@@ -1,0 +1,35 @@
+{
+  "service_running": false,
+  "service_message": "Python dual-camera service has not started yet.",
+  "updated_at": null,
+  "cameras": {
+    "entrance": {
+      "camera_role": "entrance",
+      "camera_name": "PHILCST Entrance Camera",
+      "camera_running": false,
+      "source_type": "webcam",
+      "source_value": 0,
+      "browser_device_id": null,
+      "browser_label": null,
+      "calibration_mask": null,
+      "calibration_line": null,
+      "last_capture_time": null,
+      "last_error": "Service not started.",
+      "retry_count": 0
+    },
+    "exit": {
+      "camera_role": "exit",
+      "camera_name": "PHILCST Exit Camera",
+      "camera_running": false,
+      "source_type": "webcam",
+      "source_value": 1,
+      "browser_device_id": null,
+      "browser_label": null,
+      "calibration_mask": null,
+      "calibration_line": null,
+      "last_capture_time": null,
+      "last_error": "Service not started.",
+      "retry_count": 0
+    }
+  }
+}
