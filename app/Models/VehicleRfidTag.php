@@ -19,7 +19,6 @@ class VehicleRfidTag extends Model
     protected $fillable = [
         'vehicle_id',
         'tag_uid',
-        'tag_label',
         'status',
         'assigned_at',
         'last_scanned_at',

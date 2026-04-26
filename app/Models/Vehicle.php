@@ -33,22 +33,11 @@ class Vehicle extends Model
      * @var list<string>
      */
     protected $fillable = [
+        'rfid_tag_uid',
         'plate_number',
-        'owner_name',
+        'vehicle_owner_name',
         'category',
         'vehicle_type',
-        'vehicle_color',
-        'status',
-        'current_state',
-        'daily_count_date',
-        'entries_today_count',
-        'exits_today_count',
-        'first_entry_today_at',
-        'last_exit_today_at',
-        'last_entry_at',
-        'last_exit_at',
-        'last_seen_at',
-        'notes',
     ];
 
     /**
@@ -100,6 +89,14 @@ class Vehicle extends Model
     public function latestRfidTag(): HasOne
     {
         return $this->hasOne(VehicleRfidTag::class)->latestOfMany();
+    }
+
+    /**
+     * Backward-compatible alias for older views/tests that still read owner_name.
+     */
+    public function getOwnerNameAttribute(): ?string
+    {
+        return $this->vehicle_owner_name;
     }
 
     /**

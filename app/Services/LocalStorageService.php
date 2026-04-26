@@ -58,6 +58,28 @@ class LocalStorageService
     }
 
     /**
+     * Copy the latest public camera frame into public evidence storage.
+     */
+    public function storeLatestCameraSnapshot(string $cameraRole): ?string
+    {
+        $sourcePath = public_path('camera/'.$cameraRole.'_latest_frame.jpg');
+
+        if (! File::exists($sourcePath)) {
+            return null;
+        }
+
+        $directory = $this->mediaDirectory('vehicle_images').'/guest-rfid';
+        $filename = 'guest_'.$cameraRole.'_'.Carbon::now()->format('Ymd_His_u').'_'.Str::lower(Str::random(6)).'.jpg';
+        $relativePath = trim($directory.'/'.$filename, '/');
+        $destinationPath = Storage::disk($this->mediaDisk())->path($relativePath);
+
+        File::ensureDirectoryExists(dirname($destinationPath));
+        File::copy($sourcePath, $destinationPath);
+
+        return $relativePath;
+    }
+
+    /**
      * Get a small summary of local-only storage paths for settings and documentation.
      *
      * @return array<string, string>

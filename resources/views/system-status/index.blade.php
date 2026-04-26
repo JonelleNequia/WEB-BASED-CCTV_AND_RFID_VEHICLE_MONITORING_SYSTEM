@@ -17,7 +17,6 @@
 
         <div class="hero-panel-actions">
             <a href="{{ route('monitoring.index') }}" class="button button-secondary">Live Monitoring</a>
-            <a href="{{ route('calibration.index') }}" class="button button-secondary">Calibration</a>
             <a href="{{ route('settings.index') }}" class="button button-primary">Settings</a>
         </div>
     </section>

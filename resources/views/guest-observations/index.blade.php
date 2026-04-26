@@ -119,14 +119,49 @@
             <div class="panel-header">
                 <div>
                     <div class="panel-title-row">
-                        <h3>Filter Guest Logs</h3>
+                        <h3>Latest Unregistered Capture</h3>
                         @include('layouts.partials.help', [
-                            'label' => 'Explain guest log filters',
-                            'text' => 'Filter by plate, location, source, and date range.',
+                            'label' => 'Explain unregistered capture',
+                            'text' => 'Unknown RFID scans create a CCTV-supported guest observation with the latest available camera frame.',
                         ])
                     </div>
                 </div>
             </div>
+
+            @if ($latestUnregisteredCapture)
+                <div class="result-card result-card-warning">
+                    <div class="result-card-head">
+                        <strong>Guard review needed</strong>
+                        <span class="badge badge-manual-review">{{ ucfirst($latestUnregisteredCapture->location) }}</span>
+                    </div>
+                    <img src="{{ $latestUnregisteredCapture->snapshot_url }}" alt="Unregistered vehicle capture" class="capture-preview">
+                    <div class="detail-list">
+                        <div><span>Camera</span><strong>{{ $latestUnregisteredCapture->camera?->camera_name ?: 'No camera linked' }}</strong></div>
+                        <div><span>Captured</span><strong>{{ $latestUnregisteredCapture->observed_at->format('M d, Y h:i A') }}</strong></div>
+                    </div>
+                    <p>{{ $latestUnregisteredCapture->notes }}</p>
+                </div>
+            @else
+                <div class="empty-state">
+                    <h4>No unregistered capture yet</h4>
+                    <p>Unknown RFID scans will appear here with a CCTV snapshot when a latest frame is available.</p>
+                </div>
+            @endif
+        </section>
+    </div>
+
+    <section class="panel">
+        <div class="panel-header">
+            <div>
+                <div class="panel-title-row">
+                    <h3>Filter Guest Logs</h3>
+                    @include('layouts.partials.help', [
+                        'label' => 'Explain guest log filters',
+                        'text' => 'Filter by plate, location, source, and date range.',
+                    ])
+                </div>
+            </div>
+        </div>
 
             <form method="GET" action="{{ route('guest-observations.index') }}" class="form-grid filter-grid">
                 <div class="field">
@@ -170,8 +205,7 @@
                     </div>
                 </div>
             </form>
-        </section>
-    </div>
+    </section>
 
     <section class="panel">
         <div class="panel-header">
@@ -225,4 +259,3 @@
         @include('layouts.partials.pagination', ['paginator' => $observations])
     </section>
 @endsection
-

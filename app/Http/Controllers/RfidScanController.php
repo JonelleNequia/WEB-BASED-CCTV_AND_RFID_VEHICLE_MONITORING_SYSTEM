@@ -6,6 +6,7 @@ use App\Http\Requests\SimulateRfidScanRequest;
 use App\Services\RfidService;
 use App\Services\SettingsService;
 use App\Services\VehicleRegistryService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
@@ -33,7 +34,7 @@ class RfidScanController extends Controller
     public function store(
         SimulateRfidScanRequest $request,
         RfidService $rfidService
-    ): RedirectResponse {
+    ): RedirectResponse|JsonResponse {
         $scanLog = $rfidService->simulate($request->validated());
 
         $statusMessage = match ($scanLog->verification_status) {
@@ -48,6 +49,25 @@ class RfidScanController extends Controller
             'inactive_vehicle' => 'RFID scan recorded, but the vehicle record is inactive.',
             default => 'RFID scan recorded, but the tag is not recognized in the registry.',
         };
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => $statusMessage,
+                'scan' => [
+                    'id' => $scanLog->id,
+                    'tag_uid' => $scanLog->tag_uid,
+                    'verification_status' => $scanLog->verification_status,
+                    'verification_label' => $scanLog->verificationLabel,
+                    'scan_location' => $scanLog->scan_location,
+                    'event_type' => $scanLog->resolved_event_type,
+                    'resulting_state' => $scanLog->resulting_state,
+                    'vehicle_plate' => $scanLog->vehicle?->plate_number,
+                    'vehicle_event_id' => $scanLog->correlated_vehicle_event_id,
+                    'guest_observation_id' => $scanLog->guest_vehicle_observation_id,
+                    'guest_snapshot_url' => $scanLog->guestVehicleObservation?->snapshot_url,
+                ],
+            ], 201);
+        }
 
         return back()->with(
             'status',

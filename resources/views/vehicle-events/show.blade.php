@@ -106,9 +106,8 @@
             @if ($vehicleEvent->vehicle)
                 <div class="detail-list">
                     <div><span>Registered Plate</span><strong>{{ $vehicleEvent->vehicle->plate_number }}</strong></div>
-                    <div><span>Owner / Assigned User</span><strong>{{ $vehicleEvent->vehicle->owner_name ?: 'N/A' }}</strong></div>
+                    <div><span>Vehicle Owner Name</span><strong>{{ $vehicleEvent->vehicle->vehicle_owner_name ?: 'N/A' }}</strong></div>
                     <div><span>Vehicle Type</span><strong>{{ $vehicleEvent->vehicle->vehicle_type }}</strong></div>
-                    <div><span>Vehicle Color</span><strong>{{ $vehicleEvent->vehicle->vehicle_color }}</strong></div>
                     <div><span>Status</span><strong>{{ ucfirst($vehicleEvent->vehicle->status) }}</strong></div>
                     <div><span>RFID Tags</span><strong>{{ $vehicleEvent->vehicle->rfidTags->count() }}</strong></div>
                 </div>

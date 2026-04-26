@@ -37,6 +37,7 @@ class ActiveSessionSeeder extends Seeder
             [
                 'entry_event_id' => $matchedEntry->id,
                 'plate_text' => $matchedEntry->plate_text,
+                'plate_number' => $matchedEntry->plate_text,
                 'vehicle_type' => $matchedEntry->vehicle_type,
                 'vehicle_color' => $matchedEntry->vehicle_color,
                 'entry_time' => $matchedEntry->event_time,
@@ -45,6 +46,7 @@ class ActiveSessionSeeder extends Seeder
             [
                 'entry_event_id' => $reviewEntry->id,
                 'plate_text' => $reviewEntry->plate_text,
+                'plate_number' => $reviewEntry->plate_text,
                 'vehicle_type' => $reviewEntry->vehicle_type,
                 'vehicle_color' => $reviewEntry->vehicle_color,
                 'entry_time' => $reviewEntry->event_time,
@@ -53,6 +55,7 @@ class ActiveSessionSeeder extends Seeder
             [
                 'entry_event_id' => $openEntry->id,
                 'plate_text' => $openEntry->plate_text,
+                'plate_number' => $openEntry->plate_text,
                 'vehicle_type' => $openEntry->vehicle_type,
                 'vehicle_color' => $openEntry->vehicle_color,
                 'entry_time' => $openEntry->event_time,
@@ -61,6 +64,7 @@ class ActiveSessionSeeder extends Seeder
             [
                 'entry_event_id' => $oldOpenEntry->id,
                 'plate_text' => $oldOpenEntry->plate_text,
+                'plate_number' => $oldOpenEntry->plate_text,
                 'vehicle_type' => $oldOpenEntry->vehicle_type,
                 'vehicle_color' => $oldOpenEntry->vehicle_color,
                 'entry_time' => $oldOpenEntry->event_time,

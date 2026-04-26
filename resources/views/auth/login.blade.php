@@ -28,7 +28,7 @@
 
             <p class="auth-description">
                 Access the campus monitoring dashboard for vehicle logs, live monitoring,
-                calibration, and rule-based session matching in one structured academic interface.
+                RFID scanning, camera monitoring, and rule-based session matching in one structured academic interface.
             </p>
 
             <div class="auth-feature-grid" aria-label="System highlights">
@@ -39,9 +39,9 @@
                 </article>
 
                 <article class="auth-feature-card auth-feature-card-green">
-                    <span class="auth-feature-label">Calibration</span>
+                    <span class="auth-feature-label">Camera Monitoring</span>
                     <strong>Prepared for Two Cameras</strong>
-                    <p>Keep Entrance and Exit camera settings, masking, and trigger-line calibration organized.</p>
+                    <p>Keep Entrance and Exit camera monitoring organized for guard-side observation.</p>
                 </article>
 
                 <article class="auth-feature-card auth-feature-card-orange">

@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\GuestVehicleObservation;
+use App\Models\Camera;
+use App\Models\RfidScanLog;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
@@ -39,6 +41,30 @@ class GuestObservationService
                 'snapshot_path' => $snapshotPath,
                 'notes' => $data['notes'] ?? null,
                 'created_by' => $userId,
+            ]);
+        });
+    }
+
+    /**
+     * Create a CCTV-supported guest review record from an unrecognized RFID scan.
+     */
+    public function createFromUnrecognizedRfidScan(RfidScanLog $scanLog): GuestVehicleObservation
+    {
+        return DB::transaction(function () use ($scanLog): GuestVehicleObservation {
+            $camera = Camera::query()->forRole($scanLog->scan_location)->first();
+            $snapshotPath = $this->localStorageService->storeLatestCameraSnapshot($scanLog->scan_location);
+
+            return GuestVehicleObservation::query()->create([
+                'plate_text' => null,
+                'vehicle_type' => 'Unregistered',
+                'vehicle_color' => null,
+                'location' => $scanLog->scan_location,
+                'observation_source' => 'cctv',
+                'observed_at' => $scanLog->scan_time,
+                'camera_id' => $camera?->id,
+                'snapshot_path' => $snapshotPath,
+                'notes' => 'Unrecognized RFID tag '.$scanLog->tag_uid.' scanned at '.$scanLog->scanLocationLabel.'. Guard review required.',
+                'created_by' => null,
             ]);
         });
     }

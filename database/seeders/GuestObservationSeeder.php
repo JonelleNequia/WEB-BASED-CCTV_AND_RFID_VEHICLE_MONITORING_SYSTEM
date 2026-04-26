@@ -32,13 +32,23 @@ class GuestObservationSeeder extends Seeder
             ],
             [
                 'plate_text' => null,
-                'vehicle_type' => 'Van',
+                'vehicle_type' => 'Car',
                 'vehicle_color' => 'White',
                 'location' => 'parking',
                 'observation_source' => 'cctv',
                 'observed_at' => Carbon::today()->setTime(10, 40, 0)->toIso8601String(),
                 'camera_id' => $exitCameraId,
                 'notes' => 'Delivery vehicle observed in parking area.',
+            ],
+            [
+                'plate_text' => 'TMP-3030',
+                'vehicle_type' => 'Motorcycle',
+                'vehicle_color' => 'Red',
+                'location' => 'exit',
+                'observation_source' => 'manual',
+                'observed_at' => Carbon::today()->setTime(14, 5, 0)->toIso8601String(),
+                'camera_id' => $exitCameraId,
+                'notes' => 'Visitor checked out by guard after manual verification.',
             ],
         ];
 
@@ -47,4 +57,3 @@ class GuestObservationSeeder extends Seeder
         }
     }
 }
-

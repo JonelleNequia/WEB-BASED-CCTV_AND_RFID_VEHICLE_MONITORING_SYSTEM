@@ -8,22 +8,9 @@ use App\Services\SettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
 
 class CalibrationController extends Controller
 {
-    /**
-     * Show the dual-camera live calibration page.
-     */
-    public function index(CalibrationService $calibrationService, SettingsService $settingsService): View
-    {
-        $settingsService->ensureCameraRuntimeConfigExists();
-
-        return view('calibration.index', [
-            'cameras' => $calibrationService->cameraPayload(),
-        ]);
-    }
-
     /**
      * Save one camera's live calibration overlay and selected browser source.
      */
@@ -46,7 +33,7 @@ class CalibrationController extends Controller
     }
 
     /**
-     * Save the last known browser connection state from calibration or monitoring pages.
+     * Save the last known browser connection state from monitoring pages.
      */
     public function syncState(
         Request $request,

@@ -58,13 +58,13 @@
 
         <article class="stat-card stat-card-warning">
             <div class="stat-card-head">
-                <span class="stat-card-label">Guest Profiles</span>
+                <span class="stat-card-label">Registered Tags</span>
                 <span class="stat-card-icon">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5zm4 1.5v8l6-4z"/></svg>
                 </span>
             </div>
-            <strong>{{ $rfidStats['guest_vehicles'] ?? 0 }}</strong>
-            <p>Guest profiles in registry; monitor them through Guest Monitoring flow.</p>
+            <strong>{{ $rfidStats['registered_tags'] ?? 0 }}</strong>
+            <p>Active and inactive RFID stickers assigned to authorized holders.</p>
         </article>
     </div>
 
@@ -82,18 +82,36 @@
                 </div>
             </div>
 
-            <form method="POST" action="{{ route('vehicle-registry.store') }}" class="stack-form">
+            <form method="POST" action="{{ route('vehicle-registry.store') }}" class="stack-form" data-rfid-registration-form>
                 @csrf
+
+                @error('vehicle')
+                    <div class="alert alert-danger">{{ $message }}</div>
+                @enderror
 
                 <div class="form-grid">
                     <div class="field">
-                        <label for="plate_number">Plate Number</label>
-                        <input id="plate_number" type="text" name="plate_number" value="{{ old('plate_number') }}" placeholder="ABC-1234" required>
+                        <label for="rfid_tag_uid">RFID Tag UID</label>
+                        <input id="rfid_tag_uid" type="text" name="rfid_tag_uid" value="{{ old('rfid_tag_uid') }}" placeholder="Scan or type RFID UID" required data-rfid-uid-input>
+                        @error('rfid_tag_uid')
+                            <span class="field-error">{{ $message }}</span>
+                        @enderror
                     </div>
 
                     <div class="field">
-                        <label for="owner_name">Owner / Assigned User</label>
-                        <input id="owner_name" type="text" name="owner_name" value="{{ old('owner_name') }}" placeholder="Faculty, staff, or assigned user">
+                        <label for="plate_number">Plate Number</label>
+                        <input id="plate_number" type="text" name="plate_number" value="{{ old('plate_number') }}" placeholder="ABC-1234" required>
+                        @error('plate_number')
+                            <span class="field-error">{{ $message }}</span>
+                        @enderror
+                    </div>
+
+                    <div class="field">
+                        <label for="vehicle_owner_name">Vehicle Owner Name</label>
+                        <input id="vehicle_owner_name" type="text" name="vehicle_owner_name" value="{{ old('vehicle_owner_name') }}" placeholder="Vehicle owner name">
+                        @error('vehicle_owner_name')
+                            <span class="field-error">{{ $message }}</span>
+                        @enderror
                     </div>
 
                     <div class="field">
@@ -105,14 +123,9 @@
                                 </option>
                             @endforeach
                         </select>
-                    </div>
-
-                    <div class="field">
-                        <label for="status">Vehicle Status</label>
-                        <select id="status" name="status" required>
-                            <option value="active" @selected(old('status', 'active') === 'active')>Active</option>
-                            <option value="inactive" @selected(old('status') === 'inactive')>Inactive</option>
-                        </select>
+                        @error('category')
+                            <span class="field-error">{{ $message }}</span>
+                        @enderror
                     </div>
 
                     <div class="field">
@@ -122,38 +135,9 @@
                                 <option value="{{ $vehicleType }}" @selected(old('vehicle_type') === $vehicleType)>{{ $vehicleType }}</option>
                             @endforeach
                         </select>
-                    </div>
-
-                    <div class="field">
-                        <label for="vehicle_color">Vehicle Color</label>
-                        <select id="vehicle_color" name="vehicle_color" required>
-                            @foreach ($vehicleColors as $vehicleColor)
-                                <option value="{{ $vehicleColor }}" @selected(old('vehicle_color') === $vehicleColor)>{{ $vehicleColor }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-
-                    <div class="field">
-                        <label for="tag_uid">RFID Tag UID</label>
-                        <input id="tag_uid" type="text" name="tag_uid" value="{{ old('tag_uid') }}" placeholder="RFID-ABC-1001">
-                    </div>
-
-                    <div class="field">
-                        <label for="tag_label">Tag Label</label>
-                        <input id="tag_label" type="text" name="tag_label" value="{{ old('tag_label') }}" placeholder="Sticker or card label">
-                    </div>
-
-                    <div class="field">
-                        <label for="tag_status">Tag Status</label>
-                        <select id="tag_status" name="tag_status">
-                            <option value="active" @selected(old('tag_status', 'active') === 'active')>Active</option>
-                            <option value="inactive" @selected(old('tag_status') === 'inactive')>Inactive</option>
-                        </select>
-                    </div>
-
-                    <div class="field span-full">
-                        <label for="notes">Remarks</label>
-                        <textarea id="notes" name="notes" rows="3" placeholder="Optional remarks">{{ old('notes') }}</textarea>
+                        @error('vehicle_type')
+                            <span class="field-error">{{ $message }}</span>
+                        @enderror
                     </div>
                 </div>
 
@@ -217,16 +201,16 @@
                         <th>Tags</th>
                         <th>Scans</th>
                         <th>Today</th>
-                        <th>Remarks</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
                     @forelse ($vehicles as $vehicle)
                         <tr>
                             <td><strong>{{ $vehicle->plate_number }}</strong></td>
-                            <td>{{ $vehicle->owner_name ?: 'N/A' }}</td>
+                            <td>{{ $vehicle->vehicle_owner_name ?: 'N/A' }}</td>
                             <td>{{ ucfirst(str_replace('_', ' ', $vehicle->category)) }}</td>
-                            <td>{{ $vehicle->vehicle_color }} {{ $vehicle->vehicle_type }}</td>
+                            <td>{{ $vehicle->vehicle_type }}</td>
                             <td>
                                 <span class="badge {{ $vehicle->current_state === 'inside' ? 'badge-matched' : 'badge-secondary' }}">
                                     {{ ucfirst($vehicle->current_state) }}
@@ -254,7 +238,9 @@
                             <td>
                                 E{{ $vehicle->entries_today_count }} / X{{ $vehicle->exits_today_count }}
                             </td>
-                            <td>{{ $vehicle->notes ?: 'No remarks' }}</td>
+                            <td>
+                                <a href="{{ route('vehicle-registry.edit', $vehicle) }}" class="button button-secondary button-sm">Edit</a>
+                            </td>
                         </tr>
                     @empty
                         <tr>
@@ -266,3 +252,58 @@
         </div>
     </section>
 @endsection
+
+@push('scripts')
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const form = document.querySelector('[data-rfid-registration-form]');
+            const uidInput = document.querySelector('[data-rfid-uid-input]');
+
+            if (!form || !uidInput) {
+                return;
+            }
+
+            let scanBuffer = '';
+            let lastKeyTime = 0;
+            const scanGapMs = 80;
+
+            document.addEventListener('keydown', (event) => {
+                const target = event.target;
+                const isTypingField = target instanceof HTMLElement
+                    && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)
+                    && target !== uidInput;
+
+                if (isTypingField) {
+                    return;
+                }
+
+                if (event.key === 'Enter') {
+                    if (document.activeElement === uidInput || scanBuffer.length > 0) {
+                        event.preventDefault();
+                        uidInput.focus();
+
+                        if (scanBuffer.length > 0) {
+                            uidInput.value = scanBuffer;
+                            uidInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            scanBuffer = '';
+                        }
+                    }
+
+                    return;
+                }
+
+                if (event.key.length !== 1) {
+                    return;
+                }
+
+                const now = Date.now();
+                scanBuffer = now - lastKeyTime > scanGapMs ? event.key : scanBuffer + event.key;
+                lastKeyTime = now;
+
+                if (document.activeElement !== uidInput) {
+                    uidInput.focus();
+                }
+            });
+        });
+    </script>
+@endpush

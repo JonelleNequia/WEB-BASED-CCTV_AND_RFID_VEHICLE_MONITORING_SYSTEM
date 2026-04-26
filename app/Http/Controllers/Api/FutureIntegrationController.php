@@ -56,7 +56,8 @@ class FutureIntegrationController extends Controller
      */
     public function receive(
         Request $request,
-        SettingsService $settingsService
+        SettingsService $settingsService,
+        EventService $eventService
     ): JsonResponse
     {
         $configuredKey = trim((string) $settingsService->get('python_api_key', ''));
@@ -76,6 +77,47 @@ class FutureIntegrationController extends Controller
             ], 401);
         }
 
+        if ($request->filled('external_event_key') || $request->filled('camera_role')) {
+            $validated = $request->validate([
+                'external_event_key' => ['required', 'string', 'max:120'],
+                'camera_role' => ['required_without:camera_id', 'string', 'in:entrance,exit'],
+                'camera_id' => ['nullable', 'integer', 'exists:cameras,id'],
+                'detected_vehicle_type' => ['required', 'string', 'max:50'],
+                'event_time' => ['required', 'date'],
+                'vehicle_image_path' => ['required', 'string', 'max:255'],
+                'roi_name' => ['nullable', 'string', 'max:100'],
+                'detection_metadata' => ['nullable', 'array'],
+            ]);
+
+            $existing = VehicleEvent::query()
+                ->where('external_event_key', $validated['external_event_key'])
+                ->first();
+
+            $vehicleEvent = $eventService->createDetectedEvent([
+                ...$validated,
+                'detection_metadata_json' => $validated['detection_metadata'] ?? null,
+            ]);
+
+            EventReceiveLog::query()->create([
+                'source_name' => $sourceName,
+                'payload_json' => $request->all(),
+                'status' => $existing ? 'duplicate' : 'ingested',
+                'notes' => $existing
+                    ? "Duplicate crossing ignored for event ID: {$vehicleEvent->id}"
+                    : "Detected vehicle event created with ID: {$vehicleEvent->id}",
+            ]);
+
+            return response()->json([
+                'message' => $existing
+                    ? 'Duplicate crossing ignored. The original incomplete record event is still available.'
+                    : 'Detected vehicle event saved for completion.',
+                'duplicate' => $existing !== null,
+                'event_id' => $vehicleEvent->id,
+                'event_status' => $vehicleEvent->event_status,
+                'event_type' => $vehicleEvent->event_type,
+            ], $existing ? 200 : 201);
+        }
+
         $validated = $request->validate([
             'camera_id' => ['required', 'integer', 'exists:cameras,id'],
             'direction' => ['required', 'string', 'in:IN,OUT'],
@@ -91,15 +133,16 @@ class FutureIntegrationController extends Controller
         if ($direction === 'IN') {
             // Create new VehicleEvent for IN direction
             $vehicleEvent = VehicleEvent::query()->create([
-                'event_type' => 'entry',
+                'event_type' => 'ENTRY',
                 'direction' => $direction,
                 'plate_number' => $plateNumber,
                 'plate_text' => $plateNumber,
                 'camera_id' => $cameraId,
                 'vehicle_image_path' => $imagePath,
                 'event_time' => now(),
-                'event_status' => $plateNumber ? 'pending_details' : 'requires_manual_review',
+                'event_status' => VehicleEvent::STATUS_PENDING_DETAILS,
                 'event_origin' => 'cctv_detected',
+                'match_status' => VehicleEvent::STATUS_PENDING_DETAILS,
             ]);
 
             EventReceiveLog::query()->create([
@@ -122,9 +165,12 @@ class FutureIntegrationController extends Controller
         if ($plateNumber) {
             // Find active session matching plate_number
             $activeSession = ActiveSession::query()
-                ->where('plate_number', $plateNumber)
+                ->where(function ($query) use ($plateNumber): void {
+                    $query->where('plate_number', $plateNumber)
+                        ->orWhere('plate_text', $plateNumber);
+                })
                 ->whereNull('time_out')
-                ->where('status', 'active')
+                ->where('status', 'open')
                 ->oldest()
                 ->first();
         }
@@ -133,12 +179,12 @@ class FutureIntegrationController extends Controller
             // Update the active session with time_out
             $activeSession->update([
                 'time_out' => now(),
-                'status' => 'completed',
+                'status' => 'closed',
             ]);
 
             // Also create a VehicleEvent for the exit
             VehicleEvent::query()->create([
-                'event_type' => 'exit',
+                'event_type' => 'EXIT',
                 'direction' => $direction,
                 'plate_number' => $plateNumber,
                 'plate_text' => $plateNumber,
@@ -166,7 +212,7 @@ class FutureIntegrationController extends Controller
 
         // No active session found or plate_number is null - requires manual review
         $vehicleEvent = VehicleEvent::query()->create([
-            'event_type' => 'exit',
+                'event_type' => 'EXIT',
             'direction' => $direction,
             'plate_number' => $plateNumber,
             'plate_text' => $plateNumber,

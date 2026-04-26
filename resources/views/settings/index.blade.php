@@ -19,7 +19,6 @@
             <a href="{{ route('rfid-scans.index') }}" class="button button-secondary">RFID Desk</a>
             <a href="{{ route('guest-observations.index') }}" class="button button-secondary">Guest Monitoring</a>
             <a href="{{ route('monitoring.index') }}" class="button button-secondary">Camera Monitoring</a>
-            <a href="{{ route('calibration.index') }}" class="button button-primary">Calibration</a>
         </div>
     </section>
 
@@ -27,10 +26,10 @@
         <div class="panel-header">
             <div>
                 <div class="panel-title-row">
-                    <h3>Operational Settings</h3>
+                    <h3>Camera and Integration Settings</h3>
                     @include('layouts.partials.help', [
                         'label' => 'Explain operational settings',
-                        'text' => 'These settings control the local workflow, scan behavior, review thresholds, and station labels used by the operators.',
+                        'text' => 'Camera sources and station labels stay editable while operational controls are temporarily hidden.',
                     ])
                 </div>
             </div>
@@ -40,53 +39,13 @@
             @csrf
             @method('PUT')
 
-            <div class="form-grid">
-                <div class="field">
-                    <label for="deployment_mode">Deployment Mode</label>
-                    <select id="deployment_mode" name="deployment_mode" required>
-                        <option value="offline_local" @selected(old('deployment_mode', $settings['deployment_mode']) === 'offline_local')>Offline Local Only</option>
-                    </select>
-                </div>
-
-                <div class="field">
-                    <label for="operating_mode">Operating Mode</label>
-                    <select id="operating_mode" name="operating_mode" required>
-                        <option value="manual" @selected(old('operating_mode', $settings['operating_mode']) === 'manual')>Manual</option>
-                        <option value="mock" @selected(old('operating_mode', $settings['operating_mode']) === 'mock')>Mock</option>
-                    </select>
-                </div>
-
-                <div class="field">
-                    <label for="rfid_simulation_mode">RFID Simulation</label>
-                    <select id="rfid_simulation_mode" name="rfid_simulation_mode" required>
-                        <option value="enabled" @selected(old('rfid_simulation_mode', $settings['rfid_simulation_mode']) === 'enabled')>Enabled</option>
-                        <option value="disabled" @selected(old('rfid_simulation_mode', $settings['rfid_simulation_mode']) === 'disabled')>Disabled</option>
-                    </select>
-                </div>
-
-                <div class="field">
-                    <label for="cctv_simulation_mode">Camera Simulation</label>
-                    <select id="cctv_simulation_mode" name="cctv_simulation_mode" required>
-                        <option value="enabled" @selected(old('cctv_simulation_mode', $settings['cctv_simulation_mode']) === 'enabled')>Enabled</option>
-                        <option value="disabled" @selected(old('cctv_simulation_mode', $settings['cctv_simulation_mode']) === 'disabled')>Disabled</option>
-                    </select>
-                </div>
-
-                <div class="field">
-                    <label for="matching_threshold_matched">Auto Match Threshold</label>
-                    <input id="matching_threshold_matched" type="number" name="matching_threshold_matched" min="1" max="200" value="{{ old('matching_threshold_matched', $settings['matching_threshold_matched']) }}" required>
-                </div>
-
-                <div class="field">
-                    <label for="matching_threshold_manual_review">Review Threshold</label>
-                    <input id="matching_threshold_manual_review" type="number" name="matching_threshold_manual_review" min="0" max="199" value="{{ old('matching_threshold_manual_review', $settings['matching_threshold_manual_review']) }}" required>
-                </div>
-
-                <div class="field">
-                    <label for="retention_days">Retention Days</label>
-                    <input id="retention_days" type="number" name="retention_days" min="1" value="{{ old('retention_days', $settings['retention_days']) }}">
-                </div>
-            </div>
+            <input type="hidden" name="deployment_mode" value="{{ old('deployment_mode', $settings['deployment_mode']) }}">
+            <input type="hidden" name="operating_mode" value="{{ old('operating_mode', $settings['operating_mode']) }}">
+            <input type="hidden" name="rfid_simulation_mode" value="{{ old('rfid_simulation_mode', $settings['rfid_simulation_mode']) }}">
+            <input type="hidden" name="cctv_simulation_mode" value="{{ old('cctv_simulation_mode', $settings['cctv_simulation_mode']) }}">
+            <input type="hidden" name="matching_threshold_matched" value="{{ old('matching_threshold_matched', $settings['matching_threshold_matched']) }}">
+            <input type="hidden" name="matching_threshold_manual_review" value="{{ old('matching_threshold_manual_review', $settings['matching_threshold_manual_review']) }}">
+            <input type="hidden" name="retention_days" value="{{ old('retention_days', $settings['retention_days']) }}">
 
             <section class="subpanel">
                 <div class="panel-title-row">

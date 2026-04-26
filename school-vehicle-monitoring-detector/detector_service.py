@@ -445,7 +445,20 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
 
         # Build new payload format for Laravel API
         payload = {
+            "external_event_key": event_key,
+            "camera_role": role,
             "camera_id": camera_id,
+            "detected_vehicle_type": display_label,
+            "event_time": datetime.now().astimezone().isoformat(),
+            "vehicle_image_path": vehicle_image_path,
+            "roi_name": f"{role.capitalize()} Trigger Line",
+            "detection_metadata": {
+                "track_id": track_id,
+                "confidence": confidence,
+                "detector_class": display_label,
+                "line_side_before": previous_side,
+                "line_side_after": current_side,
+            },
             "direction": direction,
             "plate_number": plate_number,
             "image_path": vehicle_image_path,

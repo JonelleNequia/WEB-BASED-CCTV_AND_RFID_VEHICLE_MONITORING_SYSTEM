@@ -16,7 +16,8 @@ class RfidService
         protected SettingsService $settingsService,
         protected LocalStorageService $localStorageService,
         protected VehicleRegistryService $vehicleRegistryService,
-        protected EventService $eventService
+        protected EventService $eventService,
+        protected GuestObservationService $guestObservationService
     ) {
     }
 
@@ -115,7 +116,14 @@ class RfidService
                 }
             }
 
-            return $scanLog->fresh(['vehicle', 'vehicleRfidTag', 'correlatedVehicleEvent.camera']);
+            if ($verificationStatus === 'unknown_tag') {
+                $guestObservation = $this->guestObservationService->createFromUnrecognizedRfidScan($scanLog);
+                $scanLog->update([
+                    'guest_vehicle_observation_id' => $guestObservation->id,
+                ]);
+            }
+
+            return $scanLog->fresh(['vehicle', 'vehicleRfidTag', 'correlatedVehicleEvent.camera', 'guestVehicleObservation.camera']);
         });
     }
 
@@ -128,6 +136,7 @@ class RfidService
     {
         return RfidScanLog::query()
             ->with(['vehicle', 'vehicleRfidTag', 'correlatedVehicleEvent.camera'])
+            ->with('guestVehicleObservation.camera')
             ->when($scanLocation, fn ($query) => $query->where('scan_location', $scanLocation))
             ->orderByDesc('scan_time')
             ->limit($limit)
@@ -143,6 +152,7 @@ class RfidService
     {
         return RfidScanLog::query()
             ->with(['vehicle', 'vehicleRfidTag', 'correlatedVehicleEvent.camera'])
+            ->with('guestVehicleObservation.camera')
             ->where('verification_status', 'verified')
             ->whereIn('vehicle_category', Vehicle::RFID_RECURRING_CATEGORIES)
             ->when($scanLocation, fn ($query) => $query->where('scan_location', $scanLocation))
@@ -280,8 +290,7 @@ class RfidService
             $updates['last_exit_today_at'] = $scanTime;
         }
 
-        $vehicle->fill($updates);
-        $vehicle->save();
+        $vehicle->forceFill($updates)->save();
 
         return [
             'event_type' => $eventType,

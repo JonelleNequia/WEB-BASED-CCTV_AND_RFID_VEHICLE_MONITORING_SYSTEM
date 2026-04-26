@@ -3,7 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Validator;
+use Illuminate\Validation\Rule;
 
 class StoreVehicleRegistrationRequest extends FormRequest
 {
@@ -22,36 +22,25 @@ class StoreVehicleRegistrationRequest extends FormRequest
      */
     public function rules(): array
     {
-        return [
-            'plate_number' => ['required', 'string', 'max:50'],
-            'owner_name' => ['nullable', 'string', 'max:100'],
-            'category' => ['nullable', 'in:parent,student,faculty_staff,guard,guest'],
-            'vehicle_type' => ['required', 'string', 'max:50'],
-            'vehicle_color' => ['required', 'string', 'max:50'],
-            'status' => ['required', 'in:active,inactive'],
-            'tag_uid' => ['nullable', 'string', 'max:100'],
-            'tag_label' => ['nullable', 'string', 'max:100'],
-            'tag_status' => ['nullable', 'in:active,inactive'],
-            'notes' => ['nullable', 'string', 'max:1000'],
-        ];
-    }
+        $vehicleId = $this->route('vehicle')?->id;
 
-    /**
-     * Apply business rules for recurring RFID registration.
-     */
-    public function withValidator(Validator $validator): void
-    {
-        $validator->after(function (Validator $validator): void {
-            if (
-                $this->input('category') === 'guest'
-                && filled($this->input('tag_uid'))
-            ) {
-                $validator->errors()->add(
-                    'tag_uid',
-                    'Guest vehicles should be monitored through CCTV/manual guest logging and should not be assigned an RFID tag.'
-                );
-            }
-        });
+        return [
+            'rfid_tag_uid' => [
+                'required',
+                'string',
+                'max:100',
+                Rule::unique('vehicles', 'rfid_tag_uid')->ignore($vehicleId),
+            ],
+            'plate_number' => [
+                'required',
+                'string',
+                'max:50',
+                Rule::unique('vehicles', 'plate_number')->ignore($vehicleId),
+            ],
+            'vehicle_owner_name' => ['nullable', 'string', 'max:100'],
+            'category' => ['required', 'in:parent,student,faculty_staff,guard'],
+            'vehicle_type' => ['required', 'in:Car,Motorcycle,Bus'],
+        ];
     }
 
     /**
@@ -59,6 +48,27 @@ class StoreVehicleRegistrationRequest extends FormRequest
      */
     protected function prepareForValidation(): void
     {
+        if (! $this->filled('vehicle_owner_name') && $this->filled('owner_name')) {
+            $this->merge(['vehicle_owner_name' => $this->input('owner_name')]);
+        }
+
+        if (! $this->filled('rfid_tag_uid') && $this->filled('tag_uid')) {
+            $this->merge(['rfid_tag_uid' => $this->input('tag_uid')]);
+        }
+
+        if ($this->filled('rfid_tag_uid')) {
+            $this->merge([
+                'rfid_tag_uid' => strtoupper((string) preg_replace('/\s+/', '', (string) $this->input('rfid_tag_uid'))),
+            ]);
+        }
+
+        if ($this->filled('plate_number')) {
+            $normalizedPlate = preg_replace('/\s+/', ' ', (string) $this->input('plate_number'));
+            $this->merge([
+                'plate_number' => strtoupper(trim((string) $normalizedPlate)),
+            ]);
+        }
+
         if (! $this->filled('category')) {
             $this->merge(['category' => 'faculty_staff']);
         }

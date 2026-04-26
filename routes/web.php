@@ -37,6 +37,8 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard.index');
     Route::get('/vehicle-registry', [VehicleRegistryController::class, 'index'])->name('vehicle-registry.index');
     Route::post('/vehicle-registry', [VehicleRegistryController::class, 'store'])->name('vehicle-registry.store');
+    Route::get('/vehicle-registry/{vehicle}/edit', [VehicleRegistryController::class, 'edit'])->name('vehicle-registry.edit');
+    Route::put('/vehicle-registry/{vehicle}', [VehicleRegistryController::class, 'update'])->name('vehicle-registry.update');
     Route::get('/rfid-scans', [RfidScanController::class, 'index'])->name('rfid-scans.index');
     Route::post('/rfid-scans/simulate', [RfidScanController::class, 'store'])->name('rfid-scans.store');
 
@@ -47,11 +49,13 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/guest-observations', [GuestObservationController::class, 'store'])->name('guest-observations.store');
 
     Route::get('/vehicle-events', [VehicleEventController::class, 'index'])->name('vehicle-events.index');
+    Route::get('/vehicle-events/export/csv', [VehicleEventController::class, 'exportCsv'])->name('vehicle-events.export.csv');
     Route::get('/vehicle-events/create', [VehicleEventController::class, 'create'])->name('vehicle-events.create');
     Route::post('/vehicle-events', [VehicleEventController::class, 'store'])->name('vehicle-events.store');
     Route::get('/vehicle-events/{vehicleEvent}', [VehicleEventController::class, 'show'])->name('vehicle-events.show');
 
     Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
+    Route::get('/reports/export/csv', [ReportController::class, 'exportCsv'])->name('reports.export.csv');
 
     Route::get('/portals/{location}', [PortalController::class, 'show'])->name('portals.show');
 
@@ -61,8 +65,6 @@ Route::middleware('auth')->group(function (): void {
     Route::middleware('admin')->group(function (): void {
         Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('settings.update');
-
-        Route::get('/calibration', [CalibrationController::class, 'index'])->name('calibration.index');
         Route::put('/calibration', [CalibrationController::class, 'update'])->name('calibration.update');
 
         Route::put('/vehicle-events/{vehicleEvent}/complete', [VehicleEventController::class, 'complete'])

@@ -21,7 +21,7 @@ class ActiveSession extends Model
         'plate_text',
         'vehicle_type',
         'vehicle_color',
-        'time_in',
+        'entry_time',
         'time_out',
         'status',
     ];
@@ -34,7 +34,7 @@ class ActiveSession extends Model
     protected function casts(): array
     {
         return [
-            'time_in' => 'datetime',
+            'entry_time' => 'datetime',
             'time_out' => 'datetime',
         ];
     }
@@ -52,7 +52,6 @@ class ActiveSession extends Model
      */
     public function scopeActive($query)
     {
-        return $query->where('status', 'active')
-            ->whereNull('time_out');
+        return $query->where('status', 'open');
     }
 }

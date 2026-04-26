@@ -17,6 +17,50 @@ class ReportController extends Controller
      */
     public function index(Request $request): View
     {
+        $report = $this->buildReport($request);
+
+        return view('reports.index', $report);
+    }
+
+    /**
+     * Export the selected report range as CSV.
+     */
+    public function exportCsv(Request $request)
+    {
+        $report = $this->buildReport($request);
+        $filename = 'reports-'.$report['filters']['date_from'].'-to-'.$report['filters']['date_to'].'.csv';
+
+        return response()->streamDownload(function () use ($report): void {
+            $handle = fopen('php://output', 'w');
+
+            fputcsv($handle, ['Metric', 'Value']);
+            foreach ($report['summary'] as $metric => $value) {
+                fputcsv($handle, [str_replace('_', ' ', ucfirst($metric)), $value]);
+            }
+
+            fputcsv($handle, []);
+            fputcsv($handle, ['Date', 'Entries', 'Exits']);
+            foreach ($report['dailyBreakdown'] as $day) {
+                fputcsv($handle, [
+                    $day->report_date,
+                    (int) $day->entry_count,
+                    (int) $day->exit_count,
+                ]);
+            }
+
+            fclose($handle);
+        }, $filename, [
+            'Content-Type' => 'text/csv',
+        ]);
+    }
+
+    /**
+     * Build the report payload shared by the page and CSV export.
+     *
+     * @return array<string, mixed>
+     */
+    protected function buildReport(Request $request): array
+    {
         $fromDate = $this->parseDate($request->string('date_from')->value()) ?? today();
         $toDate = $this->parseDate($request->string('date_to')->value()) ?? today();
 
@@ -38,7 +82,7 @@ class ReportController extends Controller
             ->orderBy('report_date')
             ->get();
 
-        return view('reports.index', [
+        return [
             'filters' => [
                 'date_from' => $fromDate->toDateString(),
                 'date_to' => $toDate->toDateString(),
@@ -56,7 +100,7 @@ class ReportController extends Controller
                 'incomplete_records' => (clone $eventBase)->where('event_status', VehicleEvent::STATUS_PENDING_DETAILS)->count(),
             ],
             'dailyBreakdown' => $dailyBreakdown,
-        ]);
+        ];
     }
 
     /**

@@ -7,7 +7,6 @@ use App\Models\VehicleRfidTag;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
 
 class VehicleRegistryService
 {
@@ -19,43 +18,37 @@ class VehicleRegistryService
     public function register(array $data): Vehicle
     {
         return DB::transaction(function () use ($data): Vehicle {
-            $vehicle = Vehicle::query()->updateOrCreate(
-                ['plate_number' => $this->normalizePlate((string) $data['plate_number'])],
-                [
-                    'owner_name' => $data['owner_name'] ?: null,
-                    'category' => $data['category'] ?? 'faculty_staff',
-                    'vehicle_type' => $data['vehicle_type'],
-                    'vehicle_color' => $data['vehicle_color'],
-                    'status' => $data['status'] ?? 'active',
-                    'notes' => $data['notes'] ?: null,
-                ]
-            );
+            $vehicle = Vehicle::query()->create([
+                'rfid_tag_uid' => $this->normalizeTagUid((string) $data['rfid_tag_uid']),
+                'plate_number' => $this->normalizePlate((string) $data['plate_number']),
+                'vehicle_owner_name' => $data['vehicle_owner_name'] ?: null,
+                'category' => $data['category'] ?? 'faculty_staff',
+                'vehicle_type' => $data['vehicle_type'],
+            ]);
 
-            $category = $data['category'] ?? $vehicle->category;
+            $this->syncTag($vehicle);
 
-            if ($category === 'guest' && filled($data['tag_uid'] ?? null)) {
-                throw ValidationException::withMessages([
-                    'tag_uid' => 'Guest vehicles should use CCTV/manual guest observation without RFID tag assignment.',
-                ]);
-            }
+            return $vehicle->fresh(['rfidTags']);
+        });
+    }
 
-            if ($category === 'guest') {
-                VehicleRfidTag::query()
-                    ->where('vehicle_id', $vehicle->id)
-                    ->delete();
-            }
+    /**
+     * Update one existing registered vehicle and optionally assign or update a tag.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function update(Vehicle $vehicle, array $data): Vehicle
+    {
+        return DB::transaction(function () use ($vehicle, $data): Vehicle {
+            $vehicle->fill([
+                'rfid_tag_uid' => $this->normalizeTagUid((string) $data['rfid_tag_uid']),
+                'plate_number' => $this->normalizePlate((string) $data['plate_number']),
+                'vehicle_owner_name' => $data['vehicle_owner_name'] ?: null,
+                'category' => $data['category'] ?? 'faculty_staff',
+                'vehicle_type' => $data['vehicle_type'],
+            ])->save();
 
-            if (filled($data['tag_uid'] ?? null) && in_array($category, Vehicle::RFID_RECURRING_CATEGORIES, true)) {
-                VehicleRfidTag::query()->updateOrCreate(
-                    ['tag_uid' => $this->normalizeTagUid((string) $data['tag_uid'])],
-                    [
-                        'vehicle_id' => $vehicle->id,
-                        'tag_label' => $data['tag_label'] ?: null,
-                        'status' => $data['tag_status'] ?? 'active',
-                        'assigned_at' => now(),
-                    ]
-                );
-            }
+            $this->syncTag($vehicle);
 
             return $vehicle->fresh(['rfidTags']);
         });
@@ -109,7 +102,7 @@ class VehicleRegistryService
      */
     public function vehicleTypes(): array
     {
-        return ['Car', 'Motorcycle', 'Van', 'Truck', 'Bus'];
+        return ['Car', 'Motorcycle', 'Bus'];
     }
 
     /**
@@ -119,7 +112,7 @@ class VehicleRegistryService
      */
     public function vehicleCategories(): array
     {
-        return ['parent', 'student', 'faculty_staff', 'guard', 'guest'];
+        return ['parent', 'student', 'faculty_staff', 'guard'];
     }
 
     /**
@@ -148,5 +141,22 @@ class VehicleRegistryService
     public function normalizeTagUid(string $tagUid): string
     {
         return Str::upper(trim((string) preg_replace('/\s+/', '', $tagUid)));
+    }
+
+    protected function syncTag(Vehicle $vehicle): void
+    {
+        VehicleRfidTag::query()
+            ->where('vehicle_id', $vehicle->id)
+            ->where('tag_uid', '!=', $vehicle->rfid_tag_uid)
+            ->delete();
+
+        VehicleRfidTag::query()->updateOrCreate(
+            ['tag_uid' => $vehicle->rfid_tag_uid],
+            [
+                'vehicle_id' => $vehicle->id,
+                'status' => 'active',
+                'assigned_at' => now(),
+            ]
+        );
     }
 }

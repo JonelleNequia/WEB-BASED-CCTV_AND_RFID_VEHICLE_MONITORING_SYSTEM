@@ -46,23 +46,8 @@
         ],
     ];
 
-    if ($isAdmin) {
-        $mainItems[] = [
-            'label' => 'Settings',
-            'route' => route('settings.index'),
-            'active' => request()->routeIs('settings.*'),
-            'icon' => 'settings',
-        ];
-    }
-
     $advancedItems = $isAdmin
         ? [
-            [
-                'label' => 'Calibration',
-                'route' => route('calibration.index'),
-                'active' => request()->routeIs('calibration.*'),
-                'icon' => 'calibration',
-            ],
             [
                 'label' => 'Review Queue',
                 'route' => route('manual-review.index'),

@@ -84,7 +84,7 @@
                 </div>
             </div>
 
-            <form method="POST" action="{{ route('rfid-scans.store') }}" class="stack-form">
+            <form method="POST" action="{{ route('rfid-scans.store') }}" class="stack-form" data-rfid-scan-form>
                 @csrf
 
                 <div class="form-grid">
@@ -139,6 +139,8 @@
                     <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Manage Registry</a>
                 </div>
             </form>
+
+            <div class="mini-note" data-rfid-scan-result hidden></div>
         </section>
 
         <section class="panel">
@@ -177,7 +179,10 @@
                                 ? 'Vehicle log #'.$latestScan->correlatedVehicleEvent->id.' linked automatically.'
                                 : 'No vehicle log linked yet.' }}
                         </strong>
-                        <p>{{ $latestScan->vehicle?->vehicle_color ? $latestScan->vehicle->vehicle_color.' '.$latestScan->vehicle->vehicle_type : 'Check registry details for this scan.' }}</p>
+                        <p>{{ $latestScan->vehicle?->vehicle_type ?: 'Check registry details or guest observation for this scan.' }}</p>
+                        @if ($latestScan->guestVehicleObservation)
+                            <p>Guest observation #{{ $latestScan->guestVehicleObservation->id }} is ready for manual review.</p>
+                        @endif
                     </div>
                 </div>
             @else
@@ -225,7 +230,10 @@
                             <td><strong>{{ $scan->tag_uid }}</strong></td>
                             <td>
                                 <strong>{{ $scan->vehicle?->plate_number ?? 'Unknown vehicle' }}</strong>
-                                <div class="table-subtext">{{ $scan->vehicle?->vehicle_color ? $scan->vehicle->vehicle_color.' '.$scan->vehicle->vehicle_type : 'No registered vehicle linked' }}</div>
+                                <div class="table-subtext">{{ $scan->vehicle?->vehicle_type ?: 'No registered vehicle linked' }}</div>
+                                @if ($scan->guestVehicleObservation)
+                                    <div class="table-subtext">Guest observation #{{ $scan->guestVehicleObservation->id }}</div>
+                                @endif
                             </td>
                             <td>{{ $scan->vehicle?->category ? ucfirst(str_replace('_', ' ', $scan->vehicle->category)) : 'N/A' }}</td>
                             <td>
@@ -257,3 +265,44 @@
         </div>
     </section>
 @endsection
+
+@push('scripts')
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const form = document.querySelector('[data-rfid-scan-form]');
+            const resultBox = document.querySelector('[data-rfid-scan-result]');
+
+            if (!form || !resultBox) {
+                return;
+            }
+
+            form.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                resultBox.hidden = false;
+                resultBox.textContent = 'Recording RFID scan...';
+
+                try {
+                    const response = await fetch(form.action, {
+                        method: 'POST',
+                        headers: {
+                            'Accept': 'application/json',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                        },
+                        body: new FormData(form),
+                    });
+                    const payload = await response.json();
+
+                    if (!response.ok) {
+                        resultBox.textContent = payload.message || 'RFID scan could not be recorded.';
+                        return;
+                    }
+
+                    const scan = payload.scan || {};
+                    resultBox.textContent = `${payload.message} ${scan.guest_observation_id ? 'Guest observation #' + scan.guest_observation_id + ' was created for review.' : ''}`;
+                } catch (error) {
+                    resultBox.textContent = 'RFID scan could not reach the server.';
+                }
+            });
+        });
+    </script>
+@endpush

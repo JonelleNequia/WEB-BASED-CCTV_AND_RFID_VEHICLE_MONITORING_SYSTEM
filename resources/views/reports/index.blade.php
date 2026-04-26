@@ -46,6 +46,8 @@
                 <div class="button-row">
                     <button type="submit" class="button button-primary">Apply</button>
                     <a href="{{ route('reports.index') }}" class="button button-secondary">Today</a>
+                    <a href="{{ route('reports.export.csv', request()->query()) }}" class="button button-secondary">Export CSV</a>
+                    <button type="button" class="button button-secondary" onclick="window.print()">Print</button>
                 </div>
             </div>
         </form>

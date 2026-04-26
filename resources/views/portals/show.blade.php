@@ -130,8 +130,8 @@
 
                     <div class="detail-list">
                         <div><span>Plate</span><strong>{{ $latestScan?->vehicle?->plate_number ?? 'Unknown' }}</strong></div>
-                        <div><span>Owner</span><strong>{{ $latestScan?->vehicle?->owner_name ?? 'N/A' }}</strong></div>
-                        <div><span>Vehicle</span><strong>{{ $latestScan?->vehicle ? $latestScan->vehicle->vehicle_color.' '.$latestScan->vehicle->vehicle_type : 'No registered data' }}</strong></div>
+                        <div><span>Owner</span><strong>{{ $latestScan?->vehicle?->vehicle_owner_name ?? 'N/A' }}</strong></div>
+                        <div><span>Vehicle</span><strong>{{ $latestScan?->vehicle?->vehicle_type ?? 'No registered data' }}</strong></div>
                         <div><span>Reader</span><strong>{{ $latestScan?->reader_name ?? $readerName }}</strong></div>
                     </div>
                 </section>

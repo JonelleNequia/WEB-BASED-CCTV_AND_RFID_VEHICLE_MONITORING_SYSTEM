@@ -24,31 +24,7 @@ class VehicleEventController extends Controller
         $dateFrom = $this->parseDate($request->string('date_from')->value());
         $dateTo = $this->parseDate($request->string('date_to')->value());
 
-        $events = VehicleEvent::query()
-            ->with(['camera', 'matchedEntry', 'vehicle', 'rfidScanLog.vehicleRfidTag'])
-            ->when($request->filled('plate_text'), function ($query) use ($request): void {
-                $query->where('plate_text', 'like', '%'.$request->string('plate_text')->trim().'%');
-            })
-            ->when($request->filled('event_type'), function ($query) use ($request): void {
-                $query->where('event_type', $request->string('event_type')->upper()->value());
-            })
-            ->when($request->filled('match_status'), function ($query) use ($request): void {
-                $selectedStatus = $request->string('match_status')->value();
-
-                if ($selectedStatus === VehicleEvent::STATUS_PENDING_DETAILS) {
-                    $query->where('event_status', VehicleEvent::STATUS_PENDING_DETAILS);
-
-                    return;
-                }
-
-                $query->where('match_status', $selectedStatus);
-            })
-            ->when($dateFrom !== null, function ($query) use ($dateFrom): void {
-                $query->where('event_time', '>=', $dateFrom->startOfDay());
-            })
-            ->when($dateTo !== null, function ($query) use ($dateTo): void {
-                $query->where('event_time', '<=', $dateTo->endOfDay());
-            })
+        $events = $this->filteredEventsQuery($request, $dateFrom, $dateTo)
             ->orderByDesc('event_time')
             ->paginate(10)
             ->withQueryString();
@@ -56,6 +32,59 @@ class VehicleEventController extends Controller
         return view('vehicle-events.index', [
             'events' => $events,
             'filters' => $request->only(['plate_text', 'event_type', 'match_status', 'date_from', 'date_to']),
+        ]);
+    }
+
+    /**
+     * Export filtered vehicle events as CSV.
+     */
+    public function exportCsv(Request $request)
+    {
+        $dateFrom = $this->parseDate($request->string('date_from')->value());
+        $dateTo = $this->parseDate($request->string('date_to')->value());
+        $filename = 'vehicle-events-'.now()->format('Ymd-His').'.csv';
+
+        return response()->streamDownload(function () use ($request, $dateFrom, $dateTo): void {
+            $handle = fopen('php://output', 'w');
+            fputcsv($handle, [
+                'ID',
+                'Type',
+                'Plate',
+                'Vehicle Type',
+                'Category',
+                'Source',
+                'Camera',
+                'State',
+                'Event Time',
+                'Status',
+                'Match Status',
+                'RFID Tag',
+            ]);
+
+            $this->filteredEventsQuery($request, $dateFrom, $dateTo)
+                ->orderByDesc('event_time')
+                ->chunk(200, function ($events) use ($handle): void {
+                    foreach ($events as $event) {
+                        fputcsv($handle, [
+                            $event->id,
+                            $event->event_type,
+                            $event->plate_text,
+                            $event->display_vehicle_type,
+                            $event->vehicle_category,
+                            $event->event_origin_label,
+                            $event->camera?->camera_name,
+                            $event->resulting_state,
+                            $event->event_time?->toDateTimeString(),
+                            $event->event_status,
+                            $event->match_status,
+                            $event->rfidScanLog?->tag_uid,
+                        ]);
+                    }
+                });
+
+            fclose($handle);
+        }, $filename, [
+            'Content-Type' => 'text/csv',
         ]);
     }
 
@@ -146,6 +175,35 @@ class VehicleEventController extends Controller
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    protected function filteredEventsQuery(Request $request, ?Carbon $dateFrom = null, ?Carbon $dateTo = null)
+    {
+        return VehicleEvent::query()
+            ->with(['camera', 'matchedEntry', 'vehicle', 'rfidScanLog.vehicleRfidTag'])
+            ->when($request->filled('plate_text'), function ($query) use ($request): void {
+                $query->where('plate_text', 'like', '%'.$request->string('plate_text')->trim().'%');
+            })
+            ->when($request->filled('event_type'), function ($query) use ($request): void {
+                $query->where('event_type', $request->string('event_type')->upper()->value());
+            })
+            ->when($request->filled('match_status'), function ($query) use ($request): void {
+                $selectedStatus = $request->string('match_status')->value();
+
+                if ($selectedStatus === VehicleEvent::STATUS_PENDING_DETAILS) {
+                    $query->where('event_status', VehicleEvent::STATUS_PENDING_DETAILS);
+
+                    return;
+                }
+
+                $query->where('match_status', $selectedStatus);
+            })
+            ->when($dateFrom !== null, function ($query) use ($dateFrom): void {
+                $query->where('event_time', '>=', $dateFrom->copy()->startOfDay());
+            })
+            ->when($dateTo !== null, function ($query) use ($dateTo): void {
+                $query->where('event_time', '<=', $dateTo->copy()->endOfDay());
+            });
     }
 
 }

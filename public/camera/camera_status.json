@@ -1,7 +1,7 @@
 {
   "service_running": true,
   "service_message": "Dual-camera detector running.",
-  "updated_at": "2026-04-27T05:31:38.252440+08:00",
+  "updated_at": "2026-04-27T07:42:01.103176+08:00",
   "detector_model_path": "yolov8n.pt",
   "cameras": {
     "entrance": {
@@ -18,10 +18,10 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-04-27T05:31:38.186873+08:00",
-      "last_error": "Detector service is starting.",
+      "last_capture_time": "2026-04-27T07:42:01.061974+08:00",
+      "last_error": "Calibration mask or trigger line is missing. Save calibration before auto logging starts.",
       "retry_count": 0,
-      "processed_frames": 1281,
+      "processed_frames": 20363,
       "detections_seen": 0,
       "crossings_logged": 0
     },
@@ -39,10 +39,10 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-04-27T05:31:38.252418+08:00",
+      "last_capture_time": "2026-04-27T07:42:01.103156+08:00",
       "last_error": "Calibration mask or trigger line is missing. Save calibration before auto logging starts.",
       "retry_count": 0,
-      "processed_frames": 1281,
+      "processed_frames": 20260,
       "detections_seen": 0,
       "crossings_logged": 0
     }

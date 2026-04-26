@@ -206,6 +206,7 @@ class SettingsService
         $sourceValue = $cameraConfiguration['source_value'] ?? '0';
 
         return [
+            'camera_id' => $cameraConfiguration['id'],
             'camera_role' => $cameraConfiguration['camera_role'],
             'camera_name' => $cameraConfiguration['camera_name'],
             'source_type' => $sourceType,

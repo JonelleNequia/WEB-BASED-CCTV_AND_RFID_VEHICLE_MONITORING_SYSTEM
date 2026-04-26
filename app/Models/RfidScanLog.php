@@ -19,6 +19,7 @@ class RfidScanLog extends Model
         'vehicle_id',
         'vehicle_rfid_tag_id',
         'correlated_vehicle_event_id',
+        'guest_vehicle_observation_id',
         'tag_uid',
         'scan_location',
         'scan_direction',
@@ -69,6 +70,14 @@ class RfidScanLog extends Model
     public function correlatedVehicleEvent(): BelongsTo
     {
         return $this->belongsTo(VehicleEvent::class, 'correlated_vehicle_event_id');
+    }
+
+    /**
+     * Guest observation created when an unrecognized tag needs CCTV review.
+     */
+    public function guestVehicleObservation(): BelongsTo
+    {
+        return $this->belongsTo(GuestVehicleObservation::class);
     }
 
     /**

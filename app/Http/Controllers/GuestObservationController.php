@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreGuestObservationRequest;
 use App\Models\Camera;
+use App\Models\GuestVehicleObservation;
 use App\Services\GuestObservationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -21,6 +22,12 @@ class GuestObservationController extends Controller
             'observations' => $guestObservationService->paginated($request->all(), 10),
             'guestCountToday' => $guestObservationService->countToday(),
             'cameras' => Camera::query()->orderBy('camera_name')->get(),
+            'latestUnregisteredCapture' => GuestVehicleObservation::query()
+                ->with('camera')
+                ->where('observation_source', 'cctv')
+                ->where('vehicle_type', 'Unregistered')
+                ->latest('observed_at')
+                ->first(),
         ]);
     }
 
@@ -36,4 +43,3 @@ class GuestObservationController extends Controller
         return back()->with('status', 'Guest observation saved.');
     }
 }
-

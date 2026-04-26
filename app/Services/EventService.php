@@ -186,7 +186,7 @@ class EventService
                 'rfid_scan_log_id' => $scanLog->id,
                 'vehicle_type' => $vehicle->vehicle_type,
                 'detected_vehicle_type' => $vehicle->vehicle_type,
-                'vehicle_color' => $vehicle->vehicle_color,
+                'vehicle_color' => null,
                 'vehicle_category' => $vehicle->category,
                 'camera_id' => $cameraId,
                 'roi_name' => $scanLog->scan_location === 'exit'
@@ -236,6 +236,7 @@ class EventService
                 ['entry_event_id' => $event->id],
                 [
                     'plate_text' => $event->plate_text,
+                    'plate_number' => $event->plate_text,
                     'vehicle_type' => $event->vehicle_type,
                     'vehicle_color' => $event->vehicle_color,
                     'entry_time' => $event->event_time,
@@ -287,6 +288,7 @@ class EventService
                 ['entry_event_id' => $event->id],
                 [
                     'plate_text' => $event->plate_text,
+                    'plate_number' => $event->plate_text,
                     'vehicle_type' => $event->vehicle_type,
                     'vehicle_color' => $event->vehicle_color,
                     'entry_time' => $event->event_time,

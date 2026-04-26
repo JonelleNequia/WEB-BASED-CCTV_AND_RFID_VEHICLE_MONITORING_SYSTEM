@@ -82,6 +82,8 @@
                 <div class="button-row">
                     <button type="submit" class="button button-primary">Apply</button>
                     <a href="{{ route('vehicle-events.index') }}" class="button button-secondary">Reset</a>
+                    <a href="{{ route('vehicle-events.export.csv', request()->query()) }}" class="button button-secondary">Export CSV</a>
+                    <button type="button" class="button button-secondary" onclick="window.print()">Print</button>
                 </div>
             </div>
         </form>
