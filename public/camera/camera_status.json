@@ -1,35 +1,50 @@
 {
-  "service_running": false,
-  "service_message": "Python dual-camera service has not started yet.",
-  "updated_at": null,
+  "service_running": true,
+  "service_message": "Dual-camera detector running.",
+  "updated_at": "2026-04-27T05:31:38.252440+08:00",
+  "detector_model_path": "yolov8n.pt",
   "cameras": {
     "entrance": {
       "camera_role": "entrance",
       "camera_name": "PHILCST Entrance Camera",
-      "camera_running": false,
+      "camera_running": true,
+      "detection_ready": true,
+      "calibration_ready": true,
       "source_type": "webcam",
       "source_value": 0,
-      "browser_device_id": null,
-      "browser_label": null,
-      "calibration_mask": null,
-      "calibration_line": null,
-      "last_capture_time": null,
-      "last_error": "Service not started.",
-      "retry_count": 0
+      "supported_vehicle_classes": [
+        "Car",
+        "Motorcycle",
+        "Bus",
+        "Truck"
+      ],
+      "last_capture_time": "2026-04-27T05:31:38.186873+08:00",
+      "last_error": "Detector service is starting.",
+      "retry_count": 0,
+      "processed_frames": 1281,
+      "detections_seen": 0,
+      "crossings_logged": 0
     },
     "exit": {
       "camera_role": "exit",
       "camera_name": "PHILCST Exit Camera",
-      "camera_running": false,
+      "camera_running": true,
+      "detection_ready": false,
+      "calibration_ready": false,
       "source_type": "webcam",
       "source_value": 1,
-      "browser_device_id": null,
-      "browser_label": null,
-      "calibration_mask": null,
-      "calibration_line": null,
-      "last_capture_time": null,
-      "last_error": "Service not started.",
-      "retry_count": 0
+      "supported_vehicle_classes": [
+        "Car",
+        "Motorcycle",
+        "Bus",
+        "Truck"
+      ],
+      "last_capture_time": "2026-04-27T05:31:38.252418+08:00",
+      "last_error": "Calibration mask or trigger line is missing. Save calibration before auto logging starts.",
+      "retry_count": 0,
+      "processed_frames": 1281,
+      "detections_seen": 0,
+      "crossings_logged": 0
     }
   }
 }

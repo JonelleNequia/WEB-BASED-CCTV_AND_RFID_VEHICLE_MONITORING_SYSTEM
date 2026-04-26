@@ -16,6 +16,8 @@ class VehicleEvent extends Model
 
     public const STATUS_COMPLETED = 'completed';
 
+    public const STATUS_REQUIRES_MANUAL_REVIEW = 'requires_manual_review';
+
     /**
      * The attributes that are mass assignable.
      *
@@ -25,6 +27,8 @@ class VehicleEvent extends Model
         'event_type',
         'event_status',
         'event_origin',
+        'direction',
+        'plate_number',
         'plate_text',
         'plate_confidence',
         'vehicle_id',

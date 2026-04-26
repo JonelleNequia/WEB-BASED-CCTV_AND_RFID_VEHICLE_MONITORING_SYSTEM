@@ -37,6 +37,7 @@ from tracking import (
     point_in_mask,
     point_side_of_line,
 )
+from anpr import read_license_plate
 
 CAMERA_ROLES = ("entrance", "exit")
 
@@ -371,7 +372,7 @@ def save_vehicle_snapshot(role, frame, xyxy, event_key):
 def process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels):
     """
     Filter detections to supported vehicle classes, track them, and log one
-    event per valid crossing.
+    event per valid crossing. Uses ANPR for license plate detection.
     """
     frame_height, frame_width = frame.shape[:2]
     mask_rect = normalized_rect_to_pixels(camera_config.get("calibration_mask"), frame_width, frame_height)
@@ -408,6 +409,20 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
         if track_id in state["crossed_track_ids"]:
             continue
 
+        # Determine direction based on crossing direction
+        # Side -1 to +1 = entering (IN), +1 to -1 = exiting (OUT)
+        if previous_side is not None and current_side is not None:
+            if previous_side < 0 and current_side > 0:
+                direction = "IN"
+            elif previous_side > 0 and current_side < 0:
+                direction = "OUT"
+            else:
+                # Default to IN if unclear
+                direction = "IN"
+        else:
+            direction = "IN"
+
+        # Save vehicle snapshot first
         event_key = f"{role}-track-{track_id}-{int(time.time() * 1000)}"
         vehicle_image_path = save_vehicle_snapshot(role, frame, xyxy, event_key)
 
@@ -416,24 +431,24 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
             state["last_error"] = f"{role.capitalize()} vehicle crossed the line, but snapshot saving failed."
             continue
 
+        # Read license plate using ANPR
+        plate_number = None
+        if direction == "OUT":
+            # Only attempt plate recognition for OUT direction
+            # (can be extended to IN as well)
+            plate_number = read_license_plate(frame, tuple(xyxy))
+
         display_label = vehicle_labels[class_id]
+        
+        # Get camera_id from config (default to 1 if not set)
+        camera_id = camera_config.get("camera_id", 1)
+
+        # Build new payload format for Laravel API
         payload = {
-            "external_event_key": event_key,
-            "camera_role": role,
-            "detected_vehicle_type": display_label,
-            "event_time": datetime.now().astimezone().isoformat(),
-            "vehicle_image_path": vehicle_image_path,
-            "roi_name": f"{role.capitalize()} Trigger Line",
-            "detection_metadata": {
-                "track_id": track_id,
-                "confidence": round(float(confidence), 4),
-                "detector_class": normalize_detector_label(display_label),
-                "line_side_before": previous_side,
-                "line_side_after": current_side,
-                "bbox": [round(float(value), 2) for value in xyxy],
-                "source_type": camera_config["source_type"],
-                "source_value": camera_config["source_value"],
-            },
+            "camera_id": camera_id,
+            "direction": direction,
+            "plate_number": plate_number,
+            "image_path": vehicle_image_path,
         }
 
         result = laravel_client.submit_event(payload)

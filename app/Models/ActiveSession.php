@@ -17,10 +17,12 @@ class ActiveSession extends Model
      */
     protected $fillable = [
         'entry_event_id',
+        'plate_number',
         'plate_text',
         'vehicle_type',
         'vehicle_color',
-        'entry_time',
+        'time_in',
+        'time_out',
         'status',
     ];
 
@@ -32,7 +34,8 @@ class ActiveSession extends Model
     protected function casts(): array
     {
         return [
-            'entry_time' => 'datetime',
+            'time_in' => 'datetime',
+            'time_out' => 'datetime',
         ];
     }
 
@@ -42,5 +45,14 @@ class ActiveSession extends Model
     public function entryEvent(): BelongsTo
     {
         return $this->belongsTo(VehicleEvent::class, 'entry_event_id');
+    }
+
+    /**
+     * Scope to filter only active sessions (no time_out yet).
+     */
+    public function scopeActive($query)
+    {
+        return $query->where('status', 'active')
+            ->whereNull('time_out');
     }
 }
