@@ -271,9 +271,25 @@
         document.addEventListener('DOMContentLoaded', () => {
             const form = document.querySelector('[data-rfid-scan-form]');
             const resultBox = document.querySelector('[data-rfid-scan-result]');
+            const registeredTagSelect = document.getElementById('vehicle_rfid_tag_id');
+            const manualTagInput = document.getElementById('tag_uid');
 
             if (!form || !resultBox) {
                 return;
+            }
+
+            if (registeredTagSelect && manualTagInput) {
+                registeredTagSelect.addEventListener('change', () => {
+                    if (registeredTagSelect.value) {
+                        manualTagInput.value = '';
+                    }
+                });
+
+                manualTagInput.addEventListener('input', () => {
+                    if (manualTagInput.value.trim() !== '') {
+                        registeredTagSelect.value = '';
+                    }
+                });
             }
 
             form.addEventListener('submit', async (event) => {
@@ -298,7 +314,10 @@
                     }
 
                     const scan = payload.scan || {};
-                    resultBox.textContent = `${payload.message} ${scan.guest_observation_id ? 'Guest observation #' + scan.guest_observation_id + ' was created for review.' : ''}`;
+                    resultBox.textContent = `${payload.message} ${scan.guest_observation_id ? 'Guest observation #' + scan.guest_observation_id + ' was created for review.' : ''} Refreshing latest result...`;
+                    window.setTimeout(() => {
+                        window.location.href = '{{ route('rfid-scans.index') }}';
+                    }, 500);
                 } catch (error) {
                     resultBox.textContent = 'RFID scan could not reach the server.';
                 }

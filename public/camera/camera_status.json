@@ -1,15 +1,15 @@
 {
   "service_running": true,
   "service_message": "Dual-camera detector running.",
-  "updated_at": "2026-04-27T07:42:01.103176+08:00",
+  "updated_at": "2026-04-27T08:28:45.128506+08:00",
   "detector_model_path": "yolov8n.pt",
   "cameras": {
     "entrance": {
       "camera_role": "entrance",
       "camera_name": "PHILCST Entrance Camera",
       "camera_running": true,
-      "detection_ready": true,
-      "calibration_ready": true,
+      "detection_ready": false,
+      "calibration_ready": false,
       "source_type": "webcam",
       "source_value": 0,
       "supported_vehicle_classes": [
@@ -18,10 +18,10 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-04-27T07:42:01.061974+08:00",
+      "last_capture_time": "2026-04-27T08:28:45.102802+08:00",
       "last_error": "Calibration mask or trigger line is missing. Save calibration before auto logging starts.",
       "retry_count": 0,
-      "processed_frames": 20363,
+      "processed_frames": 35310,
       "detections_seen": 0,
       "crossings_logged": 0
     },
@@ -39,10 +39,10 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-04-27T07:42:01.103156+08:00",
+      "last_capture_time": "2026-04-27T08:28:45.128481+08:00",
       "last_error": "Calibration mask or trigger line is missing. Save calibration before auto logging starts.",
       "retry_count": 0,
-      "processed_frames": 20260,
+      "processed_frames": 35146,
       "detections_seen": 0,
       "crossings_logged": 0
     }

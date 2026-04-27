@@ -196,7 +196,6 @@
                         <th>Owner</th>
                         <th>Category</th>
                         <th>Vehicle</th>
-                        <th>Current State</th>
                         <th>Status</th>
                         <th>Tags</th>
                         <th>Scans</th>
@@ -211,11 +210,6 @@
                             <td>{{ $vehicle->vehicle_owner_name ?: 'N/A' }}</td>
                             <td>{{ ucfirst(str_replace('_', ' ', $vehicle->category)) }}</td>
                             <td>{{ $vehicle->vehicle_type }}</td>
-                            <td>
-                                <span class="badge {{ $vehicle->current_state === 'inside' ? 'badge-matched' : 'badge-secondary' }}">
-                                    {{ ucfirst($vehicle->current_state) }}
-                                </span>
-                            </td>
                             <td>
                                 <span class="badge {{ $vehicle->status === 'active' ? 'badge-matched' : 'badge-unmatched' }}">
                                     {{ ucfirst($vehicle->status) }}
@@ -244,7 +238,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="10" class="table-empty">No registered vehicles yet.</td>
+                            <td colspan="9" class="table-empty">No registered vehicles yet.</td>
                         </tr>
                     @endforelse
                 </tbody>
