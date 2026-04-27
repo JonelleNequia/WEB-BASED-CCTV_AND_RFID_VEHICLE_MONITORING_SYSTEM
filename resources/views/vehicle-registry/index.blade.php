@@ -198,7 +198,7 @@
                         <th>Vehicle</th>
                         <th>Status</th>
                         <th>Tags</th>
-                        <th>Scans</th>
+                        <th>Totals</th>
                         <th>Today</th>
                         <th></th>
                     </tr>
@@ -228,7 +228,10 @@
                                     </div>
                                 @endif
                             </td>
-                            <td>{{ $vehicle->rfid_scan_logs_count }}</td>
+                            <td>
+                                <strong>E{{ $vehicle->total_entries_count }}</strong>
+                                <div class="table-subtext">X{{ $vehicle->total_exits_count }} / {{ $vehicle->rfid_scan_logs_count }} scans</div>
+                            </td>
                             <td>
                                 E{{ $vehicle->entries_today_count }} / X{{ $vehicle->exits_today_count }}
                             </td>

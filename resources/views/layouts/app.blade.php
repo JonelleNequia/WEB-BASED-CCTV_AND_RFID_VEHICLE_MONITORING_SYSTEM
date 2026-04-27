@@ -34,8 +34,10 @@
 
                 <div class="topbar-meta">
                     <div class="topbar-user">
-                            <span class="topbar-avatar"><img src="{{ asset('images/avatar-placeholder.png') }}" alt="Philcst logo" class="Dashboard_logo    "></span>
-                            <div>
+                        <span class="topbar-avatar">
+                            <img src="{{ asset('images/logo-placeholder.png') }}" alt="PHILCST logo">
+                        </span>
+                        <div>
                             <strong>{{ auth()->user()->name ?? 'System Administrator' }}</strong>
                             <span>{{ auth()->user()->email }}</span>
                         </div>

@@ -51,6 +51,49 @@
         </article>
     </div>
 
+    <section class="panel">
+        <div class="panel-header">
+            <div>
+                <h3>Frequent Entry Ranking</h3>
+            </div>
+            <a href="{{ route('vehicle-events.index', ['event_type' => 'ENTRY']) }}" class="button button-secondary button-sm">Open Entry Logs</a>
+        </div>
+
+        @if ($frequentEntryVehicles->isEmpty())
+            <div class="empty-state">
+                <h4>No registered entry logs yet</h4>
+                <p>Registered vehicle rankings will appear after RFID ENTRY scans.</p>
+            </div>
+        @else
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Plate</th>
+                            <th>Owner</th>
+                            <th>Category</th>
+                            <th>Total Entries</th>
+                            <th>Today</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($frequentEntryVehicles as $vehicle)
+                            <tr>
+                                <td><strong>#{{ $loop->iteration }}</strong></td>
+                                <td><strong>{{ $vehicle->plate_number }}</strong></td>
+                                <td>{{ $vehicle->vehicle_owner_name ?: 'N/A' }}</td>
+                                <td>{{ ucfirst(str_replace('_', ' ', $vehicle->category)) }}</td>
+                                <td><strong>{{ $vehicle->total_entries_count }}</strong></td>
+                                <td>{{ $vehicle->entries_today_count_from_logs }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @endif
+    </section>
+
     <div class="page-grid two-column">
         <section class="panel">
             <div class="panel-header">

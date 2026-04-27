@@ -114,11 +114,6 @@
                     </div>
 
                     <div class="field">
-                        <label for="reader_name">Reader Name</label>
-                        <input id="reader_name" type="text" name="reader_name" value="{{ old('reader_name') }}" placeholder="{{ $settings['entrance_rfid_reader_name'] }}">
-                    </div>
-
-                    <div class="field">
                         <label for="scan_time">Scan Time</label>
                         <input id="scan_time" type="datetime-local" name="scan_time" value="{{ old('scan_time', now()->format('Y-m-d\TH:i')) }}">
                     </div>
@@ -169,7 +164,6 @@
                         <div><span>Category</span><strong>{{ $latestScan->vehicle?->category ? ucfirst(str_replace('_', ' ', $latestScan->vehicle->category)) : 'N/A' }}</strong></div>
                         <div><span>Event Type</span><strong>{{ $latestScan->resolvedEventTypeLabel }}</strong></div>
                         <div><span>Current State</span><strong>{{ $latestScan->resultingStateLabel }}</strong></div>
-                        <div><span>Reader</span><strong>{{ $latestScan->reader_name }}</strong></div>
                         <div><span>Time</span><strong>{{ $latestScan->scan_time->format('M d, Y h:i A') }}</strong></div>
                     </div>
 
@@ -218,7 +212,6 @@
                         <th>Station</th>
                         <th>Event Type</th>
                         <th>Current State</th>
-                        <th>Reader</th>
                         <th>Result</th>
                         <th>Vehicle Log</th>
                     </tr>
@@ -242,7 +235,6 @@
                             </td>
                             <td>{{ $scan->resolvedEventTypeLabel }}</td>
                             <td>{{ $scan->resultingStateLabel }}</td>
-                            <td>{{ $scan->reader_name }}</td>
                             <td>
                                 <span class="badge badge-{{ $scan->verificationBadgeClass }}">{{ $scan->verificationLabel }}</span>
                             </td>
@@ -257,7 +249,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="10" class="table-empty">No RFID scan history yet.</td>
+                            <td colspan="9" class="table-empty">No RFID scan history yet.</td>
                         </tr>
                     @endforelse
                 </tbody>

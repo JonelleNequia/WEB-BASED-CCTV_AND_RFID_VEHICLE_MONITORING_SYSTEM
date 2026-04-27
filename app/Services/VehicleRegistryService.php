@@ -63,7 +63,11 @@ class VehicleRegistryService
     {
         return Vehicle::query()
             ->with('rfidTags')
-            ->withCount('rfidScanLogs')
+            ->withCount([
+                'rfidScanLogs',
+                'vehicleEvents as total_entries_count' => fn ($query) => $query->where('event_type', 'ENTRY'),
+                'vehicleEvents as total_exits_count' => fn ($query) => $query->where('event_type', 'EXIT'),
+            ])
             ->orderBy('plate_number')
             ->get();
     }
