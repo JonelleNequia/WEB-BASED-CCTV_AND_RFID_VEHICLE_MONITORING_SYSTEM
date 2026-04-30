@@ -16,7 +16,7 @@ class LoginController extends Controller
     public function create(): View|RedirectResponse
     {
         if (Auth::check()) {
-            return redirect()->route('dashboard.index');
+            return redirect()->route($this->homeRouteName());
         }
 
         return view('auth.login');
@@ -40,7 +40,7 @@ class LoginController extends Controller
 
         $request->session()->regenerate();
 
-        return redirect()->intended(route('dashboard.index'));
+        return redirect()->intended(route($this->homeRouteName()));
     }
 
     /**
@@ -53,5 +53,10 @@ class LoginController extends Controller
         $request->session()->regenerateToken();
 
         return redirect()->route('login');
+    }
+
+    protected function homeRouteName(): string
+    {
+        return 'dashboard.index';
     }
 }

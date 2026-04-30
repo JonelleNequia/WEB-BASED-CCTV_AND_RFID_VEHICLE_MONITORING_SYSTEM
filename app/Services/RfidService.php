@@ -3,8 +3,8 @@
 namespace App\Services;
 
 use App\Models\RfidScanLog;
+use App\Models\RfidTag;
 use App\Models\Vehicle;
-use App\Models\VehicleRfidTag;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -54,7 +54,7 @@ class RfidService
 
             $tag = $this->resolveTag($data);
             $vehicle = $tag?->vehicle;
-            $tagUid = $tag?->tag_uid ?? $this->vehicleRegistryService->normalizeTagUid((string) ($data['tag_uid'] ?? 'UNKNOWN-TAG'));
+            $tagUid = $tag?->uid ?? $this->vehicleRegistryService->normalizeTagUid((string) ($data['tag_uid'] ?? 'UNKNOWN-TAG'));
             $verificationStatus = $this->resolveVerificationStatus($tag, $vehicle);
             $stateTransition = $this->resolveStateTransition($verificationStatus, $vehicle, $scanTime);
             $scanDirection = $stateTransition
@@ -191,7 +191,10 @@ class RfidService
                 ->whereIn('category', $recurringCategories)
                 ->whereDate('daily_count_date', $today)
                 ->sum('exits_today_count'),
-            'registered_tags' => VehicleRfidTag::query()->count(),
+            'registered_tags' => RfidTag::query()->count(),
+            'available_tags' => RfidTag::query()
+                ->where('status', RfidTag::STATUS_AVAILABLE)
+                ->count(),
             'scans_today' => RfidScanLog::query()->whereDate('scan_time', today())->count(),
             'registered_scans_today' => RfidScanLog::query()
                 ->whereDate('scan_time', today())
@@ -218,33 +221,40 @@ class RfidService
      *
      * @param  array<string, mixed>  $data
      */
-    protected function resolveTag(array $data): ?VehicleRfidTag
+    protected function resolveTag(array $data): ?RfidTag
     {
         if (! empty($data['vehicle_rfid_tag_id'])) {
-            return VehicleRfidTag::query()->with('vehicle')->find($data['vehicle_rfid_tag_id']);
+            return RfidTag::query()->with('vehicle')->find($data['vehicle_rfid_tag_id']);
         }
 
         if (blank($data['tag_uid'] ?? null)) {
             return null;
         }
 
-        return VehicleRfidTag::query()
+        $uid = $this->vehicleRegistryService->normalizeTagUid((string) $data['tag_uid']);
+
+        return RfidTag::query()
             ->with('vehicle')
-            ->where('tag_uid', $this->vehicleRegistryService->normalizeTagUid((string) $data['tag_uid']))
+            ->where('uid', $uid)
+            ->orWhere('tag_uid', $uid)
             ->first();
     }
 
     /**
      * Evaluate whether the scan should be treated as verified or attention-needed.
      */
-    protected function resolveVerificationStatus(?VehicleRfidTag $tag, ?Vehicle $vehicle): string
+    protected function resolveVerificationStatus(?RfidTag $tag, ?Vehicle $vehicle): string
     {
         if (! $tag || ! $vehicle) {
             return 'unknown_tag';
         }
 
-        if ($tag->status !== 'active') {
+        if ($tag->status === RfidTag::STATUS_INACTIVE) {
             return 'inactive_tag';
+        }
+
+        if ($tag->status !== RfidTag::STATUS_ASSIGNED) {
+            return 'unassigned_tag';
         }
 
         if ($vehicle->status !== 'active') {
@@ -267,8 +277,13 @@ class RfidService
             return null;
         }
 
+        $vehicle = Vehicle::query()
+            ->whereKey($vehicle->id)
+            ->lockForUpdate()
+            ->firstOrFail();
+
         $this->resetDailyCountersIfNeeded($vehicle, $scanTime);
-        $currentState = $vehicle->current_state ?: Vehicle::STATE_OUTSIDE;
+        $currentState = $this->normalizeVehicleState($vehicle->current_state);
         $eventType = $currentState === Vehicle::STATE_INSIDE ? 'EXIT' : 'ENTRY';
         $resultingState = $eventType === 'ENTRY'
             ? Vehicle::STATE_INSIDE
@@ -298,6 +313,18 @@ class RfidService
             'daily_entries_count' => (int) $vehicle->entries_today_count,
             'daily_exits_count' => (int) $vehicle->exits_today_count,
         ];
+    }
+
+    /**
+     * Normalize legacy lowercase/null states before deciding the next action.
+     */
+    protected function normalizeVehicleState(?string $state): string
+    {
+        $normalized = strtoupper(trim((string) $state));
+
+        return $normalized === Vehicle::STATE_INSIDE
+            ? Vehicle::STATE_INSIDE
+            : Vehicle::STATE_OUTSIDE;
     }
 
     /**

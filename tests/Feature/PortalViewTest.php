@@ -12,9 +12,9 @@ class PortalViewTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * Ensure the lightweight entrance portal page is available for the local multi-monitor setup.
+     * Ensure the old portal URL stays compatible with the new station window.
      */
-    public function test_entrance_portal_page_renders(): void
+    public function test_entrance_portal_route_redirects_to_station_window(): void
     {
         $this->seed(DatabaseSeeder::class);
 
@@ -22,8 +22,6 @@ class PortalViewTest extends TestCase
 
         $this->actingAs($user)
             ->get(route('portals.show', 'entrance'))
-            ->assertOk()
-            ->assertSee('PHILCST Entrance Portal')
-            ->assertSee('Not connected');
+            ->assertRedirect(route('stations.entrance'));
     }
 }

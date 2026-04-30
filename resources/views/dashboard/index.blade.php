@@ -12,10 +12,11 @@
         </div>
 
         <div class="hero-panel-actions">
-            <a href="{{ route('rfid-scans.index') }}" class="button button-primary">RFID Desk</a>
+            <a href="{{ route('stations.entrance') }}" class="button button-primary">Entrance Station</a>
+            <a href="{{ route('stations.exit') }}" class="button button-primary">Exit Station</a>
             <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Vehicle Registry</a>
-            <a href="{{ route('guest-observations.index') }}" class="button button-secondary">Guest Monitoring</a>
-            <a href="{{ route('monitoring.index') }}" class="button button-secondary">Live Monitoring</a>
+            <a href="{{ route('rfid-inventory.index') }}" class="button button-secondary">RFID Inventory</a>
+            <a href="{{ route('settings.index') }}" class="button button-secondary">Settings</a>
         </div>
     </section>
 
@@ -169,10 +170,13 @@
         <div class="button-row">
             <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Vehicle Registry</a>
             <a href="{{ route('rfid-scans.index') }}" class="button button-secondary">RFID Desk</a>
-            <a href="{{ route('monitoring.index') }}" class="button button-secondary">Live Monitoring</a>
+            <a href="{{ route('stations.entrance') }}" class="button button-secondary">Entrance Station</a>
+            <a href="{{ route('stations.exit') }}" class="button button-secondary">Exit Station</a>
             <a href="{{ route('guest-observations.index') }}" class="button button-secondary">Guest Monitoring</a>
             <a href="{{ route('vehicle-events.index') }}" class="button button-secondary">Event Logs</a>
             <a href="{{ route('reports.index') }}" class="button button-secondary">Reports</a>
+            <a href="{{ route('rfid-inventory.index') }}" class="button button-secondary">RFID Inventory</a>
+            <a href="{{ route('settings.index') }}" class="button button-secondary">Settings</a>
         </div>
     </section>
 @endsection

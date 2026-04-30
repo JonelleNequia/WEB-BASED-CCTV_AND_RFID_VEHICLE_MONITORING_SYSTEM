@@ -215,7 +215,7 @@ class VehicleEvent extends Model
             return 'N/A';
         }
 
-        return ucfirst($this->resulting_state);
+        return ucfirst(strtolower($this->resulting_state));
     }
 
     /**

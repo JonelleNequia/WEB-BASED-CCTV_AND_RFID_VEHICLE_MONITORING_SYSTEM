@@ -18,9 +18,11 @@
         </div>
 
         <div class="hero-panel-actions">
-            <a href="{{ route('portals.show', 'entrance') }}" class="button button-primary">Entrance Station</a>
-            <a href="{{ route('portals.show', 'exit') }}" class="button button-primary">Exit Station</a>
-            <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Vehicle Registry</a>
+            <a href="{{ route('stations.entrance') }}" class="button button-primary">Entrance Station</a>
+            <a href="{{ route('stations.exit') }}" class="button button-primary">Exit Station</a>
+            @if (auth()->user()?->isAdmin())
+                <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Vehicle Registry</a>
+            @endif
         </div>
     </section>
 
@@ -102,7 +104,7 @@
 
                     <div class="field span-full">
                         <label for="tag_uid">Or Enter Tag UID</label>
-                        <input id="tag_uid" type="text" name="tag_uid" value="{{ old('tag_uid') }}" placeholder="UNKNOWN-TAG-0001">
+                        <input id="tag_uid" type="text" name="tag_uid" value="{{ old('tag_uid') }}" autocomplete="off" placeholder="Scan RFID card" autofocus data-rfid-scan-input>
                     </div>
 
                     <div class="field">
@@ -131,7 +133,9 @@
 
                 <div class="button-row">
                     <button type="submit" class="button button-primary {{ $simulationEnabled ? '' : 'button-disabled' }}" @disabled(! $simulationEnabled)>Simulate RFID Scan</button>
-                    <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Manage Registry</a>
+                    @if (auth()->user()?->isAdmin())
+                        <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Manage Registry</a>
+                    @endif
                 </div>
             </form>
 
@@ -265,10 +269,36 @@
             const resultBox = document.querySelector('[data-rfid-scan-result]');
             const registeredTagSelect = document.getElementById('vehicle_rfid_tag_id');
             const manualTagInput = document.getElementById('tag_uid');
+            const scanTimeInput = document.getElementById('scan_time');
 
             if (!form || !resultBox) {
                 return;
             }
+
+            const currentDateTimeLocal = () => {
+                const now = new Date();
+                now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+
+                return now.toISOString().slice(0, 16);
+            };
+
+            const focusScannerInput = () => {
+                if (!manualTagInput || registeredTagSelect?.value) {
+                    return;
+                }
+
+                const activeElement = document.activeElement;
+                const activeTag = activeElement?.tagName;
+
+                if (['SELECT', 'TEXTAREA', 'BUTTON'].includes(activeTag) || activeElement?.type === 'datetime-local') {
+                    return;
+                }
+
+                manualTagInput.focus({ preventScroll: true });
+            };
+
+            window.setTimeout(focusScannerInput, 100);
+            window.addEventListener('focus', focusScannerInput);
 
             if (registeredTagSelect && manualTagInput) {
                 registeredTagSelect.addEventListener('change', () => {
@@ -282,6 +312,16 @@
                         registeredTagSelect.value = '';
                     }
                 });
+
+                manualTagInput.addEventListener('keydown', (event) => {
+                    if (event.key !== 'Enter' || manualTagInput.value.trim() === '') {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    registeredTagSelect.value = '';
+                    form.requestSubmit();
+                });
             }
 
             form.addEventListener('submit', async (event) => {
@@ -290,6 +330,16 @@
                 resultBox.textContent = 'Recording RFID scan...';
 
                 try {
+                    if (!registeredTagSelect?.value && manualTagInput?.value.trim() === '') {
+                        resultBox.textContent = 'Scan or select an RFID tag first.';
+                        focusScannerInput();
+                        return;
+                    }
+
+                    if (scanTimeInput) {
+                        scanTimeInput.value = currentDateTimeLocal();
+                    }
+
                     const response = await fetch(form.action, {
                         method: 'POST',
                         headers: {
@@ -302,6 +352,7 @@
 
                     if (!response.ok) {
                         resultBox.textContent = payload.message || 'RFID scan could not be recorded.';
+                        focusScannerInput();
                         return;
                     }
 
@@ -312,6 +363,7 @@
                     }, 500);
                 } catch (error) {
                     resultBox.textContent = 'RFID scan could not reach the server.';
+                    focusScannerInput();
                 }
             });
         });

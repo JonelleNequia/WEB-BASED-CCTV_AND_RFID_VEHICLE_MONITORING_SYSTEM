@@ -18,6 +18,8 @@ TRACK_STALE_AFTER_SECONDS = 5.0
 STATUS_WRITE_INTERVAL_SECONDS = 1.0
 API_TIMEOUT_SECONDS = 10
 JPEG_QUALITY = 90
+MJPEG_STREAM_HOST = "127.0.0.1"
+MJPEG_STREAM_PORT = 8765
 
 # Detection settings.
 MODEL_PATH = "yolov8n.pt"
@@ -54,6 +56,7 @@ def default_camera_config(role):
     return {
         "camera_role": role,
         "camera_name": f"PHILCST {role.capitalize()} Camera",
+        "camera_id": None,
         "source_type": "webcam",
         "source_value": 0 if role == "entrance" else 1,
         "source_username": "",
@@ -88,6 +91,13 @@ def latest_frame_path(role):
     return PUBLIC_CAMERA_DIR / f"{role}_latest_frame.jpg"
 
 
+def annotated_frame_path(role):
+    """
+    Build the per-camera annotated-frame output path for the guard monitor.
+    """
+    return PUBLIC_CAMERA_DIR / f"{role}_annotated_frame.jpg"
+
+
 def normalize_camera_config(role, loaded_config):
     """
     Normalize a camera config so the rest of the service can trust its keys.
@@ -102,6 +112,7 @@ def normalize_camera_config(role, loaded_config):
         source_type = "webcam"
 
     config["camera_role"] = role
+    config["camera_id"] = config.get("camera_id") or config.get("id")
     config["camera_name"] = str(config.get("camera_name", config["camera_name"])).strip() or config["camera_name"]
     config["source_type"] = source_type
     config["source_username"] = str(config.get("source_username", "") or "").strip()

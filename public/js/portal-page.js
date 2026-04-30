@@ -26,6 +26,121 @@
     refreshClock();
     window.setInterval(refreshClock, 1000);
 
+    function currentDateTimeLocal() {
+        const now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+
+        return now.toISOString().slice(0, 16);
+    }
+
+    function initRfidScanForm() {
+        const form = document.querySelector('[data-rfid-scan-form]');
+        const resultBox = document.querySelector('[data-rfid-scan-result]');
+        const registeredTagSelect = form?.querySelector('select[name="vehicle_rfid_tag_id"]') || null;
+        const manualTagInput = form?.querySelector('[data-rfid-scan-input]') || null;
+        const scanTimeInput = form?.querySelector('input[name="scan_time"]') || null;
+
+        if (!form || !resultBox || !manualTagInput) {
+            return;
+        }
+
+        function focusScannerInput() {
+            if (registeredTagSelect?.value) {
+                return;
+            }
+
+            const activeElement = document.activeElement;
+            const activeTag = activeElement?.tagName;
+
+            if (['SELECT', 'TEXTAREA', 'BUTTON'].includes(activeTag) || activeElement?.type === 'datetime-local') {
+                return;
+            }
+
+            manualTagInput.focus({ preventScroll: true });
+        }
+
+        window.setTimeout(focusScannerInput, 100);
+        window.addEventListener('focus', focusScannerInput);
+
+        registeredTagSelect?.addEventListener('change', function () {
+            if (registeredTagSelect.value) {
+                manualTagInput.value = '';
+            } else {
+                focusScannerInput();
+            }
+        });
+
+        manualTagInput.addEventListener('input', function () {
+            if (manualTagInput.value.trim() !== '' && registeredTagSelect) {
+                registeredTagSelect.value = '';
+            }
+        });
+
+        manualTagInput.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter' || manualTagInput.value.trim() === '') {
+                return;
+            }
+
+            event.preventDefault();
+
+            if (registeredTagSelect) {
+                registeredTagSelect.value = '';
+            }
+
+            form.requestSubmit();
+        });
+
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            resultBox.hidden = false;
+            resultBox.textContent = 'Recording RFID scan...';
+
+            if (!registeredTagSelect?.value && manualTagInput.value.trim() === '') {
+                resultBox.textContent = 'Scan or select an RFID tag first.';
+                focusScannerInput();
+                return;
+            }
+
+            if (scanTimeInput) {
+                scanTimeInput.value = currentDateTimeLocal();
+            }
+
+            try {
+                const response = await fetch(form.action, {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                    },
+                    body: new FormData(form),
+                });
+                const payload = await response.json().catch(function () {
+                    return {};
+                });
+
+                if (!response.ok) {
+                    resultBox.textContent = payload.message || 'RFID scan could not be recorded.';
+                    focusScannerInput();
+                    return;
+                }
+
+                const action = payload.action_taken || payload.scan?.event_type || 'SCAN';
+                const state = payload.new_state || payload.scan?.resulting_state || 'N/A';
+                const plate = payload.vehicle?.plate_number || payload.scan?.vehicle_plate || 'Unknown vehicle';
+                resultBox.textContent = `${action} recorded for ${plate}. Current state: ${state}. Refreshing...`;
+
+                window.setTimeout(function () {
+                    window.location.reload();
+                }, 500);
+            } catch (error) {
+                resultBox.textContent = 'RFID scan could not reach the server.';
+                focusScannerInput();
+            }
+        });
+    }
+
+    initRfidScanForm();
+
     if (!cameraApi || !payloadNode) {
         return;
     }
@@ -45,8 +160,48 @@
     const messageText = card.querySelector('[data-message-value]');
     const lastSeenText = card.querySelector('[data-last-seen-value]');
     const statusDot = card.querySelector('[data-status-dot]');
+    const deviceSelect = card.querySelector('[data-camera-device-select]');
     let selectedDevice = null;
     let status = payload.camera.last_connection_status || 'unknown';
+
+    function deviceLabel(device, index) {
+        return device.label || `Camera ${index + 1}`;
+    }
+
+    function renderDeviceOptions(devices) {
+        if (!deviceSelect) {
+            return;
+        }
+
+        deviceSelect.innerHTML = '';
+
+        if (!Array.isArray(devices) || devices.length === 0) {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'No browser camera found';
+            deviceSelect.appendChild(option);
+            deviceSelect.disabled = true;
+            return;
+        }
+
+        deviceSelect.disabled = false;
+
+        devices.forEach(function (device, index) {
+            const option = document.createElement('option');
+            option.value = device.deviceId;
+            option.textContent = deviceLabel(device, index);
+            deviceSelect.appendChild(option);
+        });
+
+        const selectedId = selectedDevice?.deviceId || payload.camera.browser_device_id || '';
+        const hasSelectedOption = Array.from(deviceSelect.options).some(function (option) {
+            return option.value === selectedId;
+        });
+
+        if (hasSelectedOption) {
+            deviceSelect.value = selectedId;
+        }
+    }
 
     function updateState(nextStatus, label, message) {
         status = nextStatus;
@@ -57,6 +212,9 @@
 
         sourceText.textContent = `${payload.camera.source_type} | ${payload.camera.source_value}`;
         browserText.textContent = selectedDevice?.label || payload.camera.browser_label || 'No saved browser device';
+        if (deviceSelect && selectedDevice?.deviceId) {
+            deviceSelect.value = selectedDevice.deviceId;
+        }
         messageText.textContent = message;
         lastSeenText.textContent = nextStatus === 'connected'
             ? new Date().toLocaleString()
@@ -103,6 +261,9 @@
                 payload.camera = response.camera;
                 sourceText.textContent = `${payload.camera.source_type} | ${payload.camera.source_value}`;
                 browserText.textContent = selectedDevice?.label || payload.camera.browser_label || 'No saved browser device';
+                if (deviceSelect && selectedDevice?.deviceId) {
+                    deviceSelect.value = selectedDevice.deviceId;
+                }
             }
         } catch (error) {
             messageText.textContent = error.message || messageText.textContent;
@@ -161,6 +322,8 @@
     async function refreshDevices() {
         try {
             const devices = await cameraApi.listVideoInputs();
+            renderDeviceOptions(devices);
+
             const activeDevice = devices.find(function (device) {
                 return device.deviceId === selectedDevice?.deviceId;
             }) || null;
@@ -177,6 +340,23 @@
             await syncState();
         }
     }
+
+    deviceSelect?.addEventListener('change', async function () {
+        try {
+            const devices = await cameraApi.listVideoInputs();
+            renderDeviceOptions(devices);
+            const selectedOptionDevice = devices.find(function (device) {
+                return device.deviceId === deviceSelect.value;
+            }) || null;
+
+            await connect(selectedOptionDevice);
+        } catch (error) {
+            const errorState = cameraApi.mediaErrorState(error, 'Unable to switch station camera.');
+            showFallback('Not connected');
+            updateState(errorState.status, errorState.label, errorState.message);
+            await syncState();
+        }
+    });
 
     async function boot() {
         try {

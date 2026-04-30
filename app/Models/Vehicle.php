@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -11,9 +12,9 @@ class Vehicle extends Model
 {
     use HasFactory;
 
-    public const STATE_INSIDE = 'inside';
+    public const STATE_INSIDE = 'INSIDE';
 
-    public const STATE_OUTSIDE = 'outside';
+    public const STATE_OUTSIDE = 'OUTSIDE';
 
     /**
      * Categories that can use the RFID recurring workflow.
@@ -33,6 +34,7 @@ class Vehicle extends Model
      * @var list<string>
      */
     protected $fillable = [
+        'rfid_tag_id',
         'rfid_tag_uid',
         'plate_number',
         'vehicle_owner_name',
@@ -57,6 +59,14 @@ class Vehicle extends Model
             'last_exit_at' => 'datetime',
             'last_seen_at' => 'datetime',
         ];
+    }
+
+    /**
+     * RFID tag assigned from the offline inventory pool.
+     */
+    public function rfidTag(): BelongsTo
+    {
+        return $this->belongsTo(RfidTag::class, 'rfid_tag_id');
     }
 
     /**

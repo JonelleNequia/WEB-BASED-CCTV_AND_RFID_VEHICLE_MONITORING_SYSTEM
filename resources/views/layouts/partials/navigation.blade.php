@@ -9,22 +9,34 @@
             'icon' => 'dashboard',
         ],
         [
+            'label' => 'Entrance Station',
+            'route' => route('stations.entrance'),
+            'active' => request()->routeIs('stations.entrance'),
+            'icon' => 'monitor',
+        ],
+        [
+            'label' => 'Exit Station',
+            'route' => route('stations.exit'),
+            'active' => request()->routeIs('stations.exit'),
+            'icon' => 'monitor',
+        ],
+        [
             'label' => 'Vehicle Registry',
             'route' => route('vehicle-registry.index'),
             'active' => request()->routeIs('vehicle-registry.*'),
             'icon' => 'vehicle',
         ],
         [
+            'label' => 'RFID Inventory',
+            'route' => route('rfid-inventory.index'),
+            'active' => request()->routeIs('rfid-inventory.*'),
+            'icon' => 'rfid',
+        ],
+        [
             'label' => 'RFID Desk',
             'route' => route('rfid-scans.index'),
             'active' => request()->routeIs('rfid-scans.*'),
             'icon' => 'rfid',
-        ],
-        [
-            'label' => 'Live Monitoring',
-            'route' => route('monitoring.index'),
-            'active' => request()->routeIs('monitoring.*'),
-            'icon' => 'monitor',
         ],
         [
             'label' => 'Guest Monitoring',
@@ -44,10 +56,22 @@
             'active' => request()->routeIs('reports.*'),
             'icon' => 'reports',
         ],
+        [
+            'label' => 'Settings',
+            'route' => route('settings.index'),
+            'active' => request()->routeIs('settings.*'),
+            'icon' => 'settings',
+        ],
     ];
 
     $advancedItems = $isAdmin
         ? [
+            [
+                'label' => 'Camera Calibration',
+                'route' => route('calibration.index'),
+                'active' => request()->routeIs('calibration.*'),
+                'icon' => 'calibration',
+            ],
             [
                 'label' => 'Review Queue',
                 'route' => route('manual-review.index'),

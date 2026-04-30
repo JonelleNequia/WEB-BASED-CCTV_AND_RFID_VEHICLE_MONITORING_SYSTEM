@@ -2,8 +2,10 @@
 
 namespace App\Http\Requests;
 
+use App\Models\RfidTag;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreVehicleRegistrationRequest extends FormRequest
 {
@@ -25,8 +27,15 @@ class StoreVehicleRegistrationRequest extends FormRequest
         $vehicleId = $this->route('vehicle')?->id;
 
         return [
+            'rfid_tag_id' => [
+                'nullable',
+                'required_without:rfid_tag_uid',
+                'integer',
+                'exists:vehicle_rfid_tags,id',
+            ],
             'rfid_tag_uid' => [
-                'required',
+                'nullable',
+                'required_without:rfid_tag_id',
                 'string',
                 'max:100',
                 Rule::unique('vehicles', 'rfid_tag_uid')->ignore($vehicleId),
@@ -58,7 +67,7 @@ class StoreVehicleRegistrationRequest extends FormRequest
 
         if ($this->filled('rfid_tag_uid')) {
             $this->merge([
-                'rfid_tag_uid' => strtoupper((string) preg_replace('/\s+/', '', (string) $this->input('rfid_tag_uid'))),
+                'rfid_tag_uid' => RfidTag::normalizeUid((string) $this->input('rfid_tag_uid')),
             ]);
         }
 
@@ -72,5 +81,29 @@ class StoreVehicleRegistrationRequest extends FormRequest
         if (! $this->filled('category')) {
             $this->merge(['category' => 'faculty_staff']);
         }
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            if (! $this->filled('rfid_tag_id')) {
+                return;
+            }
+
+            $tag = RfidTag::query()->find((int) $this->input('rfid_tag_id'));
+
+            if (! $tag) {
+                return;
+            }
+
+            $vehicle = $this->route('vehicle');
+            $belongsToCurrentVehicle = $vehicle
+                && (int) $tag->vehicle_id === (int) $vehicle->id
+                && $tag->status === RfidTag::STATUS_ASSIGNED;
+
+            if ($tag->status !== RfidTag::STATUS_AVAILABLE && ! $belongsToCurrentVehicle) {
+                $validator->errors()->add('rfid_tag_id', 'The selected RFID tag is not available.');
+            }
+        });
     }
 }

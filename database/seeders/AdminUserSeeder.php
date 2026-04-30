@@ -21,5 +21,9 @@ class AdminUserSeeder extends Seeder
                 'role' => User::ROLE_ADMIN,
             ]
         );
+
+        User::query()
+            ->where('email', 'guard@philcst.local')
+            ->delete();
     }
 }

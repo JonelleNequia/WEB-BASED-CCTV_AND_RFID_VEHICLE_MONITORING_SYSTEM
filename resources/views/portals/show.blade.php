@@ -45,34 +45,34 @@
                     </div>
                 </div>
 
-                <form method="POST" action="{{ route('rfid-scans.store') }}" class="stack-form">
+                <form method="POST" action="{{ route('rfid-scans.store') }}" class="stack-form" data-rfid-scan-form>
                     @csrf
                     <input type="hidden" name="scan_location" value="{{ $location }}">
 
                     <div class="form-grid portal-form-grid">
                         <div class="field span-full">
-                            <label for="vehicle_rfid_tag_id">Registered Tag</label>
-                            <select id="vehicle_rfid_tag_id" name="vehicle_rfid_tag_id">
+                            <label for="portal_vehicle_rfid_tag_id">Registered Tag</label>
+                            <select id="portal_vehicle_rfid_tag_id" name="vehicle_rfid_tag_id">
                                 <option value="">Select a registered tag</option>
                                 @foreach ($registeredTags as $tag)
-                                    <option value="{{ $tag->id }}">{{ $tag->tag_uid }} | {{ $tag->vehicle?->plate_number ?? 'No vehicle linked' }}</option>
+                                    <option value="{{ $tag->id }}">{{ $tag->uid }} | {{ $tag->vehicle?->plate_number ?? 'No vehicle linked' }}</option>
                                 @endforeach
                             </select>
                         </div>
 
                         <div class="field span-full">
-                            <label for="tag_uid">Or Enter Tag UID</label>
-                            <input id="tag_uid" type="text" name="tag_uid" placeholder="UNKNOWN-TAG-0001">
+                            <label for="portal_tag_uid">Or Scan Tag UID</label>
+                            <input id="portal_tag_uid" type="text" name="tag_uid" autocomplete="off" placeholder="Scan RFID card" autofocus data-rfid-scan-input>
                         </div>
 
                         <div class="field">
-                            <label for="reader_name">Reader Name</label>
-                            <input id="reader_name" type="text" name="reader_name" value="{{ $readerName }}">
+                            <label for="portal_reader_name">Reader Name</label>
+                            <input id="portal_reader_name" type="text" name="reader_name" value="{{ $readerName }}">
                         </div>
 
                         <div class="field">
-                            <label for="scan_time">Scan Time</label>
-                            <input id="scan_time" type="datetime-local" name="scan_time" value="{{ now()->format('Y-m-d\TH:i') }}">
+                            <label for="portal_scan_time">Scan Time</label>
+                            <input id="portal_scan_time" type="datetime-local" name="scan_time" value="{{ now()->format('Y-m-d\TH:i') }}">
                         </div>
 
                         <div class="field span-full">
@@ -85,6 +85,8 @@
                         <button type="submit" class="button button-primary button-lg">Record RFID Scan</button>
                     </div>
                 </form>
+
+                <div class="mini-note" data-rfid-scan-result hidden></div>
             </section>
 
             <div class="portal-summary-stack">
@@ -202,6 +204,15 @@
                     <div class="camera-status-chip">
                         <span class="camera-status-dot {{ $camera['last_connection_status'] === 'connected' ? 'is-connected' : 'is-error' }}" data-status-dot></span>
                         <strong data-status-value>{{ $camera['last_connection_status'] === 'connected' ? 'Connected' : 'Not connected' }}</strong>
+                    </div>
+                </div>
+
+                <div class="form-grid portal-form-grid">
+                    <div class="field span-full">
+                        <label for="portal_camera_device">Station Camera</label>
+                        <select id="portal_camera_device" data-camera-device-select>
+                            <option value="">Loading browser cameras...</option>
+                        </select>
                     </div>
                 </div>
 

@@ -115,8 +115,8 @@
                 @if ($vehicleEvent->vehicle->rfidTags->isNotEmpty())
                     <div class="badge-row">
                         @foreach ($vehicleEvent->vehicle->rfidTags as $tag)
-                            <span class="badge {{ $tag->status === 'active' ? 'badge-matched' : 'badge-unmatched' }}">
-                                {{ $tag->tag_uid }}
+                            <span class="badge {{ $tag->status === 'assigned' ? 'badge-matched' : 'badge-unmatched' }}">
+                                {{ $tag->uid }}
                             </span>
                         @endforeach
                     </div>

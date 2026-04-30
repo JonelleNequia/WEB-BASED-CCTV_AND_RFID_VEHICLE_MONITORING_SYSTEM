@@ -8,9 +8,24 @@ use App\Services\SettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\View\View;
 
 class CalibrationController extends Controller
 {
+    /**
+     * Show the admin-only camera calibration page for ROI and trigger lines.
+     */
+    public function index(
+        CalibrationService $calibrationService,
+        SettingsService $settingsService
+    ): View {
+        $settingsService->ensureCameraRuntimeConfigExists();
+
+        return view('calibration.index', [
+            'cameras' => $calibrationService->cameraPayload(),
+        ]);
+    }
+
     /**
      * Save one camera's live calibration overlay and selected browser source.
      */

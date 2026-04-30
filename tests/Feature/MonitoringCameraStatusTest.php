@@ -13,9 +13,9 @@ class MonitoringCameraStatusTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * Ensure the monitoring page renders the dual browser-camera layout.
+     * Ensure the legacy monitoring route points operators to the dedicated station windows.
      */
-    public function test_monitoring_page_displays_dual_camera_panels(): void
+    public function test_monitoring_route_redirects_to_entrance_station(): void
     {
         $this->seed(DatabaseSeeder::class);
 
@@ -23,11 +23,7 @@ class MonitoringCameraStatusTest extends TestCase
 
         $this->actingAs($user)
             ->get(route('monitoring.index'))
-            ->assertOk()
-            ->assertSee('Entrance Camera')
-            ->assertSee('Exit Camera')
-            ->assertSee('Camera Source')
-            ->assertSee('Not connected');
+            ->assertRedirect(route('stations.entrance'));
     }
 
     /**

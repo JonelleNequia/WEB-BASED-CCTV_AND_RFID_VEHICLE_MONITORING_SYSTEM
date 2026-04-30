@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\VehicleEvent;
+use App\Models\RfidTag;
+use App\Services\RfidService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -83,5 +85,72 @@ class DetectedEventIngestionTest extends TestCase
             ->assertJsonPath('message', 'Duplicate crossing ignored. The original incomplete record event is still available.');
 
         $this->assertSame(1, VehicleEvent::query()->where('external_event_key', 'test-crossing-exit-duplicate')->count());
+    }
+
+    /**
+     * Ensure a camera crossing near a verified RFID scan returns overlay data for Python drawing.
+     */
+    public function test_detector_event_ingestion_returns_registered_overlay_when_rfid_scan_matches(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $tag = RfidTag::query()->assigned()->with('vehicle')->firstOrFail();
+        $scanTime = now();
+
+        app(RfidService::class)->ingest([
+            'tag_uid' => $tag->uid,
+            'scan_location' => 'entrance',
+            'scan_time' => $scanTime->toIso8601String(),
+        ]);
+
+        $payload = [
+            'external_event_key' => 'test-crossing-rfid-overlay',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $scanTime->copy()->addSecond()->toIso8601String(),
+            'roi_name' => 'Entrance Trigger Line',
+        ];
+
+        $this->withHeaders([
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ])->postJson(route('api.integration.events'), $payload)
+            ->assertOk()
+            ->assertJsonPath('requires_capture', false)
+            ->assertJsonPath('overlay.verification', 'registered')
+            ->assertJsonPath('overlay.vehicle.id', $tag->vehicle->id)
+            ->assertJsonPath('overlay.vehicle.plate_number', $tag->vehicle->plate_number);
+
+        $this->assertDatabaseMissing('vehicle_events', [
+            'external_event_key' => 'test-crossing-rfid-overlay',
+        ]);
+    }
+
+    /**
+     * Ensure detector probes without RFID do not store evidence until Python captures once.
+     */
+    public function test_detector_event_probe_without_rfid_requests_capture_without_creating_event(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $payload = [
+            'external_event_key' => 'test-crossing-no-rfid-probe',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => now()->toIso8601String(),
+            'roi_name' => 'Entrance Trigger Line',
+        ];
+
+        $this->withHeaders([
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ])->postJson(route('api.integration.events'), $payload)
+            ->assertAccepted()
+            ->assertJsonPath('requires_capture', true)
+            ->assertJsonPath('overlay.verification', 'guest');
+
+        $this->assertDatabaseMissing('vehicle_events', [
+            'external_event_key' => 'test-crossing-no-rfid-probe',
+        ]);
     }
 }

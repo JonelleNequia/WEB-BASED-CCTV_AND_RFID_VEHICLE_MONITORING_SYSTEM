@@ -9,6 +9,7 @@ use App\Services\VehicleRegistryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Throwable;
 
@@ -24,6 +25,7 @@ class VehicleRegistryController extends Controller
         return view('vehicle-registry.index', [
             'vehicles' => $vehicleRegistryService->registeredVehicles(),
             'registeredTags' => $vehicleRegistryService->registeredTags(),
+            'availableTags' => $vehicleRegistryService->availableTags(),
             'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
             'vehicleCategories' => $vehicleRegistryService->vehicleCategories(),
             'rfidStats' => $rfidService->stats(),
@@ -39,6 +41,8 @@ class VehicleRegistryController extends Controller
     ): RedirectResponse|JsonResponse {
         try {
             $vehicle = $vehicleRegistryService->register($request->validated());
+        } catch (ValidationException $exception) {
+            throw $exception;
         } catch (Throwable $exception) {
             Log::error('Vehicle registration failed.', [
                 'message' => $exception->getMessage(),
@@ -72,7 +76,8 @@ class VehicleRegistryController extends Controller
     public function edit(Vehicle $vehicle, VehicleRegistryService $vehicleRegistryService): View
     {
         return view('vehicle-registry.edit', [
-            'vehicle' => $vehicle->load('rfidTags'),
+            'vehicle' => $vehicle->load(['rfidTag', 'rfidTags']),
+            'availableTags' => $vehicleRegistryService->assignableTagsFor($vehicle),
             'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
             'vehicleCategories' => $vehicleRegistryService->vehicleCategories(),
         ]);
@@ -88,6 +93,8 @@ class VehicleRegistryController extends Controller
     ): RedirectResponse|JsonResponse {
         try {
             $updatedVehicle = $vehicleRegistryService->update($vehicle, $request->validated());
+        } catch (ValidationException $exception) {
+            throw $exception;
         } catch (Throwable $exception) {
             Log::error('Vehicle update failed.', [
                 'vehicle_id' => $vehicle->id,

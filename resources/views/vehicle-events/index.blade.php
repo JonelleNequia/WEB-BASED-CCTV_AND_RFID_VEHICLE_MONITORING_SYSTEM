@@ -16,15 +16,15 @@
         </div>
 
         <div class="hero-panel-actions">
-            <a href="{{ route('portals.show', 'entrance') }}" class="button button-secondary">Entrance Station</a>
-            <a href="{{ route('portals.show', 'exit') }}" class="button button-secondary">Exit Station</a>
-            <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Registry</a>
-            <a href="{{ route('guest-observations.index') }}" class="button button-secondary">Guest Monitoring</a>
+            <a href="{{ route('stations.entrance') }}" class="button button-secondary">Entrance Station</a>
+            <a href="{{ route('stations.exit') }}" class="button button-secondary">Exit Station</a>
             @if (auth()->user()?->isAdmin())
+                <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Registry</a>
+                <a href="{{ route('guest-observations.index') }}" class="button button-secondary">Guest Monitoring</a>
                 <a href="{{ route('incomplete-records.index') }}" class="button button-secondary">Incomplete Records</a>
                 <a href="{{ route('manual-review.index') }}" class="button button-secondary">Review Queue</a>
+                <a href="{{ route('vehicle-events.create') }}" class="button button-primary">Quick Manual Log</a>
             @endif
-            <a href="{{ route('vehicle-events.create') }}" class="button button-primary">Quick Manual Log</a>
         </div>
     </section>
 

@@ -18,7 +18,8 @@
         <div class="hero-panel-actions">
             <a href="{{ route('rfid-scans.index') }}" class="button button-secondary">RFID Desk</a>
             <a href="{{ route('guest-observations.index') }}" class="button button-secondary">Guest Monitoring</a>
-            <a href="{{ route('monitoring.index') }}" class="button button-secondary">Camera Monitoring</a>
+            <a href="{{ route('stations.entrance') }}" class="button button-secondary">Entrance Station</a>
+            <a href="{{ route('stations.exit') }}" class="button button-secondary">Exit Station</a>
         </div>
     </section>
 

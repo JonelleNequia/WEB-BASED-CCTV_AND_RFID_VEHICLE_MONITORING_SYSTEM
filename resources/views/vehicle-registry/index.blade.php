@@ -16,9 +16,10 @@
         </div>
 
         <div class="hero-panel-actions">
+            <a href="{{ route('rfid-inventory.index') }}" class="button button-primary">RFID Inventory</a>
             <a href="{{ route('rfid-scans.index') }}" class="button button-primary">Open RFID Desk</a>
-            <a href="{{ route('portals.show', 'entrance') }}" class="button button-secondary">Entrance Station</a>
-            <a href="{{ route('portals.show', 'exit') }}" class="button button-secondary">Exit Station</a>
+            <a href="{{ route('stations.entrance') }}" class="button button-secondary">Entrance Station</a>
+            <a href="{{ route('stations.exit') }}" class="button button-secondary">Exit Station</a>
         </div>
     </section>
 
@@ -64,7 +65,7 @@
                 </span>
             </div>
             <strong>{{ $rfidStats['registered_tags'] ?? 0 }}</strong>
-            <p>Active and inactive RFID stickers assigned to authorized holders.</p>
+            <p>Inventory tags tracked locally for assignment and scanning.</p>
         </article>
     </div>
 
@@ -91,11 +92,21 @@
 
                 <div class="form-grid">
                     <div class="field">
-                        <label for="rfid_tag_uid">RFID Tag UID</label>
-                        <input id="rfid_tag_uid" type="text" name="rfid_tag_uid" value="{{ old('rfid_tag_uid') }}" placeholder="Scan or type RFID UID" required data-rfid-uid-input>
-                        @error('rfid_tag_uid')
+                        <label for="rfid_tag_id">RFID Tag</label>
+                        <select id="rfid_tag_id" name="rfid_tag_id" required>
+                            <option value="">Select available RFID tag</option>
+                            @foreach ($availableTags as $tag)
+                                <option value="{{ $tag->id }}" @selected((string) old('rfid_tag_id') === (string) $tag->id)>
+                                    {{ $tag->uid }}
+                                </option>
+                            @endforeach
+                        </select>
+                        @error('rfid_tag_id')
                             <span class="field-error">{{ $message }}</span>
                         @enderror
+                        @if ($availableTags->isEmpty())
+                            <span class="field-error">No available RFID tags. Enroll cards in RFID Inventory first.</span>
+                        @endif
                     </div>
 
                     <div class="field">
@@ -142,7 +153,8 @@
                 </div>
 
                 <div class="button-row">
-                    <button type="submit" class="button button-primary">Save Vehicle</button>
+                    <button type="submit" class="button button-primary" @disabled($availableTags->isEmpty())>Save Vehicle</button>
+                    <a href="{{ route('rfid-inventory.index') }}" class="button button-secondary">Enroll Tags</a>
                     <a href="{{ route('rfid-scans.index') }}" class="button button-secondary">Go to RFID Desk</a>
                 </div>
             </form>
@@ -162,9 +174,9 @@
             </div>
 
             <div class="detail-list">
-                <div><span>Saved Tags</span><strong>{{ $registeredTags->count() }}</strong></div>
+                <div><span>Assigned Tags</span><strong>{{ $registeredTags->count() }}</strong></div>
+                <div><span>Available Tags</span><strong>{{ $availableTags->count() }}</strong></div>
                 <div><span>Evidence Storage</span><strong>Local file saved</strong></div>
-                <div><span>Snapshots</span><strong>Available in logs</strong></div>
                 <div><span>RFID Exports</span><strong>Download evidence</strong></div>
             </div>
 
@@ -216,13 +228,17 @@
                                 </span>
                             </td>
                             <td>
-                                @if ($vehicle->rfidTags->isEmpty())
+                                @if (! $vehicle->rfidTag && $vehicle->rfidTags->isEmpty())
                                     <span class="badge badge-secondary">No tag</span>
+                                @elseif ($vehicle->rfidTag)
+                                    <span class="badge {{ $vehicle->rfidTag->status === 'assigned' ? 'badge-matched' : 'badge-unmatched' }}">
+                                        {{ $vehicle->rfidTag->uid }}
+                                    </span>
                                 @else
                                     <div class="badge-row">
                                         @foreach ($vehicle->rfidTags as $tag)
-                                            <span class="badge {{ $tag->status === 'active' ? 'badge-matched' : 'badge-unmatched' }}">
-                                                {{ $tag->tag_uid }}
+                                            <span class="badge {{ $tag->status === 'assigned' ? 'badge-matched' : 'badge-unmatched' }}">
+                                                {{ $tag->uid }}
                                             </span>
                                         @endforeach
                                     </div>
@@ -249,58 +265,3 @@
         </div>
     </section>
 @endsection
-
-@push('scripts')
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const form = document.querySelector('[data-rfid-registration-form]');
-            const uidInput = document.querySelector('[data-rfid-uid-input]');
-
-            if (!form || !uidInput) {
-                return;
-            }
-
-            let scanBuffer = '';
-            let lastKeyTime = 0;
-            const scanGapMs = 80;
-
-            document.addEventListener('keydown', (event) => {
-                const target = event.target;
-                const isTypingField = target instanceof HTMLElement
-                    && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)
-                    && target !== uidInput;
-
-                if (isTypingField) {
-                    return;
-                }
-
-                if (event.key === 'Enter') {
-                    if (document.activeElement === uidInput || scanBuffer.length > 0) {
-                        event.preventDefault();
-                        uidInput.focus();
-
-                        if (scanBuffer.length > 0) {
-                            uidInput.value = scanBuffer;
-                            uidInput.dispatchEvent(new Event('input', { bubbles: true }));
-                            scanBuffer = '';
-                        }
-                    }
-
-                    return;
-                }
-
-                if (event.key.length !== 1) {
-                    return;
-                }
-
-                const now = Date.now();
-                scanBuffer = now - lastKeyTime > scanGapMs ? event.key : scanBuffer + event.key;
-                lastKeyTime = now;
-
-                if (document.activeElement !== uidInput) {
-                    uidInput.focus();
-                }
-            });
-        });
-    </script>
-@endpush

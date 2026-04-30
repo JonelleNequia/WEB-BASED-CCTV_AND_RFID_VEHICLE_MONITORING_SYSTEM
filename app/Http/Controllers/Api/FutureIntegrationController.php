@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\EventReceiveLog;
-use App\Models\VehicleEvent;
 use App\Models\ActiveSession;
+use App\Models\EventReceiveLog;
+use App\Models\RfidScanLog;
+use App\Models\VehicleEvent;
+use Carbon\Carbon;
 use App\Services\DetectorRuntimeService;
 use App\Services\EventService;
 use App\Services\RfidService;
@@ -15,6 +17,10 @@ use Illuminate\Http\Request;
 
 class FutureIntegrationController extends Controller
 {
+    protected const RFID_OVERLAY_LOOKAHEAD_SECONDS = 3;
+
+    protected const RFID_OVERLAY_POLL_MICROSECONDS = 200000;
+
     /**
      * Expose the current detector integration status and auto-start behavior.
      */
@@ -84,19 +90,79 @@ class FutureIntegrationController extends Controller
                 'camera_id' => ['nullable', 'integer', 'exists:cameras,id'],
                 'detected_vehicle_type' => ['required', 'string', 'max:50'],
                 'event_time' => ['required', 'date'],
-                'vehicle_image_path' => ['required', 'string', 'max:255'],
+                'vehicle_image_path' => ['nullable', 'required_if:unregistered_capture,true', 'string', 'max:255'],
                 'roi_name' => ['nullable', 'string', 'max:100'],
                 'detection_metadata' => ['nullable', 'array'],
+                'unregistered_capture' => ['sometimes', 'boolean'],
             ]);
 
             $existing = VehicleEvent::query()
                 ->where('external_event_key', $validated['external_event_key'])
                 ->first();
+            $isUnregisteredCapture = $request->boolean('unregistered_capture');
+            $hasVehicleImage = filled($validated['vehicle_image_path'] ?? null);
+            $eventTime = Carbon::parse($validated['event_time']);
+            $rfidScan = $isUnregisteredCapture
+                ? null
+                : $this->resolveRecentVerifiedRfidScan($validated['camera_role'], $eventTime);
+
+            if ($rfidScan && ! $isUnregisteredCapture) {
+                EventReceiveLog::query()->create([
+                    'source_name' => $sourceName,
+                    'payload_json' => $request->all(),
+                    'status' => 'rfid_matched',
+                    'notes' => "Detected crossing matched RFID scan ID: {$rfidScan->id}. No CCTV capture was stored.",
+                ]);
+
+                return response()->json([
+                    'message' => 'RFID verification matched. No CCTV capture is required.',
+                    'duplicate' => false,
+                    'requires_capture' => false,
+                    'event_id' => $rfidScan->correlated_vehicle_event_id,
+                    'event_status' => VehicleEvent::STATUS_COMPLETED,
+                    'event_type' => $rfidScan->resolved_event_type,
+                    'overlay' => $this->overlayPayload(null, $rfidScan),
+                ]);
+            }
+
+            if (! $hasVehicleImage) {
+                EventReceiveLog::query()->create([
+                    'source_name' => $sourceName,
+                    'payload_json' => $request->all(),
+                    'status' => 'capture_requested',
+                    'notes' => 'No RFID match found for the detected crossing. Requesting one evidence capture.',
+                ]);
+
+                return response()->json([
+                    'message' => 'No RFID match found. Capture one vehicle snapshot and record as unregistered.',
+                    'duplicate' => false,
+                    'requires_capture' => true,
+                    'event_id' => null,
+                    'event_status' => null,
+                    'event_type' => null,
+                    'overlay' => $this->overlayPayload(null, null),
+                ], 202);
+            }
 
             $vehicleEvent = $eventService->createDetectedEvent([
                 ...$validated,
                 'detection_metadata_json' => $validated['detection_metadata'] ?? null,
             ]);
+
+            if ($rfidScan) {
+                $vehicle = $rfidScan->vehicle;
+                $vehicleEvent->forceFill([
+                    'event_status' => VehicleEvent::STATUS_COMPLETED,
+                    'vehicle_id' => $vehicle?->id,
+                    'rfid_scan_log_id' => $rfidScan->id,
+                    'plate_text' => $vehicle?->plate_number,
+                    'vehicle_type' => $vehicle?->vehicle_type ?: $vehicleEvent->vehicle_type,
+                    'vehicle_category' => $vehicle?->category,
+                    'resulting_state' => $rfidScan->resulting_state,
+                    'match_status' => 'rfid_verified',
+                    'details_completed_at' => now(),
+                ])->save();
+            }
 
             EventReceiveLog::query()->create([
                 'source_name' => $sourceName,
@@ -110,11 +176,13 @@ class FutureIntegrationController extends Controller
             return response()->json([
                 'message' => $existing
                     ? 'Duplicate crossing ignored. The original incomplete record event is still available.'
-                    : 'Detected vehicle event saved for completion.',
+                    : 'Unregistered vehicle capture saved for review.',
                 'duplicate' => $existing !== null,
+                'requires_capture' => false,
                 'event_id' => $vehicleEvent->id,
                 'event_status' => $vehicleEvent->event_status,
                 'event_type' => $vehicleEvent->event_type,
+                'overlay' => $this->overlayPayload($vehicleEvent, $rfidScan),
             ], $existing ? 200 : 201);
         }
 
@@ -283,9 +351,126 @@ class FutureIntegrationController extends Controller
 
         return response()->json([
             'message' => 'RFID scan ingested and saved to the local log.',
-            'scan_id' => $scanLog->id,
-            'verification_status' => $scanLog->verification_status,
-            'scan_location' => $scanLog->scan_location,
+            ...$this->rfidScanResponsePayload($scanLog),
         ], 201);
+    }
+
+    /**
+     * Build the JSON contract expected by the front-end monitor after an RFID scan.
+     *
+     * @return array<string, mixed>
+     */
+    protected function rfidScanResponsePayload(RfidScanLog $scanLog): array
+    {
+        $scanLog->loadMissing([
+            'vehicle.rfidTag',
+            'correlatedVehicleEvent',
+            'guestVehicleObservation',
+        ]);
+
+        $verified = $scanLog->verification_status === 'verified';
+        $vehicle = $scanLog->vehicle;
+
+        return [
+            'vehicle' => $vehicle ? [
+                'id' => $vehicle->id,
+                'plate_number' => $vehicle->plate_number,
+                'owner_name' => $vehicle->owner_name,
+                'category' => $vehicle->category,
+                'vehicle_type' => $vehicle->vehicle_type,
+                'rfid_tag_uid' => $vehicle->rfidTag?->uid ?? $vehicle->rfid_tag_uid,
+                'current_state' => $vehicle->current_state,
+            ] : null,
+            'action_taken' => $verified ? $scanLog->resolved_event_type : null,
+            'new_state' => $verified ? $scanLog->resulting_state : null,
+            'event' => $scanLog->correlatedVehicleEvent ? [
+                'id' => $scanLog->correlatedVehicleEvent->id,
+                'type' => $scanLog->correlatedVehicleEvent->event_type,
+                'event_time' => $scanLog->correlatedVehicleEvent->event_time?->toIso8601String(),
+            ] : null,
+            'scan' => [
+                'id' => $scanLog->id,
+                'tag_uid' => $scanLog->tag_uid,
+                'verification_status' => $scanLog->verification_status,
+                'verification_label' => $scanLog->verificationLabel,
+                'scan_location' => $scanLog->scan_location,
+                'event_type' => $scanLog->resolved_event_type,
+                'resulting_state' => $scanLog->resulting_state,
+                'vehicle_plate' => $vehicle?->plate_number,
+                'vehicle_event_id' => $scanLog->correlated_vehicle_event_id,
+                'guest_observation_id' => $scanLog->guest_vehicle_observation_id,
+                'guest_snapshot_url' => $scanLog->guestVehicleObservation?->snapshot_url,
+            ],
+        ];
+    }
+
+    protected function resolveRecentVerifiedRfidScan(string $cameraRole, Carbon $eventTime): ?RfidScanLog
+    {
+        $deadline = microtime(true) + (app()->runningUnitTests() ? 0 : self::RFID_OVERLAY_LOOKAHEAD_SECONDS);
+
+        do {
+            $scanLog = $this->findRecentVerifiedRfidScan($cameraRole, $eventTime);
+
+            if ($scanLog) {
+                return $scanLog;
+            }
+
+            if (microtime(true) >= $deadline) {
+                return null;
+            }
+
+            usleep(self::RFID_OVERLAY_POLL_MICROSECONDS);
+        } while (true);
+    }
+
+    protected function findRecentVerifiedRfidScan(string $cameraRole, Carbon $eventTime): ?RfidScanLog
+    {
+        $from = $eventTime->copy()->subSeconds(12);
+        $to = $eventTime->copy()->addSeconds(12);
+
+        return RfidScanLog::query()
+            ->with('vehicle.rfidTag')
+            ->where('verification_status', 'verified')
+            ->where('scan_location', $cameraRole)
+            ->whereBetween('scan_time', [$from, $to])
+            ->latest('scan_time')
+            ->first();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function overlayPayload(?VehicleEvent $vehicleEvent, ?RfidScanLog $rfidScan): array
+    {
+        if (! $rfidScan || ! $rfidScan->vehicle) {
+            return [
+                'verification' => 'guest',
+                'label' => 'UNREGISTERED / GUEST',
+                'color' => 'red',
+                'event_id' => $vehicleEvent?->id,
+                'rfid_scan_id' => null,
+                'vehicle' => null,
+            ];
+        }
+
+        $vehicle = $rfidScan->vehicle;
+
+        return [
+            'verification' => 'registered',
+            'label' => 'REGISTERED - Plate: '.$vehicle->plate_number,
+            'color' => 'green',
+            'event_id' => $vehicleEvent?->id ?? $rfidScan->correlated_vehicle_event_id,
+            'rfid_scan_id' => $rfidScan->id,
+            'action_taken' => $rfidScan->resolved_event_type,
+            'new_state' => $rfidScan->resulting_state,
+            'vehicle' => [
+                'id' => $vehicle->id,
+                'plate_number' => $vehicle->plate_number,
+                'owner_name' => $vehicle->owner_name,
+                'category' => $vehicle->category,
+                'vehicle_type' => $vehicle->vehicle_type,
+                'rfid_tag_uid' => $vehicle->rfidTag?->uid ?? $vehicle->rfid_tag_uid,
+            ],
+        ];
     }
 }

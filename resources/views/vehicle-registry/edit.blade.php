@@ -23,11 +23,21 @@
 
             <div class="form-grid">
                 <div class="field">
-                    <label for="rfid_tag_uid">RFID Tag UID</label>
-                    <input id="rfid_tag_uid" type="text" name="rfid_tag_uid" value="{{ old('rfid_tag_uid', $vehicle->rfid_tag_uid ?: $vehicle->latestRfidTag?->tag_uid) }}" required data-rfid-uid-input>
-                    @error('rfid_tag_uid')
+                    <label for="rfid_tag_id">RFID Tag</label>
+                    <select id="rfid_tag_id" name="rfid_tag_id" required>
+                        <option value="">Select available RFID tag</option>
+                        @foreach ($availableTags as $tag)
+                            <option value="{{ $tag->id }}" @selected((string) old('rfid_tag_id', $vehicle->rfid_tag_id) === (string) $tag->id)>
+                                {{ $tag->uid }}{{ $tag->vehicle_id === $vehicle->id ? ' | Current tag' : '' }}
+                            </option>
+                        @endforeach
+                    </select>
+                    @error('rfid_tag_id')
                         <span class="field-error">{{ $message }}</span>
                     @enderror
+                    @if ($availableTags->isEmpty())
+                        <span class="field-error">No available RFID tags. Enroll cards in RFID Inventory first.</span>
+                    @endif
                 </div>
 
                 <div class="field">
@@ -75,26 +85,9 @@
 
             <div class="button-row">
                 <button type="submit" class="button button-primary">Update Vehicle</button>
+                <a href="{{ route('rfid-inventory.index') }}" class="button button-secondary">Enroll Tags</a>
                 <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Cancel</a>
             </div>
         </form>
     </section>
 @endsection
-
-@push('scripts')
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const uidInput = document.querySelector('[data-rfid-uid-input]');
-
-            if (!uidInput) {
-                return;
-            }
-
-            uidInput.addEventListener('keydown', (event) => {
-                if (event.key === 'Enter') {
-                    event.preventDefault();
-                }
-            });
-        });
-    </script>
-@endpush

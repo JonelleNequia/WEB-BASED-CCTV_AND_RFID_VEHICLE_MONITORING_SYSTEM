@@ -1,8 +1,10 @@
 import json
 import os
 import platform
+import threading
 import time
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlparse, urlunparse
 
@@ -16,6 +18,8 @@ from config import (
     DETECTION_CONFIDENCE_THRESHOLD,
     DETECTION_IOU_THRESHOLD,
     JPEG_QUALITY,
+    MJPEG_STREAM_HOST,
+    MJPEG_STREAM_PORT,
     MODEL_PATH,
     PUBLIC_CAMERA_DIR,
     RECONNECT_DELAY_SECONDS,
@@ -23,6 +27,7 @@ from config import (
     STATUS_FILE_PATH,
     TRACK_STALE_AFTER_SECONDS,
     TRACKER_CONFIG,
+    annotated_frame_path,
     latest_frame_path,
     load_runtime_config,
     resolve_capture_source,
@@ -40,6 +45,71 @@ from tracking import (
 from anpr import read_license_plate
 
 CAMERA_ROLES = ("entrance", "exit")
+STREAM_FRAMES = {role: None for role in CAMERA_ROLES}
+STREAM_CONDITION = threading.Condition()
+
+
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+class MjpegStreamHandler(BaseHTTPRequestHandler):
+    """
+    Serve live detector frames from memory so station screens do not poll saved files.
+    """
+
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(b'{"ok":true}')
+            return
+
+        role = self.path.strip("/").split("/")
+        if len(role) != 2 or role[0] != "stream" or role[1] not in CAMERA_ROLES:
+            self.send_error(404)
+            return
+
+        self.stream_role(role[1])
+
+    def stream_role(self, role):
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+
+        last_frame_id = None
+
+        while True:
+            with STREAM_CONDITION:
+                STREAM_CONDITION.wait_for(
+                    lambda: STREAM_FRAMES[role] is not None and id(STREAM_FRAMES[role]) != last_frame_id,
+                    timeout=1.0,
+                )
+                frame = STREAM_FRAMES[role]
+
+            if frame is None or id(frame) == last_frame_id:
+                continue
+
+            last_frame_id = id(frame)
+
+            try:
+                self.wfile.write(b"--frame\r\n")
+                self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                self.wfile.write(f"Content-Length: {len(frame)}\r\n\r\n".encode("ascii"))
+                self.wfile.write(frame)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                return
+
+    def log_message(self, format, *args):
+        return
 
 
 def ensure_output_directories():
@@ -77,6 +147,67 @@ def save_frame_atomic(role, frame):
         return False
 
     output_path = latest_frame_path(role)
+    temp_path = output_path.with_suffix(output_path.suffix + ".tmp")
+    temp_path.write_bytes(buffer.tobytes())
+    os.replace(temp_path, output_path)
+
+    return True
+
+
+def publish_stream_frame(role, frame):
+    """
+    Publish one live frame to connected MJPEG clients without saving it to disk.
+    """
+    encoded, buffer = cv2.imencode(
+        ".jpg",
+        frame,
+        [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY],
+    )
+
+    if not encoded:
+        return False
+
+    with STREAM_CONDITION:
+        STREAM_FRAMES[role] = buffer.tobytes()
+        STREAM_CONDITION.notify_all()
+
+    return True
+
+
+def start_stream_server():
+    """
+    Start the local in-memory MJPEG server used by the station kiosk windows.
+    """
+    try:
+        server = ReusableThreadingHTTPServer(
+            (MJPEG_STREAM_HOST, MJPEG_STREAM_PORT),
+            MjpegStreamHandler,
+        )
+    except OSError as error:
+        print(f"MJPEG stream server could not start: {error}")
+        return None
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    print(f"MJPEG stream server running at http://{MJPEG_STREAM_HOST}:{MJPEG_STREAM_PORT}")
+
+    return server
+
+
+def save_annotated_frame_atomic(role, frame):
+    """
+    Keep the latest AI/RFID annotated frame per camera for the Live Monitor.
+    """
+    encoded, buffer = cv2.imencode(
+        ".jpg",
+        frame,
+        [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY],
+    )
+
+    if not encoded:
+        return False
+
+    output_path = annotated_frame_path(role)
     temp_path = output_path.with_suffix(output_path.suffix + ".tmp")
     temp_path.write_bytes(buffer.tobytes())
     os.replace(temp_path, output_path)
@@ -227,6 +358,7 @@ def initial_camera_state():
         "track_sides": {},
         "track_last_seen": {},
         "crossed_track_ids": {},
+        "track_overlays": {},
     }
 
 
@@ -268,6 +400,10 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
         "service_message": service_message,
         "updated_at": datetime.now().astimezone().isoformat(),
         "detector_model_path": MODEL_PATH,
+        "stream_server": {
+            "host": MJPEG_STREAM_HOST,
+            "port": MJPEG_STREAM_PORT,
+        },
         "cameras": {},
     }
 
@@ -284,6 +420,7 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
             "calibration_ready": calibration_ready(camera_config),
             "source_type": camera_config["source_type"],
             "source_value": camera_config["source_value"],
+            "stream_url": f"http://{MJPEG_STREAM_HOST}:{MJPEG_STREAM_PORT}/stream/{role}",
             "supported_vehicle_classes": list(model_info.get("vehicle_labels", {}).values()),
             "last_capture_time": state["last_capture_time"],
             "last_error": state["last_error"],
@@ -328,6 +465,7 @@ def cleanup_stale_tracks(state):
         state["track_last_seen"].pop(track_id, None)
         state["track_sides"].pop(track_id, None)
         state["crossed_track_ids"].pop(track_id, None)
+        state["track_overlays"].pop(track_id, None)
 
 
 def save_vehicle_snapshot(role, frame, xyxy, event_key):
@@ -367,6 +505,88 @@ def save_vehicle_snapshot(role, frame, xyxy, event_key):
     os.replace(temp_path, full_path)
 
     return str(Path("detected-vehicle-images") / relative_path).replace("\\", "/")
+
+
+def overlay_color(overlay):
+    """
+    Convert Laravel overlay color names into OpenCV BGR colors.
+    """
+    if overlay.get("color") == "green":
+        return (46, 155, 98)
+
+    return (38, 38, 220)
+
+
+def default_overlay():
+    """
+    Fallback label before a detection is matched with a verified RFID scan.
+    """
+    return {
+        "label": "UNREGISTERED / GUEST",
+        "color": "red",
+        "verification": "guest",
+    }
+
+
+def draw_label(frame, text, x, y, color):
+    """
+    Draw a readable filled label near a bounding box.
+    """
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.62
+    thickness = 2
+    padding = 7
+    frame_height, frame_width = frame.shape[:2]
+    text_size, baseline = cv2.getTextSize(text, font, font_scale, thickness)
+    text_width, text_height = text_size
+    label_x1 = max(min(x, frame_width - text_width - padding * 2), 0)
+    label_y1 = max(y - text_height - padding * 2, 0)
+    label_x2 = min(label_x1 + text_width + padding * 2, frame_width)
+    label_y2 = min(label_y1 + text_height + padding * 2 + baseline, frame_height)
+
+    cv2.rectangle(frame, (label_x1, label_y1), (label_x2, label_y2), color, -1)
+    cv2.putText(
+        frame,
+        text,
+        (label_x1 + padding, label_y2 - padding - baseline),
+        font,
+        font_scale,
+        (255, 255, 255),
+        thickness,
+        cv2.LINE_AA,
+    )
+
+
+def render_annotated_frame(role, frame, results, camera_config, state, vehicle_labels):
+    """
+    Draw only resolved RFID/guest verification labels on the live frame.
+    """
+    annotated = frame.copy()
+    boxes = results.boxes if results is not None else None
+
+    if boxes is not None and boxes.id is not None:
+        ids = boxes.id.int().cpu().tolist()
+        classes = boxes.cls.int().cpu().tolist()
+        confidences = boxes.conf.cpu().tolist()
+        coordinates = boxes.xyxy.cpu().tolist()
+
+        for track_id, class_id, confidence, xyxy in zip(ids, classes, confidences, coordinates):
+            if class_id not in vehicle_labels:
+                continue
+
+            overlay = state["track_overlays"].get(track_id)
+            if not overlay:
+                continue
+
+            color = overlay_color(overlay)
+            x1, y1, x2, y2 = [int(value) for value in xyxy]
+            label = overlay.get("label") or default_overlay()["label"]
+            label = f"{label} | {vehicle_labels[class_id]} {confidence:.0%}"
+
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
+            draw_label(annotated, label, x1, y1, color)
+
+    return annotated
 
 
 def process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels):
@@ -422,35 +642,17 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
         else:
             direction = "IN"
 
-        # Save vehicle snapshot first
         event_key = f"{role}-track-{track_id}-{int(time.time() * 1000)}"
-        vehicle_image_path = save_vehicle_snapshot(role, frame, xyxy, event_key)
-
-        if not vehicle_image_path:
-            state["crossed_track_ids"][track_id] = time.monotonic()
-            state["last_error"] = f"{role.capitalize()} vehicle crossed the line, but snapshot saving failed."
-            continue
-
-        # Read license plate using ANPR
-        plate_number = None
-        if direction == "OUT":
-            # Only attempt plate recognition for OUT direction
-            # (can be extended to IN as well)
-            plate_number = read_license_plate(frame, tuple(xyxy))
-
+        event_time = datetime.now().astimezone().isoformat()
         display_label = vehicle_labels[class_id]
-        
-        # Get camera_id from config (default to 1 if not set)
         camera_id = camera_config.get("camera_id", 1)
 
-        # Build new payload format for Laravel API
         payload = {
             "external_event_key": event_key,
             "camera_role": role,
             "camera_id": camera_id,
             "detected_vehicle_type": display_label,
-            "event_time": datetime.now().astimezone().isoformat(),
-            "vehicle_image_path": vehicle_image_path,
+            "event_time": event_time,
             "roi_name": f"{role.capitalize()} Trigger Line",
             "detection_metadata": {
                 "track_id": track_id,
@@ -460,12 +662,33 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
                 "line_side_after": current_side,
             },
             "direction": direction,
-            "plate_number": plate_number,
-            "image_path": vehicle_image_path,
         }
 
         result = laravel_client.submit_event(payload)
+
+        if result.get("requires_capture"):
+            vehicle_image_path = save_vehicle_snapshot(role, frame, xyxy, event_key)
+
+            if not vehicle_image_path:
+                state["crossed_track_ids"][track_id] = time.monotonic()
+                state["last_error"] = f"{role.capitalize()} vehicle had no RFID match, but snapshot saving failed."
+                continue
+
+            plate_number = None
+            if direction == "OUT":
+                plate_number = read_license_plate(frame, tuple(xyxy))
+
+            capture_payload = {
+                **payload,
+                "vehicle_image_path": vehicle_image_path,
+                "image_path": vehicle_image_path,
+                "plate_number": plate_number,
+                "unregistered_capture": True,
+            }
+            result = laravel_client.submit_event(capture_payload)
+
         state["crossed_track_ids"][track_id] = time.monotonic()
+        state["track_overlays"][track_id] = result.get("overlay") or default_overlay()
 
         if result["accepted"]:
             if result["created"]:
@@ -503,18 +726,12 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
         state["last_error"] = "Camera opened, but frame capture failed."
         return False
 
-    if not save_frame_atomic(role, frame):
-        state["camera_running"] = False
-        state["detection_ready"] = False
-        state["retry_count"] += 1
-        state["last_error"] = f"{role.capitalize()} frame was captured, but it could not be saved."
-        return False
-
     state["camera_running"] = True
     state["last_capture_time"] = datetime.now().astimezone().isoformat()
     state["processed_frames"] += 1
 
     if not calibration_ready(camera_config):
+        publish_stream_frame(role, frame)
         state["detection_ready"] = False
         state["retry_count"] = 0
         state["last_error"] = "Calibration mask or trigger line is missing. Save calibration before auto logging starts."
@@ -522,6 +739,7 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
 
     vehicle_labels = model_info["vehicle_labels"]
     if not vehicle_labels:
+        publish_stream_frame(role, frame)
         state["detection_ready"] = False
         state["retry_count"] = 0
         state["last_error"] = "The current detector model does not expose any supported vehicle classes."
@@ -547,6 +765,8 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
     state["detection_ready"] = True
     state["retry_count"] = 0
     process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels)
+    live_frame = render_annotated_frame(role, frame, results, camera_config, state, vehicle_labels)
+    publish_stream_frame(role, live_frame)
 
     return True
 
@@ -581,6 +801,7 @@ def run_detector_loop():
     Start the dual-camera vehicle detector until the user stops it.
     """
     ensure_output_directories()
+    stream_server = start_stream_server()
 
     runtime_config = load_runtime_config()
     camera_states = {role: initial_camera_state() for role in CAMERA_ROLES}
@@ -621,6 +842,8 @@ def run_detector_loop():
             time.sleep(CAPTURE_INTERVAL_SECONDS if had_success else RECONNECT_DELAY_SECONDS)
     except KeyboardInterrupt:
         release_all(camera_states)
+        if stream_server is not None:
+            stream_server.shutdown()
         write_status(
             runtime_config,
             camera_states,
@@ -637,6 +860,8 @@ def run_detector_loop():
             camera_states[role]["last_error"] = f"Detector service error: {error}"
 
         release_all(camera_states)
+        if stream_server is not None:
+            stream_server.shutdown()
         write_status(
             runtime_config,
             camera_states,

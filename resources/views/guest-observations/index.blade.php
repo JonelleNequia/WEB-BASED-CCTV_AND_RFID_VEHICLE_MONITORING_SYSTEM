@@ -16,7 +16,8 @@
         </div>
 
         <div class="hero-panel-actions">
-            <a href="{{ route('monitoring.index') }}" class="button button-secondary">Live Monitoring</a>
+            <a href="{{ route('stations.entrance') }}" class="button button-secondary">Entrance Station</a>
+            <a href="{{ route('stations.exit') }}" class="button button-secondary">Exit Station</a>
             <a href="{{ route('vehicle-events.index') }}" class="button button-secondary">Event Logs</a>
         </div>
     </section>

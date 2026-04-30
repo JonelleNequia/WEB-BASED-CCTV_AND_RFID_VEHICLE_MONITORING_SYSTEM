@@ -95,7 +95,7 @@ class RfidScanLog extends Model
     {
         return match ($this->verification_status) {
             'verified' => 'matched',
-            'inactive_tag', 'inactive_vehicle', 'non_recurring_category' => 'manual-review',
+            'inactive_tag', 'inactive_vehicle', 'non_recurring_category', 'unassigned_tag' => 'manual-review',
             default => 'unmatched',
         };
     }
@@ -144,6 +144,6 @@ class RfidScanLog extends Model
             return 'N/A';
         }
 
-        return ucfirst($this->resulting_state);
+        return ucfirst(strtolower($this->resulting_state));
     }
 }

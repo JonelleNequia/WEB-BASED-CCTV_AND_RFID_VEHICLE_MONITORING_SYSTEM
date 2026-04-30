@@ -62,8 +62,16 @@ class LaravelEventClient:
                 "message": "Python API key is missing from Laravel settings.",
             }
 
-        # Validate required payload fields
-        required_fields = ["camera_id", "direction", "image_path"]
+        if payload.get("external_event_key") or payload.get("camera_role"):
+            required_fields = [
+                "external_event_key",
+                "camera_role",
+                "detected_vehicle_type",
+                "event_time",
+            ]
+        else:
+            required_fields = ["camera_id", "direction", "image_path"]
+
         missing_fields = [field for field in required_fields if field not in payload or payload[field] is None]
         
         if missing_fields:
@@ -75,7 +83,7 @@ class LaravelEventClient:
             }
 
         # Validate direction value
-        if payload.get("direction") not in ["IN", "OUT"]:
+        if payload.get("direction") is not None and payload.get("direction") not in ["IN", "OUT"]:
             return {
                 "accepted": False,
                 "created": False,
@@ -108,12 +116,15 @@ class LaravelEventClient:
         except ValueError:
             body = {}
 
-        if response.status_code in {200, 201}:
+        if response.status_code in {200, 201, 202}:
             return {
                 "accepted": True,
                 "created": response.status_code == 201,
                 "duplicate": bool(body.get("duplicate", response.status_code == 200)),
                 "message": body.get("message", "Event accepted."),
+                "body": body,
+                "overlay": body.get("overlay"),
+                "requires_capture": bool(body.get("requires_capture", False)),
             }
 
         return {
@@ -121,4 +132,7 @@ class LaravelEventClient:
             "created": False,
             "duplicate": False,
             "message": body.get("message", response.text),
+            "body": body,
+            "overlay": body.get("overlay"),
+            "requires_capture": bool(body.get("requires_capture", False)),
         }

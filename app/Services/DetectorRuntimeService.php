@@ -164,6 +164,7 @@ class DetectorRuntimeService
             'detection_ready' => false,
             'source_type' => $camera['source_type'],
             'source_value' => $camera['source_value'],
+            'stream_url' => 'http://127.0.0.1:8765/stream/'.$camera['camera_role'],
             'calibration_ready' => ! empty($camera['calibration_mask']) && ! empty($camera['calibration_line']),
             'last_capture_time' => null,
             'last_error' => 'Detector has not processed this camera yet.',

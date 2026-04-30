@@ -207,6 +207,7 @@ class SettingsService
 
         return [
             'camera_id' => $cameraConfiguration['id'],
+            'id' => $cameraConfiguration['id'],
             'camera_role' => $cameraConfiguration['camera_role'],
             'camera_name' => $cameraConfiguration['camera_name'],
             'source_type' => $sourceType,
