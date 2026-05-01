@@ -22,8 +22,11 @@ class GuestVehicleObservation extends Model
         'vehicle_color',
         'location',
         'observation_source',
+        'status',
         'observed_at',
         'camera_id',
+        'external_event_key',
+        'detection_metadata_json',
         'snapshot_path',
         'notes',
         'created_by',
@@ -38,6 +41,7 @@ class GuestVehicleObservation extends Model
     {
         return [
             'observed_at' => 'datetime',
+            'detection_metadata_json' => 'array',
         ];
     }
 
@@ -69,4 +73,3 @@ class GuestVehicleObservation extends Model
         return asset('images/placeholders/vehicle-placeholder.svg');
     }
 }
-

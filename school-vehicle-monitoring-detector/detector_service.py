@@ -14,7 +14,9 @@ from ultralytics import YOLO
 from config import (
     ALLOWED_VEHICLE_CLASS_NAMES,
     CAPTURE_INTERVAL_SECONDS,
+    CAMERA_RETRY_DELAY_SECONDS,
     DETECTED_IMAGE_DIR,
+    DETECTION_FRAME_INTERVAL,
     DETECTION_CONFIDENCE_THRESHOLD,
     DETECTION_IOU_THRESHOLD,
     JPEG_QUALITY,
@@ -23,6 +25,8 @@ from config import (
     MODEL_PATH,
     PUBLIC_CAMERA_DIR,
     RECONNECT_DELAY_SECONDS,
+    RFID_DETECTION_WINDOW_SECONDS,
+    RFID_POLL_INTERVAL_SECONDS,
     SNAPSHOTS_DIR,
     STATUS_FILE_PATH,
     TRACK_STALE_AFTER_SECONDS,
@@ -93,7 +97,7 @@ class MjpegStreamHandler(BaseHTTPRequestHandler):
                 )
                 frame = STREAM_FRAMES[role]
 
-            if frame is None or id(frame) == last_frame_id:
+            if frame is None:
                 continue
 
             last_frame_id = id(frame)
@@ -355,10 +359,12 @@ def initial_camera_state():
         "processed_frames": 0,
         "detections_seen": 0,
         "crossings_logged": 0,
+        "retry_after": 0.0,
         "track_sides": {},
         "track_last_seen": {},
         "crossed_track_ids": {},
         "track_overlays": {},
+        "pending_windows": {},
     }
 
 
@@ -379,6 +385,10 @@ def ensure_capture(camera_config, state):
     Reconnect when the configured source changed or the capture dropped.
     """
     signature = camera_signature(camera_config)
+    now_monotonic = time.monotonic()
+
+    if state["capture"] is None and now_monotonic < state.get("retry_after", 0.0):
+        return None, resolve_capture_source(camera_config)
 
     if state["capture"] is not None and state["signature"] == signature and state["capture"].isOpened():
         return state["capture"], resolve_capture_source(camera_config)
@@ -387,6 +397,9 @@ def ensure_capture(camera_config, state):
     capture, capture_source = open_capture(camera_config)
     state["capture"] = capture
     state["signature"] = signature
+
+    if not capture.isOpened():
+        state["retry_after"] = now_monotonic + CAMERA_RETRY_DELAY_SECONDS
 
     return capture, capture_source
 
@@ -466,6 +479,7 @@ def cleanup_stale_tracks(state):
         state["track_sides"].pop(track_id, None)
         state["crossed_track_ids"].pop(track_id, None)
         state["track_overlays"].pop(track_id, None)
+        state["pending_windows"].pop(track_id, None)
 
 
 def save_vehicle_snapshot(role, frame, xyxy, event_key):
@@ -514,6 +528,9 @@ def overlay_color(overlay):
     if overlay.get("color") == "green":
         return (46, 155, 98)
 
+    if overlay.get("color") == "amber":
+        return (0, 165, 255)
+
     return (38, 38, 220)
 
 
@@ -525,6 +542,17 @@ def default_overlay():
         "label": "UNREGISTERED / GUEST",
         "color": "red",
         "verification": "guest",
+    }
+
+
+def waiting_overlay():
+    """
+    Temporary label while the 5-second RFID detection window is still open.
+    """
+    return {
+        "label": "CHECKING RFID",
+        "color": "amber",
+        "verification": "pending",
     }
 
 
@@ -589,6 +617,144 @@ def render_annotated_frame(role, frame, results, camera_config, state, vehicle_l
     return annotated
 
 
+def current_track_boxes(results):
+    """
+    Return the latest visible YOLO boxes keyed by track id.
+    """
+    boxes = results.boxes if results is not None else None
+
+    if boxes is None or boxes.id is None:
+        return {}
+
+    ids = boxes.id.int().cpu().tolist()
+    classes = boxes.cls.int().cpu().tolist()
+    confidences = boxes.conf.cpu().tolist()
+    coordinates = boxes.xyxy.cpu().tolist()
+
+    return {
+        track_id: {
+            "class_id": class_id,
+            "confidence": confidence,
+            "xyxy": xyxy,
+        }
+        for track_id, class_id, confidence, xyxy in zip(ids, classes, confidences, coordinates)
+    }
+
+
+def start_detection_window(role, state, track_id, class_id, confidence, xyxy, direction, camera_config, vehicle_labels):
+    """
+    Start one 5-second RFID matching window for a triggered vehicle.
+    """
+    now_monotonic = time.monotonic()
+    event_key = f"{role}-track-{track_id}-{int(time.time() * 1000)}"
+    event_time = datetime.now().astimezone().isoformat()
+    display_label = vehicle_labels[class_id]
+
+    state["pending_windows"][track_id] = {
+        "event_key": event_key,
+        "camera_role": role,
+        "camera_id": camera_config.get("camera_id"),
+        "track_id": track_id,
+        "class_id": class_id,
+        "detected_vehicle_type": display_label,
+        "confidence": confidence,
+        "xyxy": xyxy,
+        "direction": direction,
+        "event_time": event_time,
+        "started_at": now_monotonic,
+        "deadline_at": now_monotonic + RFID_DETECTION_WINDOW_SECONDS,
+        "next_poll_at": now_monotonic,
+        "snapshot_frame": None,
+        "last_message": "Waiting for RFID scan.",
+    }
+    state["track_overlays"][track_id] = waiting_overlay()
+
+
+def update_detection_windows(role, frame, results, state, laravel_client):
+    """
+    Poll Laravel for each pending RFID window and create a guest observation on timeout.
+    """
+    now_monotonic = time.monotonic()
+    visible_boxes = current_track_boxes(results)
+
+    for track_id, window in list(state["pending_windows"].items()):
+        visible_box = visible_boxes.get(track_id)
+        if visible_box:
+            window["xyxy"] = visible_box["xyxy"]
+            window["confidence"] = visible_box["confidence"]
+            window["snapshot_frame"] = frame.copy()
+        elif window.get("snapshot_frame") is None:
+            window["snapshot_frame"] = frame.copy()
+
+        if now_monotonic >= window["next_poll_at"] and now_monotonic <= window["deadline_at"]:
+            match = laravel_client.check_rfid_match(
+                role,
+                window["event_time"],
+                RFID_DETECTION_WINDOW_SECONDS,
+            )
+            window["next_poll_at"] = now_monotonic + RFID_POLL_INTERVAL_SECONDS
+            window["last_message"] = match.get("message", window["last_message"])
+
+            if match.get("matched"):
+                state["track_overlays"][track_id] = match.get("overlay") or {
+                    "label": "REGISTERED",
+                    "color": "green",
+                    "verification": "registered",
+                }
+                state["crossed_track_ids"][track_id] = now_monotonic
+                state["pending_windows"].pop(track_id, None)
+                state["last_error"] = ""
+                continue
+
+        if now_monotonic < window["deadline_at"]:
+            continue
+
+        snapshot_frame = window.get("snapshot_frame") if window.get("snapshot_frame") is not None else frame
+        vehicle_image_path = save_vehicle_snapshot(
+            role,
+            snapshot_frame,
+            window["xyxy"],
+            window["event_key"],
+        )
+
+        if not vehicle_image_path:
+            state["crossed_track_ids"][track_id] = now_monotonic
+            state["pending_windows"].pop(track_id, None)
+            state["last_error"] = f"{role.capitalize()} vehicle had no RFID match, but snapshot saving failed."
+            continue
+
+        plate_number = None
+        if window["direction"] == "OUT":
+            plate_number = read_license_plate(snapshot_frame, tuple(window["xyxy"]))
+
+        result = laravel_client.submit_guest_observation({
+            "external_event_key": window["event_key"],
+            "camera_role": role,
+            "camera_id": window.get("camera_id"),
+            "detected_vehicle_type": window["detected_vehicle_type"],
+            "event_time": window["event_time"],
+            "vehicle_image_path": vehicle_image_path,
+            "plate_number": plate_number,
+            "detection_metadata": {
+                "track_id": track_id,
+                "confidence": window["confidence"],
+                "direction": window["direction"],
+                "rfid_window_seconds": RFID_DETECTION_WINDOW_SECONDS,
+            },
+        })
+
+        state["track_overlays"][track_id] = result.get("overlay") or default_overlay()
+        state["crossed_track_ids"][track_id] = now_monotonic
+        state["pending_windows"].pop(track_id, None)
+
+        if result.get("accepted"):
+            if result.get("created"):
+                state["crossings_logged"] += 1
+            state["last_error"] = ""
+        else:
+            state["last_error"] = result.get("message", "Guest observation could not be saved.")
+
+
 def process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels):
     """
     Filter detections to supported vehicle classes, track them, and log one
@@ -600,6 +766,7 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
     boxes = results.boxes
 
     if boxes is None or boxes.id is None:
+        update_detection_windows(role, frame, results, state, laravel_client)
         cleanup_stale_tracks(state)
         return
 
@@ -616,89 +783,45 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
         state["track_last_seen"][track_id] = time.monotonic()
 
         center_point = bbox_center(xyxy)
-        if not point_in_mask(center_point, mask_rect):
+        inside_roi = point_in_mask(center_point, mask_rect) if mask_rect else True
+        if not inside_roi:
             continue
 
-        current_side = point_side_of_line(center_point, line)
+        current_side = point_side_of_line(center_point, line) if line else 0
         previous_side = state["track_sides"].get(track_id)
         state["track_sides"][track_id] = current_side
 
-        if not crossed_line(previous_side, current_side):
+        triggered = crossed_line(previous_side, current_side) if line else previous_side is None
+
+        if not triggered:
             continue
 
-        if track_id in state["crossed_track_ids"]:
+        if track_id in state["crossed_track_ids"] or track_id in state["pending_windows"]:
             continue
 
-        # Determine direction based on crossing direction
-        # Side -1 to +1 = entering (IN), +1 to -1 = exiting (OUT)
-        if previous_side is not None and current_side is not None:
+        if line and previous_side is not None and current_side is not None:
             if previous_side < 0 and current_side > 0:
                 direction = "IN"
             elif previous_side > 0 and current_side < 0:
                 direction = "OUT"
             else:
-                # Default to IN if unclear
                 direction = "IN"
         else:
             direction = "IN"
 
-        event_key = f"{role}-track-{track_id}-{int(time.time() * 1000)}"
-        event_time = datetime.now().astimezone().isoformat()
-        display_label = vehicle_labels[class_id]
-        camera_id = camera_config.get("camera_id", 1)
+        start_detection_window(
+            role,
+            state,
+            track_id,
+            class_id,
+            confidence,
+            xyxy,
+            direction,
+            camera_config,
+            vehicle_labels,
+        )
 
-        payload = {
-            "external_event_key": event_key,
-            "camera_role": role,
-            "camera_id": camera_id,
-            "detected_vehicle_type": display_label,
-            "event_time": event_time,
-            "roi_name": f"{role.capitalize()} Trigger Line",
-            "detection_metadata": {
-                "track_id": track_id,
-                "confidence": confidence,
-                "detector_class": display_label,
-                "line_side_before": previous_side,
-                "line_side_after": current_side,
-            },
-            "direction": direction,
-        }
-
-        result = laravel_client.submit_event(payload)
-
-        if result.get("requires_capture"):
-            vehicle_image_path = save_vehicle_snapshot(role, frame, xyxy, event_key)
-
-            if not vehicle_image_path:
-                state["crossed_track_ids"][track_id] = time.monotonic()
-                state["last_error"] = f"{role.capitalize()} vehicle had no RFID match, but snapshot saving failed."
-                continue
-
-            plate_number = None
-            if direction == "OUT":
-                plate_number = read_license_plate(frame, tuple(xyxy))
-
-            capture_payload = {
-                **payload,
-                "vehicle_image_path": vehicle_image_path,
-                "image_path": vehicle_image_path,
-                "plate_number": plate_number,
-                "unregistered_capture": True,
-            }
-            result = laravel_client.submit_event(capture_payload)
-
-        state["crossed_track_ids"][track_id] = time.monotonic()
-        state["track_overlays"][track_id] = result.get("overlay") or default_overlay()
-
-        if result["accepted"]:
-            if result["created"]:
-                state["crossings_logged"] += 1
-
-            state["last_error"] = ""
-            continue
-
-        state["last_error"] = result["message"]
-
+    update_detection_windows(role, frame, results, state, laravel_client)
     cleanup_stale_tracks(state)
 
 
@@ -708,11 +831,12 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
     """
     capture, capture_source = ensure_capture(camera_config, state)
 
-    if not capture.isOpened():
+    if capture is None or not capture.isOpened():
         release_capture(state)
         state["camera_running"] = False
         state["detection_ready"] = False
-        state["retry_count"] += 1
+        if time.monotonic() >= state.get("retry_after", 0.0):
+            state["retry_count"] += 1
         state["last_error"] = f"Could not open camera source: {capture_source}"
         return False
 
@@ -743,6 +867,11 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
         state["detection_ready"] = False
         state["retry_count"] = 0
         state["last_error"] = "The current detector model does not expose any supported vehicle classes."
+        return True
+
+    if state["processed_frames"] % DETECTION_FRAME_INTERVAL != 0:
+        update_detection_windows(role, frame, None, state, laravel_client)
+        publish_stream_frame(role, frame)
         return True
 
     try:

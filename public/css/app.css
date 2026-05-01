@@ -1793,6 +1793,16 @@ th {
     background: #080b12;
 }
 
+.station-rfid-input {
+    position: fixed;
+    top: 0;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
 .station-kiosk-shell {
     height: 100vh;
     display: grid;

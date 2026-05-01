@@ -46,6 +46,9 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/station/{location}/state', [StationController::class, 'state'])
         ->whereIn('location', ['entrance', 'exit'])
         ->name('stations.state');
+    Route::post('/station/{location}/rfid-scan', [StationController::class, 'rfidScan'])
+        ->whereIn('location', ['entrance', 'exit'])
+        ->name('stations.rfid-scan');
 
     Route::get('/monitoring', fn () => redirect()->route('stations.entrance'))->name('monitoring.index');
     Route::get('/monitoring/live-state', [MonitoringController::class, 'liveState'])->name('monitoring.live-state');

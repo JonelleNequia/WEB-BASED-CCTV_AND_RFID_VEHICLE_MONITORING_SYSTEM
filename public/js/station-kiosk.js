@@ -14,6 +14,13 @@
     const detectorChip = document.querySelector('[data-detector-status-chip]');
     const cameraFrames = document.querySelector('[data-camera-frames]');
     const cameraDetections = document.querySelector('[data-camera-detections]');
+    const rfidInput = document.querySelector('[data-rfid-input]');
+    const rfidStatus = document.querySelector('[data-rfid-status]');
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    let rfidBuffer = '';
+    let rfidBufferTimer = null;
+    let lastSubmittedUid = '';
+    let lastSubmittedAt = 0;
 
     function formatDateTime(value, fallbackText) {
         if (!value) {
@@ -52,6 +59,26 @@
         node.textContent = online ? onlineText : standbyText;
         node.classList.toggle('is-online', online);
         node.classList.toggle('is-standby', !online);
+    }
+
+    function setRfidStatus(text) {
+        if (!rfidStatus) {
+            return;
+        }
+
+        rfidStatus.textContent = text;
+    }
+
+    function focusRfidInput() {
+        if (!rfidInput || document.activeElement === rfidInput) {
+            return;
+        }
+
+        rfidInput.focus({ preventScroll: true });
+    }
+
+    function normalizeScannedUid(uid) {
+        return String(uid || '').replace(/\s+/g, '').trim().toUpperCase();
     }
 
     function startLiveStream(streamUrl) {
@@ -160,10 +187,109 @@
         }
     }
 
+    async function submitRfidScan(rawUid) {
+        const uid = normalizeScannedUid(rawUid);
+
+        if (!uid || !payload.routes?.rfidScan) {
+            return;
+        }
+
+        const now = Date.now();
+
+        if (uid === lastSubmittedUid && now - lastSubmittedAt < 1500) {
+            setRfidStatus(`RFID duplicate ignored: ${uid}`);
+            return;
+        }
+
+        lastSubmittedUid = uid;
+        lastSubmittedAt = now;
+        setRfidStatus(`RFID scanning: ${uid}`);
+
+        try {
+            const response = await fetch(payload.routes.rfidScan, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken,
+                },
+                body: JSON.stringify({
+                    tag_uid: uid,
+                    reader_name: `${payload.location || 'station'} station RFID reader`,
+                }),
+            });
+
+            const body = await response.json().catch(function () {
+                return {};
+            });
+
+            if (!response.ok) {
+                const errors = body.errors ? Object.values(body.errors).flat().join(' ') : '';
+                throw new Error(body.message || errors || 'RFID scan was not accepted.');
+            }
+
+            const status = body.scan?.verification_status || 'recorded';
+            const plate = body.vehicle?.plate_number || body.scan?.vehicle_plate || uid;
+            const action = body.action_taken || body.scan?.event_type || status;
+
+            setRfidStatus(`RFID ${status}: ${plate} (${action})`);
+            refreshState();
+        } catch (error) {
+            setRfidStatus(error.message || 'RFID scan failed');
+        } finally {
+            focusRfidInput();
+        }
+    }
+
+    function bindRfidScanner() {
+        if (!rfidInput) {
+            return;
+        }
+
+        rfidInput.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter') {
+                return;
+            }
+
+            event.preventDefault();
+            submitRfidScan(rfidInput.value);
+            rfidInput.value = '';
+        });
+
+        document.addEventListener('keydown', function (event) {
+            if (document.activeElement === rfidInput || event.ctrlKey || event.metaKey || event.altKey) {
+                return;
+            }
+
+            if (event.key === 'Enter') {
+                const uid = rfidBuffer;
+                rfidBuffer = '';
+                submitRfidScan(uid);
+                return;
+            }
+
+            if (event.key.length !== 1) {
+                return;
+            }
+
+            rfidBuffer += event.key;
+            window.clearTimeout(rfidBufferTimer);
+            rfidBufferTimer = window.setTimeout(function () {
+                rfidBuffer = '';
+            }, 500);
+        });
+
+        window.addEventListener('focus', focusRfidInput);
+        document.addEventListener('click', focusRfidInput);
+        window.setInterval(focusRfidInput, 2000);
+        focusRfidInput();
+    }
+
     updateClock();
     updateStatus({ runtime: payload.detectorStatus, camera: payload.cameraStatus });
     renderLogs(payload.logs || []);
     startLiveStream(payload.streamUrl);
+    bindRfidScanner();
     window.setInterval(updateClock, 1000);
     window.setInterval(refreshState, 2000);
 })();

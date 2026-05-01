@@ -1,7 +1,7 @@
 {
   "service_running": true,
   "service_message": "Dual-camera detector running.",
-  "updated_at": "2026-04-30T22:08:38.180169+08:00",
+  "updated_at": "2026-05-01T15:11:39.463309+08:00",
   "detector_model_path": "yolov8n.pt",
   "stream_server": {
     "host": "127.0.0.1",
@@ -23,11 +23,11 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-04-30T22:08:30.915385+08:00",
+      "last_capture_time": "2026-05-01T15:11:35.147455+08:00",
       "last_error": "Could not open camera source: 0",
-      "retry_count": 3,
-      "processed_frames": 2327,
-      "detections_seen": 200,
+      "retry_count": 1,
+      "processed_frames": 59944,
+      "detections_seen": 183,
       "crossings_logged": 0
     },
     "exit": {
@@ -47,7 +47,7 @@
       ],
       "last_capture_time": null,
       "last_error": "Could not open camera source: 1",
-      "retry_count": 2330,
+      "retry_count": 0,
       "processed_frames": 0,
       "detections_seen": 0,
       "crossings_logged": 0

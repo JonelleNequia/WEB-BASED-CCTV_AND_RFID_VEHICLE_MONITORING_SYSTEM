@@ -20,6 +20,10 @@ API_TIMEOUT_SECONDS = 10
 JPEG_QUALITY = 90
 MJPEG_STREAM_HOST = "127.0.0.1"
 MJPEG_STREAM_PORT = 8765
+DETECTION_FRAME_INTERVAL = 2
+RFID_DETECTION_WINDOW_SECONDS = 5.0
+RFID_POLL_INTERVAL_SECONDS = 0.35
+CAMERA_RETRY_DELAY_SECONDS = 2.0
 
 # Detection settings.
 MODEL_PATH = "yolov8n.pt"
@@ -75,6 +79,8 @@ DEFAULT_RUNTIME_CONFIG = {
         "python_api_key": "",
         "app_url": "http://127.0.0.1:8000",
         "event_ingest_url": "http://127.0.0.1:8000/api/v1/integration/events",
+        "guest_observation_url": "http://127.0.0.1:8000/api/v1/integration/guest-observations",
+        "rfid_match_url": "http://127.0.0.1:8000/api/v1/integration/rfid-match",
         "status_url": "http://127.0.0.1:8000/api/v1/integration/status",
     },
     "cameras": {

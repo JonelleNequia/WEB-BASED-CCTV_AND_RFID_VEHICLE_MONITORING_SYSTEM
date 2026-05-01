@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\VehicleEvent;
+use App\Models\GuestVehicleObservation;
 use App\Models\RfidTag;
 use App\Services\RfidService;
 use Database\Seeders\DatabaseSeeder;
@@ -152,5 +153,63 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertDatabaseMissing('vehicle_events', [
             'external_event_key' => 'test-crossing-no-rfid-probe',
         ]);
+    }
+
+    public function test_detector_can_poll_rfid_match_endpoint_during_detection_window(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $tag = RfidTag::query()->assigned()->with('vehicle')->firstOrFail();
+        $scanTime = now();
+
+        app(RfidService::class)->ingest([
+            'tag_uid' => $tag->uid,
+            'scan_location' => 'entrance',
+            'scan_time' => $scanTime->toIso8601String(),
+        ]);
+
+        $this->withHeaders([
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ])->getJson(route('api.integration.rfid-match', [
+            'camera_role' => 'entrance',
+            'event_time' => $scanTime->copy()->subSecond()->toIso8601String(),
+            'window_seconds' => 5,
+        ]))
+            ->assertOk()
+            ->assertJsonPath('matched', true)
+            ->assertJsonPath('overlay.verification', 'registered')
+            ->assertJsonPath('overlay.vehicle.plate_number', $tag->vehicle->plate_number);
+    }
+
+    public function test_detector_guest_observation_endpoint_creates_pending_review_record(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $this->withHeaders([
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ])->postJson(route('api.integration.guest-observations'), [
+            'external_event_key' => 'guest-window-timeout-001',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => now()->toIso8601String(),
+            'vehicle_image_path' => 'detected-vehicle-images/entrance/guest-window-timeout-001.jpg',
+            'detection_metadata' => [
+                'track_id' => 44,
+                'rfid_window_seconds' => 5,
+            ],
+        ])
+            ->assertCreated()
+            ->assertJsonPath('status', 'pending_review')
+            ->assertJsonPath('overlay.verification', 'guest');
+
+        $observation = GuestVehicleObservation::query()
+            ->where('external_event_key', 'guest-window-timeout-001')
+            ->firstOrFail();
+
+        $this->assertSame('pending_review', $observation->status);
+        $this->assertSame('entrance', $observation->location);
+        $this->assertSame('cctv', $observation->observation_source);
     }
 }

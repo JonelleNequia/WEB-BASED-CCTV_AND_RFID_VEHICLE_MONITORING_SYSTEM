@@ -138,6 +138,8 @@ class SettingsService
                 'python_api_key' => $settings['python_api_key'] ?? '',
                 'app_url' => rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/'),
                 'event_ingest_url' => rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/').'/api/v1/integration/events',
+                'guest_observation_url' => rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/').'/api/v1/integration/guest-observations',
+                'rfid_match_url' => rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/').'/api/v1/integration/rfid-match',
                 'status_url' => rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/').'/api/v1/integration/status',
                 'rfid_ingest_url' => rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/').'/api/v1/integration/rfid-scans',
                 'entrance_portal_label' => $settings['entrance_portal_label'] ?? 'PHILCST Entrance Portal',

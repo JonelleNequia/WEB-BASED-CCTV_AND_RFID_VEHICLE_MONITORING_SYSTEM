@@ -95,6 +95,6 @@ def crossed_line(previous_side, current_side):
 
 def calibration_ready(camera_config):
     """
-    The detector only logs events when both mask and line are present.
+    The detector can trigger from either a saved ROI mask or a trigger line.
     """
-    return bool(camera_config.get("calibration_mask")) and bool(camera_config.get("calibration_line"))
+    return bool(camera_config.get("calibration_mask")) or bool(camera_config.get("calibration_line"))

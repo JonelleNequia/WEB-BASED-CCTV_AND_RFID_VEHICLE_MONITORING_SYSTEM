@@ -8,6 +8,15 @@
     <link rel="stylesheet" href="{{ asset('css/app.css') }}">
 </head>
 <body class="station-kiosk-body station-kiosk-{{ $location }}">
+    <input
+        type="text"
+        class="station-rfid-input"
+        data-rfid-input
+        autocomplete="off"
+        inputmode="none"
+        aria-label="{{ $stationLabel }} RFID scanner input"
+    >
+
     <main class="station-kiosk-shell">
         <section class="station-video-pane">
             <div class="station-video-topbar">
@@ -40,6 +49,7 @@
                 <span data-camera-source>{{ strtoupper($camera['source_type']) }} | {{ $camera['source_value'] }}</span>
                 <span data-camera-frames>{{ $cameraStatus['processed_frames'] ?? 0 }} frames</span>
                 <span data-camera-detections>{{ $cameraStatus['detections_seen'] ?? 0 }} detections</span>
+                <span data-rfid-status>RFID Ready</span>
             </div>
         </section>
 
@@ -81,6 +91,7 @@
         'logs' => $logs,
         'routes' => [
             'state' => route('stations.state', $location),
+            'rfidScan' => route('stations.rfid-scan', $location),
         ],
     ])
     <script id="station-kiosk-data" type="application/json">{!! json_encode($stationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
