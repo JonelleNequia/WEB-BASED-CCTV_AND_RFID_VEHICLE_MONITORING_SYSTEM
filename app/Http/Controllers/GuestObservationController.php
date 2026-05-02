@@ -25,7 +25,6 @@ class GuestObservationController extends Controller
             'latestUnregisteredCapture' => GuestVehicleObservation::query()
                 ->with('camera')
                 ->where('observation_source', 'cctv')
-                ->where('vehicle_type', 'Unregistered')
                 ->latest('observed_at')
                 ->first(),
         ]);

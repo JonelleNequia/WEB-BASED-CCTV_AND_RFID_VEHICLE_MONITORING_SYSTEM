@@ -39,6 +39,13 @@
                     data-station-frame
                     data-frame-stream="{{ $streamUrl }}"
                 >
+                <video
+                    data-browser-frame
+                    class="is-hidden"
+                    autoplay
+                    muted
+                    playsinline
+                ></video>
                 <div class="station-frame-fallback" data-frame-fallback>
                     Waiting for {{ strtolower($stationLabel) }} live stream
                 </div>
@@ -48,7 +55,7 @@
                 <span>{{ $camera['camera_name'] }}</span>
                 <span data-camera-source>{{ strtoupper($camera['source_type']) }} | {{ $camera['source_value'] }}</span>
                 <span data-camera-frames>{{ $cameraStatus['processed_frames'] ?? 0 }} frames</span>
-                <span data-camera-detections>{{ $cameraStatus['detections_seen'] ?? 0 }} detections</span>
+                <span data-camera-detections>{{ $cameraStatus['active_detections'] ?? 0 }} active / {{ $cameraStatus['detections_seen'] ?? 0 }} detections</span>
                 <span data-rfid-status>RFID Ready</span>
             </div>
         </section>
@@ -95,6 +102,7 @@
         ],
     ])
     <script id="station-kiosk-data" type="application/json">{!! json_encode($stationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
+    <script src="{{ asset('js/browser-camera-common.js') }}"></script>
     <script src="{{ asset('js/station-kiosk.js') }}"></script>
 </body>
 </html>

@@ -7,6 +7,7 @@
 
     const payload = JSON.parse(payloadNode.textContent);
     const frame = document.querySelector('[data-station-frame]');
+    const browserFrame = document.querySelector('[data-browser-frame]');
     const fallback = document.querySelector('[data-frame-fallback]');
     const logList = document.querySelector('[data-station-log-list]');
     const clock = document.querySelector('[data-station-clock]');
@@ -21,6 +22,9 @@
     let rfidBufferTimer = null;
     let lastSubmittedUid = '';
     let lastSubmittedAt = 0;
+    let streamLoaded = false;
+    let browserFallbackStarted = false;
+    let browserFallbackTimer = null;
 
     function formatDateTime(value, fallbackText) {
         if (!value) {
@@ -81,6 +85,66 @@
         return String(uid || '').replace(/\s+/g, '').trim().toUpperCase();
     }
 
+    function chooseStationDevice(devices) {
+        const camera = payload.camera || {};
+
+        if (!Array.isArray(devices) || devices.length === 0) {
+            return null;
+        }
+
+        if (camera.browser_device_id) {
+            const savedDevice = devices.find(function (device) {
+                return device.deviceId === camera.browser_device_id;
+            });
+
+            if (savedDevice) {
+                return savedDevice;
+            }
+        }
+
+        if (camera.source_type === 'webcam' && /^\d+$/.test(String(camera.source_value))) {
+            const webcamIndex = Number.parseInt(String(camera.source_value), 10);
+
+            if (devices[webcamIndex]) {
+                return devices[webcamIndex];
+            }
+        }
+
+        return devices[0];
+    }
+
+    async function startBrowserCameraFallback() {
+        if (browserFallbackStarted || !browserFrame || !window.PHILCSTBrowserCamera) {
+            return;
+        }
+
+        browserFallbackStarted = true;
+
+        try {
+            const cameraApi = window.PHILCSTBrowserCamera;
+            await cameraApi.unlockVideoLabels().catch(function () {
+                return undefined;
+            });
+            const device = chooseStationDevice(await cameraApi.listVideoInputs());
+
+            if (!device) {
+                throw new Error('No browser camera source is available.');
+            }
+
+            await cameraApi.attachDevice(browserFrame, device.deviceId);
+            frame?.classList.add('is-hidden');
+            browserFrame.classList.remove('is-hidden');
+            fallback?.classList.add('is-hidden');
+            setStatusChip(cameraChip, true, 'Browser Live', 'Standby');
+        } catch (error) {
+            browserFallbackStarted = false;
+            fallback?.classList.remove('is-hidden');
+            if (fallback) {
+                fallback.textContent = error.message || 'Waiting for station live stream';
+            }
+        }
+    }
+
     function startLiveStream(streamUrl) {
         const base = streamUrl || frame?.dataset.frameStream || payload.streamUrl;
 
@@ -89,18 +153,34 @@
         }
 
         frame.onload = function () {
+            streamLoaded = true;
+            window.clearTimeout(browserFallbackTimer);
+            if (browserFrame && !browserFrame.classList.contains('is-hidden')) {
+                window.PHILCSTBrowserCamera?.stopVideo(browserFrame);
+                browserFrame.classList.add('is-hidden');
+                browserFallbackStarted = false;
+            }
             frame.classList.remove('is-hidden');
             fallback?.classList.add('is-hidden');
         };
 
         frame.onerror = function () {
             frame.classList.add('is-hidden');
-            fallback?.classList.remove('is-hidden');
+            startBrowserCameraFallback();
         };
 
         if (frame.src !== base) {
+            streamLoaded = false;
             frame.src = base;
         }
+
+        window.clearTimeout(browserFallbackTimer);
+        browserFallbackTimer = window.setTimeout(function () {
+            if (!streamLoaded) {
+                frame.classList.add('is-hidden');
+                startBrowserCameraFallback();
+            }
+        }, 2500);
     }
 
     function renderLogs(logs) {
@@ -155,7 +235,7 @@
         }
 
         if (cameraDetections) {
-            cameraDetections.textContent = `${camera.detections_seen ?? 0} detections`;
+            cameraDetections.textContent = `${camera.active_detections ?? 0} active / ${camera.detections_seen ?? 0} detections`;
         }
     }
 

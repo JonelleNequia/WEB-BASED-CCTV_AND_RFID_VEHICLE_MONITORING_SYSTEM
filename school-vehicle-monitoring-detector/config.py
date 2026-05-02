@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-# Resolve project paths from this Python module directory.
 MODULE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = MODULE_ROOT.parent
 PUBLIC_CAMERA_DIR = PROJECT_ROOT / "public" / "camera"
@@ -11,7 +10,6 @@ RUNTIME_CONFIG_PATH = PROJECT_ROOT / "storage" / "app" / "camera" / "camera_runt
 PUBLIC_STORAGE_DIR = PROJECT_ROOT / "storage" / "app" / "public"
 DETECTED_IMAGE_DIR = PUBLIC_STORAGE_DIR / "detected-vehicle-images"
 
-# Runtime behavior.
 CAPTURE_INTERVAL_SECONDS = 0.08
 RECONNECT_DELAY_SECONDS = 3.0
 TRACK_STALE_AFTER_SECONDS = 5.0
@@ -79,8 +77,8 @@ DEFAULT_RUNTIME_CONFIG = {
         "python_api_key": "",
         "app_url": "http://127.0.0.1:8000",
         "event_ingest_url": "http://127.0.0.1:8000/api/v1/integration/events",
-        "guest_observation_url": "http://127.0.0.1:8000/api/v1/integration/guest-observations",
-        "rfid_match_url": "http://127.0.0.1:8000/api/v1/integration/rfid-match",
+        "guest_observation_url": "http://127.0.0.1:8000/api/guest-observation",
+        "rfid_match_url": "http://127.0.0.1:8000/api/check-latest-scan",
         "status_url": "http://127.0.0.1:8000/api/v1/integration/status",
     },
     "cameras": {

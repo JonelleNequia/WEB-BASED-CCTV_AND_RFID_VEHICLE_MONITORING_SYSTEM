@@ -132,7 +132,8 @@ def write_text_atomic(path, content):
     """
     Write text atomically so Laravel does not read partial JSON.
     """
-    temp_path = path.with_suffix(path.suffix + ".tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(f"{path.suffix}.{os.getpid()}.{threading.get_ident()}.tmp")
     temp_path.write_text(content, encoding="utf-8")
     os.replace(temp_path, path)
 
@@ -178,22 +179,30 @@ def publish_stream_frame(role, frame):
     return True
 
 
-def start_stream_server():
+def start_stream_server(max_attempts=5):
     """
     Start the local in-memory MJPEG server used by the station kiosk windows.
     """
-    try:
-        server = ReusableThreadingHTTPServer(
-            (MJPEG_STREAM_HOST, MJPEG_STREAM_PORT),
-            MjpegStreamHandler,
-        )
-    except OSError as error:
-        print(f"MJPEG stream server could not start: {error}")
+    last_error = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            server = ReusableThreadingHTTPServer(
+                (MJPEG_STREAM_HOST, MJPEG_STREAM_PORT),
+                MjpegStreamHandler,
+            )
+            break
+        except OSError as error:
+            last_error = error
+            print(f"MJPEG stream server attempt {attempt} failed: {error}", flush=True)
+            time.sleep(0.75)
+    else:
+        print(f"MJPEG stream server could not start: {last_error}", flush=True)
         return None
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    print(f"MJPEG stream server running at http://{MJPEG_STREAM_HOST}:{MJPEG_STREAM_PORT}")
+    print(f"MJPEG stream server running at http://{MJPEG_STREAM_HOST}:{MJPEG_STREAM_PORT}", flush=True)
 
     return server
 
@@ -358,6 +367,7 @@ def initial_camera_state():
         "retry_count": 0,
         "processed_frames": 0,
         "detections_seen": 0,
+        "active_detections": 0,
         "crossings_logged": 0,
         "retry_after": 0.0,
         "track_sides": {},
@@ -440,6 +450,7 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
             "retry_count": state["retry_count"],
             "processed_frames": state["processed_frames"],
             "detections_seen": state["detections_seen"],
+            "active_detections": state.get("active_detections", 0),
             "crossings_logged": state["crossings_logged"],
         }
 
@@ -482,9 +493,9 @@ def cleanup_stale_tracks(state):
         state["pending_windows"].pop(track_id, None)
 
 
-def save_vehicle_snapshot(role, frame, xyxy, event_key):
+def encode_vehicle_snapshot(role, frame, xyxy, event_key):
     """
-    Save a cropped vehicle snapshot into Laravel's public storage disk.
+    Encode a cropped vehicle snapshot for Laravel multipart upload.
     """
     frame_height, frame_width = frame.shape[:2]
     x1, y1, x2, y2 = [int(value) for value in xyxy]
@@ -501,9 +512,7 @@ def save_vehicle_snapshot(role, frame, xyxy, event_key):
         crop = frame
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    relative_path = Path(role) / f"{timestamp}_{event_key}.jpg"
-    full_path = DETECTED_IMAGE_DIR / relative_path
-    full_path.parent.mkdir(parents=True, exist_ok=True)
+    filename = f"{role}_{timestamp}_{event_key}.jpg"
 
     encoded, buffer = cv2.imencode(
         ".jpg",
@@ -514,11 +523,10 @@ def save_vehicle_snapshot(role, frame, xyxy, event_key):
     if not encoded:
         return None
 
-    temp_path = full_path.with_suffix(full_path.suffix + ".tmp")
-    temp_path.write_bytes(buffer.tobytes())
-    os.replace(temp_path, full_path)
-
-    return str(Path("detected-vehicle-images") / relative_path).replace("\\", "/")
+    return {
+        "filename": filename,
+        "bytes": buffer.tobytes(),
+    }
 
 
 def overlay_color(overlay):
@@ -527,6 +535,9 @@ def overlay_color(overlay):
     """
     if overlay.get("color") == "green":
         return (46, 155, 98)
+
+    if overlay.get("color") == "blue":
+        return (180, 116, 35)
 
     if overlay.get("color") == "amber":
         return (0, 165, 255)
@@ -553,6 +564,17 @@ def waiting_overlay():
         "label": "CHECKING RFID",
         "color": "amber",
         "verification": "pending",
+    }
+
+
+def detection_overlay():
+    """
+    Neutral label for vehicles YOLO sees before the RFID trigger window starts.
+    """
+    return {
+        "label": "VEHICLE DETECTED",
+        "color": "blue",
+        "verification": "detected",
     }
 
 
@@ -585,11 +607,42 @@ def draw_label(frame, text, x, y, color):
     )
 
 
+def draw_calibration_guides(frame, camera_config):
+    """
+    Draw the saved ROI and trigger line so station operators can see where detection starts.
+    """
+    frame_height, frame_width = frame.shape[:2]
+    mask_rect = normalized_rect_to_pixels(camera_config.get("calibration_mask"), frame_width, frame_height)
+    line = normalized_line_to_pixels(camera_config.get("calibration_line"), frame_width, frame_height)
+
+    if mask_rect:
+        x = int(mask_rect["x"])
+        y = int(mask_rect["y"])
+        width = int(mask_rect["width"])
+        height = int(mask_rect["height"])
+        cv2.rectangle(
+            frame,
+            (x, y),
+            (x + width, y + height),
+            (255, 255, 255),
+            1,
+        )
+
+    if line:
+        x1 = int(line["x1"])
+        y1 = int(line["y1"])
+        x2 = int(line["x2"])
+        y2 = int(line["y2"])
+        cv2.line(frame, (x1, y1), (x2, y2), (0, 165, 255), 2)
+        draw_label(frame, "TRIGGER LINE", x1, y1, (0, 165, 255))
+
+
 def render_annotated_frame(role, frame, results, camera_config, state, vehicle_labels):
     """
-    Draw only resolved RFID/guest verification labels on the live frame.
+    Draw live YOLO detections, then upgrade the label when RFID/guest state resolves.
     """
     annotated = frame.copy()
+    draw_calibration_guides(annotated, camera_config)
     boxes = results.boxes if results is not None else None
 
     if boxes is not None and boxes.id is not None:
@@ -602,10 +655,7 @@ def render_annotated_frame(role, frame, results, camera_config, state, vehicle_l
             if class_id not in vehicle_labels:
                 continue
 
-            overlay = state["track_overlays"].get(track_id)
-            if not overlay:
-                continue
-
+            overlay = state["track_overlays"].get(track_id) or detection_overlay()
             color = overlay_color(overlay)
             x1, y1, x2, y2 = [int(value) for value in xyxy]
             label = overlay.get("label") or default_overlay()["label"]
@@ -710,17 +760,17 @@ def update_detection_windows(role, frame, results, state, laravel_client):
             continue
 
         snapshot_frame = window.get("snapshot_frame") if window.get("snapshot_frame") is not None else frame
-        vehicle_image_path = save_vehicle_snapshot(
+        snapshot = encode_vehicle_snapshot(
             role,
             snapshot_frame,
             window["xyxy"],
             window["event_key"],
         )
 
-        if not vehicle_image_path:
+        if not snapshot:
             state["crossed_track_ids"][track_id] = now_monotonic
             state["pending_windows"].pop(track_id, None)
-            state["last_error"] = f"{role.capitalize()} vehicle had no RFID match, but snapshot saving failed."
+            state["last_error"] = f"{role.capitalize()} vehicle had no RFID match, but snapshot encoding failed."
             continue
 
         plate_number = None
@@ -733,7 +783,6 @@ def update_detection_windows(role, frame, results, state, laravel_client):
             "camera_id": window.get("camera_id"),
             "detected_vehicle_type": window["detected_vehicle_type"],
             "event_time": window["event_time"],
-            "vehicle_image_path": vehicle_image_path,
             "plate_number": plate_number,
             "detection_metadata": {
                 "track_id": track_id,
@@ -741,7 +790,7 @@ def update_detection_windows(role, frame, results, state, laravel_client):
                 "direction": window["direction"],
                 "rfid_window_seconds": RFID_DETECTION_WINDOW_SECONDS,
             },
-        })
+        }, snapshot["bytes"], snapshot["filename"])
 
         state["track_overlays"][track_id] = result.get("overlay") or default_overlay()
         state["crossed_track_ids"][track_id] = now_monotonic
@@ -766,6 +815,7 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
     boxes = results.boxes
 
     if boxes is None or boxes.id is None:
+        state["active_detections"] = 0
         update_detection_windows(role, frame, results, state, laravel_client)
         cleanup_stale_tracks(state)
         return
@@ -774,11 +824,13 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
     classes = boxes.cls.int().cpu().tolist()
     confidences = boxes.conf.cpu().tolist()
     coordinates = boxes.xyxy.cpu().tolist()
+    active_detections = 0
 
     for track_id, class_id, confidence, xyxy in zip(ids, classes, confidences, coordinates):
         if class_id not in vehicle_labels:
             continue
 
+        active_detections += 1
         state["detections_seen"] += 1
         state["track_last_seen"][track_id] = time.monotonic()
 
@@ -821,6 +873,7 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
             vehicle_labels,
         )
 
+    state["active_detections"] = active_detections
     update_detection_windows(role, frame, results, state, laravel_client)
     cleanup_stale_tracks(state)
 
@@ -893,6 +946,7 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
 
     state["detection_ready"] = True
     state["retry_count"] = 0
+    state["last_error"] = ""
     process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels)
     live_frame = render_annotated_frame(role, frame, results, camera_config, state, vehicle_labels)
     publish_stream_frame(role, live_frame)

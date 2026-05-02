@@ -9,7 +9,7 @@ class DetectorRuntimeService
 {
     protected const STATUS_STALE_AFTER_SECONDS = 20;
 
-    protected const LAUNCH_COOLDOWN_SECONDS = 300;
+    protected const LAUNCH_COOLDOWN_SECONDS = 15;
 
     protected const LOCK_AFTER_FAILED_ATTEMPTS = 3;
 
@@ -171,6 +171,7 @@ class DetectorRuntimeService
             'retry_count' => 0,
             'processed_frames' => 0,
             'detections_seen' => 0,
+            'active_detections' => 0,
             'crossings_logged' => 0,
         ];
     }

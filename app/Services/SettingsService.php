@@ -127,6 +127,7 @@ class SettingsService
     {
         $settings ??= $this->all();
         $cameraConfigurations = $this->cameraConfigurations();
+        $integrationBaseUrl = $this->integrationBaseUrl($settings);
 
         $payload = [
             'generated_at' => now()->toIso8601String(),
@@ -136,12 +137,12 @@ class SettingsService
                 'cctv_simulation_mode' => $settings['cctv_simulation_mode'] ?? 'enabled',
                 'rfid_simulation_mode' => $settings['rfid_simulation_mode'] ?? 'enabled',
                 'python_api_key' => $settings['python_api_key'] ?? '',
-                'app_url' => rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/'),
-                'event_ingest_url' => rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/').'/api/v1/integration/events',
-                'guest_observation_url' => rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/').'/api/v1/integration/guest-observations',
-                'rfid_match_url' => rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/').'/api/v1/integration/rfid-match',
-                'status_url' => rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/').'/api/v1/integration/status',
-                'rfid_ingest_url' => rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/').'/api/v1/integration/rfid-scans',
+                'app_url' => $integrationBaseUrl,
+                'event_ingest_url' => $integrationBaseUrl.'/api/v1/integration/events',
+                'guest_observation_url' => $integrationBaseUrl.'/api/guest-observation',
+                'rfid_match_url' => $integrationBaseUrl.'/api/check-latest-scan',
+                'status_url' => $integrationBaseUrl.'/api/v1/integration/status',
+                'rfid_ingest_url' => $integrationBaseUrl.'/api/v1/integration/rfid-scans',
                 'entrance_portal_label' => $settings['entrance_portal_label'] ?? 'PHILCST Entrance Portal',
                 'exit_portal_label' => $settings['exit_portal_label'] ?? 'PHILCST Exit Portal',
                 'entrance_rfid_reader_name' => $settings['entrance_rfid_reader_name'] ?? 'Entrance RFID Reader (Simulated)',
@@ -194,6 +195,29 @@ class SettingsService
                 'status' => 'active',
             ]);
         }
+    }
+
+    /**
+     * Resolve the URL Python should use when calling Laravel from this same PC.
+     *
+     * @param  array<string, string>  $settings
+     */
+    protected function integrationBaseUrl(array $settings): string
+    {
+        $explicitUrl = trim((string) env('PYTHON_INTEGRATION_URL', ''));
+
+        if ($explicitUrl !== '') {
+            return rtrim($explicitUrl, '/');
+        }
+
+        $appUrl = rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/');
+
+        if (($settings['deployment_mode'] ?? 'offline_local') === 'offline_local'
+            && in_array($appUrl, ['http://localhost', 'https://localhost'], true)) {
+            return 'http://127.0.0.1:8000';
+        }
+
+        return $appUrl ?: 'http://127.0.0.1:8000';
     }
 
     /**

@@ -1917,6 +1917,7 @@ th {
 }
 
 .station-frame-stage img,
+.station-frame-stage video,
 .station-frame-fallback {
     position: absolute;
     inset: 0;
@@ -1924,12 +1925,14 @@ th {
     height: 100%;
 }
 
-.station-frame-stage img {
+.station-frame-stage img,
+.station-frame-stage video {
     object-fit: contain;
     background: #020617;
 }
 
 .station-frame-stage img.is-hidden,
+.station-frame-stage video.is-hidden,
 .station-frame-fallback.is-hidden {
     display: none;
 }

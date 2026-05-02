@@ -1,7 +1,7 @@
 {
   "service_running": true,
   "service_message": "Dual-camera detector running.",
-  "updated_at": "2026-05-01T15:11:39.463309+08:00",
+  "updated_at": "2026-05-02T12:50:38.745258+08:00",
   "detector_model_path": "yolov8n.pt",
   "stream_server": {
     "host": "127.0.0.1",
@@ -11,8 +11,8 @@
     "entrance": {
       "camera_role": "entrance",
       "camera_name": "PHILCST Entrance Camera",
-      "camera_running": false,
-      "detection_ready": false,
+      "camera_running": true,
+      "detection_ready": true,
       "calibration_ready": true,
       "source_type": "webcam",
       "source_value": 0,
@@ -23,11 +23,12 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-05-01T15:11:35.147455+08:00",
-      "last_error": "Could not open camera source: 0",
-      "retry_count": 1,
-      "processed_frames": 59944,
-      "detections_seen": 183,
+      "last_capture_time": "2026-05-02T12:50:38.737216+08:00",
+      "last_error": "",
+      "retry_count": 0,
+      "processed_frames": 147,
+      "detections_seen": 0,
+      "active_detections": 0,
       "crossings_logged": 0
     },
     "exit": {
@@ -50,6 +51,7 @@
       "retry_count": 0,
       "processed_frames": 0,
       "detections_seen": 0,
+      "active_detections": 0,
       "crossings_logged": 0
     }
   }

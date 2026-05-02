@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\GuestVehicleObservation;
 use App\Models\VehicleEvent;
 use App\Services\CalibrationService;
 use App\Services\DetectorRuntimeService;
@@ -38,7 +39,7 @@ class StationController extends Controller
             'detectorStatus' => $detectorStatus,
             'cameraStatus' => $cameraStatus,
             'streamUrl' => $cameraStatus['stream_url'] ?? "http://127.0.0.1:8765/stream/{$location}",
-            'logs' => $this->recentLogs($eventType),
+            'logs' => $this->recentLogs($eventType, $location),
         ]);
     }
 
@@ -49,7 +50,7 @@ class StationController extends Controller
     {
         $location = $this->validateLocation($location);
         $eventType = $this->eventTypeForLocation($location);
-        $runtime = $detectorRuntimeService->readStatus();
+        $runtime = $detectorRuntimeService->ensureRunning();
 
         return response()->json([
             'location' => $location,
@@ -57,7 +58,7 @@ class StationController extends Controller
             'runtime' => $runtime,
             'camera' => $runtime['cameras'][$location] ?? null,
             'stream_url' => $runtime['cameras'][$location]['stream_url'] ?? "http://127.0.0.1:8765/stream/{$location}",
-            'logs' => $this->recentLogs($eventType),
+            'logs' => $this->recentLogs($eventType, $location),
             'generated_at' => now()->toIso8601String(),
         ]);
     }
@@ -139,9 +140,9 @@ class StationController extends Controller
     /**
      * @return list<array<string, mixed>>
      */
-    protected function recentLogs(string $eventType, int $limit = 14): array
+    protected function recentLogs(string $eventType, string $location, int $limit = 14): array
     {
-        return VehicleEvent::query()
+        $eventLogs = VehicleEvent::query()
             ->with(['camera', 'vehicle', 'rfidScanLog'])
             ->where('event_type', $eventType)
             ->latest('event_time')
@@ -165,8 +166,46 @@ class StationController extends Controller
                     'event_time' => $event->event_time?->toIso8601String(),
                     'display_time' => $event->event_time?->format('M d, Y h:i:s A'),
                     'status' => $event->display_status,
+                    'sort_time' => $event->event_time?->getTimestamp() ?? 0,
                 ];
+            });
+
+        $guestLogs = GuestVehicleObservation::query()
+            ->with('camera')
+            ->where('location', $location)
+            ->latest('observed_at')
+            ->limit($limit)
+            ->get()
+            ->map(function (GuestVehicleObservation $observation): array {
+                return [
+                    'id' => 'guest-'.$observation->id,
+                    'record_type' => 'guest_observation',
+                    'event_type' => 'GUEST',
+                    'plate_number' => $observation->plate_text ?: 'UNREGISTERED / GUEST',
+                    'owner_name' => 'N/A',
+                    'vehicle_type' => $observation->vehicle_type ?: 'Vehicle',
+                    'camera_role' => $observation->camera?->camera_role,
+                    'scan_location' => $observation->location,
+                    'verification_label' => 'Unregistered / Guest',
+                    'resulting_state' => 'Pending Review',
+                    'event_time' => $observation->observed_at?->toIso8601String(),
+                    'display_time' => $observation->observed_at?->format('M d, Y h:i:s A'),
+                    'status' => ucfirst(str_replace('_', ' ', $observation->status)),
+                    'snapshot_url' => $observation->snapshot_url,
+                    'sort_time' => $observation->observed_at?->getTimestamp() ?? 0,
+                ];
+            });
+
+        return $eventLogs
+            ->concat($guestLogs)
+            ->sortByDesc('sort_time')
+            ->take($limit)
+            ->map(function (array $log): array {
+                unset($log['sort_time']);
+
+                return $log;
             })
+            ->values()
             ->all();
     }
 

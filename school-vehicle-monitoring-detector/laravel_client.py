@@ -1,3 +1,5 @@
+import json
+
 import requests
 
 from config import API_TIMEOUT_SECONDS
@@ -23,6 +25,45 @@ class LaravelEventClient:
         self.rfid_match_url = str(system_settings.get("rfid_match_url", "")).strip()
         self.api_key = str(system_settings.get("python_api_key", "")).strip()
         self.session = requests.Session()
+
+    def integration_headers(self, include_json=False):
+        """
+        Build headers for Laravel integration calls.
+
+        The local offline setup may run without a configured shared key. Laravel
+        accepts that only for loopback requests, so the Python client should not
+        fail locally before it can ask Laravel for the RFID match.
+        """
+        headers = {
+            "Accept": "application/json",
+            "X-Source-Name": "philcst-dual-camera-detector",
+        }
+
+        if include_json:
+            headers["Content-Type"] = "application/json"
+
+        if self.api_key:
+            headers["X-Api-Key"] = self.api_key
+
+        return headers
+
+    def multipart_payload(self, payload):
+        """
+        Convert Python values into multipart-safe form fields.
+        """
+        data = {}
+
+        for key, value in payload.items():
+            if value is None:
+                continue
+
+            if isinstance(value, (dict, list)):
+                data[key] = json.dumps(value)
+                continue
+
+            data[key] = str(value)
+
+        return data
 
     def submit_event(self, payload):
         """
@@ -54,14 +95,6 @@ class LaravelEventClient:
                 "created": False,
                 "duplicate": False,
                 "message": "Laravel event endpoint is not configured.",
-            }
-
-        if not self.api_key:
-            return {
-                "accepted": False,
-                "created": False,
-                "duplicate": False,
-                "message": "Python API key is missing from Laravel settings.",
             }
 
         if payload.get("external_event_key") or payload.get("camera_role"):
@@ -97,12 +130,7 @@ class LaravelEventClient:
             response = self.session.post(
                 self.event_ingest_url,
                 json=payload,
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "X-Api-Key": self.api_key,
-                    "X-Source-Name": "philcst-dual-camera-detector",
-                },
+                headers=self.integration_headers(include_json=True),
                 timeout=API_TIMEOUT_SECONDS,
             )
         except requests.RequestException as error:
@@ -139,7 +167,7 @@ class LaravelEventClient:
             "requires_capture": bool(body.get("requires_capture", False)),
         }
 
-    def check_rfid_match(self, camera_role, event_time, window_seconds=5):
+    def check_rfid_match(self, camera_role, event_time, window_seconds=5, lookback_seconds=2):
         """
         Poll Laravel for a verified RFID scan at one gate during the detector window.
         """
@@ -149,12 +177,6 @@ class LaravelEventClient:
                 "message": "Laravel RFID match endpoint is not configured.",
             }
 
-        if not self.api_key:
-            return {
-                "matched": False,
-                "message": "Python API key is missing from Laravel settings.",
-            }
-
         try:
             response = self.session.get(
                 self.rfid_match_url,
@@ -162,12 +184,9 @@ class LaravelEventClient:
                     "camera_role": camera_role,
                     "event_time": event_time,
                     "window_seconds": window_seconds,
+                    "lookback_seconds": lookback_seconds,
                 },
-                headers={
-                    "Accept": "application/json",
-                    "X-Api-Key": self.api_key,
-                    "X-Source-Name": "philcst-dual-camera-detector",
-                },
+                headers=self.integration_headers(),
                 timeout=1.0,
             )
         except requests.RequestException as error:
@@ -196,7 +215,7 @@ class LaravelEventClient:
             "body": body,
         }
 
-    def submit_guest_observation(self, payload):
+    def submit_guest_observation(self, payload, image_bytes=None, filename=None):
         """
         Submit an unregistered/guest detector capture after the RFID window expires.
         """
@@ -208,26 +227,28 @@ class LaravelEventClient:
                 "message": "Laravel guest observation endpoint is not configured.",
             }
 
-        if not self.api_key:
-            return {
-                "accepted": False,
-                "created": False,
-                "duplicate": False,
-                "message": "Python API key is missing from Laravel settings.",
-            }
-
         try:
-            response = self.session.post(
-                self.guest_observation_url,
-                json=payload,
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "X-Api-Key": self.api_key,
-                    "X-Source-Name": "philcst-dual-camera-detector",
-                },
-                timeout=API_TIMEOUT_SECONDS,
-            )
+            if image_bytes:
+                response = self.session.post(
+                    self.guest_observation_url,
+                    data=self.multipart_payload(payload),
+                    files={
+                        "snapshot_image": (
+                            filename or "guest_snapshot.jpg",
+                            image_bytes,
+                            "image/jpeg",
+                        ),
+                    },
+                    headers=self.integration_headers(),
+                    timeout=API_TIMEOUT_SECONDS,
+                )
+            else:
+                response = self.session.post(
+                    self.guest_observation_url,
+                    json=payload,
+                    headers=self.integration_headers(include_json=True),
+                    timeout=API_TIMEOUT_SECONDS,
+                )
         except requests.RequestException as error:
             return {
                 "accepted": False,

@@ -16,6 +16,7 @@ use App\Services\RfidService;
 use App\Services\SettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class FutureIntegrationController extends Controller
 {
@@ -32,13 +33,10 @@ class FutureIntegrationController extends Controller
         DetectorRuntimeService $detectorRuntimeService
     ): JsonResponse
     {
-        $configuredKey = trim((string) $settingsService->get('python_api_key', ''));
-        $providedKey = trim((string) $request->header('X-Api-Key', ''));
+        $authorized = $this->authorizeIntegrationRequest($request, $settingsService);
 
-        if ($configuredKey === '' || ! hash_equals($configuredKey, $providedKey)) {
-            return response()->json([
-                'message' => 'API key is missing or invalid.',
-            ], 401);
+        if ($authorized !== null) {
+            return $authorized;
         }
 
         $settings = $settingsService->all();
@@ -68,11 +66,10 @@ class FutureIntegrationController extends Controller
         EventService $eventService
     ): JsonResponse
     {
-        $configuredKey = trim((string) $settingsService->get('python_api_key', ''));
-        $providedKey = trim((string) $request->header('X-Api-Key', ''));
+        $authorized = $this->authorizeIntegrationRequest($request, $settingsService);
         $sourceName = $request->header('X-Source-Name', 'philcst-detector');
 
-        if ($configuredKey === '' || ! hash_equals($configuredKey, $providedKey)) {
+        if ($authorized !== null) {
             EventReceiveLog::query()->create([
                 'source_name' => $sourceName,
                 'payload_json' => $request->all(),
@@ -322,19 +319,35 @@ class FutureIntegrationController extends Controller
             'camera_role' => ['required', 'string', 'in:entrance,exit'],
             'event_time' => ['required', 'date'],
             'window_seconds' => ['nullable', 'numeric', 'min:1', 'max:10'],
+            'lookback_seconds' => ['nullable', 'numeric', 'min:0', 'max:5'],
         ]);
 
         $eventTime = Carbon::parse($validated['event_time']);
         $windowSeconds = (int) ($validated['window_seconds'] ?? 5);
+        $lookbackSeconds = (int) ($validated['lookback_seconds'] ?? 2);
         $rfidScan = $this->findRecentVerifiedRfidScanWithinWindow(
             $validated['camera_role'],
             $eventTime,
-            $windowSeconds
+            $windowSeconds,
+            $lookbackSeconds
         );
 
         return response()->json([
             'matched' => $rfidScan !== null,
+            'message' => $rfidScan
+                ? 'Verified RFID scan found for this detector window.'
+                : 'No verified RFID scan found for this detector window yet.',
             'overlay' => $this->overlayPayload(null, $rfidScan),
+            'vehicle' => $rfidScan?->vehicle ? [
+                'id' => $rfidScan->vehicle->id,
+                'plate_number' => $rfidScan->vehicle->plate_number,
+                'owner_name' => $rfidScan->vehicle->owner_name,
+                'category' => $rfidScan->vehicle->category,
+                'vehicle_type' => $rfidScan->vehicle->vehicle_type,
+                'rfid_tag_uid' => $rfidScan->vehicle->rfidTag?->uid ?? $rfidScan->vehicle->rfid_tag_uid,
+            ] : null,
+            'action_taken' => $rfidScan?->resolved_event_type,
+            'new_state' => $rfidScan?->resulting_state,
             'scan' => $rfidScan ? [
                 'id' => $rfidScan->id,
                 'scan_location' => $rfidScan->scan_location,
@@ -356,7 +369,7 @@ class FutureIntegrationController extends Controller
         if ($authorized !== null) {
             EventReceiveLog::query()->create([
                 'source_name' => $sourceName,
-                'payload_json' => $request->all(),
+                'payload_json' => $request->except(['snapshot_image', 'image']),
                 'status' => 'unauthorized',
                 'notes' => 'API key missing or invalid for detector guest observation.',
             ]);
@@ -364,16 +377,25 @@ class FutureIntegrationController extends Controller
             return $authorized;
         }
 
+        $this->prepareGuestObservationRequest($request);
+
         $validated = $request->validate([
             'external_event_key' => ['required', 'string', 'max:120'],
             'camera_role' => ['required', 'string', 'in:entrance,exit'],
             'camera_id' => ['nullable', 'integer', 'exists:cameras,id'],
             'detected_vehicle_type' => ['nullable', 'string', 'max:50'],
             'event_time' => ['required', 'date'],
-            'vehicle_image_path' => ['required', 'string', 'max:255'],
+            'vehicle_image_path' => ['nullable', 'string', 'max:255'],
+            'snapshot_image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
             'plate_number' => ['nullable', 'string', 'max:50'],
             'detection_metadata' => ['nullable', 'array'],
         ]);
+
+        if (! $request->hasFile('snapshot_image') && blank($validated['vehicle_image_path'] ?? null)) {
+            throw ValidationException::withMessages([
+                'snapshot_image' => 'A JPEG snapshot upload or existing vehicle image path is required.',
+            ]);
+        }
 
         $existing = GuestVehicleObservation::query()
             ->where('external_event_key', $validated['external_event_key'])
@@ -390,6 +412,15 @@ class FutureIntegrationController extends Controller
 
         $cameraId = $validated['camera_id']
             ?? Camera::query()->forRole($validated['camera_role'])->value('id');
+        $snapshotPath = $request->hasFile('snapshot_image')
+            ? $request->file('snapshot_image')->store('guest_snapshots', 'public')
+            : ($validated['vehicle_image_path'] ?? null);
+
+        if (! $snapshotPath) {
+            throw ValidationException::withMessages([
+                'snapshot_image' => 'The guest snapshot could not be stored.',
+            ]);
+        }
 
         $observation = GuestVehicleObservation::query()->create([
             'plate_text' => $validated['plate_number'] ?? null,
@@ -402,14 +433,14 @@ class FutureIntegrationController extends Controller
             'camera_id' => $cameraId,
             'external_event_key' => $validated['external_event_key'],
             'detection_metadata_json' => $validated['detection_metadata'] ?? null,
-            'snapshot_path' => $validated['vehicle_image_path'],
+            'snapshot_path' => $snapshotPath,
             'notes' => 'No successful RFID scan was recorded within the 5-second detector window.',
             'created_by' => null,
         ]);
 
         EventReceiveLog::query()->create([
             'source_name' => $sourceName,
-            'payload_json' => $request->all(),
+            'payload_json' => $this->safeGuestObservationLogPayload($request, $snapshotPath),
             'status' => 'guest_observation_created',
             'notes' => "Guest observation created with ID: {$observation->id}",
         ]);
@@ -431,11 +462,9 @@ class FutureIntegrationController extends Controller
         SettingsService $settingsService,
         RfidService $rfidService
     ): JsonResponse {
-        $configuredKey = trim((string) $settingsService->get('python_api_key', ''));
-        $providedKey = trim((string) $request->header('X-Api-Key', ''));
         $sourceName = $request->header('X-Source-Name', 'philcst-rfid-adapter');
 
-        if ($configuredKey === '' || ! hash_equals($configuredKey, $providedKey)) {
+        if ($this->authorizeIntegrationRequest($request, $settingsService) !== null) {
             EventReceiveLog::query()->create([
                 'source_name' => $sourceName,
                 'payload_json' => $request->all(),
@@ -522,6 +551,47 @@ class FutureIntegrationController extends Controller
         ];
     }
 
+    protected function prepareGuestObservationRequest(Request $request): void
+    {
+        if (! $request->hasFile('snapshot_image') && $request->hasFile('image')) {
+            $request->files->set('snapshot_image', $request->file('image'));
+        }
+
+        if ($request->input('camera_id') === '') {
+            $request->request->remove('camera_id');
+        }
+
+        $metadata = $request->input('detection_metadata');
+
+        if (is_string($metadata) && filled($metadata)) {
+            $decoded = json_decode($metadata, true);
+
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $request->merge(['detection_metadata' => $decoded]);
+            }
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function safeGuestObservationLogPayload(Request $request, ?string $snapshotPath = null): array
+    {
+        $payload = $request->except(['snapshot_image', 'image']);
+
+        if ($request->hasFile('snapshot_image')) {
+            $file = $request->file('snapshot_image');
+            $payload['snapshot_image'] = [
+                'original_name' => $file?->getClientOriginalName(),
+                'mime_type' => $file?->getClientMimeType(),
+                'size' => $file?->getSize(),
+                'stored_path' => $snapshotPath,
+            ];
+        }
+
+        return $payload;
+    }
+
     protected function resolveRecentVerifiedRfidScan(string $cameraRole, Carbon $eventTime): ?RfidScanLog
     {
         $deadline = microtime(true) + (app()->runningUnitTests() ? 0 : self::RFID_OVERLAY_LOOKAHEAD_SECONDS);
@@ -543,6 +613,7 @@ class FutureIntegrationController extends Controller
 
     protected function findRecentVerifiedRfidScan(string $cameraRole, Carbon $eventTime): ?RfidScanLog
     {
+        $eventTime = $this->normalizeDetectorEventTime($eventTime);
         $from = $eventTime->copy()->subSeconds(12);
         $to = $eventTime->copy()->addSeconds(12);
 
@@ -558,18 +629,26 @@ class FutureIntegrationController extends Controller
     protected function findRecentVerifiedRfidScanWithinWindow(
         string $cameraRole,
         Carbon $eventTime,
-        int $windowSeconds = 5
+        int $windowSeconds = 5,
+        int $lookbackSeconds = 2
     ): ?RfidScanLog {
+        $eventTime = $this->normalizeDetectorEventTime($eventTime);
         $windowEnd = $eventTime->copy()->addSeconds($windowSeconds);
         $to = now()->lessThan($windowEnd) ? now() : $windowEnd;
+        $from = $eventTime->copy()->subSeconds($lookbackSeconds);
 
         return RfidScanLog::query()
             ->with('vehicle.rfidTag')
             ->where('verification_status', 'verified')
             ->where('scan_location', $cameraRole)
-            ->whereBetween('scan_time', [$eventTime->copy()->subSecond(), $to])
+            ->whereBetween('scan_time', [$from, $to])
             ->latest('scan_time')
             ->first();
+    }
+
+    protected function normalizeDetectorEventTime(Carbon $eventTime): Carbon
+    {
+        return $eventTime->copy()->setTimezone(config('app.timezone', 'UTC'));
     }
 
     protected function authorizeIntegrationRequest(Request $request, SettingsService $settingsService): ?JsonResponse
@@ -581,9 +660,24 @@ class FutureIntegrationController extends Controller
             return null;
         }
 
+        if ($configuredKey === ''
+            && $settingsService->get('deployment_mode', 'offline_local') === 'offline_local'
+            && $this->isLoopbackRequest($request)) {
+            return null;
+        }
+
         return response()->json([
             'message' => 'API key is missing or invalid.',
         ], 401);
+    }
+
+    protected function isLoopbackRequest(Request $request): bool
+    {
+        $ip = (string) ($request->ip() ?: $request->server('REMOTE_ADDR', ''));
+
+        return $ip === '::1'
+            || $ip === 'localhost'
+            || str_starts_with($ip, '127.');
     }
 
     /**

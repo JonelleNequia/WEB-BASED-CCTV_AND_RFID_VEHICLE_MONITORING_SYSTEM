@@ -5,9 +5,12 @@ namespace Tests\Feature;
 use App\Models\VehicleEvent;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidTag;
+use App\Models\SystemSetting;
 use App\Services\RfidService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class DetectedEventIngestionTest extends TestCase
@@ -182,6 +185,73 @@ class DetectedEventIngestionTest extends TestCase
             ->assertJsonPath('overlay.vehicle.plate_number', $tag->vehicle->plate_number);
     }
 
+    public function test_local_detector_can_poll_rfid_match_without_key_and_with_detector_timezone(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        SystemSetting::query()->updateOrCreate(
+            ['setting_key' => 'python_api_key'],
+            ['setting_value' => '']
+        );
+
+        $tag = RfidTag::query()->assigned()->with('vehicle')->firstOrFail();
+        $scanTime = now();
+
+        app(RfidService::class)->ingest([
+            'tag_uid' => $tag->uid,
+            'scan_location' => 'entrance',
+            'scan_time' => $scanTime->toIso8601String(),
+        ], 'station_reader');
+
+        $detectorEventTime = $scanTime
+            ->copy()
+            ->subSecond()
+            ->setTimezone('Asia/Manila')
+            ->toIso8601String();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])
+            ->withHeaders(['X-Source-Name' => 'phpunit-local-detector'])
+            ->getJson(route('api.integration.rfid-match', [
+                'camera_role' => 'entrance',
+                'event_time' => $detectorEventTime,
+                'window_seconds' => 5,
+            ]))
+            ->assertOk()
+            ->assertJsonPath('matched', true)
+            ->assertJsonPath('overlay.verification', 'registered')
+            ->assertJsonPath('overlay.vehicle.plate_number', $tag->vehicle->plate_number);
+    }
+
+    public function test_rfid_match_endpoint_allows_realtime_detector_polling_burst(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $tag = RfidTag::query()->assigned()->with('vehicle')->firstOrFail();
+        $scanTime = now();
+
+        app(RfidService::class)->ingest([
+            'tag_uid' => $tag->uid,
+            'scan_location' => 'entrance',
+            'scan_time' => $scanTime->toIso8601String(),
+        ], 'station_reader');
+
+        $headers = [
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ];
+
+        for ($attempt = 0; $attempt < 75; $attempt++) {
+            $this->withHeaders($headers)
+                ->getJson(route('api.integration.rfid-match', [
+                    'camera_role' => 'entrance',
+                    'event_time' => $scanTime->copy()->subSecond()->toIso8601String(),
+                    'window_seconds' => 5,
+                ]))
+                ->assertOk()
+                ->assertJsonPath('matched', true);
+        }
+    }
+
     public function test_detector_guest_observation_endpoint_creates_pending_review_record(): void
     {
         $this->seed(DatabaseSeeder::class);
@@ -211,5 +281,37 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertSame('pending_review', $observation->status);
         $this->assertSame('entrance', $observation->location);
         $this->assertSame('cctv', $observation->observation_source);
+    }
+
+    public function test_detector_guest_observation_accepts_multipart_snapshot_upload(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $this->withHeaders([
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ])->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-timeout-upload-001',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => now()->toIso8601String(),
+            'snapshot_image' => UploadedFile::fake()->image('guest-upload.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 55,
+                'rfid_window_seconds' => 5,
+            ]),
+        ])
+            ->assertCreated()
+            ->assertJsonPath('status', 'pending_review')
+            ->assertJsonPath('overlay.verification', 'guest');
+
+        $observation = GuestVehicleObservation::query()
+            ->where('external_event_key', 'guest-window-timeout-upload-001')
+            ->firstOrFail();
+
+        $this->assertStringStartsWith('guest_snapshots/', $observation->snapshot_path);
+        $this->assertSame(55, $observation->detection_metadata_json['track_id']);
+        Storage::disk('public')->assertExists($observation->snapshot_path);
     }
 }
