@@ -1,7 +1,7 @@
 {
   "service_running": true,
   "service_message": "Dual-camera detector running.",
-  "updated_at": "2026-05-02T12:50:38.745258+08:00",
+  "updated_at": "2026-05-02T12:53:36.817635+08:00",
   "detector_model_path": "yolov8n.pt",
   "stream_server": {
     "host": "127.0.0.1",
@@ -23,10 +23,10 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-05-02T12:50:38.737216+08:00",
+      "last_capture_time": "2026-05-02T12:53:36.810594+08:00",
       "last_error": "",
       "retry_count": 0,
-      "processed_frames": 147,
+      "processed_frames": 1565,
       "detections_seen": 0,
       "active_detections": 0,
       "crossings_logged": 0
