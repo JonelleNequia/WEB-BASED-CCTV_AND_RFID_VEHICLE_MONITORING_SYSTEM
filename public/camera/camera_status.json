@@ -1,7 +1,7 @@
 {
   "service_running": true,
   "service_message": "Dual-camera detector running.",
-  "updated_at": "2026-05-02T12:53:36.817635+08:00",
+  "updated_at": "2026-05-03T09:17:49.445037+08:00",
   "detector_model_path": "yolov8n.pt",
   "stream_server": {
     "host": "127.0.0.1",
@@ -11,8 +11,8 @@
     "entrance": {
       "camera_role": "entrance",
       "camera_name": "PHILCST Entrance Camera",
-      "camera_running": true,
-      "detection_ready": true,
+      "camera_running": false,
+      "detection_ready": false,
       "calibration_ready": true,
       "source_type": "webcam",
       "source_value": 0,
@@ -23,11 +23,11 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-05-02T12:53:36.810594+08:00",
-      "last_error": "",
-      "retry_count": 0,
-      "processed_frames": 1565,
-      "detections_seen": 0,
+      "last_capture_time": "2026-05-03T09:17:43.188858+08:00",
+      "last_error": "Could not open camera source: 0",
+      "retry_count": 1,
+      "processed_frames": 32414,
+      "detections_seen": 8,
       "active_detections": 0,
       "crossings_logged": 0
     },
@@ -36,7 +36,7 @@
       "camera_name": "PHILCST Exit Camera",
       "camera_running": false,
       "detection_ready": false,
-      "calibration_ready": false,
+      "calibration_ready": true,
       "source_type": "webcam",
       "source_value": 1,
       "stream_url": "http://127.0.0.1:8765/stream/exit",
