@@ -6,6 +6,32 @@
 
 @section('content')
     @php($simulationEnabled = ($settings['rfid_simulation_mode'] ?? 'enabled') === 'enabled')
+    @php($registeredTagOptions = $registeredTags->map(function ($tag) {
+        $owner = $tag->vehicle?->vehicle_owner_name ?: $tag->vehicle?->owner_name ?: 'No owner linked';
+        $plate = $tag->vehicle?->plate_number ?: 'No plate';
+        $category = $tag->vehicle?->category
+            ? str($tag->vehicle->category)->replace('_', ' ')->title()->value()
+            : 'No category';
+        $uidLabel = $tag->uid.' - '.$owner;
+        $plateLabel = $plate.' - '.$category;
+
+        return [
+            'id' => $tag->id,
+            'uid' => $tag->uid,
+            'owner' => $owner,
+            'plate' => $plate,
+            'category' => $category,
+            'uid_label' => $uidLabel,
+            'plate_label' => $plateLabel,
+            'label' => $uidLabel,
+            'description' => $plateLabel,
+            'uid_search' => strtolower($tag->uid.' '.$owner),
+            'plate_search' => strtolower($plate.' '.$category),
+            'search' => strtolower($tag->uid.' '.$owner.' '.$plate.' '.$category.' '.($tag->vehicle?->vehicle_type ?: '')),
+        ];
+    })->values())
+    @php($selectedRegisteredTagId = (string) old('vehicle_rfid_tag_id', ''))
+    @php($selectedRegisteredTag = $registeredTagOptions->first(fn ($option) => (string) $option['id'] === $selectedRegisteredTagId))
 
     <section class="hero-panel hero-panel-compact">
         <div class="hero-panel-copy">
@@ -92,14 +118,19 @@
                 <div class="form-grid">
                     <div class="field span-full">
                         <label for="vehicle_rfid_tag_id">Registered Tag</label>
-                        <select id="vehicle_rfid_tag_id" name="vehicle_rfid_tag_id">
-                            <option value="">Select a registered tag</option>
-                            @foreach ($registeredTags as $tag)
-                                <option value="{{ $tag->id }}" @selected((string) old('vehicle_rfid_tag_id') === (string) $tag->id)>
-                                    {{ $tag->tag_uid }} | {{ $tag->vehicle?->plate_number ?? 'No vehicle linked' }}
-                                </option>
-                            @endforeach
-                        </select>
+                        <input id="vehicle_rfid_tag_id" type="hidden" name="vehicle_rfid_tag_id" value="{{ $selectedRegisteredTagId }}" data-rfid-combobox-value>
+                        <div class="combobox" data-rfid-combobox>
+                            <input
+                                id="registered_tag_search"
+                                type="search"
+                                value="{{ $selectedRegisteredTag['label'] ?? '' }}"
+                                autocomplete="off"
+                                placeholder="Type owner name, plate number, or RFID UID"
+                                data-rfid-combobox-input
+                            >
+                            <button type="button" class="combobox-clear" data-rfid-combobox-clear aria-label="Clear selected RFID tag">Clear</button>
+                            <div class="combobox-menu" data-rfid-combobox-list hidden></div>
+                        </div>
                     </div>
 
                     <div class="field span-full">
@@ -155,7 +186,6 @@
                 </div>
             </div>
 
-            @php($latestScan = $scanLogs->first())
             @if ($latestScan)
                 <div class="result-card result-card-{{ $latestScan->verification_status === 'verified' ? 'success' : 'warning' }}">
                     <div class="result-card-head">
@@ -164,7 +194,7 @@
                     </div>
                     <div class="detail-list">
                         <div><span>Tag UID</span><strong>{{ $latestScan->tag_uid }}</strong></div>
-                        <div><span>Vehicle</span><strong>{{ $latestScan->vehicle?->plate_number ?? 'Unknown vehicle' }}</strong></div>
+                        <div><span>Vehicle</span><strong>{{ $latestScan->vehicle?->plate_number ?? 'GUEST' }}</strong></div>
                         <div><span>Category</span><strong>{{ $latestScan->vehicle?->category ? ucfirst(str_replace('_', ' ', $latestScan->vehicle->category)) : 'N/A' }}</strong></div>
                         <div><span>Event Type</span><strong>{{ $latestScan->resolvedEventTypeLabel }}</strong></div>
                         <div><span>Current State</span><strong>{{ $latestScan->resultingStateLabel }}</strong></div>
@@ -205,6 +235,44 @@
             </div>
         </div>
 
+        <form method="GET" action="{{ route('rfid-scans.index') }}" class="form-grid filter-grid">
+            <div class="field span-2">
+                <label for="history_q">Search RFID Scan History</label>
+                <div class="search-input-shell">
+                    <span class="search-input-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M10.5 4a6.5 6.5 0 0 1 5.1 10.5l4 4a1 1 0 0 1-1.4 1.4l-4-4A6.5 6.5 0 1 1 10.5 4m0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9"/></svg>
+                    </span>
+                    <input id="history_q" type="search" name="history_q" value="{{ $filters['history_q'] ?? '' }}" placeholder="Owner name, plate number, or RFID UID">
+                </div>
+            </div>
+
+            <div class="field">
+                <label for="history_scan_location">Station</label>
+                <select id="history_scan_location" name="scan_location">
+                    <option value="">All</option>
+                    <option value="entrance" @selected(($filters['scan_location'] ?? '') === 'entrance')>Entrance</option>
+                    <option value="exit" @selected(($filters['scan_location'] ?? '') === 'exit')>Exit</option>
+                </select>
+            </div>
+
+            <div class="field">
+                <label for="verification_status">Result</label>
+                <select id="verification_status" name="verification_status">
+                    <option value="">All</option>
+                    @foreach (['verified' => 'Verified', 'guest' => 'Guest', 'inactive_tag' => 'Inactive Tag', 'unassigned_tag' => 'Unassigned Tag', 'inactive_vehicle' => 'Inactive Vehicle', 'non_recurring_category' => 'Manual Review'] as $value => $label)
+                        <option value="{{ $value }}" @selected(($filters['verification_status'] ?? '') === $value)>{{ $label }}</option>
+                    @endforeach
+                </select>
+            </div>
+
+            <div class="field field-actions">
+                <div class="button-row">
+                    <button type="submit" class="button button-secondary">Filter History</button>
+                    <a href="{{ route('rfid-scans.index') }}" class="button button-secondary">Reset History</a>
+                </div>
+            </div>
+        </form>
+
         <div class="table-responsive">
             <table>
                 <thead>
@@ -226,8 +294,8 @@
                             <td>{{ $scan->scan_time->format('M d, Y h:i A') }}</td>
                             <td><strong>{{ $scan->tag_uid }}</strong></td>
                             <td>
-                                <strong>{{ $scan->vehicle?->plate_number ?? 'Unknown vehicle' }}</strong>
-                                <div class="table-subtext">{{ $scan->vehicle?->vehicle_type ?: 'No registered vehicle linked' }}</div>
+                                <strong>{{ $scan->vehicle?->plate_number ?? 'GUEST' }}</strong>
+                                <div class="table-subtext">{{ $scan->vehicle?->vehicle_type ?: 'Guest record' }}</div>
                                 @if ($scan->guestVehicleObservation)
                                     <div class="table-subtext">Guest observation #{{ $scan->guestVehicleObservation->id }}</div>
                                 @endif
@@ -245,7 +313,7 @@
                             <td>
                                 @if ($scan->correlatedVehicleEvent)
                                     <strong>#{{ $scan->correlatedVehicleEvent->id }}</strong>
-                                    <div class="table-subtext">{{ $scan->correlatedVehicleEvent->event_type }} • {{ $scan->correlatedVehicleEvent->plate_text ?: 'Incomplete record' }}</div>
+                                    <div class="table-subtext">{{ $scan->correlatedVehicleEvent->event_type }} • {{ $scan->correlatedVehicleEvent->plate_text ?: $scan->vehicle?->plate_number ?: 'GUEST' }}</div>
                                 @else
                                     <span class="table-subtext">No linked vehicle log</span>
                                 @endif
@@ -259,7 +327,11 @@
                 </tbody>
             </table>
         </div>
+
+        @include('layouts.partials.pagination', ['paginator' => $scanLogs])
     </section>
+
+    <script id="registered-rfid-tag-options" type="application/json">{!! json_encode($registeredTagOptions, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 @endsection
 
 @push('scripts')
@@ -267,9 +339,15 @@
         document.addEventListener('DOMContentLoaded', () => {
             const form = document.querySelector('[data-rfid-scan-form]');
             const resultBox = document.querySelector('[data-rfid-scan-result]');
-            const registeredTagSelect = document.getElementById('vehicle_rfid_tag_id');
+            const registeredTagValue = document.querySelector('[data-rfid-combobox-value]');
+            const combobox = document.querySelector('[data-rfid-combobox]');
+            const comboboxInput = document.querySelector('[data-rfid-combobox-input]');
+            const comboboxList = document.querySelector('[data-rfid-combobox-list]');
+            const comboboxClear = document.querySelector('[data-rfid-combobox-clear]');
             const manualTagInput = document.getElementById('tag_uid');
             const scanTimeInput = document.getElementById('scan_time');
+            const optionNode = document.getElementById('registered-rfid-tag-options');
+            const registeredTagOptions = optionNode ? JSON.parse(optionNode.textContent || '[]') : [];
 
             if (!form || !resultBox) {
                 return;
@@ -283,14 +361,17 @@
             };
 
             const focusScannerInput = () => {
-                if (!manualTagInput || registeredTagSelect?.value) {
+                if (!manualTagInput || registeredTagValue?.value) {
                     return;
                 }
 
                 const activeElement = document.activeElement;
                 const activeTag = activeElement?.tagName;
 
-                if (['SELECT', 'TEXTAREA', 'BUTTON'].includes(activeTag) || activeElement?.type === 'datetime-local') {
+                if (
+                    activeElement !== manualTagInput
+                    && (['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(activeTag) || activeElement?.type === 'datetime-local')
+                ) {
                     return;
                 }
 
@@ -300,16 +381,134 @@
             window.setTimeout(focusScannerInput, 100);
             window.addEventListener('focus', focusScannerInput);
 
-            if (registeredTagSelect && manualTagInput) {
-                registeredTagSelect.addEventListener('change', () => {
-                    if (registeredTagSelect.value) {
-                        manualTagInput.value = '';
+            const normalizedTerm = (term = '') => term.trim().toLowerCase();
+
+            const optionDisplayLabel = (option, term = '') => {
+                const searchTerm = normalizedTerm(term);
+
+                if (searchTerm && option.plate_search?.includes(searchTerm) && !option.uid_search?.includes(searchTerm)) {
+                    return option.plate_label || option.label;
+                }
+
+                return option.uid_label || option.label;
+            };
+
+            const optionMetaLabel = (option, term = '') => {
+                const label = optionDisplayLabel(option, term);
+
+                return label === option.plate_label
+                    ? option.uid_label || option.label
+                    : option.plate_label || option.description;
+            };
+
+            const renderComboboxOptions = (term = '') => {
+                if (!comboboxList) {
+                    return;
+                }
+
+                const searchTerm = normalizedTerm(term);
+                const results = registeredTagOptions
+                    .filter((option) => !searchTerm || option.search.includes(searchTerm))
+                    .slice(0, 12);
+
+                comboboxList.innerHTML = '';
+
+                if (results.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'combobox-empty';
+                    empty.textContent = 'No registered tag matched.';
+                    comboboxList.appendChild(empty);
+                    comboboxList.hidden = false;
+                    return;
+                }
+
+                results.forEach((option) => {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'combobox-option';
+                    button.dataset.optionId = option.id;
+                    const displayLabel = optionDisplayLabel(option, term);
+                    const label = document.createElement('strong');
+                    const meta = document.createElement('span');
+                    label.textContent = displayLabel;
+                    meta.textContent = optionMetaLabel(option, term);
+                    button.append(label, meta);
+                    button.addEventListener('click', () => selectComboboxOption(option, displayLabel));
+                    comboboxList.appendChild(button);
+                });
+
+                comboboxList.hidden = false;
+            };
+
+            const closeCombobox = () => {
+                if (comboboxList) {
+                    comboboxList.hidden = true;
+                }
+            };
+
+            const selectComboboxOption = (option, displayLabel = null) => {
+                if (!registeredTagValue || !comboboxInput) {
+                    return;
+                }
+
+                registeredTagValue.value = option.id;
+                comboboxInput.value = displayLabel || option.uid_label || option.label;
+                if (manualTagInput) {
+                    manualTagInput.value = '';
+                }
+                closeCombobox();
+            };
+
+            if (comboboxInput && registeredTagValue) {
+                comboboxInput.addEventListener('focus', () => renderComboboxOptions(comboboxInput.value));
+                comboboxInput.addEventListener('input', () => {
+                    registeredTagValue.value = '';
+                    renderComboboxOptions(comboboxInput.value);
+                });
+
+                comboboxInput.addEventListener('keydown', (event) => {
+                    if (event.key === 'Escape') {
+                        closeCombobox();
+                        return;
+                    }
+
+                    if (event.key !== 'Enter') {
+                        return;
+                    }
+
+                    const firstOption = comboboxList?.querySelector('[data-option-id]');
+                    if (!firstOption) {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    const option = registeredTagOptions.find((item) => String(item.id) === String(firstOption.dataset.optionId));
+                    if (option) {
+                        selectComboboxOption(option, firstOption.querySelector('strong')?.textContent || null);
                     }
                 });
 
+                comboboxClear?.addEventListener('click', () => {
+                    registeredTagValue.value = '';
+                    comboboxInput.value = '';
+                    renderComboboxOptions('');
+                    manualTagInput?.focus();
+                });
+
+                document.addEventListener('click', (event) => {
+                    if (!combobox?.contains(event.target)) {
+                        closeCombobox();
+                    }
+                });
+            }
+
+            if (registeredTagValue && manualTagInput) {
                 manualTagInput.addEventListener('input', () => {
                     if (manualTagInput.value.trim() !== '') {
-                        registeredTagSelect.value = '';
+                        registeredTagValue.value = '';
+                        if (comboboxInput) {
+                            comboboxInput.value = '';
+                        }
                     }
                 });
 
@@ -319,7 +518,10 @@
                     }
 
                     event.preventDefault();
-                    registeredTagSelect.value = '';
+                    registeredTagValue.value = '';
+                    if (comboboxInput) {
+                        comboboxInput.value = '';
+                    }
                     form.requestSubmit();
                 });
             }
@@ -330,7 +532,7 @@
                 resultBox.textContent = 'Recording RFID scan...';
 
                 try {
-                    if (!registeredTagSelect?.value && manualTagInput?.value.trim() === '') {
+                    if (!registeredTagValue?.value && manualTagInput?.value.trim() === '') {
                         resultBox.textContent = 'Scan or select an RFID tag first.';
                         focusScannerInput();
                         return;

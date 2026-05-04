@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'System Status | PHILCST Parking Monitoring')
+@section('title', 'System Status | PHILCST Vehicle Monitoring')
 @section('page-title', 'System Status')
 @section('page-description', 'Admin view for camera service health and integration activity.')
 

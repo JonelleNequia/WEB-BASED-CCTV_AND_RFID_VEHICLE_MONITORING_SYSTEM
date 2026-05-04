@@ -181,6 +181,49 @@
         };
     }
 
+    function rectToPolygon(rect) {
+        if (!rect) {
+            return null;
+        }
+
+        return [
+            { x: rect.x, y: rect.y },
+            { x: rect.x + rect.width, y: rect.y },
+            { x: rect.x + rect.width, y: rect.y + rect.height },
+            { x: rect.x, y: rect.y + rect.height },
+        ];
+    }
+
+    function normalisePolygon(points, width, height) {
+        if (!Array.isArray(points) || points.length < 3 || width <= 0 || height <= 0) {
+            return null;
+        }
+
+        return points.map(function (point) {
+            return {
+                x: clampRatio(point.x / width),
+                y: clampRatio(point.y / height),
+            };
+        });
+    }
+
+    function denormalisePolygon(points, width, height) {
+        if (Array.isArray(points)) {
+            return points.map(function (point) {
+                return {
+                    x: point.x * width,
+                    y: point.y * height,
+                };
+            });
+        }
+
+        if (points && typeof points === 'object' && 'width' in points && 'height' in points) {
+            return rectToPolygon(denormaliseRect(points, width, height));
+        }
+
+        return null;
+    }
+
     function normaliseLine(line, width, height) {
         if (!line || width <= 0 || height <= 0) {
             return null;
@@ -247,10 +290,12 @@
         attachDevice: attachDevice,
         chooseDevices: chooseDevices,
         denormaliseLine: denormaliseLine,
+        denormalisePolygon: denormalisePolygon,
         denormaliseRect: denormaliseRect,
         listVideoInputs: listVideoInputs,
         mediaErrorState: mediaErrorState,
         normaliseLine: normaliseLine,
+        normalisePolygon: normalisePolygon,
         normaliseRect: normaliseRect,
         putJson: putJson,
         stopVideo: stopVideo,

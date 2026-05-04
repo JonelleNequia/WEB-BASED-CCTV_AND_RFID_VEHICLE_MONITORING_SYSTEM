@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\SaveCalibrationRequest;
 use App\Services\CalibrationService;
+use App\Services\DetectorRuntimeService;
 use App\Services\SettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -17,12 +18,22 @@ class CalibrationController extends Controller
      */
     public function index(
         CalibrationService $calibrationService,
+        DetectorRuntimeService $detectorRuntimeService,
         SettingsService $settingsService
     ): View {
         $settingsService->ensureCameraRuntimeConfigExists();
+        $detectorStatus = $detectorRuntimeService->ensureRunning();
+        $cameras = $calibrationService->cameraPayload();
+
+        foreach (['entrance', 'exit'] as $role) {
+            $cameras[$role]['stream_url'] = $detectorStatus['cameras'][$role]['stream_url']
+                ?? "http://127.0.0.1:8765/stream/{$role}";
+            $cameras[$role]['detector_status'] = $detectorStatus['cameras'][$role] ?? [];
+        }
 
         return view('calibration.index', [
-            'cameras' => $calibrationService->cameraPayload(),
+            'cameras' => $cameras,
+            'detectorStatus' => $detectorStatus,
         ]);
     }
 

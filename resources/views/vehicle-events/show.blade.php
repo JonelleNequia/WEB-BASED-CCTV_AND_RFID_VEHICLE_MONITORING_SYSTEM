@@ -13,7 +13,7 @@
 
         <div class="hero-panel-actions">
             <span class="badge badge-{{ $vehicleEvent->status_badge_class }}">
-                {{ $vehicleEvent->display_status === 'pending_details' ? 'Incomplete Record' : str_replace('_', ' ', ucfirst($vehicleEvent->display_status)) }}
+                {{ str_replace('_', ' ', ucfirst($vehicleEvent->display_status)) }}
             </span>
             <a href="{{ route('vehicle-events.index') }}" class="button button-secondary">Back to Logs</a>
         </div>
@@ -35,9 +35,9 @@
 
             <div class="detail-list">
                 <div><span>Log Type</span><strong>{{ $vehicleEvent->event_type }}</strong></div>
-                <div><span>Status</span><strong>{{ $vehicleEvent->display_status === 'pending_details' ? 'Incomplete Record' : str_replace('_', ' ', ucfirst($vehicleEvent->display_status)) }}</strong></div>
+                <div><span>Status</span><strong>{{ str_replace('_', ' ', ucfirst($vehicleEvent->display_status)) }}</strong></div>
                 <div><span>Source</span><strong>{{ $vehicleEvent->event_origin_label }}</strong></div>
-                <div><span>Plate</span><strong>{{ $vehicleEvent->plate_text ?: 'Incomplete record' }}</strong></div>
+                <div><span>Plate</span><strong>{{ $vehicleEvent->plate_text ?: $vehicleEvent->vehicle?->plate_number ?: 'UNREGISTERED / GUEST' }}</strong></div>
                 <div><span>Vehicle</span><strong>{{ $vehicleEvent->vehicle_color ?: 'Pending color' }} {{ $vehicleEvent->display_vehicle_type }}</strong></div>
                 <div><span>Category</span><strong>{{ $vehicleEvent->vehicle_category ? ucfirst(str_replace('_', ' ', $vehicleEvent->vehicle_category)) : 'N/A' }}</strong></div>
                 <div><span>Station / Camera</span><strong>{{ $vehicleEvent->camera?->camera_name ?? 'No camera linked' }}</strong></div>
@@ -174,10 +174,10 @@
             <div class="panel-header">
                 <div>
                     <div class="panel-title-row">
-                        <h3>Complete Incomplete Record</h3>
+                        <h3>Complete Camera Record</h3>
                         @include('layouts.partials.help', [
                             'label' => 'Explain complete record form',
-                            'text' => 'Use this form to finish incomplete camera-supported records. ENTRY records open sessions and EXIT records run the matching workflow after save.',
+                            'text' => 'Use this form only for legacy camera-supported records that still need manual details.',
                         ])
                     </div>
                 </div>
@@ -255,7 +255,7 @@
         @else
             <div class="empty-state">
                 <h4>No entry match linked</h4>
-                <p>{{ $vehicleEvent->event_status === 'pending_details' ? 'Matching begins after this record is completed.' : 'This log does not currently point to an entry record.' }}</p>
+                <p>This log does not currently point to an entry record.</p>
             </div>
         @endif
     </section>

@@ -26,8 +26,8 @@ class VehicleRegistryService
                 'rfid_tag_uid' => $tag->uid,
                 'plate_number' => $this->normalizePlate((string) $data['plate_number']),
                 'vehicle_owner_name' => $data['vehicle_owner_name'] ?: null,
-                'category' => $data['category'] ?? 'faculty_staff',
-                'vehicle_type' => $data['vehicle_type'],
+                'category' => $this->normalizeCategory((string) ($data['category'] ?? 'faculty_staff')),
+                'vehicle_type' => $this->normalizeVehicleType((string) $data['vehicle_type']),
             ]);
 
             $this->assignTagToVehicle($tag, $vehicle);
@@ -51,8 +51,8 @@ class VehicleRegistryService
                 'rfid_tag_uid' => $tag->uid,
                 'plate_number' => $this->normalizePlate((string) $data['plate_number']),
                 'vehicle_owner_name' => $data['vehicle_owner_name'] ?: null,
-                'category' => $data['category'] ?? 'faculty_staff',
-                'vehicle_type' => $data['vehicle_type'],
+                'category' => $this->normalizeCategory((string) ($data['category'] ?? 'faculty_staff')),
+                'vehicle_type' => $this->normalizeVehicleType((string) $data['vehicle_type']),
             ])->save();
 
             $this->assignTagToVehicle($tag, $vehicle);
@@ -84,11 +84,24 @@ class VehicleRegistryService
      *
      * @return Collection<int, RfidTag>
      */
-    public function registeredTags(): Collection
+    public function registeredTags(?string $search = null): Collection
     {
         return RfidTag::query()
             ->with('vehicle')
             ->assigned()
+            ->when(filled($search), function ($query) use ($search): void {
+                $term = '%'.trim((string) $search).'%';
+
+                $query->where(function ($query) use ($term): void {
+                    $query->where('uid', 'like', $term)
+                        ->orWhere('tag_uid', 'like', $term)
+                        ->orWhereHas('vehicle', function ($vehicleQuery) use ($term): void {
+                            $vehicleQuery->where('plate_number', 'like', $term)
+                                ->orWhere('vehicle_owner_name', 'like', $term)
+                                ->orWhere('owner_name', 'like', $term);
+                        });
+                });
+            })
             ->orderBy('uid')
             ->get();
     }
@@ -127,11 +140,11 @@ class VehicleRegistryService
      */
     public function vehicleTypes(): array
     {
-        return ['Car', 'Motorcycle', 'Bus'];
+        return ['Car', 'Motorcycle', 'Truck', 'Bus'];
     }
 
     /**
-     * Shared vehicle categories for the parking-focused RFID workflow.
+     * Shared vehicle categories for the vehicle-focused RFID workflow.
      *
      * @return list<string>
      */
@@ -168,6 +181,20 @@ class VehicleRegistryService
         return RfidTag::normalizeUid($tagUid);
     }
 
+    public function normalizeCategory(string $category): string
+    {
+        $category = trim($category);
+
+        return $category !== '' ? $category : 'faculty_staff';
+    }
+
+    public function normalizeVehicleType(string $vehicleType): string
+    {
+        $vehicleType = trim($vehicleType);
+
+        return $vehicleType !== '' ? Str::title($vehicleType) : 'Car';
+    }
+
     /**
      * Get available tags plus this vehicle's current tag for edit screens.
      *
@@ -177,9 +204,19 @@ class VehicleRegistryService
     {
         return RfidTag::query()
             ->with('vehicle')
-            ->where('status', RfidTag::STATUS_AVAILABLE)
-            ->when($vehicle?->rfid_tag_id, function ($query) use ($vehicle): void {
-                $query->orWhereKey($vehicle->rfid_tag_id);
+            ->where(function ($query) use ($vehicle): void {
+                $query->where('status', RfidTag::STATUS_AVAILABLE);
+
+                if ($vehicle?->rfid_tag_id) {
+                    $query->orWhereKey($vehicle->rfid_tag_id);
+                }
+
+                if ($vehicle?->id) {
+                    $query->orWhere(function ($query) use ($vehicle): void {
+                        $query->where('vehicle_id', $vehicle->id)
+                            ->where('status', RfidTag::STATUS_ASSIGNED);
+                    });
+                }
             })
             ->orderBy('uid')
             ->get();

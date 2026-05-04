@@ -2,16 +2,16 @@
 
 @section('title', 'Event Logs | PHILCST Vehicle Access Monitoring')
 @section('page-title', 'Event Logs')
-@section('page-description', 'Review RFID-based vehicle logs, incomplete records, and support entries from one searchable list.')
+@section('page-description', 'Review vehicle events, guest observations, and report-ready filtered records from one searchable list.')
 
 @section('content')
     <section class="hero-panel hero-panel-compact">
         <div class="hero-panel-copy">
             <span class="panel-kicker">Central Record</span>
-            <h3>Vehicle access logs</h3>
+            <h3>Vehicle operations logs</h3>
             <div class="inline-status-list">
                 <span class="chip chip-brand">RFID-first logs</span>
-                <span class="chip chip-soft">Camera support remains visible when linked</span>
+                <span class="chip chip-soft">Filtered list is the report</span>
             </div>
         </div>
 
@@ -21,7 +21,6 @@
             @if (auth()->user()?->isAdmin())
                 <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Registry</a>
                 <a href="{{ route('guest-observations.index') }}" class="button button-secondary">Guest Monitoring</a>
-                <a href="{{ route('incomplete-records.index') }}" class="button button-secondary">Incomplete Records</a>
                 <a href="{{ route('manual-review.index') }}" class="button button-secondary">Review Queue</a>
                 <a href="{{ route('vehicle-events.create') }}" class="button button-primary">Quick Manual Log</a>
             @endif
@@ -35,7 +34,7 @@
                     <h3>Filters</h3>
                     @include('layouts.partials.help', [
                         'label' => 'Explain log filters',
-                        'text' => 'Filter by plate, log type, workflow status, or date range. Incomplete records and review items remain searchable here.',
+                        'text' => 'Filter by plate, log type, workflow status, or date range. Guest and review records remain searchable here.',
                     ])
                 </div>
             </div>
@@ -48,11 +47,28 @@
             </div>
 
             <div class="field">
+                <label for="vehicle_owner_name">Vehicle Owner Name</label>
+                <input id="vehicle_owner_name" type="text" name="vehicle_owner_name" value="{{ $filters['vehicle_owner_name'] ?? '' }}" placeholder="Juan Dela Cruz">
+            </div>
+
+            <div class="field">
+                <label for="category">Category</label>
+                <select id="category" name="category">
+                    <option value="">All</option>
+                    @foreach ($categoryOptions as $value => $label)
+                        <option value="{{ $value }}" @selected(($filters['category'] ?? '') === $value)>{{ $label }}</option>
+                    @endforeach
+                </select>
+            </div>
+
+            <div class="field">
                 <label for="event_type">Log Type</label>
                 <select id="event_type" name="event_type">
                     <option value="">All</option>
                     <option value="ENTRY" @selected(($filters['event_type'] ?? '') === 'ENTRY')>ENTRY</option>
                     <option value="EXIT" @selected(($filters['event_type'] ?? '') === 'EXIT')>EXIT</option>
+                    <option value="GUEST" @selected(($filters['event_type'] ?? '') === 'GUEST')>GUEST</option>
+                    <option value="RFID" @selected(($filters['event_type'] ?? '') === 'RFID')>RFID</option>
                 </select>
             </div>
 
@@ -60,9 +76,9 @@
                 <label for="match_status">Status</label>
                 <select id="match_status" name="match_status">
                     <option value="">All</option>
-                    @foreach (['pending_details', 'open', 'closed', 'matched', 'manual_review', 'unmatched'] as $status)
+                    @foreach (['open', 'closed', 'matched', 'manual_review', 'unmatched', 'pending_review', 'reviewed'] as $status)
                         <option value="{{ $status }}" @selected(($filters['match_status'] ?? '') === $status)>
-                            {{ $status === 'pending_details' ? 'Incomplete records' : str_replace('_', ' ', ucfirst($status)) }}
+                            {{ str_replace('_', ' ', ucfirst($status)) }}
                         </option>
                     @endforeach
                 </select>
@@ -80,10 +96,8 @@
 
             <div class="field field-actions">
                 <div class="button-row">
-                    <button type="submit" class="button button-primary">Apply</button>
+                    <button type="submit" class="button button-primary">Apply Filters</button>
                     <a href="{{ route('vehicle-events.index') }}" class="button button-secondary">Reset</a>
-                    <a href="{{ route('vehicle-events.export.csv', request()->query()) }}" class="button button-secondary">Export CSV</a>
-                    <button type="button" class="button button-secondary" onclick="window.print()">Print</button>
                 </div>
             </div>
         </form>
@@ -100,77 +114,168 @@
                     ])
                 </div>
             </div>
-            <span class="chip chip-soft">{{ $events->total() }} total</span>
+            <span class="chip chip-soft">{{ $logs->total() }} total</span>
         </div>
 
-        <div class="table-responsive">
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Preview</th>
-                        <th>Type</th>
-                        <th>Plate</th>
-                        <th>Vehicle</th>
-                        <th>Category</th>
-                        <th>Source</th>
-                        <th>Station / Camera</th>
-                        <th>State</th>
-                        <th>Time</th>
-                        <th>Status</th>
-                        <th>Match</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse ($events as $event)
-                        <tr>
-                            <td>#{{ $event->id }}</td>
-                            <td>
-                                @if ($event->has_visual_evidence)
-                                    <img src="{{ $event->vehicle_image_url }}" alt="Vehicle preview" class="thumb thumb-sm">
-                                @else
-                                    <span class="thumb thumb-sm thumb-empty">No image</span>
-                                @endif
-                            </td>
-                            <td>{{ $event->event_type }}</td>
-                            <td>{{ $event->plate_text ?: 'Incomplete record' }}</td>
-                            <td>
-                                <strong>{{ $event->vehicle_color ?: 'Pending color' }} {{ $event->display_vehicle_type }}</strong>
-                                <div class="table-subtext">{{ $event->vehicle?->plate_number ? 'Registry: '.$event->vehicle->plate_number : 'No registry link' }}</div>
-                            </td>
-                            <td>{{ $event->vehicle_category ? ucfirst(str_replace('_', ' ', $event->vehicle_category)) : 'N/A' }}</td>
-                            <td>
-                                <strong>{{ $event->event_origin_label }}</strong>
-                                <div class="table-subtext">{{ $event->rfidScanLog?->tag_uid ? 'RFID: '.$event->rfidScanLog->tag_uid : 'No RFID tag linked' }}</div>
-                            </td>
-                            <td>
-                                <strong>{{ $event->camera?->camera_name ?? 'No camera linked' }}</strong>
-                                <div class="table-subtext">{{ $event->roi_name ?: 'No station label' }}</div>
-                            </td>
-                            <td>{{ $event->resulting_state_label }}</td>
-                            <td>{{ $event->event_time->format('M d, Y h:i A') }}</td>
-                            <td>
-                                <span class="badge badge-{{ $event->status_badge_class }}">
-                                    {{ $event->display_status === 'pending_details' ? 'Incomplete Record' : str_replace('_', ' ', ucfirst($event->display_status)) }}
-                                </span>
-                            </td>
-                            <td>{{ $event->match_display }}</td>
-                            <td>
-                                <a href="{{ route('vehicle-events.show', $event) }}" class="button button-secondary button-sm">
-                                    {{ $event->event_status === 'pending_details' && auth()->user()?->isAdmin() ? 'Complete' : 'View' }}
-                                </a>
-                            </td>
-                        </tr>
-                    @empty
-                        <tr>
-                            <td colspan="13" class="table-empty">No vehicle logs matched the current filters.</td>
-                        </tr>
-                    @endforelse
-                </tbody>
-            </table>
+        <div class="report-action-bar">
+            <div>
+                <strong>Report Actions</strong>
+                <span>Print or export only the records visible on this filtered page.</span>
+            </div>
+            <div class="button-row">
+                <button type="button" class="button button-primary" onclick="window.print()">Print</button>
+                <a href="{{ route('vehicle-events.export.csv', request()->query()) }}" class="button button-secondary">Export CSV</a>
+            </div>
         </div>
 
-        @include('layouts.partials.pagination', ['paginator' => $events])
+        <div class="event-log-card-list event-log-card-list-compact">
+            @forelse ($logs as $log)
+                <article class="event-log-card event-log-card-compact">
+                    <div class="event-log-title-block">
+                        <span class="station-log-badge">{{ $log['event_type'] }}</span>
+                        <div>
+                            <strong>{{ $log['plate_number'] ?: 'GUEST' }}</strong>
+                            <span>{{ $log['summary_label'] }}</span>
+                        </div>
+                    </div>
+
+                    <div class="event-log-row-actions">
+                        @if ($log['status_badge_class'] === 'manual-review')
+                            <span class="badge badge-manual-review">{{ $log['status_label'] }}</span>
+                        @endif
+                        <button type="button" class="button button-secondary button-sm" data-event-log-view="{{ $loop->index }}">
+                            View Details
+                        </button>
+                    </div>
+                </article>
+            @empty
+                <div class="empty-state">
+                    <h4>No records matched the current filters</h4>
+                    <p>Adjust the report filters to widen the visible list.</p>
+                </div>
+            @endforelse
+        </div>
+
+        @include('layouts.partials.pagination', ['paginator' => $logs])
     </section>
+
+    <div class="modal-backdrop is-hidden" data-event-log-modal aria-hidden="true">
+        <div class="modal-panel event-log-modal-panel" role="dialog" aria-modal="true" aria-labelledby="event-log-modal-title">
+            <div class="modal-header">
+                <div>
+                    <span class="panel-kicker" data-event-log-modal-type>Event Log</span>
+                    <h3 id="event-log-modal-title">Log Details</h3>
+                </div>
+                <button type="button" class="modal-close" data-event-log-modal-close aria-label="Close details">×</button>
+            </div>
+
+            <div class="event-log-modal-body">
+                <div class="event-log-modal-image" data-event-log-modal-image-wrap hidden>
+                    <img src="" alt="Vehicle log snapshot" data-event-log-modal-image>
+                </div>
+
+                <div class="event-log-detail-grid" data-event-log-modal-details></div>
+            </div>
+
+            <div class="modal-actions">
+                <a href="#" class="button button-primary button-sm" data-event-log-modal-link>Open Full Record</a>
+                <button type="button" class="button button-secondary button-sm" data-event-log-modal-close>Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script id="event-log-modal-data" type="application/json">{!! json_encode($logs->getCollection()->values(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 @endsection
+
+@push('scripts')
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const dataNode = document.getElementById('event-log-modal-data');
+            const modal = document.querySelector('[data-event-log-modal]');
+            const title = document.getElementById('event-log-modal-title');
+            const type = document.querySelector('[data-event-log-modal-type]');
+            const detailGrid = document.querySelector('[data-event-log-modal-details]');
+            const imageWrap = document.querySelector('[data-event-log-modal-image-wrap]');
+            const image = document.querySelector('[data-event-log-modal-image]');
+            const link = document.querySelector('[data-event-log-modal-link]');
+            const logs = dataNode ? JSON.parse(dataNode.textContent || '[]') : [];
+
+            if (!modal || !title || !type || !detailGrid || !imageWrap || !image || !link) {
+                return;
+            }
+
+            const detailsFor = (log) => [
+                ['Owner', log.owner_name],
+                ['Vehicle', log.vehicle_type],
+                ['Category', log.category_label],
+                ['Source', log.source_label],
+                ['Station / Camera', log.station_label],
+                ['RFID Tag', log.rfid_tag_uid],
+                ['State', log.state_label],
+                ['Status', log.status_label],
+                ['Match', log.match_label],
+                ['Time', log.display_time],
+            ];
+
+            const openModal = (log) => {
+                title.textContent = `${log.event_type} • ${log.plate_number || 'GUEST'}`;
+                type.textContent = `${log.record_type_label} #${log.id}`;
+                link.href = log.detail_url;
+                detailGrid.innerHTML = '';
+
+                detailsFor(log).forEach(([label, value]) => {
+                    const item = document.createElement('div');
+                    const labelNode = document.createElement('span');
+                    const valueNode = document.createElement('strong');
+
+                    labelNode.textContent = label;
+                    valueNode.textContent = value || 'N/A';
+                    item.append(labelNode, valueNode);
+                    detailGrid.appendChild(item);
+                });
+
+                if (log.image_url) {
+                    image.src = log.image_url;
+                    imageWrap.hidden = false;
+                } else {
+                    image.removeAttribute('src');
+                    imageWrap.hidden = true;
+                }
+
+                modal.classList.remove('is-hidden');
+                modal.setAttribute('aria-hidden', 'false');
+            };
+
+            const closeModal = () => {
+                modal.classList.add('is-hidden');
+                modal.setAttribute('aria-hidden', 'true');
+            };
+
+            document.querySelectorAll('[data-event-log-view]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const log = logs[Number.parseInt(button.dataset.eventLogView, 10)];
+
+                    if (log) {
+                        openModal(log);
+                    }
+                });
+            });
+
+            document.querySelectorAll('[data-event-log-modal-close]').forEach((button) => {
+                button.addEventListener('click', closeModal);
+            });
+
+            modal.addEventListener('click', (event) => {
+                if (event.target === modal) {
+                    closeModal();
+                }
+            });
+
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && !modal.classList.contains('is-hidden')) {
+                    closeModal();
+                }
+            });
+        });
+    </script>
+@endpush

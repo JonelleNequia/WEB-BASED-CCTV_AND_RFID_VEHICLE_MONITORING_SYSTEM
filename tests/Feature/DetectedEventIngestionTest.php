@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\VehicleEvent;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidTag;
 use App\Models\SystemSetting;
@@ -18,9 +17,9 @@ class DetectedEventIngestionTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * Ensure the Python detector can ingest one crossing as a pending details event.
+     * Ensure the Python detector stores one unregistered crossing as a guest observation.
      */
-    public function test_detector_event_ingestion_creates_a_pending_details_record(): void
+    public function test_detector_event_ingestion_creates_a_guest_observation_record(): void
     {
         $this->seed(DatabaseSeeder::class);
 
@@ -45,17 +44,17 @@ class DetectedEventIngestionTest extends TestCase
             'X-Source-Name' => 'phpunit-detector',
         ])->postJson(route('api.integration.events'), $payload)
             ->assertCreated()
-            ->assertJsonPath('event_status', 'pending_details')
-            ->assertJsonPath('event_type', 'ENTRY');
+            ->assertJsonPath('event_status', 'pending_review')
+            ->assertJsonPath('event_type', 'GUEST')
+            ->assertJsonPath('overlay.verification', 'guest');
 
-        $event = VehicleEvent::query()
+        $observation = GuestVehicleObservation::query()
             ->where('external_event_key', 'test-crossing-entrance-001')
             ->firstOrFail();
 
-        $this->assertSame('pending_details', $event->event_status);
-        $this->assertSame('pending_details', $event->match_status);
-        $this->assertSame('ENTRY', $event->event_type);
-        $this->assertSame('Car', $event->detected_vehicle_type);
+        $this->assertSame('pending_review', $observation->status);
+        $this->assertSame('entrance', $observation->location);
+        $this->assertSame('Car', $observation->vehicle_type);
     }
 
     /**
@@ -86,9 +85,9 @@ class DetectedEventIngestionTest extends TestCase
         $this->withHeaders($headers)
             ->postJson(route('api.integration.events'), $payload)
             ->assertOk()
-            ->assertJsonPath('message', 'Duplicate crossing ignored. The original incomplete record event is still available.');
+            ->assertJsonPath('message', 'Duplicate guest observation ignored.');
 
-        $this->assertSame(1, VehicleEvent::query()->where('external_event_key', 'test-crossing-exit-duplicate')->count());
+        $this->assertSame(1, GuestVehicleObservation::query()->where('external_event_key', 'test-crossing-exit-duplicate')->count());
     }
 
     /**
@@ -125,7 +124,7 @@ class DetectedEventIngestionTest extends TestCase
             ->assertJsonPath('overlay.vehicle.id', $tag->vehicle->id)
             ->assertJsonPath('overlay.vehicle.plate_number', $tag->vehicle->plate_number);
 
-        $this->assertDatabaseMissing('vehicle_events', [
+        $this->assertDatabaseMissing('guest_vehicle_observations', [
             'external_event_key' => 'test-crossing-rfid-overlay',
         ]);
     }
@@ -153,7 +152,7 @@ class DetectedEventIngestionTest extends TestCase
             ->assertJsonPath('requires_capture', true)
             ->assertJsonPath('overlay.verification', 'guest');
 
-        $this->assertDatabaseMissing('vehicle_events', [
+        $this->assertDatabaseMissing('guest_vehicle_observations', [
             'external_event_key' => 'test-crossing-no-rfid-probe',
         ]);
     }
@@ -296,7 +295,8 @@ class DetectedEventIngestionTest extends TestCase
             'camera_role' => 'entrance',
             'detected_vehicle_type' => 'Car',
             'event_time' => now()->toIso8601String(),
-            'snapshot_image' => UploadedFile::fake()->image('guest-upload.jpg', 640, 480),
+            'plate_number' => 'abc1234',
+            'snapshot' => UploadedFile::fake()->image('guest-upload.jpg', 640, 480),
             'detection_metadata' => json_encode([
                 'track_id' => 55,
                 'rfid_window_seconds' => 5,
@@ -311,6 +311,8 @@ class DetectedEventIngestionTest extends TestCase
             ->firstOrFail();
 
         $this->assertStringStartsWith('guest_snapshots/', $observation->snapshot_path);
+        $this->assertSame('abc1234', $observation->plate_number);
+        $this->assertSame('abc1234', $observation->plate_text);
         $this->assertSame(55, $observation->detection_metadata_json['track_id']);
         Storage::disk('public')->assertExists($observation->snapshot_path);
     }

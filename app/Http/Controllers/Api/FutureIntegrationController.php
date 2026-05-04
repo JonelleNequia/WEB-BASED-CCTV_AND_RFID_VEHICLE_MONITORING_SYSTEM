@@ -11,7 +11,6 @@ use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
 use Carbon\Carbon;
 use App\Services\DetectorRuntimeService;
-use App\Services\EventService;
 use App\Services\RfidService;
 use App\Services\SettingsService;
 use Illuminate\Http\JsonResponse;
@@ -43,7 +42,7 @@ class FutureIntegrationController extends Controller
         $runtime = $detectorRuntimeService->readStatus();
 
         return response()->json([
-            'project' => 'Web-Based CCTV and RFID Parking Vehicle Monitoring System for PHILCST',
+            'project' => 'Web-Based CCTV and RFID Vehicle Monitoring System for PHILCST',
             'integration_ready' => true,
             'ingestion_mode' => $settings['operating_mode'],
             'message' => $runtime['service_message'],
@@ -62,8 +61,7 @@ class FutureIntegrationController extends Controller
      */
     public function receive(
         Request $request,
-        SettingsService $settingsService,
-        EventService $eventService
+        SettingsService $settingsService
     ): JsonResponse
     {
         $authorized = $this->authorizeIntegrationRequest($request, $settingsService);
@@ -90,12 +88,13 @@ class FutureIntegrationController extends Controller
                 'detected_vehicle_type' => ['required', 'string', 'max:50'],
                 'event_time' => ['required', 'date'],
                 'vehicle_image_path' => ['nullable', 'required_if:unregistered_capture,true', 'string', 'max:255'],
+                'plate_number' => ['nullable', 'string', 'max:50'],
                 'roi_name' => ['nullable', 'string', 'max:100'],
                 'detection_metadata' => ['nullable', 'array'],
                 'unregistered_capture' => ['sometimes', 'boolean'],
             ]);
 
-            $existing = VehicleEvent::query()
+            $existingGuestObservation = GuestVehicleObservation::query()
                 ->where('external_event_key', $validated['external_event_key'])
                 ->first();
             $isUnregisteredCapture = $request->boolean('unregistered_capture');
@@ -143,46 +142,45 @@ class FutureIntegrationController extends Controller
                 ], 202);
             }
 
-            $vehicleEvent = $eventService->createDetectedEvent([
-                ...$validated,
-                'detection_metadata_json' => $validated['detection_metadata'] ?? null,
-            ]);
+            if ($existingGuestObservation) {
+                EventReceiveLog::query()->create([
+                    'source_name' => $sourceName,
+                    'payload_json' => $request->all(),
+                    'status' => 'duplicate',
+                    'notes' => "Duplicate guest observation ignored for ID: {$existingGuestObservation->id}",
+                ]);
 
-            if ($rfidScan) {
-                $vehicle = $rfidScan->vehicle;
-                $vehicleEvent->forceFill([
-                    'event_status' => VehicleEvent::STATUS_COMPLETED,
-                    'vehicle_id' => $vehicle?->id,
-                    'rfid_scan_log_id' => $rfidScan->id,
-                    'plate_text' => $vehicle?->plate_number,
-                    'vehicle_type' => $vehicle?->vehicle_type ?: $vehicleEvent->vehicle_type,
-                    'vehicle_category' => $vehicle?->category,
-                    'resulting_state' => $rfidScan->resulting_state,
-                    'match_status' => 'rfid_verified',
-                    'details_completed_at' => now(),
-                ])->save();
+                return response()->json([
+                    'message' => 'Duplicate guest observation ignored.',
+                    'duplicate' => true,
+                    'requires_capture' => false,
+                    'event_id' => null,
+                    'event_status' => $existingGuestObservation->status,
+                    'event_type' => 'GUEST',
+                    'guest_observation_id' => $existingGuestObservation->id,
+                    'overlay' => $this->guestOverlayPayload($existingGuestObservation),
+                ]);
             }
+
+            $guestObservation = $this->createGuestObservationFromDetectedCapture($validated);
 
             EventReceiveLog::query()->create([
                 'source_name' => $sourceName,
                 'payload_json' => $request->all(),
-                'status' => $existing ? 'duplicate' : 'ingested',
-                'notes' => $existing
-                    ? "Duplicate crossing ignored for event ID: {$vehicleEvent->id}"
-                    : "Detected vehicle event created with ID: {$vehicleEvent->id}",
+                'status' => 'guest_observation_created',
+                'notes' => "Detected vehicle capture saved as guest observation ID: {$guestObservation->id}",
             ]);
 
             return response()->json([
-                'message' => $existing
-                    ? 'Duplicate crossing ignored. The original incomplete record event is still available.'
-                    : 'Unregistered vehicle capture saved for review.',
-                'duplicate' => $existing !== null,
+                'message' => 'Unregistered vehicle capture saved as a GUEST observation for review.',
+                'duplicate' => false,
                 'requires_capture' => false,
-                'event_id' => $vehicleEvent->id,
-                'event_status' => $vehicleEvent->event_status,
-                'event_type' => $vehicleEvent->event_type,
-                'overlay' => $this->overlayPayload($vehicleEvent, $rfidScan),
-            ], $existing ? 200 : 201);
+                'event_id' => null,
+                'event_status' => $guestObservation->status,
+                'event_type' => 'GUEST',
+                'guest_observation_id' => $guestObservation->id,
+                'overlay' => $this->guestOverlayPayload($guestObservation),
+            ], 201);
         }
 
         $validated = $request->validate([
@@ -198,31 +196,25 @@ class FutureIntegrationController extends Controller
         $imagePath = $validated['image_path'];
 
         if ($direction === 'IN') {
-            // Create new VehicleEvent for IN direction
-            $vehicleEvent = VehicleEvent::query()->create([
-                'event_type' => 'ENTRY',
-                'direction' => $direction,
-                'plate_number' => $plateNumber,
-                'plate_text' => $plateNumber,
-                'camera_id' => $cameraId,
-                'vehicle_image_path' => $imagePath,
-                'event_time' => now(),
-                'event_status' => VehicleEvent::STATUS_PENDING_DETAILS,
-                'event_origin' => 'cctv_detected',
-                'match_status' => VehicleEvent::STATUS_PENDING_DETAILS,
-            ]);
+            $guestObservation = $this->createGuestObservationFromLegacyCapture(
+                $cameraId,
+                $direction,
+                $plateNumber,
+                $imagePath
+            );
 
             EventReceiveLog::query()->create([
                 'source_name' => $sourceName,
                 'payload_json' => $request->all(),
-                'status' => 'ingested',
-                'notes' => "Vehicle entry event created with ID: {$vehicleEvent->id}",
+                'status' => 'guest_observation_created',
+                'notes' => "Camera entry detection saved as guest observation ID: {$guestObservation->id}",
             ]);
 
             return response()->json([
-                'message' => 'Vehicle entry event created.',
-                'event_id' => $vehicleEvent->id,
-                'event_status' => $vehicleEvent->event_status,
+                'message' => 'Camera entry detection saved as a GUEST observation.',
+                'guest_observation_id' => $guestObservation->id,
+                'event_status' => $guestObservation->status,
+                'overlay' => $this->guestOverlayPayload($guestObservation),
             ], 201);
         }
 
@@ -277,31 +269,80 @@ class FutureIntegrationController extends Controller
             ], 200);
         }
 
-        // No active session found or plate_number is null - requires manual review
-        $vehicleEvent = VehicleEvent::query()->create([
-                'event_type' => 'EXIT',
-            'direction' => $direction,
-            'plate_number' => $plateNumber,
-            'plate_text' => $plateNumber,
-            'camera_id' => $cameraId,
-            'vehicle_image_path' => $imagePath,
-            'event_time' => now(),
-            'event_status' => 'requires_manual_review',
-            'event_origin' => 'cctv_detected',
-        ]);
+        $guestObservation = $this->createGuestObservationFromLegacyCapture(
+            $cameraId,
+            $direction,
+            $plateNumber,
+            $imagePath
+        );
 
         EventReceiveLog::query()->create([
             'source_name' => $sourceName,
             'payload_json' => $request->all(),
-            'status' => 'ingested',
-            'notes' => "Vehicle exit saved as requires_manual_review. No matching active session found.",
+            'status' => 'guest_observation_created',
+            'notes' => "Camera exit detection saved as guest observation ID: {$guestObservation->id}",
         ]);
 
         return response()->json([
-            'message' => 'Vehicle exit recorded but requires manual review. No matching active session found.',
-            'event_id' => $vehicleEvent->id,
-            'event_status' => $vehicleEvent->event_status,
+            'message' => 'Camera exit detection saved as a GUEST observation. No matching active session found.',
+            'guest_observation_id' => $guestObservation->id,
+            'event_status' => $guestObservation->status,
+            'overlay' => $this->guestOverlayPayload($guestObservation),
         ], 201);
+    }
+
+    /**
+     * Convert detector captures without verified RFID into the only valid
+     * unregistered workflow: a pending GUEST observation.
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    protected function createGuestObservationFromDetectedCapture(array $validated): GuestVehicleObservation
+    {
+        $cameraId = $validated['camera_id']
+            ?? Camera::query()->forRole($validated['camera_role'])->value('id');
+
+        return GuestVehicleObservation::query()->create([
+            'plate_text' => $validated['plate_number'] ?? null,
+            'plate_number' => $validated['plate_number'] ?? null,
+            'vehicle_type' => $validated['detected_vehicle_type'] ?? 'Vehicle',
+            'vehicle_color' => null,
+            'location' => $validated['camera_role'],
+            'observation_source' => 'cctv',
+            'status' => 'pending_review',
+            'observed_at' => Carbon::parse($validated['event_time']),
+            'camera_id' => $cameraId,
+            'external_event_key' => $validated['external_event_key'],
+            'detection_metadata_json' => $validated['detection_metadata'] ?? null,
+            'snapshot_path' => $validated['vehicle_image_path'],
+            'notes' => 'No successful RFID scan was recorded for this detector capture.',
+            'created_by' => null,
+        ]);
+    }
+
+    protected function createGuestObservationFromLegacyCapture(
+        int $cameraId,
+        string $direction,
+        ?string $plateNumber,
+        string $imagePath
+    ): GuestVehicleObservation {
+        $camera = Camera::query()->find($cameraId);
+        $location = $camera?->camera_role ?: ($direction === 'OUT' ? 'exit' : 'entrance');
+
+        return GuestVehicleObservation::query()->create([
+            'plate_text' => $plateNumber,
+            'plate_number' => $plateNumber,
+            'vehicle_type' => 'Vehicle',
+            'vehicle_color' => null,
+            'location' => $location === 'exit' ? 'exit' : 'entrance',
+            'observation_source' => 'cctv',
+            'status' => 'pending_review',
+            'observed_at' => now(),
+            'camera_id' => $cameraId,
+            'snapshot_path' => $imagePath,
+            'notes' => 'Legacy CCTV detection without verified RFID was recorded as GUEST.',
+            'created_by' => null,
+        ]);
     }
 
     /**
@@ -369,7 +410,7 @@ class FutureIntegrationController extends Controller
         if ($authorized !== null) {
             EventReceiveLog::query()->create([
                 'source_name' => $sourceName,
-                'payload_json' => $request->except(['snapshot_image', 'image']),
+                'payload_json' => $request->except(['snapshot', 'snapshot_image', 'image']),
                 'status' => 'unauthorized',
                 'notes' => 'API key missing or invalid for detector guest observation.',
             ]);
@@ -386,14 +427,18 @@ class FutureIntegrationController extends Controller
             'detected_vehicle_type' => ['nullable', 'string', 'max:50'],
             'event_time' => ['required', 'date'],
             'vehicle_image_path' => ['nullable', 'string', 'max:255'],
+            'snapshot' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
             'snapshot_image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
             'plate_number' => ['nullable', 'string', 'max:50'],
             'detection_metadata' => ['nullable', 'array'],
         ]);
+        $snapshotFile = $request->file('snapshot')
+            ?: $request->file('snapshot_image')
+            ?: $request->file('image');
 
-        if (! $request->hasFile('snapshot_image') && blank($validated['vehicle_image_path'] ?? null)) {
+        if (! $snapshotFile && blank($validated['vehicle_image_path'] ?? null)) {
             throw ValidationException::withMessages([
-                'snapshot_image' => 'A JPEG snapshot upload or existing vehicle image path is required.',
+                'snapshot' => 'A JPEG snapshot upload or existing vehicle image path is required.',
             ]);
         }
 
@@ -412,18 +457,19 @@ class FutureIntegrationController extends Controller
 
         $cameraId = $validated['camera_id']
             ?? Camera::query()->forRole($validated['camera_role'])->value('id');
-        $snapshotPath = $request->hasFile('snapshot_image')
-            ? $request->file('snapshot_image')->store('guest_snapshots', 'public')
+        $snapshotPath = $snapshotFile
+            ? $snapshotFile->store('guest_snapshots', 'public')
             : ($validated['vehicle_image_path'] ?? null);
 
         if (! $snapshotPath) {
             throw ValidationException::withMessages([
-                'snapshot_image' => 'The guest snapshot could not be stored.',
+                'snapshot' => 'The guest snapshot could not be stored.',
             ]);
         }
 
         $observation = GuestVehicleObservation::query()->create([
             'plate_text' => $validated['plate_number'] ?? null,
+            'plate_number' => $validated['plate_number'] ?? null,
             'vehicle_type' => $validated['detected_vehicle_type'] ?? 'Vehicle',
             'vehicle_color' => null,
             'location' => $validated['camera_role'],
@@ -553,12 +599,20 @@ class FutureIntegrationController extends Controller
 
     protected function prepareGuestObservationRequest(Request $request): void
     {
+        if (! $request->hasFile('snapshot_image') && $request->hasFile('snapshot')) {
+            $request->files->set('snapshot_image', $request->file('snapshot'));
+        }
+
         if (! $request->hasFile('snapshot_image') && $request->hasFile('image')) {
             $request->files->set('snapshot_image', $request->file('image'));
         }
 
         if ($request->input('camera_id') === '') {
             $request->request->remove('camera_id');
+        }
+
+        if (! $request->filled('plate_number') && $request->filled('plate_text')) {
+            $request->merge(['plate_number' => $request->input('plate_text')]);
         }
 
         $metadata = $request->input('detection_metadata');
@@ -577,10 +631,13 @@ class FutureIntegrationController extends Controller
      */
     protected function safeGuestObservationLogPayload(Request $request, ?string $snapshotPath = null): array
     {
-        $payload = $request->except(['snapshot_image', 'image']);
+        $payload = $request->except(['snapshot', 'snapshot_image', 'image']);
 
-        if ($request->hasFile('snapshot_image')) {
-            $file = $request->file('snapshot_image');
+        $file = $request->file('snapshot')
+            ?: $request->file('snapshot_image')
+            ?: $request->file('image');
+
+        if ($file) {
             $payload['snapshot_image'] = [
                 'original_name' => $file?->getClientOriginalName(),
                 'mime_type' => $file?->getClientMimeType(),

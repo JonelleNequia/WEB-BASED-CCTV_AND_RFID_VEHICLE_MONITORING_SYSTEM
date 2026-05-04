@@ -1,8 +1,8 @@
 @extends('layouts.app')
 
-@section('title', 'Guest Monitoring | PHILCST Parking Monitoring')
+@section('title', 'Guest Monitoring | PHILCST Vehicle Monitoring')
 @section('page-title', 'Guest Monitoring')
-@section('page-description', 'Manual and CCTV-supported guest vehicle observation records for parking and gate operations.')
+@section('page-description', 'Manual and CCTV-supported guest vehicle observation records for entrance and exit operations.')
 
 @section('content')
     <section class="hero-panel hero-panel-compact">
@@ -28,7 +28,7 @@
                 <span class="stat-card-label">Guest Observations Today</span>
             </div>
             <strong>{{ $guestCountToday }}</strong>
-            <p>Guest entries and parking observations recorded today.</p>
+            <p>Guest vehicle observations recorded today.</p>
         </article>
     </div>
 
@@ -40,7 +40,7 @@
                         <h3>Add Guest Observation</h3>
                         @include('layouts.partials.help', [
                             'label' => 'Explain guest observation form',
-                            'text' => 'Use this form for guest vehicles and parking observation. This flow is separate from recurring RFID scanning.',
+                            'text' => 'Use this form for guest vehicles at the entrance or exit. This flow is separate from recurring RFID scanning.',
                         ])
                     </div>
                 </div>
@@ -48,11 +48,12 @@
 
             <form method="POST" action="{{ route('guest-observations.store') }}" enctype="multipart/form-data" class="stack-form">
                 @csrf
+                <input type="hidden" name="observation_source" value="manual">
 
                 <div class="form-grid">
                     <div class="field">
-                        <label for="plate_text">Plate Number</label>
-                        <input id="plate_text" type="text" name="plate_text" value="{{ old('plate_text') }}" placeholder="Optional for guest vehicle">
+                        <label for="plate_number">Plate Number</label>
+                        <input id="plate_number" type="text" name="plate_number" value="{{ old('plate_number', old('plate_text')) }}" placeholder="Optional for guest vehicle">
                     </div>
 
                     <div class="field">
@@ -68,17 +69,9 @@
                     <div class="field">
                         <label for="location">Location</label>
                         <select id="location" name="location" required>
-                            @foreach (['entrance' => 'Entrance', 'exit' => 'Exit', 'parking' => 'Parking Area', 'other' => 'Other'] as $value => $label)
-                                <option value="{{ $value }}" @selected(old('location', 'parking') === $value)>{{ $label }}</option>
+                            @foreach (['entrance' => 'Entrance', 'exit' => 'Exit'] as $value => $label)
+                                <option value="{{ $value }}" @selected(old('location', 'entrance') === $value)>{{ $label }}</option>
                             @endforeach
-                        </select>
-                    </div>
-
-                    <div class="field">
-                        <label for="observation_source">Source</label>
-                        <select id="observation_source" name="observation_source" required>
-                            <option value="manual" @selected(old('observation_source', 'manual') === 'manual')>Manual</option>
-                            <option value="cctv" @selected(old('observation_source') === 'cctv')>CCTV Supported</option>
                         </select>
                     </div>
 
@@ -100,13 +93,13 @@
                     </div>
 
                     <div class="field">
-                        <label for="snapshot_image">Snapshot</label>
-                        <input id="snapshot_image" type="file" name="snapshot_image" accept="image/*">
+                        <label for="snapshot">Snapshot</label>
+                        <input id="snapshot" type="file" name="snapshot" accept="image/*">
                     </div>
 
                     <div class="field span-full">
                         <label for="notes">Notes</label>
-                        <textarea id="notes" name="notes" rows="3" placeholder="Guard remarks or parking notes">{{ old('notes') }}</textarea>
+                        <textarea id="notes" name="notes" rows="3" placeholder="Guard remarks">{{ old('notes') }}</textarea>
                     </div>
                 </div>
 
@@ -130,14 +123,16 @@
             </div>
 
             @if ($latestUnregisteredCapture)
+                @php($latestSnapshotUrl = $latestUnregisteredCapture->snapshot_path ? asset('storage/'.$latestUnregisteredCapture->snapshot_path) : $latestUnregisteredCapture->snapshot_url)
                 <div class="result-card result-card-warning">
                     <div class="result-card-head">
                         <strong>Guard review needed</strong>
                         <span class="badge badge-manual-review">{{ ucfirst($latestUnregisteredCapture->location) }}</span>
                     </div>
-                    <img src="{{ $latestUnregisteredCapture->snapshot_url }}" alt="Unregistered vehicle capture" class="capture-preview">
+                    <img src="{{ $latestSnapshotUrl }}" alt="Unregistered vehicle capture" class="capture-preview">
                     <div class="detail-list">
                         <div><span>Camera</span><strong>{{ $latestUnregisteredCapture->camera?->camera_name ?: 'No camera linked' }}</strong></div>
+                        <div><span>Plate</span><strong>{{ $latestUnregisteredCapture->plate_number ?: $latestUnregisteredCapture->plate_text ?: 'No plate detected' }}</strong></div>
                         <div><span>Captured</span><strong>{{ $latestUnregisteredCapture->observed_at->format('M d, Y h:i A') }}</strong></div>
                     </div>
                     <p>{{ $latestUnregisteredCapture->notes }}</p>
@@ -158,7 +153,7 @@
                     <h3>Filter Guest Logs</h3>
                     @include('layouts.partials.help', [
                         'label' => 'Explain guest log filters',
-                        'text' => 'Filter by plate, location, source, and date range.',
+                        'text' => 'Filter by plate, location, and date range.',
                     ])
                 </div>
             </div>
@@ -174,18 +169,9 @@
                     <label for="filter_location">Location</label>
                     <select id="filter_location" name="location">
                         <option value="">All</option>
-                        @foreach (['entrance' => 'Entrance', 'exit' => 'Exit', 'parking' => 'Parking Area', 'other' => 'Other'] as $value => $label)
+                        @foreach (['entrance' => 'Entrance', 'exit' => 'Exit'] as $value => $label)
                             <option value="{{ $value }}" @selected(($filters['location'] ?? '') === $value)>{{ $label }}</option>
                         @endforeach
-                    </select>
-                </div>
-
-                <div class="field">
-                    <label for="filter_observation_source">Source</label>
-                    <select id="filter_observation_source" name="observation_source">
-                        <option value="">All</option>
-                        <option value="manual" @selected(($filters['observation_source'] ?? '') === 'manual')>Manual</option>
-                        <option value="cctv" @selected(($filters['observation_source'] ?? '') === 'cctv')>CCTV</option>
                     </select>
                 </div>
 
@@ -228,25 +214,30 @@
                     <tr>
                         <th>Time</th>
                         <th>Snapshot</th>
-                        <th>Plate</th>
+                        <th>Plate Number</th>
                         <th>Vehicle</th>
                         <th>Location</th>
-                        <th>Source</th>
                         <th>Camera</th>
                         <th>Notes</th>
+                        <th>Action</th>
                     </tr>
                 </thead>
                 <tbody>
                     @forelse ($observations as $observation)
+                        @php($snapshotUrl = $observation->snapshot_path ? asset('storage/'.$observation->snapshot_path) : $observation->snapshot_url)
                         <tr>
                             <td>{{ $observation->observed_at->format('M d, Y h:i A') }}</td>
-                            <td><img src="{{ $observation->snapshot_url }}" alt="Guest vehicle snapshot" class="thumb thumb-sm"></td>
-                            <td>{{ $observation->plate_text ?: 'No plate' }}</td>
+                            <td><img src="{{ $snapshotUrl }}" alt="Guest vehicle snapshot" class="thumb thumb-sm"></td>
+                            <td>{{ $observation->plate_number ?: $observation->plate_text ?: 'No plate' }}</td>
                             <td>{{ trim(($observation->vehicle_color ?: '').' '.($observation->vehicle_type ?: 'N/A')) }}</td>
                             <td>{{ ucfirst($observation->location) }}</td>
-                            <td>{{ strtoupper($observation->observation_source) }}</td>
                             <td>{{ $observation->camera?->camera_name ?: 'N/A' }}</td>
                             <td>{{ $observation->notes ?: 'No notes' }}</td>
+                            <td>
+                                <button type="button" class="button button-secondary button-sm" data-guest-view="{{ $observation->id }}">
+                                    View Image
+                                </button>
+                            </td>
                         </tr>
                     @empty
                         <tr>
@@ -259,4 +250,190 @@
 
         @include('layouts.partials.pagination', ['paginator' => $observations])
     </section>
+
+    <div class="modal-backdrop is-hidden" data-guest-modal>
+        <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="guest_modal_title">
+            <div class="modal-header">
+                <div>
+                    <span class="panel-kicker">Guest Review</span>
+                    <h3 id="guest_modal_title">Captured Vehicle</h3>
+                </div>
+                <button type="button" class="button button-secondary button-sm" data-guest-modal-close>Close</button>
+            </div>
+
+            <div class="guest-review-grid">
+                <div>
+                    <div class="zoom-image-frame" data-zoom-frame>
+                        <img src="" alt="Captured guest vehicle" class="capture-preview zoom-image" data-guest-modal-image>
+                    </div>
+                    <div class="detail-list">
+                        <div><span>Detected Plate</span><strong data-guest-modal-plate>No plate</strong></div>
+                        <div><span>Timestamp</span><strong data-guest-modal-time>No time</strong></div>
+                        <div><span>Location</span><strong data-guest-modal-location>No location</strong></div>
+                        <div><span>Status</span><strong data-guest-modal-status>Pending Review</strong></div>
+                    </div>
+                </div>
+
+                <form method="POST" action="" class="stack-form" data-guest-modal-form>
+                    @csrf
+                    @method('PATCH')
+
+                    <div class="form-grid">
+                        <div class="field">
+                            <label for="modal_plate_number">Plate Number</label>
+                            <input id="modal_plate_number" type="text" name="plate_number" data-guest-modal-field="plate_number">
+                        </div>
+
+                        <div class="field">
+                            <label for="modal_vehicle_type">Vehicle Type</label>
+                            <input id="modal_vehicle_type" type="text" name="vehicle_type" data-guest-modal-field="vehicle_type">
+                        </div>
+
+                        <div class="field">
+                            <label for="modal_vehicle_color">Vehicle Color</label>
+                            <input id="modal_vehicle_color" type="text" name="vehicle_color" data-guest-modal-field="vehicle_color">
+                        </div>
+
+                        <div class="field">
+                            <label for="modal_location">Location</label>
+                            <select id="modal_location" name="location" data-guest-modal-field="location">
+                                @foreach (['entrance' => 'Entrance', 'exit' => 'Exit'] as $value => $label)
+                                    <option value="{{ $value }}">{{ $label }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+
+                        <div class="field">
+                            <label for="modal_observed_at">Observation Time</label>
+                            <input id="modal_observed_at" type="datetime-local" name="observed_at" data-guest-modal-field="observed_at">
+                        </div>
+
+                        <div class="field">
+                            <label for="modal_status">Review Status</label>
+                            <select id="modal_status" name="status" data-guest-modal-field="status">
+                                <option value="pending_review">Pending Review</option>
+                                <option value="reviewed">Reviewed</option>
+                            </select>
+                        </div>
+
+                        <div class="field span-full">
+                            <label for="modal_notes">Notes</label>
+                            <textarea id="modal_notes" name="notes" rows="4" data-guest-modal-field="notes"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="button-row">
+                        <button type="submit" class="button button-primary">Save Review</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+    </div>
+
+    @php($guestObservationPayload = $observations->getCollection()->map(fn ($observation) => [
+        'id' => $observation->id,
+        'plate_number' => $observation->plate_number ?: $observation->plate_text,
+        'vehicle_type' => $observation->vehicle_type,
+        'vehicle_color' => $observation->vehicle_color,
+        'location' => $observation->location,
+        'observed_at' => $observation->observed_at?->format('Y-m-d\TH:i'),
+        'display_time' => $observation->observed_at?->format('M d, Y h:i A'),
+        'status' => $observation->status,
+        'status_label' => ucfirst(str_replace('_', ' ', $observation->status)),
+        'notes' => $observation->notes,
+        'snapshot_url' => $observation->snapshot_path ? asset('storage/'.$observation->snapshot_path) : $observation->snapshot_url,
+        'update_url' => route('guest-observations.update', $observation),
+    ])->values())
+    <script id="guest-observations-data" type="application/json">{!! json_encode($guestObservationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 @endsection
+
+@push('scripts')
+    <script>
+        (() => {
+            const payloadNode = document.getElementById('guest-observations-data');
+            const modal = document.querySelector('[data-guest-modal]');
+
+            if (!payloadNode || !modal) {
+                return;
+            }
+
+            const observations = new Map(JSON.parse(payloadNode.textContent).map((item) => [String(item.id), item]));
+            const form = modal.querySelector('[data-guest-modal-form]');
+            const image = modal.querySelector('[data-guest-modal-image]');
+            const plate = modal.querySelector('[data-guest-modal-plate]');
+            const time = modal.querySelector('[data-guest-modal-time]');
+            const location = modal.querySelector('[data-guest-modal-location]');
+            const status = modal.querySelector('[data-guest-modal-status]');
+            const zoomFrame = modal.querySelector('[data-zoom-frame]');
+
+            function setField(name, value) {
+                const field = modal.querySelector(`[data-guest-modal-field="${name}"]`);
+
+                if (field) {
+                    field.value = value || '';
+                }
+            }
+
+            function openModal(observation) {
+                form.action = observation.update_url;
+                image.src = observation.snapshot_url;
+                plate.textContent = observation.plate_number || 'No plate detected';
+                time.textContent = observation.display_time || 'No time';
+                location.textContent = observation.location ? observation.location.charAt(0).toUpperCase() + observation.location.slice(1) : 'No location';
+                status.textContent = observation.status_label || 'Pending Review';
+
+                setField('plate_number', observation.plate_number);
+                setField('vehicle_type', observation.vehicle_type);
+                setField('vehicle_color', observation.vehicle_color);
+                setField('location', observation.location);
+                setField('observed_at', observation.observed_at);
+                setField('status', observation.status || 'pending_review');
+                setField('notes', observation.notes);
+
+                modal.classList.remove('is-hidden');
+            }
+
+            document.querySelectorAll('[data-guest-view]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const observation = observations.get(String(button.dataset.guestView));
+
+                    if (observation) {
+                        openModal(observation);
+                    }
+                });
+            });
+
+            modal.querySelector('[data-guest-modal-close]')?.addEventListener('click', () => {
+                modal.classList.add('is-hidden');
+            });
+
+            modal.addEventListener('click', (event) => {
+                if (event.target === modal) {
+                    modal.classList.add('is-hidden');
+                }
+            });
+
+            if (zoomFrame && image) {
+                zoomFrame.addEventListener('mousemove', (event) => {
+                    const rect = zoomFrame.getBoundingClientRect();
+                    const x = ((event.clientX - rect.left) / rect.width) * 100;
+                    const y = ((event.clientY - rect.top) / rect.height) * 100;
+
+                    image.style.transformOrigin = `${x}% ${y}%`;
+                    image.classList.add('is-zoomed');
+                });
+
+                zoomFrame.addEventListener('mouseleave', () => {
+                    image.classList.remove('is-zoomed');
+                    image.style.transformOrigin = 'center center';
+                });
+            }
+
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    modal.classList.add('is-hidden');
+                }
+            });
+        })();
+    </script>
+@endpush

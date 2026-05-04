@@ -34,11 +34,11 @@ class GuestObservationSeeder extends Seeder
                 'plate_text' => null,
                 'vehicle_type' => 'Car',
                 'vehicle_color' => 'White',
-                'location' => 'parking',
+                'location' => 'entrance',
                 'observation_source' => 'cctv',
                 'observed_at' => Carbon::today()->setTime(10, 40, 0)->toIso8601String(),
                 'camera_id' => $exitCameraId,
-                'notes' => 'Delivery vehicle observed in parking area.',
+                'notes' => 'Delivery vehicle observed at the entrance station.',
             ],
             [
                 'plate_text' => 'TMP-3030',

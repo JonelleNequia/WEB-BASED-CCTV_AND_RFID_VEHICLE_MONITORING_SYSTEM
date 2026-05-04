@@ -207,7 +207,7 @@ class VehicleEvent extends Model
     }
 
     /**
-     * Show one readable state result for parking movement summaries.
+     * Show one readable state result for vehicle movement summaries.
      */
     public function getResultingStateLabelAttribute(): string
     {

@@ -42,12 +42,12 @@ class RfidScanLogSeeder extends Seeder
                 'notes' => 'Verified entrance scan for the service van.',
             ],
             [
-                'tag_uid' => 'UNKNOWN-TAG-9001',
+                'tag_uid' => 'GUEST-RFID-9001',
                 'scan_location' => 'exit',
                 'scan_direction' => 'exit',
                 'reader_name' => 'Exit RFID Reader (Simulated)',
                 'scan_time' => Carbon::today()->setTime(12, 46, 0)->toIso8601String(),
-                'notes' => 'Unknown tag sample for manual verification testing.',
+                'notes' => 'Guest RFID sample for manual verification testing.',
             ],
             [
                 'tag_uid' => 'RFID-XYZ-1005',

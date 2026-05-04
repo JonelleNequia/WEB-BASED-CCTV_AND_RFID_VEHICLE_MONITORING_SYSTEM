@@ -73,7 +73,7 @@ class RfidScanLog extends Model
     }
 
     /**
-     * Guest observation created when an unrecognized tag needs CCTV review.
+     * Guest observation created when a guest tag needs CCTV review.
      */
     public function guestVehicleObservation(): BelongsTo
     {
@@ -85,6 +85,10 @@ class RfidScanLog extends Model
      */
     public function getVerificationLabelAttribute(): string
     {
+        if ($this->verification_status === 'guest') {
+            return 'Guest';
+        }
+
         return str_replace('_', ' ', ucfirst($this->verification_status));
     }
 
@@ -95,7 +99,7 @@ class RfidScanLog extends Model
     {
         return match ($this->verification_status) {
             'verified' => 'matched',
-            'inactive_tag', 'inactive_vehicle', 'non_recurring_category', 'unassigned_tag' => 'manual-review',
+            'guest', 'inactive_tag', 'inactive_vehicle', 'non_recurring_category', 'unassigned_tag' => 'manual-review',
             default => 'unmatched',
         };
     }
@@ -136,7 +140,7 @@ class RfidScanLog extends Model
     }
 
     /**
-     * Show a readable resulting state label for parking workflow views.
+     * Show a readable resulting state label for vehicle workflow views.
      */
     public function getResultingStateLabelAttribute(): string
     {

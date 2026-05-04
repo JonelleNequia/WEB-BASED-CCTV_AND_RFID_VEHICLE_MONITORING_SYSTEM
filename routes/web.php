@@ -5,10 +5,8 @@ use App\Http\Controllers\CalibrationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EvidenceController;
 use App\Http\Controllers\GuestObservationController;
-use App\Http\Controllers\IncompleteRecordController;
 use App\Http\Controllers\ManualReviewController;
 use App\Http\Controllers\MonitoringController;
-use App\Http\Controllers\ReportController;
 use App\Http\Controllers\RfidInventoryController;
 use App\Http\Controllers\RfidScanController;
 use App\Http\Controllers\SettingsController;
@@ -71,6 +69,9 @@ Route::middleware('auth')->group(function (): void {
         Route::post('/rfid-scans/simulate', [RfidScanController::class, 'store'])->name('rfid-scans.store');
         Route::get('/guest-observations', [GuestObservationController::class, 'index'])->name('guest-observations.index');
         Route::post('/guest-observations', [GuestObservationController::class, 'store'])->name('guest-observations.store');
+        Route::patch('/guest-observations/{guestVehicleObservation}', [GuestObservationController::class, 'update'])
+            ->whereNumber('guestVehicleObservation')
+            ->name('guest-observations.update');
         Route::get('/vehicle-events', [VehicleEventController::class, 'index'])->name('vehicle-events.index');
         Route::get('/vehicle-events/create', [VehicleEventController::class, 'create'])->name('vehicle-events.create');
         Route::post('/vehicle-events', [VehicleEventController::class, 'store'])->name('vehicle-events.store');
@@ -78,8 +79,9 @@ Route::middleware('auth')->group(function (): void {
         Route::get('/vehicle-events/{vehicleEvent}', [VehicleEventController::class, 'show'])
             ->whereNumber('vehicleEvent')
             ->name('vehicle-events.show');
-        Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
-        Route::get('/reports/export/csv', [ReportController::class, 'exportCsv'])->name('reports.export.csv');
+        Route::redirect('/reports', '/vehicle-events')->name('reports.index');
+        Route::get('/reports/export/csv', fn () => redirect()->route('vehicle-events.export.csv', request()->query()))
+            ->name('reports.export.csv');
         Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('settings.update');
         Route::get('/camera-calibration', [CalibrationController::class, 'index'])->name('calibration.index');
@@ -98,7 +100,7 @@ Route::middleware('auth')->group(function (): void {
         Route::patch('/manual-review/{vehicleEvent}/mark-unmatched', [ManualReviewController::class, 'markUnmatched'])
             ->name('manual-review.mark-unmatched');
 
-        Route::get('/incomplete-records', [IncompleteRecordController::class, 'index'])->name('incomplete-records.index');
+        Route::redirect('/incomplete-records', '/guest-observations')->name('incomplete-records.index');
         Route::get('/system-status', [SystemStatusController::class, 'index'])->name('system-status.index');
     });
 });

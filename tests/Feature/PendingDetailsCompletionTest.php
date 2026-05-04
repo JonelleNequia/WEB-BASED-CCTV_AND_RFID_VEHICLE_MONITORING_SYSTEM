@@ -22,9 +22,23 @@ class PendingDetailsCompletionTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
-        $vehicleEvent = VehicleEvent::query()
-            ->where('external_event_key', 'seed-detected-entrance-001')
-            ->firstOrFail();
+
+        /** @var EventService $eventService */
+        $eventService = app(EventService::class);
+
+        $vehicleEvent = $eventService->createDetectedEvent([
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => now()->toIso8601String(),
+            'vehicle_image_path' => 'detected-vehicle-images/entrance/pending-entry-test.jpg',
+            'external_event_key' => 'pending-entry-session-001',
+            'roi_name' => 'Entrance Trigger Line',
+            'detection_metadata_json' => [
+                'track_id' => 17,
+                'confidence' => 0.91,
+                'detector_class' => 'car',
+            ],
+        ]);
 
         $this->actingAs($user)
             ->put(route('vehicle-events.complete', $vehicleEvent), [

@@ -101,7 +101,8 @@ class StationController extends Controller
             'unassigned_tag' => 'RFID scan recorded, but this tag is not assigned to a vehicle.',
             'inactive_vehicle' => 'RFID scan recorded, but the vehicle record is inactive.',
             'non_recurring_category' => 'RFID scan recorded, but this vehicle category does not use recurring RFID monitoring.',
-            default => 'RFID scan recorded, but the tag is not registered.',
+            'guest' => 'RFID scan recorded as GUEST. A guest observation was created for review.',
+            default => 'RFID scan recorded for manual review.',
         };
 
         return response()->json([
@@ -145,6 +146,7 @@ class StationController extends Controller
         $eventLogs = VehicleEvent::query()
             ->with(['camera', 'vehicle', 'rfidScanLog'])
             ->where('event_type', $eventType)
+            ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->latest('event_time')
             ->limit($limit)
             ->get()
@@ -155,7 +157,7 @@ class StationController extends Controller
                 return [
                     'id' => $event->id,
                     'event_type' => $event->event_type,
-                    'plate_number' => $event->plate_text ?: $vehicle?->plate_number ?: 'UNKNOWN',
+                    'plate_number' => $event->plate_text ?: $vehicle?->plate_number ?: 'UNREGISTERED / GUEST',
                     'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',
                     'vehicle_type' => $event->display_vehicle_type,
                     'camera_role' => $event->camera?->camera_role,
@@ -164,7 +166,7 @@ class StationController extends Controller
                         ?? ($event->vehicle_id ? 'Registered' : 'Unregistered / Guest'),
                     'resulting_state' => $event->resulting_state ?: 'N/A',
                     'event_time' => $event->event_time?->toIso8601String(),
-                    'display_time' => $event->event_time?->format('M d, Y h:i:s A'),
+                    'display_time' => $event->event_time?->format('M d, Y • h:i:s A'),
                     'status' => $event->display_status,
                     'sort_time' => $event->event_time?->getTimestamp() ?? 0,
                 ];
@@ -181,7 +183,7 @@ class StationController extends Controller
                     'id' => 'guest-'.$observation->id,
                     'record_type' => 'guest_observation',
                     'event_type' => 'GUEST',
-                    'plate_number' => $observation->plate_text ?: 'UNREGISTERED / GUEST',
+                    'plate_number' => $observation->plate_number ?: $observation->plate_text ?: 'UNREGISTERED / GUEST',
                     'owner_name' => 'N/A',
                     'vehicle_type' => $observation->vehicle_type ?: 'Vehicle',
                     'camera_role' => $observation->camera?->camera_role,
@@ -189,7 +191,7 @@ class StationController extends Controller
                     'verification_label' => 'Unregistered / Guest',
                     'resulting_state' => 'Pending Review',
                     'event_time' => $observation->observed_at?->toIso8601String(),
-                    'display_time' => $observation->observed_at?->format('M d, Y h:i:s A'),
+                    'display_time' => $observation->observed_at?->format('M d, Y • h:i:s A'),
                     'status' => ucfirst(str_replace('_', ' ', $observation->status)),
                     'snapshot_url' => $observation->snapshot_url,
                     'sort_time' => $observation->observed_at?->getTimestamp() ?? 0,

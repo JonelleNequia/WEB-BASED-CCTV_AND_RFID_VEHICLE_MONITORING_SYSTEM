@@ -233,7 +233,7 @@ class LaravelEventClient:
                     self.guest_observation_url,
                     data=self.multipart_payload(payload),
                     files={
-                        "snapshot_image": (
+                        "snapshot": (
                             filename or "guest_snapshot.jpg",
                             image_bytes,
                             "image/jpeg",

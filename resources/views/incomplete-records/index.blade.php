@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Incomplete Records | PHILCST Parking Monitoring')
+@section('title', 'Incomplete Records | PHILCST Vehicle Monitoring')
 @section('page-title', 'Incomplete Records')
 @section('page-description', 'Records that still need operator completion before final logging.')
 

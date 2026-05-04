@@ -147,35 +147,6 @@ class VehicleEventSeeder extends Seeder
 
         VehicleEvent::query()->updateOrCreate(
             [
-                'external_event_key' => 'seed-detected-entrance-001',
-            ],
-            [
-                'event_type' => 'ENTRY',
-                'event_status' => 'pending_details',
-                'event_origin' => 'cctv_detected',
-                'plate_text' => null,
-                'plate_confidence' => null,
-                'vehicle_id' => null,
-                'vehicle_type' => 'Car',
-                'detected_vehicle_type' => 'Car',
-                'vehicle_color' => null,
-                'camera_id' => $entranceCamera->id,
-                'external_event_key' => 'seed-detected-entrance-001',
-                'detection_metadata_json' => [
-                    'track_id' => 7,
-                    'confidence' => 0.91,
-                    'detector_class' => 'car',
-                    'line_side_before' => -1,
-                    'line_side_after' => 1,
-                ],
-                'roi_name' => 'Entrance Trigger Line',
-                'event_time' => Carbon::today()->setTime(13, 5, 0),
-                'match_status' => 'pending_details',
-            ]
-        );
-
-        VehicleEvent::query()->updateOrCreate(
-            [
                 'event_type' => 'ENTRY',
                 'plate_text' => 'LMN-3456',
                 'event_time' => Carbon::yesterday()->setTime(16, 30, 0),

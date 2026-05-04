@@ -66,7 +66,7 @@ class MonitoringController extends Controller
             ->map(fn (VehicleEvent $event): array => [
                 'id' => 'event-'.$event->id,
                 'kind' => $event->event_type,
-                'title' => $event->event_type.' - '.($event->plate_text ?: $event->vehicle?->plate_number ?: 'Unknown vehicle'),
+                'title' => $event->event_type.' - '.($event->plate_text ?: $event->vehicle?->plate_number ?: 'UNREGISTERED / GUEST'),
                 'subtitle' => trim(($event->event_origin_label ?? 'Vehicle Event').' | '.($event->resulting_state ?: 'Pending state')),
                 'badge' => $event->event_type === 'ENTRY' ? 'matched' : 'closed',
                 'occurred_at' => $event->event_time?->toIso8601String(),
@@ -81,7 +81,7 @@ class MonitoringController extends Controller
             ->map(fn (GuestVehicleObservation $observation): array => [
                 'id' => 'guest-'.$observation->id,
                 'kind' => 'GUEST',
-                'title' => 'GUEST - '.($observation->plate_text ?: 'No plate'),
+                'title' => 'GUEST - '.($observation->plate_number ?: $observation->plate_text ?: 'No plate'),
                 'subtitle' => ucfirst($observation->location).' | '.trim(($observation->vehicle_color ?: '').' '.($observation->vehicle_type ?: 'Vehicle')),
                 'badge' => 'manual-review',
                 'occurred_at' => $observation->observed_at?->toIso8601String(),

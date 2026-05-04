@@ -30,10 +30,10 @@ class CalibrationSaveTest extends TestCase
                 'last_connection_status' => 'connected',
                 'last_connection_message' => 'Browser preview connected.',
                 'calibration_mask' => [
-                    'x' => 0.15,
-                    'y' => 0.20,
-                    'width' => 0.50,
-                    'height' => 0.35,
+                    ['x' => 0.15, 'y' => 0.20],
+                    ['x' => 0.65, 'y' => 0.20],
+                    ['x' => 0.72, 'y' => 0.55],
+                    ['x' => 0.10, 'y' => 0.55],
                 ],
                 'calibration_line' => [
                     'x1' => 0.10,
@@ -51,10 +51,10 @@ class CalibrationSaveTest extends TestCase
         $this->assertSame('Built-in Webcam', $camera->browser_label);
         $this->assertSame('connected', $camera->last_connection_status);
         $this->assertSame([
-            'x' => 0.15,
-            'y' => 0.20,
-            'width' => 0.50,
-            'height' => 0.35,
+            ['x' => 0.15, 'y' => 0.20],
+            ['x' => 0.65, 'y' => 0.20],
+            ['x' => 0.72, 'y' => 0.55],
+            ['x' => 0.10, 'y' => 0.55],
         ], $camera->calibration_mask_json);
         $this->assertSame([
             'x1' => 0.10,

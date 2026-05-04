@@ -18,6 +18,7 @@ class GuestVehicleObservation extends Model
      */
     protected $fillable = [
         'plate_text',
+        'plate_number',
         'vehicle_type',
         'vehicle_color',
         'location',

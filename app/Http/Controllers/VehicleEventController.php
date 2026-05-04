@@ -5,13 +5,18 @@ namespace App\Http\Controllers;
 use App\Http\Requests\CompleteVehicleEventRequest;
 use App\Http\Requests\StoreVehicleEventRequest;
 use App\Models\Camera;
+use App\Models\GuestVehicleObservation;
+use App\Models\RfidScanLog;
 use App\Models\Roi;
+use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Services\EventService;
 use App\Services\VehicleRegistryService;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 use Illuminate\View\View;
 
 class VehicleEventController extends Controller
@@ -21,17 +26,21 @@ class VehicleEventController extends Controller
      */
     public function index(Request $request): View
     {
-        $dateFrom = $this->parseDate($request->string('date_from')->value());
-        $dateTo = $this->parseDate($request->string('date_to')->value());
-
-        $events = $this->filteredEventsQuery($request, $dateFrom, $dateTo)
-            ->orderByDesc('event_time')
-            ->paginate(10)
-            ->withQueryString();
+        $logs = $this->paginatedUnifiedLogs($request, 10);
 
         return view('vehicle-events.index', [
-            'events' => $events,
-            'filters' => $request->only(['plate_text', 'event_type', 'match_status', 'date_from', 'date_to']),
+            'logs' => $logs,
+            'events' => $logs,
+            'filters' => $request->only([
+                'plate_text',
+                'event_type',
+                'match_status',
+                'date_from',
+                'date_to',
+                'category',
+                'vehicle_owner_name',
+            ]),
+            'categoryOptions' => $this->categoryOptions(),
         ]);
     }
 
@@ -40,20 +49,21 @@ class VehicleEventController extends Controller
      */
     public function exportCsv(Request $request)
     {
-        $dateFrom = $this->parseDate($request->string('date_from')->value());
-        $dateTo = $this->parseDate($request->string('date_to')->value());
+        $logs = $this->paginatedUnifiedLogs($request, 10);
         $filename = 'vehicle-events-'.now()->format('Ymd-His').'.csv';
 
-        return response()->streamDownload(function () use ($request, $dateFrom, $dateTo): void {
+        return response()->streamDownload(function () use ($logs): void {
             $handle = fopen('php://output', 'w');
             fputcsv($handle, [
+                'Record Type',
                 'ID',
                 'Type',
                 'Plate',
+                'Owner',
                 'Vehicle Type',
                 'Category',
                 'Source',
-                'Camera',
+                'Station / Camera',
                 'State',
                 'Event Time',
                 'Status',
@@ -61,26 +71,24 @@ class VehicleEventController extends Controller
                 'RFID Tag',
             ]);
 
-            $this->filteredEventsQuery($request, $dateFrom, $dateTo)
-                ->orderByDesc('event_time')
-                ->chunk(200, function ($events) use ($handle): void {
-                    foreach ($events as $event) {
-                        fputcsv($handle, [
-                            $event->id,
-                            $event->event_type,
-                            $event->plate_text,
-                            $event->display_vehicle_type,
-                            $event->vehicle_category,
-                            $event->event_origin_label,
-                            $event->camera?->camera_name,
-                            $event->resulting_state,
-                            $event->event_time?->toDateTimeString(),
-                            $event->event_status,
-                            $event->match_status,
-                            $event->rfidScanLog?->tag_uid,
-                        ]);
-                    }
-                });
+            $logs->getCollection()->each(function (array $log) use ($handle): void {
+                fputcsv($handle, [
+                    $log['record_type_label'],
+                    $log['id'],
+                    $log['event_type'],
+                    $log['plate_number'],
+                    $log['owner_name'],
+                    $log['vehicle_type'],
+                    $log['category_label'],
+                    $log['source_label'],
+                    $log['station_label'],
+                    $log['state_label'],
+                    $log['event_time_export'],
+                    $log['status_label'],
+                    $log['match_label'],
+                    $log['rfid_tag_uid'],
+                ]);
+            });
 
             fclose($handle);
         }, $filename, [
@@ -181,8 +189,15 @@ class VehicleEventController extends Controller
     {
         return VehicleEvent::query()
             ->with(['camera', 'matchedEntry', 'vehicle', 'rfidScanLog.vehicleRfidTag'])
+            ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->when($request->filled('plate_text'), function ($query) use ($request): void {
-                $query->where('plate_text', 'like', '%'.$request->string('plate_text')->trim().'%');
+                $plate = '%'.$request->string('plate_text')->trim().'%';
+
+                $query->where(function ($query) use ($plate): void {
+                    $query->where('plate_text', 'like', $plate)
+                        ->orWhere('plate_number', 'like', $plate)
+                        ->orWhereHas('vehicle', fn ($vehicleQuery) => $vehicleQuery->where('plate_number', 'like', $plate));
+                });
             })
             ->when($request->filled('event_type'), function ($query) use ($request): void {
                 $query->where('event_type', $request->string('event_type')->upper()->value());
@@ -190,13 +205,23 @@ class VehicleEventController extends Controller
             ->when($request->filled('match_status'), function ($query) use ($request): void {
                 $selectedStatus = $request->string('match_status')->value();
 
-                if ($selectedStatus === VehicleEvent::STATUS_PENDING_DETAILS) {
-                    $query->where('event_status', VehicleEvent::STATUS_PENDING_DETAILS);
-
-                    return;
-                }
-
                 $query->where('match_status', $selectedStatus);
+            })
+            ->when($request->filled('category'), function ($query) use ($request): void {
+                $category = $request->string('category')->value();
+
+                $query->where(function ($query) use ($category): void {
+                    $query->where('vehicle_category', $category)
+                        ->orWhereHas('vehicle', fn ($vehicleQuery) => $vehicleQuery->where('category', $category));
+                });
+            })
+            ->when($request->filled('vehicle_owner_name'), function ($query) use ($request): void {
+                $owner = '%'.$request->string('vehicle_owner_name')->trim().'%';
+
+                $query->whereHas('vehicle', function ($vehicleQuery) use ($owner): void {
+                    $vehicleQuery->where('vehicle_owner_name', 'like', $owner)
+                        ->orWhere('owner_name', 'like', $owner);
+                });
             })
             ->when($dateFrom !== null, function ($query) use ($dateFrom): void {
                 $query->where('event_time', '>=', $dateFrom->copy()->startOfDay());
@@ -204,6 +229,266 @@ class VehicleEventController extends Controller
             ->when($dateTo !== null, function ($query) use ($dateTo): void {
                 $query->where('event_time', '<=', $dateTo->copy()->endOfDay());
             });
+    }
+
+    /**
+     * Build the visible report page. CSV export intentionally uses this same
+     * paginator so exports only contain the currently visible records.
+     *
+     * @return LengthAwarePaginator<int, array<string, mixed>>
+     */
+    protected function paginatedUnifiedLogs(Request $request, int $perPage): LengthAwarePaginator
+    {
+        $logs = $this->filteredUnifiedLogs($request);
+        $page = max(1, (int) $request->query('page', 1));
+        $items = $logs->forPage($page, $perPage)->values();
+
+        return new LengthAwarePaginator(
+            $items,
+            $logs->count(),
+            $perPage,
+            $page,
+            [
+                'path' => $request->url(),
+                'query' => $request->query(),
+            ]
+        );
+    }
+
+    /**
+     * @return Collection<int, array<string, mixed>>
+     */
+    protected function filteredUnifiedLogs(Request $request): Collection
+    {
+        $dateFrom = $this->parseDate($request->string('date_from')->value());
+        $dateTo = $this->parseDate($request->string('date_to')->value());
+
+        $eventLogs = $this->filteredEventsQuery($request, $dateFrom, $dateTo)
+            ->get()
+            ->map(fn (VehicleEvent $event): array => $this->vehicleEventLogPayload($event));
+
+        $guestLogs = $this->filteredGuestLogs($request, $dateFrom, $dateTo)
+            ->get()
+            ->map(fn (GuestVehicleObservation $observation): array => $this->guestLogPayload($observation));
+        $rfidOnlyLogs = $this->filteredRfidOnlyLogs($request, $dateFrom, $dateTo)
+            ->get()
+            ->map(fn (RfidScanLog $scanLog): array => $this->rfidOnlyLogPayload($scanLog));
+
+        return $eventLogs
+            ->concat($guestLogs)
+            ->concat($rfidOnlyLogs)
+            ->sortByDesc('sort_time')
+            ->values();
+    }
+
+    protected function filteredGuestLogs(Request $request, ?Carbon $dateFrom = null, ?Carbon $dateTo = null)
+    {
+        return GuestVehicleObservation::query()
+            ->with('camera')
+            ->when($request->filled('plate_text'), function ($query) use ($request): void {
+                $plate = '%'.$request->string('plate_text')->trim().'%';
+
+                $query->where(function ($query) use ($plate): void {
+                    $query->where('plate_number', 'like', $plate)
+                        ->orWhere('plate_text', 'like', $plate);
+                });
+            })
+            ->when($request->filled('event_type'), function ($query) use ($request): void {
+                if ($request->string('event_type')->upper()->value() !== 'GUEST') {
+                    $query->whereRaw('1 = 0');
+                }
+            })
+            ->when($request->filled('match_status'), function ($query) use ($request): void {
+                $status = $request->string('match_status')->value();
+
+                if (in_array($status, ['pending_review', 'reviewed'], true)) {
+                    $query->where('status', $status);
+
+                    return;
+                }
+
+                $query->whereRaw('1 = 0');
+            })
+            ->when($request->filled('category') || $request->filled('vehicle_owner_name'), function ($query): void {
+                $query->whereRaw('1 = 0');
+            })
+            ->when($dateFrom !== null, function ($query) use ($dateFrom): void {
+                $query->where('observed_at', '>=', $dateFrom->copy()->startOfDay());
+            })
+            ->when($dateTo !== null, function ($query) use ($dateTo): void {
+                $query->where('observed_at', '<=', $dateTo->copy()->endOfDay());
+            });
+    }
+
+    protected function filteredRfidOnlyLogs(Request $request, ?Carbon $dateFrom = null, ?Carbon $dateTo = null)
+    {
+        return RfidScanLog::query()
+            ->with(['vehicle', 'vehicleRfidTag'])
+            ->whereNull('correlated_vehicle_event_id')
+            ->whereNull('guest_vehicle_observation_id')
+            ->when($request->filled('plate_text'), function ($query) use ($request): void {
+                $term = '%'.$request->string('plate_text')->trim().'%';
+
+                $query->where(function ($query) use ($term): void {
+                    $query->where('tag_uid', 'like', $term)
+                        ->orWhereHas('vehicle', fn ($vehicleQuery) => $vehicleQuery->where('plate_number', 'like', $term));
+                });
+            })
+            ->when($request->filled('event_type'), function ($query) use ($request): void {
+                if ($request->string('event_type')->upper()->value() !== 'RFID') {
+                    $query->whereRaw('1 = 0');
+                }
+            })
+            ->when($request->filled('match_status'), function ($query): void {
+                $query->whereRaw('1 = 0');
+            })
+            ->when($request->filled('category'), function ($query) use ($request): void {
+                $category = $request->string('category')->value();
+
+                $query->where(function ($query) use ($category): void {
+                    $query->where('vehicle_category', $category)
+                        ->orWhereHas('vehicle', fn ($vehicleQuery) => $vehicleQuery->where('category', $category));
+                });
+            })
+            ->when($request->filled('vehicle_owner_name'), function ($query) use ($request): void {
+                $owner = '%'.$request->string('vehicle_owner_name')->trim().'%';
+
+                $query->whereHas('vehicle', function ($vehicleQuery) use ($owner): void {
+                    $vehicleQuery->where('vehicle_owner_name', 'like', $owner)
+                        ->orWhere('owner_name', 'like', $owner);
+                });
+            })
+            ->when($dateFrom !== null, function ($query) use ($dateFrom): void {
+                $query->where('scan_time', '>=', $dateFrom->copy()->startOfDay());
+            })
+            ->when($dateTo !== null, function ($query) use ($dateTo): void {
+                $query->where('scan_time', '<=', $dateTo->copy()->endOfDay());
+            });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function vehicleEventLogPayload(VehicleEvent $event): array
+    {
+        $vehicle = $event->vehicle;
+        $time = $event->event_time;
+
+        return [
+            'record_type' => 'vehicle_event',
+            'record_type_label' => 'Vehicle Event',
+            'id' => $event->id,
+            'detail_url' => route('vehicle-events.show', $event),
+            'event_type' => $event->event_type,
+            'plate_number' => $event->plate_text ?: $vehicle?->plate_number ?: 'GUEST',
+            'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',
+            'vehicle_type' => $event->display_vehicle_type,
+            'category_label' => $this->displayCategory($event->vehicle_category ?: $vehicle?->category),
+            'source_label' => $event->event_origin_label,
+            'station_label' => $event->camera?->camera_name ?: ($event->roi_name ?: 'No camera linked'),
+            'state_label' => $event->resulting_state_label,
+            'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
+            'summary_label' => 'Vehicle Event #'.$event->id.' • '.($time?->format('M d, Y • h:i A') ?: 'No time'),
+            'event_time_export' => $time?->toDateTimeString(),
+            'status_label' => str($event->display_status)->replace('_', ' ')->title()->value(),
+            'status_badge_class' => $event->status_badge_class,
+            'match_label' => $event->match_display,
+            'rfid_tag_uid' => $event->rfidScanLog?->tag_uid ?: 'N/A',
+            'image_url' => $event->has_visual_evidence ? $event->vehicle_image_url : null,
+            'sort_time' => $time?->getTimestamp() ?? 0,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function guestLogPayload(GuestVehicleObservation $observation): array
+    {
+        $time = $observation->observed_at;
+
+        return [
+            'record_type' => 'guest_observation',
+            'record_type_label' => 'Guest Observation',
+            'id' => $observation->id,
+            'detail_url' => route('guest-observations.index', ['plate_text' => $observation->plate_number ?: $observation->plate_text]),
+            'event_type' => 'GUEST',
+            'plate_number' => $observation->plate_number ?: $observation->plate_text ?: 'GUEST',
+            'owner_name' => 'N/A',
+            'vehicle_type' => $observation->vehicle_type ?: 'Vehicle',
+            'category_label' => 'Guest',
+            'source_label' => $observation->observation_source === 'cctv' ? 'Guest CCTV' : 'Guest Manual',
+            'station_label' => ucfirst($observation->location).' Station',
+            'state_label' => 'Pending Review',
+            'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
+            'summary_label' => 'Guest Observation #'.$observation->id.' • '.($time?->format('M d, Y • h:i A') ?: 'No time'),
+            'event_time_export' => $time?->toDateTimeString(),
+            'status_label' => ucfirst(str_replace('_', ' ', $observation->status)),
+            'status_badge_class' => $observation->status === 'reviewed' ? 'matched' : 'manual-review',
+            'match_label' => 'Guest review',
+            'rfid_tag_uid' => 'N/A',
+            'image_url' => $observation->snapshot_url,
+            'sort_time' => $time?->getTimestamp() ?? 0,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function rfidOnlyLogPayload(RfidScanLog $scanLog): array
+    {
+        $vehicle = $scanLog->vehicle;
+        $time = $scanLog->scan_time;
+
+        return [
+            'record_type' => 'rfid_scan',
+            'record_type_label' => 'RFID Scan',
+            'id' => $scanLog->id,
+            'detail_url' => route('rfid-scans.index', ['history_q' => $scanLog->tag_uid]),
+            'event_type' => 'RFID',
+            'plate_number' => $vehicle?->plate_number ?: 'GUEST',
+            'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',
+            'vehicle_type' => $vehicle?->vehicle_type ?: 'N/A',
+            'category_label' => $this->displayCategory($scanLog->vehicle_category ?: $vehicle?->category),
+            'source_label' => 'RFID Desk',
+            'station_label' => ucfirst($scanLog->scan_location).' Station',
+            'state_label' => $scanLog->resultingStateLabel,
+            'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
+            'summary_label' => 'RFID Scan #'.$scanLog->id.' • '.($time?->format('M d, Y • h:i A') ?: 'No time'),
+            'event_time_export' => $time?->toDateTimeString(),
+            'status_label' => $scanLog->verificationLabel,
+            'status_badge_class' => $scanLog->verificationBadgeClass,
+            'match_label' => 'No vehicle event',
+            'rfid_tag_uid' => $scanLog->tag_uid,
+            'image_url' => null,
+            'sort_time' => $time?->getTimestamp() ?? 0,
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function categoryOptions(): array
+    {
+        return VehicleEvent::query()
+            ->whereNotNull('vehicle_category')
+            ->distinct()
+            ->orderBy('vehicle_category')
+            ->pluck('vehicle_category')
+            ->merge(Vehicle::RFID_RECURRING_CATEGORIES)
+            ->merge(Vehicle::query()->whereNotNull('category')->distinct()->orderBy('category')->pluck('category'))
+            ->filter()
+            ->unique()
+            ->mapWithKeys(fn (string $category): array => [$category => $this->displayCategory($category)])
+            ->all();
+    }
+
+    protected function displayCategory(?string $category): string
+    {
+        if (blank($category)) {
+            return 'N/A';
+        }
+
+        return str((string) $category)->replace('_', ' ')->title()->value();
     }
 
 }

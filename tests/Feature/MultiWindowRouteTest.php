@@ -24,7 +24,7 @@ class MultiWindowRouteTest extends TestCase
         $this->actingAs($admin)
             ->get('/admin')
             ->assertOk()
-            ->assertSee('Campus parking monitoring dashboard')
+            ->assertSee('Campus vehicle monitoring dashboard')
             ->assertSee('Entrance Station')
             ->assertSee('Exit Station');
     }
@@ -42,7 +42,11 @@ class MultiWindowRouteTest extends TestCase
             ->assertSee('ENTRY Logs')
             ->assertSee('RFID Ready')
             ->assertSee('data-rfid-input', false)
-            ->assertDontSee('Vehicle Registry');
+            ->assertDontSee('Vehicle Registry')
+            ->assertDontSee('<canvas', false)
+            ->assertDontSee('Save ROI')
+            ->assertDontSee('browser-camera-common.js')
+            ->assertDontSee('data-browser-frame', false);
 
         $this->actingAs($admin)
             ->get(route('stations.exit'))
@@ -51,7 +55,11 @@ class MultiWindowRouteTest extends TestCase
             ->assertSee('EXIT Logs')
             ->assertSee('RFID Ready')
             ->assertSee('data-rfid-input', false)
-            ->assertDontSee('RFID Inventory');
+            ->assertDontSee('RFID Inventory')
+            ->assertDontSee('<canvas', false)
+            ->assertDontSee('Save ROI')
+            ->assertDontSee('browser-camera-common.js')
+            ->assertDontSee('data-browser-frame', false);
     }
 
     public function test_station_state_endpoint_returns_event_type_scoped_logs(): void

@@ -3,7 +3,9 @@
 namespace App\Http\Requests;
 
 use App\Models\RfidTag;
+use App\Models\Vehicle;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
@@ -24,7 +26,10 @@ class StoreVehicleRegistrationRequest extends FormRequest
      */
     public function rules(): array
     {
-        $vehicleId = $this->route('vehicle')?->id;
+        $routeVehicle = $this->route('vehicle');
+        $vehicleId = $routeVehicle instanceof Vehicle
+            ? $routeVehicle->getKey()
+            : $routeVehicle;
 
         return [
             'rfid_tag_id' => [
@@ -47,8 +52,10 @@ class StoreVehicleRegistrationRequest extends FormRequest
                 Rule::unique('vehicles', 'plate_number')->ignore($vehicleId),
             ],
             'vehicle_owner_name' => ['nullable', 'string', 'max:100'],
-            'category' => ['required', 'in:parent,student,faculty_staff,guard'],
-            'vehicle_type' => ['required', 'in:Car,Motorcycle,Bus'],
+            'category' => ['required', 'string', 'max:50'],
+            'category_other' => ['nullable', 'required_if:category,others', 'string', 'max:50'],
+            'vehicle_type' => ['required', 'string', 'max:50'],
+            'vehicle_type_other' => ['nullable', 'required_if:vehicle_type,Others', 'string', 'max:50'],
         ];
     }
 
@@ -80,6 +87,18 @@ class StoreVehicleRegistrationRequest extends FormRequest
 
         if (! $this->filled('category')) {
             $this->merge(['category' => 'faculty_staff']);
+        }
+
+        if ($this->input('category') === 'others' && $this->filled('category_other')) {
+            $this->merge([
+                'category' => trim((string) $this->input('category_other')),
+            ]);
+        }
+
+        if ($this->input('vehicle_type') === 'Others' && $this->filled('vehicle_type_other')) {
+            $this->merge([
+                'vehicle_type' => Str::title(trim((string) $this->input('vehicle_type_other'))),
+            ]);
         }
     }
 

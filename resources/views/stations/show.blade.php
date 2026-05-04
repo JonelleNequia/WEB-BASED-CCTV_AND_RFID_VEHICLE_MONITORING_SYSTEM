@@ -39,16 +39,6 @@
                     data-station-frame
                     data-frame-stream="{{ $streamUrl }}"
                 >
-                <video
-                    data-browser-frame
-                    class="is-hidden"
-                    autoplay
-                    muted
-                    playsinline
-                ></video>
-                <div class="station-frame-fallback" data-frame-fallback>
-                    Waiting for {{ strtolower($stationLabel) }} live stream
-                </div>
             </div>
 
             <div class="station-video-footer">
@@ -74,12 +64,20 @@
             <div class="station-log-list" data-station-log-list>
                 @forelse ($logs as $log)
                     <article class="station-log-item">
-                        <div class="station-log-main">
-                            <strong>{{ $log['event_type'] }} - {{ $log['plate_number'] }}</strong>
-                            <span>{{ $log['verification_label'] }} | {{ $log['resulting_state'] }}</span>
-                            <small>{{ $log['display_time'] }}</small>
+                        <div class="station-log-badge-row">
+                            <span class="station-log-badge">{{ $log['event_type'] }}</span>
+                            <span class="station-log-time">{{ $log['display_time'] }}</span>
                         </div>
-                        <span class="station-log-badge">{{ $log['event_type'] }}</span>
+                        <div class="station-log-main">
+                            <strong>{{ $log['plate_number'] }}</strong>
+                            <span>{{ $log['verification_label'] }}</span>
+                        </div>
+                        <div class="station-log-detail-grid">
+                            <div><span>Owner</span><strong>{{ $log['owner_name'] }}</strong></div>
+                            <div><span>Vehicle</span><strong>{{ $log['vehicle_type'] }}</strong></div>
+                            <div><span>State</span><strong>{{ $log['resulting_state'] }}</strong></div>
+                            <div><span>Status</span><strong>{{ $log['status'] }}</strong></div>
+                        </div>
                     </article>
                 @empty
                     <div class="station-log-empty" data-station-log-empty>No {{ $eventType }} logs yet</div>
@@ -102,7 +100,6 @@
         ],
     ])
     <script id="station-kiosk-data" type="application/json">{!! json_encode($stationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
-    <script src="{{ asset('js/browser-camera-common.js') }}"></script>
     <script src="{{ asset('js/station-kiosk.js') }}"></script>
 </body>
 </html>

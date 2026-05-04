@@ -1,8 +1,8 @@
 @extends('layouts.app')
 
-@section('title', 'Settings | PHILCST Parking Monitoring')
+@section('title', 'Settings | PHILCST Vehicle Monitoring')
 @section('page-title', 'Settings')
-@section('page-description', 'Adjust local parking workflow, station labels, camera sources, and optional advanced settings.')
+@section('page-description', 'Adjust local vehicle workflow, station labels, camera sources, and optional advanced settings.')
 
 @section('content')
     <section class="hero-panel hero-panel-compact">
@@ -11,7 +11,7 @@
             <h3>Local deployment configuration</h3>
             <div class="inline-status-list">
                 <span class="chip chip-brand">Offline Local</span>
-                <span class="chip chip-soft">Parking-focused RFID workflow</span>
+                <span class="chip chip-soft">Vehicle-focused RFID workflow</span>
             </div>
         </div>
 
@@ -85,7 +85,7 @@
                     <h4>Camera Sources</h4>
                     @include('layouts.partials.help', [
                         'label' => 'Explain camera sources',
-                        'text' => 'These sources support parking observation and guest monitoring. They do not replace RFID as the main identifier for recurring vehicles.',
+                        'text' => 'These sources support vehicle observation and guest monitoring. They do not replace RFID as the main identifier for recurring vehicles.',
                     ])
                 </div>
 

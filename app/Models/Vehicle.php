@@ -17,7 +17,7 @@ class Vehicle extends Model
     public const STATE_OUTSIDE = 'OUTSIDE';
 
     /**
-     * Categories that can use the RFID recurring workflow.
+     * Built-in categories shown in registry forms.
      *
      * @var list<string>
      */
@@ -114,6 +114,6 @@ class Vehicle extends Model
      */
     public function isRfidRecurring(): bool
     {
-        return in_array($this->category, self::RFID_RECURRING_CATEGORIES, true);
+        return $this->category !== 'guest';
     }
 }

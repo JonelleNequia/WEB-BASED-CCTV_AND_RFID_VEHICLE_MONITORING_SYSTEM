@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Camera Calibration | PHILCST Parking Monitoring')
+@section('title', 'Camera Calibration | PHILCST Vehicle Monitoring')
 @section('page-title', 'Camera Calibration')
 @section('page-description', 'Admin setup for YOLOv8 detection zones, ROI masks, trigger lines, and camera device assignments.')
 
@@ -26,7 +26,7 @@
         <div class="panel-header">
             <div>
                 <h3>Calibration Workflow</h3>
-                <p>Select a browser camera, draw the ROI mask first, draw the trigger line second, then save calibration. The Python detector uses these shapes to decide when a vehicle crossing becomes a system event.</p>
+                <p>Select a browser camera, click point-by-point to draw the polygon ROI first, draw the trigger line second, then save calibration. The Python detector uses these shapes to decide when a vehicle crossing becomes a system event.</p>
             </div>
         </div>
     </section>
@@ -45,15 +45,15 @@
                 <div class="calibration-controls-panel">
                     <div class="form-grid">
                         <div class="field">
-                            <label for="{{ $role }}_device_select">Browser Camera</label>
-                            <select id="{{ $role }}_device_select" data-device-select>
-                                <option value="">Loading camera sources...</option>
+                            <label for="{{ $role }}_stream_select">Calibration Stream</label>
+                            <select id="{{ $role }}_stream_select" data-device-select>
+                                <option value="{{ $camera['stream_url'] }}">{{ $camera['role_label'] }} MJPEG Stream</option>
                             </select>
                         </div>
                     </div>
 
                     <div class="button-row camera-toolbar">
-                        <button type="button" class="button button-secondary button-sm" data-tool="mask">Draw ROI Mask</button>
+                        <button type="button" class="button button-secondary button-sm" data-tool="mask">Draw Polygon ROI</button>
                         <button type="button" class="button button-secondary button-sm" data-tool="line">Draw Trigger Line</button>
                         <button type="button" class="button button-secondary button-sm" data-clear>Clear</button>
                         <button type="button" class="button button-primary button-sm" data-save>Save Calibration</button>
@@ -61,7 +61,13 @@
                 </div>
 
                 <div class="camera-stage camera-stage-calibration">
-                    <video class="camera-video is-hidden" data-video autoplay muted playsinline></video>
+                    <img
+                        class="camera-video"
+                        data-video
+                        data-stream-url="{{ $camera['stream_url'] }}"
+                        src="{{ $camera['stream_url'] }}"
+                        alt="{{ $camera['role_label'] }} calibration stream"
+                    >
                     <canvas class="camera-overlay" data-overlay></canvas>
                     <div class="camera-fallback" data-fallback-wrapper>
                         <div class="camera-fallback-copy">
@@ -78,15 +84,15 @@
                         <strong data-source-value>{{ $camera['source_type'] }} | {{ $camera['source_value'] }}</strong>
                     </div>
                     <div>
-                        <span>Browser Device</span>
-                        <strong data-browser-value>{{ $camera['browser_label'] ?: 'No saved browser device' }}</strong>
+                        <span>Stream URL</span>
+                        <strong data-browser-value>{{ $camera['stream_url'] }}</strong>
                     </div>
                     <div>
                         <span>Status</span>
                         <strong data-status-value>{{ ucfirst(str_replace('_', ' ', $camera['last_connection_status'])) }}</strong>
                     </div>
                     <div>
-                        <span>ROI Mask</span>
+                        <span>Polygon ROI</span>
                         <strong data-mask-value>{{ $camera['calibration_mask'] ? 'Mask saved' : 'No mask yet' }}</strong>
                     </div>
                     <div>

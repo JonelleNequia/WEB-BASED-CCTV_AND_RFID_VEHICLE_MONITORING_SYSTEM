@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Live Monitor | PHILCST Parking Monitoring')
+@section('title', 'Live Monitor | PHILCST Vehicle Monitoring')
 @section('page-title', 'Live Monitor')
 @section('page-description', 'Guard command center for AI-assisted CCTV overlays, RFID status, and real-time vehicle activity.')
 

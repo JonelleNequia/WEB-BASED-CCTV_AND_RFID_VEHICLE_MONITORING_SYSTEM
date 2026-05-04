@@ -9,6 +9,7 @@ use App\Services\SettingsService;
 use App\Services\VehicleRegistryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\View\View;
 
 class RfidScanController extends Controller
@@ -17,14 +18,17 @@ class RfidScanController extends Controller
      * Show recent RFID scans and the simulation form.
      */
     public function index(
+        Request $request,
         RfidService $rfidService,
         SettingsService $settingsService,
         VehicleRegistryService $vehicleRegistryService
     ): View {
         return view('rfid-scans.index', [
-            'scanLogs' => $rfidService->recentScans(12),
+            'scanLogs' => $rfidService->scanHistory($request->only(['history_q', 'scan_location', 'verification_status']), 12),
+            'latestScan' => $rfidService->recentScans(1)->first(),
             'rfidStats' => $rfidService->stats(),
-            'registeredTags' => $vehicleRegistryService->registeredTags(),
+            'registeredTags' => $vehicleRegistryService->registeredTags($request->string('q')->value()),
+            'filters' => $request->only(['q', 'history_q', 'scan_location', 'verification_status']),
             'settings' => $settingsService->all(),
         ]);
     }
@@ -49,7 +53,8 @@ class RfidScanController extends Controller
             'inactive_tag' => 'RFID scan recorded, but the assigned tag is inactive.',
             'unassigned_tag' => 'RFID scan recorded, but this tag is still available in inventory and is not assigned to a vehicle.',
             'inactive_vehicle' => 'RFID scan recorded, but the vehicle record is inactive.',
-            default => 'RFID scan recorded, but the tag is not recognized in the registry.',
+            'guest' => 'RFID scan recorded as GUEST. A guest observation was created for review.',
+            default => 'RFID scan recorded for manual review.',
         };
 
         if ($request->expectsJson()) {

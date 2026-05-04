@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import quote, urlparse, urlunparse
 
 import cv2
+import numpy as np
 from ultralytics import YOLO
 
 from config import (
@@ -42,8 +43,8 @@ from tracking import (
     calibration_ready,
     crossed_line,
     normalized_line_to_pixels,
-    normalized_rect_to_pixels,
-    point_in_mask,
+    normalized_polygon_to_pixels,
+    point_in_polygon,
     point_side_of_line,
 )
 from anpr import read_license_plate
@@ -64,7 +65,9 @@ class MjpegStreamHandler(BaseHTTPRequestHandler):
     """
 
     def do_GET(self):
-        if self.path == "/health":
+        request_path = urlparse(self.path).path
+
+        if request_path == "/health":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -72,7 +75,7 @@ class MjpegStreamHandler(BaseHTTPRequestHandler):
             self.wfile.write(b'{"ok":true}')
             return
 
-        role = self.path.strip("/").split("/")
+        role = request_path.strip("/").split("/")
         if len(role) != 2 or role[0] != "stream" or role[1] not in CAMERA_ROLES:
             self.send_error(404)
             return
@@ -177,6 +180,52 @@ def publish_stream_frame(role, frame):
         STREAM_CONDITION.notify_all()
 
     return True
+
+
+def publish_status_frame(role, title, detail):
+    """
+    Publish a simple diagnostic frame when a configured camera cannot provide
+    live frames. This keeps station/calibration MJPEG clients connected.
+    """
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    frame[:, :] = (34, 25, 54)
+
+    cv2.putText(
+        frame,
+        f"{role.upper()} CAMERA",
+        (70, 170),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.6,
+        (255, 255, 255),
+        3,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame,
+        title,
+        (70, 245),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.0,
+        (180, 150, 220),
+        2,
+        cv2.LINE_AA,
+    )
+
+    y = 315
+    for line in str(detail or "").split(". "):
+        cv2.putText(
+            frame,
+            line[:78],
+            (70, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.72,
+            (230, 224, 240),
+            2,
+            cv2.LINE_AA,
+        )
+        y += 42
+
+    return publish_stream_frame(role, frame)
 
 
 def start_stream_server(max_attempts=5):
@@ -493,30 +542,16 @@ def cleanup_stale_tracks(state):
         state["pending_windows"].pop(track_id, None)
 
 
-def encode_vehicle_snapshot(role, frame, xyxy, event_key):
+def encode_frame_snapshot(role, frame, event_key):
     """
-    Encode a cropped vehicle snapshot for Laravel multipart upload.
+    Encode the current full camera frame for Laravel multipart upload.
     """
-    frame_height, frame_width = frame.shape[:2]
-    x1, y1, x2, y2 = [int(value) for value in xyxy]
-    padding_x = max(int((x2 - x1) * 0.1), 8)
-    padding_y = max(int((y2 - y1) * 0.1), 8)
-
-    crop_x1 = max(x1 - padding_x, 0)
-    crop_y1 = max(y1 - padding_y, 0)
-    crop_x2 = min(x2 + padding_x, frame_width)
-    crop_y2 = min(y2 + padding_y, frame_height)
-
-    crop = frame[crop_y1:crop_y2, crop_x1:crop_x2]
-    if crop.size == 0:
-        crop = frame
-
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     filename = f"{role}_{timestamp}_{event_key}.jpg"
 
     encoded, buffer = cv2.imencode(
         ".jpg",
-        crop,
+        frame,
         [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY],
     )
 
@@ -609,32 +644,10 @@ def draw_label(frame, text, x, y, color):
 
 def draw_calibration_guides(frame, camera_config):
     """
-    Draw the saved ROI and trigger line so station operators can see where detection starts.
+    Reserved for admin diagnostics. Station MJPEG feeds intentionally stay clean
+    and only show algorithm detection boxes/labels around vehicles.
     """
-    frame_height, frame_width = frame.shape[:2]
-    mask_rect = normalized_rect_to_pixels(camera_config.get("calibration_mask"), frame_width, frame_height)
-    line = normalized_line_to_pixels(camera_config.get("calibration_line"), frame_width, frame_height)
-
-    if mask_rect:
-        x = int(mask_rect["x"])
-        y = int(mask_rect["y"])
-        width = int(mask_rect["width"])
-        height = int(mask_rect["height"])
-        cv2.rectangle(
-            frame,
-            (x, y),
-            (x + width, y + height),
-            (255, 255, 255),
-            1,
-        )
-
-    if line:
-        x1 = int(line["x1"])
-        y1 = int(line["y1"])
-        x2 = int(line["x2"])
-        y2 = int(line["y2"])
-        cv2.line(frame, (x1, y1), (x2, y2), (0, 165, 255), 2)
-        draw_label(frame, "TRIGGER LINE", x1, y1, (0, 165, 255))
+    return
 
 
 def render_annotated_frame(role, frame, results, camera_config, state, vehicle_labels):
@@ -760,10 +773,9 @@ def update_detection_windows(role, frame, results, state, laravel_client):
             continue
 
         snapshot_frame = window.get("snapshot_frame") if window.get("snapshot_frame") is not None else frame
-        snapshot = encode_vehicle_snapshot(
+        snapshot = encode_frame_snapshot(
             role,
             snapshot_frame,
-            window["xyxy"],
             window["event_key"],
         )
 
@@ -773,9 +785,7 @@ def update_detection_windows(role, frame, results, state, laravel_client):
             state["last_error"] = f"{role.capitalize()} vehicle had no RFID match, but snapshot encoding failed."
             continue
 
-        plate_number = None
-        if window["direction"] == "OUT":
-            plate_number = read_license_plate(snapshot_frame, tuple(window["xyxy"]))
+        plate_number = read_license_plate(snapshot_frame, tuple(window["xyxy"]))
 
         result = laravel_client.submit_guest_observation({
             "external_event_key": window["event_key"],
@@ -810,7 +820,7 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
     event per valid crossing. Uses ANPR for license plate detection.
     """
     frame_height, frame_width = frame.shape[:2]
-    mask_rect = normalized_rect_to_pixels(camera_config.get("calibration_mask"), frame_width, frame_height)
+    mask_polygon = normalized_polygon_to_pixels(camera_config.get("calibration_mask"), frame_width, frame_height)
     line = normalized_line_to_pixels(camera_config.get("calibration_line"), frame_width, frame_height)
     boxes = results.boxes
 
@@ -835,7 +845,7 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
         state["track_last_seen"][track_id] = time.monotonic()
 
         center_point = bbox_center(xyxy)
-        inside_roi = point_in_mask(center_point, mask_rect) if mask_rect else True
+        inside_roi = point_in_polygon(center_point, mask_polygon) if mask_polygon else True
         if not inside_roi:
             continue
 
@@ -891,6 +901,7 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
         if time.monotonic() >= state.get("retry_after", 0.0):
             state["retry_count"] += 1
         state["last_error"] = f"Could not open camera source: {capture_source}"
+        publish_status_frame(role, "Camera source unavailable", state["last_error"])
         return False
 
     has_frame, frame = capture.read()
@@ -901,6 +912,7 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
         state["detection_ready"] = False
         state["retry_count"] += 1
         state["last_error"] = "Camera opened, but frame capture failed."
+        publish_status_frame(role, "Frame capture failed", state["last_error"])
         return False
 
     state["camera_running"] = True

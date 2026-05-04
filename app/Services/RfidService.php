@@ -7,6 +7,7 @@ use App\Models\RfidTag;
 use App\Models\Vehicle;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -52,9 +53,17 @@ class RfidService
                 ? Carbon::parse((string) $data['scan_time'])
                 : now();
 
+            $rawTagUid = (string) ($data['tag_uid'] ?? '');
             $tag = $this->resolveTag($data);
             $vehicle = $tag?->vehicle;
-            $tagUid = $tag?->uid ?? $this->vehicleRegistryService->normalizeTagUid((string) ($data['tag_uid'] ?? 'UNKNOWN-TAG'));
+            $tagUid = $tag?->uid ?: $this->vehicleRegistryService->normalizeTagUid($rawTagUid);
+
+            if ($tagUid === '') {
+                throw ValidationException::withMessages([
+                    'tag_uid' => 'Scan or select an RFID tag first.',
+                ]);
+            }
+
             $verificationStatus = $this->resolveVerificationStatus($tag, $vehicle);
             $stateTransition = $this->resolveStateTransition($verificationStatus, $vehicle, $scanTime);
             $scanDirection = $stateTransition
@@ -116,7 +125,7 @@ class RfidService
                 }
             }
 
-            if ($verificationStatus === 'unknown_tag') {
+            if ($verificationStatus === 'guest') {
                 $guestObservation = $this->guestObservationService->createFromUnrecognizedRfidScan($scanLog);
                 $scanLog->update([
                     'guest_vehicle_observation_id' => $guestObservation->id,
@@ -138,13 +147,50 @@ class RfidService
             ->with(['vehicle', 'vehicleRfidTag', 'correlatedVehicleEvent.camera'])
             ->with('guestVehicleObservation.camera')
             ->when($scanLocation, fn ($query) => $query->where('scan_location', $scanLocation))
-            ->orderByDesc('scan_time')
+            ->orderBy('created_at', 'desc')
             ->limit($limit)
             ->get();
     }
 
     /**
-     * Get recent verified recurring RFID activity for parking status widgets.
+     * Searchable RFID scan history for the RFID Desk table.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return LengthAwarePaginator<int, RfidScanLog>
+     */
+    public function scanHistory(array $filters = [], int $perPage = 12): LengthAwarePaginator
+    {
+        return RfidScanLog::query()
+            ->with(['vehicle', 'vehicleRfidTag', 'correlatedVehicleEvent.camera', 'guestVehicleObservation.camera'])
+            ->when(! empty($filters['history_q']), function ($query) use ($filters): void {
+                $term = '%'.trim((string) $filters['history_q']).'%';
+
+                $query->where(function ($query) use ($term): void {
+                    $query->where('tag_uid', 'like', $term)
+                        ->orWhereHas('vehicle', function ($vehicleQuery) use ($term): void {
+                            $vehicleQuery->where('plate_number', 'like', $term)
+                                ->orWhere('vehicle_owner_name', 'like', $term)
+                                ->orWhere('owner_name', 'like', $term);
+                        })
+                        ->orWhereHas('vehicleRfidTag', function ($tagQuery) use ($term): void {
+                            $tagQuery->where('uid', 'like', $term)
+                                ->orWhere('tag_uid', 'like', $term);
+                        });
+                });
+            })
+            ->when(! empty($filters['scan_location']), function ($query) use ($filters): void {
+                $query->where('scan_location', $this->normalizeLocation((string) $filters['scan_location']));
+            })
+            ->when(! empty($filters['verification_status']), function ($query) use ($filters): void {
+                $query->where('verification_status', $filters['verification_status']);
+            })
+            ->orderByDesc('scan_time')
+            ->paginate($perPage)
+            ->withQueryString();
+    }
+
+    /**
+     * Get recent verified recurring RFID activity for vehicle status widgets.
      *
      * @return Collection<int, RfidScanLog>
      */
@@ -154,7 +200,10 @@ class RfidService
             ->with(['vehicle', 'vehicleRfidTag', 'correlatedVehicleEvent.camera'])
             ->with('guestVehicleObservation.camera')
             ->where('verification_status', 'verified')
-            ->whereIn('vehicle_category', Vehicle::RFID_RECURRING_CATEGORIES)
+            ->where(function ($query): void {
+                $query->whereNull('vehicle_category')
+                    ->orWhere('vehicle_category', '!=', 'guest');
+            })
             ->when($scanLocation, fn ($query) => $query->where('scan_location', $scanLocation))
             ->orderByDesc('scan_time')
             ->limit($limit)
@@ -169,26 +218,24 @@ class RfidService
     public function stats(): array
     {
         $today = today()->toDateString();
-        $recurringCategories = Vehicle::RFID_RECURRING_CATEGORIES;
-
         return [
             'registered_vehicles' => Vehicle::query()
-                ->whereIn('category', $recurringCategories)
+                ->where('category', '!=', 'guest')
                 ->count(),
             'guest_vehicles' => Vehicle::query()
                 ->where('category', 'guest')
                 ->count(),
             'vehicles_inside' => Vehicle::query()
-                ->whereIn('category', $recurringCategories)
+                ->where('category', '!=', 'guest')
                 ->where('status', 'active')
                 ->where('current_state', Vehicle::STATE_INSIDE)
                 ->count(),
             'entries_today' => (int) Vehicle::query()
-                ->whereIn('category', $recurringCategories)
+                ->where('category', '!=', 'guest')
                 ->whereDate('daily_count_date', $today)
                 ->sum('entries_today_count'),
             'exits_today' => (int) Vehicle::query()
-                ->whereIn('category', $recurringCategories)
+                ->where('category', '!=', 'guest')
                 ->whereDate('daily_count_date', $today)
                 ->sum('exits_today_count'),
             'registered_tags' => RfidTag::query()->count(),
@@ -199,7 +246,10 @@ class RfidService
             'registered_scans_today' => RfidScanLog::query()
                 ->whereDate('scan_time', today())
                 ->where('verification_status', 'verified')
-                ->whereIn('vehicle_category', $recurringCategories)
+                ->where(function ($query): void {
+                    $query->whereNull('vehicle_category')
+                        ->orWhere('vehicle_category', '!=', 'guest');
+                })
                 ->count(),
             'verified_today' => RfidScanLog::query()
                 ->whereDate('scan_time', today())
@@ -246,7 +296,7 @@ class RfidService
     protected function resolveVerificationStatus(?RfidTag $tag, ?Vehicle $vehicle): string
     {
         if (! $tag || ! $vehicle) {
-            return 'unknown_tag';
+            return 'guest';
         }
 
         if ($tag->status === RfidTag::STATUS_INACTIVE) {
@@ -269,7 +319,7 @@ class RfidService
     }
 
     /**
-     * Resolve the parking state transition for recurring RFID vehicles.
+     * Resolve the vehicle state transition for recurring RFID vehicles.
      */
     protected function resolveStateTransition(string $verificationStatus, ?Vehicle $vehicle, Carbon $scanTime): ?array
     {

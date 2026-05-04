@@ -1,3 +1,7 @@
+import cv2
+import numpy as np
+
+
 def clamp(value, lower, upper):
     return max(lower, min(value, upper))
 
@@ -20,6 +24,43 @@ def normalized_rect_to_pixels(rect, frame_width, frame_height):
         "width": width,
         "height": height,
     }
+
+
+def normalized_polygon_to_pixels(polygon, frame_width, frame_height):
+    """
+    Convert a saved normalized polygon ROI into pixel coordinates.
+    """
+    if not polygon:
+        return None
+
+    if isinstance(polygon, dict) and {"x", "y", "width", "height"}.issubset(polygon.keys()):
+        rect = normalized_rect_to_pixels(polygon, frame_width, frame_height)
+
+        if not rect:
+            return None
+
+        return [
+            (rect["x"], rect["y"]),
+            (rect["x"] + rect["width"], rect["y"]),
+            (rect["x"] + rect["width"], rect["y"] + rect["height"]),
+            (rect["x"], rect["y"] + rect["height"]),
+        ]
+
+    if not isinstance(polygon, list) or len(polygon) < 3:
+        return None
+
+    points = []
+
+    for point in polygon:
+        if not isinstance(point, dict) or "x" not in point or "y" not in point:
+            return None
+
+        points.append((
+            clamp(int(float(point["x"]) * frame_width), 0, frame_width),
+            clamp(int(float(point["y"]) * frame_height), 0, frame_height),
+        ))
+
+    return points
 
 
 def normalized_line_to_pixels(line, frame_width, frame_height):
@@ -59,6 +100,18 @@ def point_in_mask(point, mask_rect):
         mask_rect["x"] <= x <= mask_rect["x"] + mask_rect["width"]
         and mask_rect["y"] <= y <= mask_rect["y"] + mask_rect["height"]
     )
+
+
+def point_in_polygon(point, polygon):
+    """
+    Use OpenCV to keep detections whose center point is inside the polygon ROI.
+    """
+    if not polygon or len(polygon) < 3:
+        return False
+
+    contour = np.array(polygon, dtype=np.int32)
+
+    return cv2.pointPolygonTest(contour, (float(point[0]), float(point[1])), False) >= 0
 
 
 def point_side_of_line(point, line):

@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('plate_text', 50)->nullable()->index();
             $table->string('vehicle_type', 50)->nullable();
             $table->string('vehicle_color', 50)->nullable();
-            $table->string('location', 30)->default('parking')->index();
+            $table->string('location', 30)->default('entrance')->index();
             $table->string('observation_source', 30)->default('manual')->index();
             $table->timestamp('observed_at')->index();
             $table->foreignId('camera_id')->nullable()->constrained()->nullOnDelete();
@@ -35,4 +35,3 @@ return new class extends Migration
         Schema::dropIfExists('guest_vehicle_observations');
     }
 };
-

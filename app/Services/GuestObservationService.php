@@ -27,12 +27,14 @@ class GuestObservationService
     {
         return DB::transaction(function () use ($data, $userId): GuestVehicleObservation {
             $snapshotPath = $this->storeSnapshot($data['snapshot_image'] ?? null);
+            $plateNumber = $this->normalizePlate($data['plate_number'] ?? $data['plate_text'] ?? null);
 
             return GuestVehicleObservation::query()->create([
-                'plate_text' => $this->normalizePlate($data['plate_text'] ?? null),
+                'plate_text' => $plateNumber,
+                'plate_number' => $plateNumber,
                 'vehicle_type' => $data['vehicle_type'] ?? null,
                 'vehicle_color' => $data['vehicle_color'] ?? null,
-                'location' => $data['location'] ?? 'parking',
+                'location' => $this->normalizeLocation($data['location'] ?? 'entrance'),
                 'observation_source' => $data['observation_source'] ?? 'manual',
                 'observed_at' => isset($data['observed_at'])
                     ? Carbon::parse((string) $data['observed_at'])
@@ -46,7 +48,7 @@ class GuestObservationService
     }
 
     /**
-     * Create a CCTV-supported guest review record from an unrecognized RFID scan.
+     * Create a CCTV-supported guest review record from a guest RFID scan.
      */
     public function createFromUnrecognizedRfidScan(RfidScanLog $scanLog): GuestVehicleObservation
     {
@@ -56,6 +58,7 @@ class GuestObservationService
 
             return GuestVehicleObservation::query()->create([
                 'plate_text' => null,
+                'plate_number' => null,
                 'vehicle_type' => 'Unregistered',
                 'vehicle_color' => null,
                 'location' => $scanLog->scan_location,
@@ -63,7 +66,7 @@ class GuestObservationService
                 'observed_at' => $scanLog->scan_time,
                 'camera_id' => $camera?->id,
                 'snapshot_path' => $snapshotPath,
-                'notes' => 'Unrecognized RFID tag '.$scanLog->tag_uid.' scanned at '.$scanLog->scanLocationLabel.'. Guard review required.',
+                'notes' => 'Guest RFID tag '.$scanLog->tag_uid.' scanned at '.$scanLog->scanLocationLabel.'. Guard review required.',
                 'created_by' => null,
             ]);
         });
@@ -82,10 +85,15 @@ class GuestObservationService
         return GuestVehicleObservation::query()
             ->with('camera')
             ->when(! empty($filters['plate_text']), function ($query) use ($filters): void {
-                $query->where('plate_text', 'like', '%'.trim((string) $filters['plate_text']).'%');
+                $plate = '%'.trim((string) $filters['plate_text']).'%';
+
+                $query->where(function ($query) use ($plate): void {
+                    $query->where('plate_number', 'like', $plate)
+                        ->orWhere('plate_text', 'like', $plate);
+                });
             })
             ->when(! empty($filters['location']), function ($query) use ($filters): void {
-                $query->where('location', $filters['location']);
+                $query->where('location', $this->normalizeLocation($filters['location']));
             })
             ->when(! empty($filters['observation_source']), function ($query) use ($filters): void {
                 $query->where('observation_source', $filters['observation_source']);
@@ -136,7 +144,7 @@ class GuestObservationService
 
         $this->localStorageService->ensureBaseDirectories();
 
-        return $this->localStorageService->storeEventImage($file, 'vehicle');
+        return $file->store('guest_snapshots', 'public');
     }
 
     /**
@@ -151,6 +159,11 @@ class GuestObservationService
         $normalized = preg_replace('/\s+/', ' ', (string) $plate) ?? (string) $plate;
 
         return Str::upper(trim($normalized));
+    }
+
+    protected function normalizeLocation(mixed $location): string
+    {
+        return (string) $location === 'exit' ? 'exit' : 'entrance';
     }
 
     /**

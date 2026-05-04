@@ -71,6 +71,12 @@
 
     <div class="page-grid two-column">
         <section class="panel">
+            @php($selectedCategory = old('category', 'faculty_staff'))
+            @php($categoryOtherValue = old('category_other', ! in_array($selectedCategory, $vehicleCategories, true) && $selectedCategory !== 'others' ? $selectedCategory : ''))
+            @php($categorySelectValue = $categoryOtherValue !== '' ? 'others' : $selectedCategory)
+            @php($selectedVehicleType = old('vehicle_type', 'Car'))
+            @php($vehicleTypeOtherValue = old('vehicle_type_other', ! in_array($selectedVehicleType, $vehicleTypes, true) && $selectedVehicleType !== 'Others' ? $selectedVehicleType : ''))
+            @php($vehicleTypeSelectValue = $vehicleTypeOtherValue !== '' ? 'Others' : $selectedVehicleType)
             <div class="panel-header">
                 <div>
                     <div class="panel-title-row">
@@ -127,26 +133,52 @@
 
                     <div class="field">
                         <label for="category">Category</label>
-                        <select id="category" name="category" required>
+                        <select id="category" name="category" required data-other-select data-other-target="category_other">
                             @foreach ($vehicleCategories as $category)
-                                <option value="{{ $category }}" @selected(old('category', 'faculty_staff') === $category)>
+                                <option value="{{ $category }}" @selected($categorySelectValue === $category)>
                                     {{ ucfirst(str_replace('_', ' ', $category)) }}
                                 </option>
                             @endforeach
+                            <option value="others" @selected($categorySelectValue === 'others')>Others</option>
                         </select>
+                        <input
+                            id="category_other"
+                            type="text"
+                            name="category_other"
+                            value="{{ $categoryOtherValue }}"
+                            placeholder="Enter custom category"
+                            data-other-field
+                            @if ($categorySelectValue !== 'others') hidden @endif
+                        >
                         @error('category')
+                            <span class="field-error">{{ $message }}</span>
+                        @enderror
+                        @error('category_other')
                             <span class="field-error">{{ $message }}</span>
                         @enderror
                     </div>
 
                     <div class="field">
                         <label for="vehicle_type">Vehicle Type</label>
-                        <select id="vehicle_type" name="vehicle_type" required>
+                        <select id="vehicle_type" name="vehicle_type" required data-other-select data-other-target="vehicle_type_other">
                             @foreach ($vehicleTypes as $vehicleType)
-                                <option value="{{ $vehicleType }}" @selected(old('vehicle_type') === $vehicleType)>{{ $vehicleType }}</option>
+                                <option value="{{ $vehicleType }}" @selected($vehicleTypeSelectValue === $vehicleType)>{{ $vehicleType }}</option>
                             @endforeach
+                            <option value="Others" @selected($vehicleTypeSelectValue === 'Others')>Others</option>
                         </select>
+                        <input
+                            id="vehicle_type_other"
+                            type="text"
+                            name="vehicle_type_other"
+                            value="{{ $vehicleTypeOtherValue }}"
+                            placeholder="Enter custom vehicle type"
+                            data-other-field
+                            @if ($vehicleTypeSelectValue !== 'Others') hidden @endif
+                        >
                         @error('vehicle_type')
+                            <span class="field-error">{{ $message }}</span>
+                        @enderror
+                        @error('vehicle_type_other')
                             <span class="field-error">{{ $message }}</span>
                         @enderror
                     </div>
@@ -265,3 +297,31 @@
         </div>
     </section>
 @endsection
+
+@push('scripts')
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('[data-other-select]').forEach((select) => {
+                const field = document.getElementById(select.dataset.otherTarget);
+                const otherValues = ['others', 'Others'];
+
+                if (!field) {
+                    return;
+                }
+
+                const syncOtherField = () => {
+                    const show = otherValues.includes(select.value);
+                    field.hidden = !show;
+                    field.toggleAttribute('required', show);
+
+                    if (show) {
+                        field.focus({ preventScroll: true });
+                    }
+                };
+
+                select.addEventListener('change', syncOtherField);
+                syncOtherField();
+            });
+        });
+    </script>
+@endpush

@@ -51,12 +51,6 @@
             'icon' => 'logs',
         ],
         [
-            'label' => 'Reports',
-            'route' => route('reports.index'),
-            'active' => request()->routeIs('reports.*'),
-            'icon' => 'reports',
-        ],
-        [
             'label' => 'Settings',
             'route' => route('settings.index'),
             'active' => request()->routeIs('settings.*'),
@@ -79,12 +73,6 @@
                 'icon' => 'review',
             ],
             [
-                'label' => 'Incomplete Records',
-                'route' => route('incomplete-records.index'),
-                'active' => request()->routeIs('incomplete-records.*'),
-                'icon' => 'incomplete',
-            ],
-            [
                 'label' => 'System Status',
                 'route' => route('system-status.index'),
                 'active' => request()->routeIs('system-status.*'),
@@ -104,7 +92,6 @@
             'calibration' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4a2 2 0 0 0-2 2v3a1 1 0 1 0 2 0V6h3a1 1 0 1 0 0-2zm9 0a1 1 0 1 0 0 2h3v3a1 1 0 1 0 2 0V6a2 2 0 0 0-2-2zm4 11a1 1 0 0 0-1 1v3h-3a1 1 0 1 0 0 2h3a2 2 0 0 0 2-2v-3a1 1 0 0 0-1-1M5 15a1 1 0 0 0-1 1v3a2 2 0 0 0 2 2h3a1 1 0 1 0 0-2H6v-3a1 1 0 0 0-1-1m3.5-4a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0"/></svg>',
             'settings' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.4 3.6-.3 1.6a7.7 7.7 0 0 0-1.4.8L6.2 5.2a1.2 1.2 0 0 0-1.6.2L3.2 6.8a1.2 1.2 0 0 0-.2 1.6l.8 1.5a7.7 7.7 0 0 0-.8 1.4l-1.6.3A1.2 1.2 0 0 0 .5 13v2a1.2 1.2 0 0 0 .9 1.2l1.6.3a7.7 7.7 0 0 0 .8 1.4l-.8 1.5a1.2 1.2 0 0 0 .2 1.6l1.4 1.4a1.2 1.2 0 0 0 1.6.2l1.5-.8a7.7 7.7 0 0 0 1.4.8l.3 1.6a1.2 1.2 0 0 0 1.2.9h2a1.2 1.2 0 0 0 1.2-.9l.3-1.6a7.7 7.7 0 0 0 1.4-.8l1.5.8a1.2 1.2 0 0 0 1.6-.2l1.4-1.4a1.2 1.2 0 0 0 .2-1.6l-.8-1.5a7.7 7.7 0 0 0 .8-1.4l1.6-.3A1.2 1.2 0 0 0 23.5 15v-2a1.2 1.2 0 0 0-.9-1.2l-1.6-.3a7.7 7.7 0 0 0-.8-1.4l.8-1.5a1.2 1.2 0 0 0-.2-1.6l-1.4-1.4a1.2 1.2 0 0 0-1.6-.2l-1.5.8a7.7 7.7 0 0 0-1.4-.8l-.3-1.6A1.2 1.2 0 0 0 13 2.5h-2a1.2 1.2 0 0 0-1.2.9M12 8.5A3.5 3.5 0 1 1 8.5 12 3.5 3.5 0 0 1 12 8.5"/></svg>',
             'guest' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a4 4 0 1 0 4 4 4 4 0 0 0-4-4m0 10c-4.4 0-8 2-8 4.5V20a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2.5C20 15 16.4 13 12 13m8.2-8.5a1 1 0 0 0-1.4 1.4A3 3 0 0 1 18 8a1 1 0 1 0 2 0 5 5 0 0 0-1.8-3.5"/></svg>',
-            'reports' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3h13A1.5 1.5 0 0 1 20 4.5v15a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19.5zm3 3a1 1 0 0 0 0 2h10a1 1 0 1 0 0-2zm0 4a1 1 0 0 0 0 2h6a1 1 0 1 0 0-2zm0 4a1 1 0 0 0 0 2h8a1 1 0 1 0 0-2z"/></svg>',
             'incomplete' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m0 5a1 1 0 0 1 1 1v5a1 1 0 0 1-2 0V8a1 1 0 0 1 1-1m0 10a1.25 1.25 0 1 1 1.25-1.25A1.25 1.25 0 0 1 12 17"/></svg>',
             'status' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9A9 9 0 0 0 12 3m-3 9a1 1 0 0 1 2 0v3a1 1 0 0 1-2 0zm4-2a1 1 0 0 1 2 0v5a1 1 0 0 1-2 0zm4-3a1 1 0 0 1 2 0v8a1 1 0 0 1-2 0z"/></svg>',
             'logout' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3.75A2.75 2.75 0 0 0 7.25 6.5v2.25a1 1 0 1 0 2 0V6.5c0-.41.34-.75.75-.75h6.5c.41 0 .75.34.75.75v11c0 .41-.34.75-.75.75H10a.75.75 0 0 1-.75-.75v-2.25a1 1 0 1 0-2 0v2.25A2.75 2.75 0 0 0 10 20.25h6.5A2.75 2.75 0 0 0 19.25 17.5v-11A2.75 2.75 0 0 0 16.5 3.75zm-5.28 7.53a1 1 0 0 0 0 1.44l3 2.97a1 1 0 0 0 1.4-1.42l-1.26-1.24H14a1 1 0 1 0 0-2H7.86l1.26-1.25a1 1 0 0 0-1.4-1.42z"/></svg>',
