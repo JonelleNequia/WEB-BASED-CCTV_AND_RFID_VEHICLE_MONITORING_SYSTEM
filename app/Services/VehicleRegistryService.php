@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Models\Vehicle;
 use App\Models\RfidTag;
+use App\Models\Vehicle;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -80,13 +80,31 @@ class VehicleRegistryService
     }
 
     /**
+     * Get every RFID tag registered in the local inventory pool.
+     *
+     * @return Collection<int, RfidTag>
+     */
+    public function rfidTagInventory(): Collection
+    {
+        $query = RfidTag::query()
+            ->with('vehicle')
+            ->withCount('scanLogs')
+            ->orderByRaw(
+                "CASE status WHEN ? THEN 0 WHEN ? THEN 1 ELSE 2 END",
+                [RfidTag::STATUS_AVAILABLE, RfidTag::STATUS_ASSIGNED]
+            );
+
+        return $this->orderTagsByNumberThenUid($query)->get();
+    }
+
+    /**
      * Get tag options for RFID simulation forms.
      *
      * @return Collection<int, RfidTag>
      */
     public function registeredTags(?string $search = null): Collection
     {
-        return RfidTag::query()
+        $query = RfidTag::query()
             ->with('vehicle')
             ->assigned()
             ->when(filled($search), function ($query) use ($search): void {
@@ -101,9 +119,9 @@ class VehicleRegistryService
                                 ->orWhere('owner_name', 'like', $term);
                         });
                 });
-            })
-            ->orderBy('uid')
-            ->get();
+            });
+
+        return $this->orderTagsByNumberThenUid($query)->get();
     }
 
     /**
@@ -113,10 +131,11 @@ class VehicleRegistryService
      */
     public function availableTags(): Collection
     {
-        return RfidTag::query()
-            ->available()
-            ->orderBy('uid')
-            ->get();
+        $query = RfidTag::query()
+            ->with('vehicle')
+            ->available();
+
+        return $this->orderTagsByNumberThenUid($query)->get();
     }
 
     /**
@@ -202,13 +221,13 @@ class VehicleRegistryService
      */
     public function assignableTagsFor(?Vehicle $vehicle = null): Collection
     {
-        return RfidTag::query()
+        $query = RfidTag::query()
             ->with('vehicle')
             ->where(function ($query) use ($vehicle): void {
                 $query->where('status', RfidTag::STATUS_AVAILABLE);
 
                 if ($vehicle?->rfid_tag_id) {
-                    $query->orWhereKey($vehicle->rfid_tag_id);
+                    $query->orWhere('id', $vehicle->rfid_tag_id);
                 }
 
                 if ($vehicle?->id) {
@@ -217,13 +236,65 @@ class VehicleRegistryService
                             ->where('status', RfidTag::STATUS_ASSIGNED);
                     });
                 }
-            })
-            ->orderBy('uid')
-            ->get();
+            });
+
+        return $this->orderTagsByNumberThenUid($query)->get();
     }
 
     /**
-     * Resolve and validate the tag selected from the offline inventory.
+     * Register one RFID UID in the inventory before vehicle assignment.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function registerRfidTag(array $data): RfidTag
+    {
+        return DB::transaction(function () use ($data): RfidTag {
+            $uid = $this->normalizeTagUid((string) ($data['uid'] ?? $data['rfid_uid'] ?? $data['tag_uid'] ?? ''));
+            $tagNumber = $this->normalizeTagNumber($data['tag_number'] ?? null);
+
+            if ($uid === '') {
+                throw ValidationException::withMessages([
+                    'uid' => 'Scan an RFID UID first.',
+                ]);
+            }
+
+            if ($tagNumber === null) {
+                throw ValidationException::withMessages([
+                    'tag_number' => 'Enter the RFID tag number before registering the scanned UID.',
+                ]);
+            }
+
+            $existing = RfidTag::query()
+                ->where('uid', $uid)
+                ->orWhere('tag_uid', $uid)
+                ->first();
+
+            if ($existing) {
+                throw ValidationException::withMessages([
+                    'uid' => 'This RFID tag is already registered in the inventory.',
+                ]);
+            }
+
+            $existingNumber = RfidTag::query()
+                ->where('tag_number', $tagNumber)
+                ->first();
+
+            if ($existingNumber) {
+                throw ValidationException::withMessages([
+                    'tag_number' => 'This RFID tag number is already used in the inventory.',
+                ]);
+            }
+
+            return RfidTag::query()->create([
+                'tag_number' => $tagNumber,
+                'uid' => $uid,
+                'status' => RfidTag::STATUS_AVAILABLE,
+            ]);
+        });
+    }
+
+    /**
+     * Resolve and validate an inventory tag selected for vehicle assignment.
      *
      * @param  array<string, mixed>  $data
      */
@@ -234,7 +305,7 @@ class VehicleRegistryService
                 ->lockForUpdate()
                 ->find((int) $data['rfid_tag_id']);
         } else {
-            $uid = $this->normalizeTagUid((string) ($data['rfid_tag_uid'] ?? $data['tag_uid'] ?? ''));
+            $uid = $this->normalizeTagUid((string) ($data['rfid_uid'] ?? $data['rfid_tag_uid'] ?? $data['tag_uid'] ?? ''));
 
             $tag = RfidTag::query()
                 ->lockForUpdate()
@@ -243,16 +314,15 @@ class VehicleRegistryService
                 ->first();
 
             if (! $tag && $uid !== '') {
-                $tag = RfidTag::query()->create([
-                    'uid' => $uid,
-                    'status' => RfidTag::STATUS_AVAILABLE,
+                throw ValidationException::withMessages([
+                    'rfid_uid' => 'Register this RFID tag in the inventory before assigning it to a vehicle.',
                 ]);
             }
         }
 
         if (! $tag) {
             throw ValidationException::withMessages([
-                'rfid_tag_id' => 'Select an available RFID tag from the inventory.',
+                'rfid_tag_id' => 'Choose an available RFID tag from the inventory.',
             ]);
         }
 
@@ -262,7 +332,7 @@ class VehicleRegistryService
 
         if ($tag->status !== RfidTag::STATUS_AVAILABLE && ! $belongsToCurrentVehicle) {
             throw ValidationException::withMessages([
-                'rfid_tag_id' => 'The selected RFID tag is not available.',
+                'rfid_uid' => 'The selected RFID tag is already assigned to another vehicle.',
             ]);
         }
 
@@ -293,5 +363,28 @@ class VehicleRegistryService
                 'rfid_tag_uid' => $tag->uid,
             ])->save();
         }
+    }
+
+    protected function normalizeTagNumber(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (! is_numeric($value)) {
+            return null;
+        }
+
+        $number = (int) $value;
+
+        return $number > 0 ? $number : null;
+    }
+
+    protected function orderTagsByNumberThenUid($query)
+    {
+        return $query
+            ->orderByRaw('CASE WHEN tag_number IS NULL THEN 1 ELSE 0 END')
+            ->orderBy('tag_number')
+            ->orderBy('uid');
     }
 }

@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\RfidTag;
 use App\Services\VehicleRegistryService;
 use Illuminate\Database\Seeder;
 
@@ -68,8 +69,24 @@ class VehicleRegistrySeeder extends Seeder
             ],
         ];
 
-        foreach ($records as $record) {
-            $vehicleRegistryService->register($record);
+        foreach ($records as $index => $record) {
+            $tag = $vehicleRegistryService->registerRfidTag([
+                'tag_number' => $index + 1,
+                'uid' => $record['rfid_tag_uid'],
+            ]);
+
+            $vehicle = $vehicleRegistryService->register([
+                ...$record,
+                'rfid_tag_id' => $tag->id,
+            ]);
+
+            if (($record['status'] ?? 'active') !== 'active') {
+                $vehicle->forceFill(['status' => $record['status']])->save();
+            }
+
+            if (($record['tag_status'] ?? 'assigned') === 'inactive') {
+                $tag->fresh()->forceFill(['status' => RfidTag::STATUS_INACTIVE])->save();
+            }
         }
     }
 }

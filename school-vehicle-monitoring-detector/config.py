@@ -10,21 +10,26 @@ RUNTIME_CONFIG_PATH = PROJECT_ROOT / "storage" / "app" / "camera" / "camera_runt
 PUBLIC_STORAGE_DIR = PROJECT_ROOT / "storage" / "app" / "public"
 DETECTED_IMAGE_DIR = PUBLIC_STORAGE_DIR / "detected-vehicle-images"
 
-CAPTURE_INTERVAL_SECONDS = 0.08
+CAPTURE_INTERVAL_SECONDS = 0.04
 RECONNECT_DELAY_SECONDS = 3.0
 TRACK_STALE_AFTER_SECONDS = 3.0
 STATUS_WRITE_INTERVAL_SECONDS = 1.0
 API_TIMEOUT_SECONDS = 10
-JPEG_QUALITY = 90
+RFID_MATCH_TIMEOUT_SECONDS = 0.45
+JPEG_QUALITY = 82
 MJPEG_STREAM_HOST = "127.0.0.1"
 MJPEG_STREAM_PORT = 8765
-DETECTION_FRAME_INTERVAL = 2
-RFID_DETECTION_WINDOW_SECONDS = 5.0
-RFID_POLL_INTERVAL_SECONDS = 0.35
+DETECTION_FRAME_INTERVAL = 3
+CAPTURE_DRAIN_FRAMES = 1
+STREAM_FRAME_MAX_WIDTH = 1280
+YOLO_IMAGE_SIZE = 640
+RFID_DETECTION_WINDOW_SECONDS = 4.0
+RFID_POLL_INTERVAL_SECONDS = 0.5
 CAMERA_RETRY_DELAY_SECONDS = 2.0
 
 # Detection settings.
 MODEL_PATH = "yolov8n.pt"
+
 TRACKER_CONFIG = "bytetrack.yaml"
 DETECTION_CONFIDENCE_THRESHOLD = 0.35
 DETECTION_IOU_THRESHOLD = 0.45
@@ -61,7 +66,7 @@ def default_camera_config(role):
         "camera_name": f"PHILCST {role.capitalize()} Camera",
         "camera_id": None,
         "source_type": "webcam",
-        "source_value": 0 if role == "entrance" else 1,
+        "source_value": 0,
         "source_username": "",
         "source_password": "",
         "browser_device_id": None,
@@ -79,7 +84,7 @@ DEFAULT_RUNTIME_CONFIG = {
         "app_url": "http://127.0.0.1:8000",
         "event_ingest_url": "http://127.0.0.1:8000/api/v1/integration/events",
         "guest_observation_url": "http://127.0.0.1:8000/api/guest-observation",
-        "rfid_match_url": "http://127.0.0.1:8000/api/check-latest-scan",
+        "rfid_match_url": "http://127.0.0.1:8000/api/latest-scan",
         "status_url": "http://127.0.0.1:8000/api/v1/integration/status",
     },
     "cameras": {

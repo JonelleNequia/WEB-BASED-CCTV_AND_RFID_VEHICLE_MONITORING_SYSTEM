@@ -7,7 +7,6 @@ use App\Http\Controllers\EvidenceController;
 use App\Http\Controllers\GuestObservationController;
 use App\Http\Controllers\ManualReviewController;
 use App\Http\Controllers\MonitoringController;
-use App\Http\Controllers\RfidInventoryController;
 use App\Http\Controllers\RfidScanController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\StationController;
@@ -58,13 +57,13 @@ Route::middleware('auth')->group(function (): void {
 
     Route::middleware('admin')->group(function (): void {
         Route::get('/admin', [DashboardController::class, 'index'])->name('dashboard.index');
+        Route::get('/admin/live-state', [DashboardController::class, 'liveState'])->name('dashboard.live-state');
         Route::redirect('/dashboard', '/admin')->name('dashboard.legacy');
         Route::get('/vehicle-registry', [VehicleRegistryController::class, 'index'])->name('vehicle-registry.index');
+        Route::post('/vehicle-registry/rfid-tags', [VehicleRegistryController::class, 'storeRfidTag'])->name('vehicle-registry.rfid-tags.store');
         Route::post('/vehicle-registry', [VehicleRegistryController::class, 'store'])->name('vehicle-registry.store');
         Route::get('/vehicle-registry/{vehicle}/edit', [VehicleRegistryController::class, 'edit'])->name('vehicle-registry.edit');
         Route::put('/vehicle-registry/{vehicle}', [VehicleRegistryController::class, 'update'])->name('vehicle-registry.update');
-        Route::get('/rfid-inventory', [RfidInventoryController::class, 'index'])->name('rfid-inventory.index');
-        Route::post('/rfid-inventory', [RfidInventoryController::class, 'store'])->name('rfid-inventory.store');
         Route::get('/rfid-scans', [RfidScanController::class, 'index'])->name('rfid-scans.index');
         Route::post('/rfid-scans/simulate', [RfidScanController::class, 'store'])->name('rfid-scans.store');
         Route::get('/guest-observations', [GuestObservationController::class, 'index'])->name('guest-observations.index');
@@ -72,6 +71,9 @@ Route::middleware('auth')->group(function (): void {
         Route::patch('/guest-observations/{guestVehicleObservation}', [GuestObservationController::class, 'update'])
             ->whereNumber('guestVehicleObservation')
             ->name('guest-observations.update');
+        Route::patch('/guest-observations/{guestVehicleObservation}/verify', [GuestObservationController::class, 'verify'])
+            ->whereNumber('guestVehicleObservation')
+            ->name('guest-observations.verify');
         Route::get('/vehicle-events', [VehicleEventController::class, 'index'])->name('vehicle-events.index');
         Route::get('/vehicle-events/create', [VehicleEventController::class, 'create'])->name('vehicle-events.create');
         Route::post('/vehicle-events', [VehicleEventController::class, 'store'])->name('vehicle-events.store');

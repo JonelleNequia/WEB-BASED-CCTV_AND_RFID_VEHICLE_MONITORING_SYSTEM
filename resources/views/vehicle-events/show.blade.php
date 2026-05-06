@@ -37,7 +37,7 @@
                 <div><span>Log Type</span><strong>{{ $vehicleEvent->event_type }}</strong></div>
                 <div><span>Status</span><strong>{{ str_replace('_', ' ', ucfirst($vehicleEvent->display_status)) }}</strong></div>
                 <div><span>Source</span><strong>{{ $vehicleEvent->event_origin_label }}</strong></div>
-                <div><span>Plate</span><strong>{{ $vehicleEvent->plate_text ?: $vehicleEvent->vehicle?->plate_number ?: 'UNREGISTERED / GUEST' }}</strong></div>
+                <div><span>Plate</span><strong>{{ $vehicleEvent->plate_text ?: $vehicleEvent->vehicle?->plate_number ?: 'GUEST' }}</strong></div>
                 <div><span>Vehicle</span><strong>{{ $vehicleEvent->vehicle_color ?: 'Pending color' }} {{ $vehicleEvent->display_vehicle_type }}</strong></div>
                 <div><span>Category</span><strong>{{ $vehicleEvent->vehicle_category ? ucfirst(str_replace('_', ' ', $vehicleEvent->vehicle_category)) : 'N/A' }}</strong></div>
                 <div><span>Station / Camera</span><strong>{{ $vehicleEvent->camera?->camera_name ?? 'No camera linked' }}</strong></div>

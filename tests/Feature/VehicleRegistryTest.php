@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use App\Models\Vehicle;
-use App\Models\VehicleRfidTag;
 use App\Models\RfidTag;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -15,9 +14,9 @@ class VehicleRegistryTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * Ensure the vehicle registry page loads with seeded RFID-ready records.
+     * Ensure the vehicle registry page loads without demo vehicle records.
      */
-    public function test_vehicle_registry_page_renders_seeded_records(): void
+    public function test_vehicle_registry_page_renders_clean_registry(): void
     {
         $this->seed(DatabaseSeeder::class);
 
@@ -27,8 +26,13 @@ class VehicleRegistryTest extends TestCase
             ->get(route('vehicle-registry.index'))
             ->assertOk()
             ->assertSee('Vehicle Registry')
-            ->assertSee('ABC-1234')
-            ->assertSee('RFID-ABC-1001');
+            ->assertSee('RFID Tag Inventory')
+            ->assertSee('No RFID tags registered yet.')
+            ->assertSee('No registered vehicles yet.')
+            ->assertDontSee('RFID-ABC-1001');
+
+        $this->assertDatabaseCount('vehicles', 0);
+        $this->assertDatabaseCount('vehicle_rfid_tags', 0);
     }
 
     /**
@@ -39,17 +43,19 @@ class VehicleRegistryTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+        $tag = RfidTag::query()->create([
+            'uid' => 'DEMO-TAG-8899',
+            'status' => RfidTag::STATUS_AVAILABLE,
+        ]);
 
         $this->actingAs($user)
             ->post(route('vehicle-registry.store'), [
+                'rfid_tag_id' => $tag->id,
                 'plate_number' => ' tst-8899 ',
                 'owner_name' => 'Test Owner',
                 'vehicle_type' => 'Car',
                 'vehicle_color' => 'Black',
                 'status' => 'active',
-                'tag_uid' => ' demo-tag-8899 ',
-                'tag_label' => 'Test Tag',
-                'tag_status' => 'active',
                 'notes' => 'Created from feature test.',
             ])
             ->assertRedirect();
@@ -58,7 +64,11 @@ class VehicleRegistryTest extends TestCase
 
         $this->assertNotNull($vehicle);
         $this->assertSame('Test Owner', $vehicle->owner_name);
-        $this->assertTrue(VehicleRfidTag::query()->where('tag_uid', 'DEMO-TAG-8899')->exists());
+        $this->assertDatabaseHas('vehicle_rfid_tags', [
+            'uid' => 'DEMO-TAG-8899',
+            'status' => RfidTag::STATUS_ASSIGNED,
+            'vehicle_id' => $vehicle->id,
+        ]);
     }
 
     public function test_vehicle_registry_saves_custom_category_and_vehicle_type(): void
@@ -92,7 +102,9 @@ class VehicleRegistryTest extends TestCase
 
     public function test_vehicle_registry_edit_updates_existing_vehicle(): void
     {
-        $user = User::factory()->create();
+        $this->seed(DatabaseSeeder::class);
+
+        $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $vehicle = Vehicle::query()->create([
             'plate_number' => 'OLD-1001',
             'vehicle_owner_name' => 'Old Owner',

@@ -85,6 +85,10 @@ class RfidScanLog extends Model
      */
     public function getVerificationLabelAttribute(): string
     {
+        if ($this->verification_status === 'verified') {
+            return 'Registered';
+        }
+
         if ($this->verification_status === 'guest') {
             return 'Guest';
         }

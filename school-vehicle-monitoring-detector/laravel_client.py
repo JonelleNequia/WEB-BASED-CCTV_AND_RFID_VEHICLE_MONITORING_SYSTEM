@@ -2,7 +2,7 @@ import json
 
 import requests
 
-from config import API_TIMEOUT_SECONDS
+from config import API_TIMEOUT_SECONDS, RFID_MATCH_TIMEOUT_SECONDS
 
 
 class LaravelEventClient:
@@ -24,7 +24,6 @@ class LaravelEventClient:
         self.guest_observation_url = str(system_settings.get("guest_observation_url", "")).strip()
         self.rfid_match_url = str(system_settings.get("rfid_match_url", "")).strip()
         self.api_key = str(system_settings.get("python_api_key", "")).strip()
-        self.session = requests.Session()
 
     def integration_headers(self, include_json=False):
         """
@@ -127,7 +126,7 @@ class LaravelEventClient:
             }
 
         try:
-            response = self.session.post(
+            response = requests.post(
                 self.event_ingest_url,
                 json=payload,
                 headers=self.integration_headers(include_json=True),
@@ -167,7 +166,7 @@ class LaravelEventClient:
             "requires_capture": bool(body.get("requires_capture", False)),
         }
 
-    def check_rfid_match(self, camera_role, event_time, window_seconds=5, lookback_seconds=2):
+    def check_rfid_match(self, camera_role, event_time, window_seconds=4, lookback_seconds=3):
         """
         Poll Laravel for a verified RFID scan at one gate during the detector window.
         """
@@ -178,7 +177,7 @@ class LaravelEventClient:
             }
 
         try:
-            response = self.session.get(
+            response = requests.get(
                 self.rfid_match_url,
                 params={
                     "camera_role": camera_role,
@@ -187,7 +186,7 @@ class LaravelEventClient:
                     "lookback_seconds": lookback_seconds,
                 },
                 headers=self.integration_headers(),
-                timeout=1.0,
+                timeout=RFID_MATCH_TIMEOUT_SECONDS,
             )
         except requests.RequestException as error:
             return {
@@ -229,7 +228,7 @@ class LaravelEventClient:
 
         try:
             if image_bytes:
-                response = self.session.post(
+                response = requests.post(
                     self.guest_observation_url,
                     data=self.multipart_payload(payload),
                     files={
@@ -243,7 +242,7 @@ class LaravelEventClient:
                     timeout=API_TIMEOUT_SECONDS,
                 )
             else:
-                response = self.session.post(
+                response = requests.post(
                     self.guest_observation_url,
                     json=payload,
                     headers=self.integration_headers(include_json=True),

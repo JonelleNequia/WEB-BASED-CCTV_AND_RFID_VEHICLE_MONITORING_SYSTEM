@@ -27,12 +27,6 @@
             'icon' => 'vehicle',
         ],
         [
-            'label' => 'RFID Inventory',
-            'route' => route('rfid-inventory.index'),
-            'active' => request()->routeIs('rfid-inventory.*'),
-            'icon' => 'rfid',
-        ],
-        [
             'label' => 'RFID Desk',
             'route' => route('rfid-scans.index'),
             'active' => request()->routeIs('rfid-scans.*'),

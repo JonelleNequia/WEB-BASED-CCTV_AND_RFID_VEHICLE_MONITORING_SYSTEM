@@ -67,7 +67,7 @@ class GuestVehicleObservation extends Model
      */
     public function getSnapshotUrlAttribute(): string
     {
-        if ($this->snapshot_path) {
+        if ($this->snapshot_path && Storage::disk('public')->exists($this->snapshot_path)) {
             return Storage::disk('public')->url($this->snapshot_path);
         }
 

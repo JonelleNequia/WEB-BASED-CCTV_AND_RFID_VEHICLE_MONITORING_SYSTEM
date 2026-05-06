@@ -34,13 +34,17 @@ class StoreVehicleRegistrationRequest extends FormRequest
         return [
             'rfid_tag_id' => [
                 'nullable',
-                'required_without:rfid_tag_uid',
+                'required_without_all:rfid_uid,rfid_tag_uid',
                 'integer',
                 'exists:vehicle_rfid_tags,id',
             ],
+            'rfid_uid' => [
+                'nullable',
+                'string',
+                'max:100',
+            ],
             'rfid_tag_uid' => [
                 'nullable',
-                'required_without:rfid_tag_id',
                 'string',
                 'max:100',
                 Rule::unique('vehicles', 'rfid_tag_uid')->ignore($vehicleId),
@@ -72,9 +76,16 @@ class StoreVehicleRegistrationRequest extends FormRequest
             $this->merge(['rfid_tag_uid' => $this->input('tag_uid')]);
         }
 
+        if (! $this->filled('rfid_tag_uid') && $this->filled('rfid_uid')) {
+            $this->merge(['rfid_tag_uid' => $this->input('rfid_uid')]);
+        }
+
         if ($this->filled('rfid_tag_uid')) {
+            $normalizedUid = RfidTag::normalizeUid((string) $this->input('rfid_tag_uid'));
+
             $this->merge([
-                'rfid_tag_uid' => RfidTag::normalizeUid((string) $this->input('rfid_tag_uid')),
+                'rfid_uid' => $normalizedUid,
+                'rfid_tag_uid' => $normalizedUid,
             ]);
         }
 

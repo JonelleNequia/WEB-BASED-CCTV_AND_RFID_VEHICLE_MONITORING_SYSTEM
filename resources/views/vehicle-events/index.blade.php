@@ -27,7 +27,7 @@
         </div>
     </section>
 
-    <section class="panel">
+    <section class="panel printable-report-panel">
         <div class="panel-header">
             <div>
                 <div class="panel-title-row">
@@ -76,7 +76,7 @@
                 <label for="match_status">Status</label>
                 <select id="match_status" name="match_status">
                     <option value="">All</option>
-                    @foreach (['open', 'closed', 'matched', 'manual_review', 'unmatched', 'pending_review', 'reviewed'] as $status)
+                    @foreach (['open', 'closed', 'matched', 'manual_review', 'unmatched', 'pending_review', 'reviewed', 'verified'] as $status)
                         <option value="{{ $status }}" @selected(($filters['match_status'] ?? '') === $status)>
                             {{ str_replace('_', ' ', ucfirst($status)) }}
                         </option>
@@ -128,24 +128,43 @@
             </div>
         </div>
 
-        <div class="event-log-card-list event-log-card-list-compact">
+        <div class="event-log-card-list event-log-list-view">
             @forelse ($logs as $log)
-                <article class="event-log-card event-log-card-compact">
-                    <div class="event-log-title-block">
-                        <span class="station-log-badge">{{ $log['event_type'] }}</span>
-                        <div>
-                            <strong>{{ $log['plate_number'] ?: 'GUEST' }}</strong>
-                            <span>{{ $log['summary_label'] }}</span>
+                <article class="event-log-card event-log-list-item">
+                    <div class="event-log-card-top">
+                        <div class="event-log-title-block">
+                            <span class="station-log-badge">{{ $log['event_type'] }}</span>
+                            <div>
+                                <strong>{{ $log['plate_number'] ?: 'GUEST' }}</strong>
+                                <span>{{ $log['summary_label'] }}</span>
+                            </div>
+                        </div>
+
+                        <div class="event-log-row-actions">
+                            <span class="badge badge-{{ $log['status_badge_class'] }}">{{ $log['status_label'] }}</span>
+                            <button type="button" class="button button-secondary button-sm" data-event-log-view="{{ $loop->index }}">
+                                View Details
+                            </button>
                         </div>
                     </div>
 
-                    <div class="event-log-row-actions">
-                        @if ($log['status_badge_class'] === 'manual-review')
-                            <span class="badge badge-manual-review">{{ $log['status_label'] }}</span>
-                        @endif
-                        <button type="button" class="button button-secondary button-sm" data-event-log-view="{{ $loop->index }}">
-                            View Details
-                        </button>
+                    <div class="event-log-body">
+                        <div class="event-log-preview" @unless($log['image_url']) data-empty-preview @endunless>
+                            @if ($log['image_url'])
+                                <img src="{{ $log['image_url'] }}" alt="{{ $log['record_type_label'] }} snapshot">
+                            @else
+                                No Image
+                            @endif
+                        </div>
+
+                        <div class="event-log-summary-panel">
+                            <div class="event-log-summary-line">
+                                <span>{{ $log['station_label'] }}</span>
+                                <span>{{ $log['display_time'] }}</span>
+                                <span>{{ $log['source_label'] }}</span>
+                            </div>
+                            <p>{{ $log['vehicle_type'] }} | {{ $log['vehicle_color'] }} | {{ $log['category_label'] }}</p>
+                        </div>
                     </div>
                 </article>
             @empty
@@ -207,6 +226,7 @@
             const detailsFor = (log) => [
                 ['Owner', log.owner_name],
                 ['Vehicle', log.vehicle_type],
+                ['Color', log.vehicle_color],
                 ['Category', log.category_label],
                 ['Source', log.source_label],
                 ['Station / Camera', log.station_label],

@@ -53,7 +53,7 @@
         <aside class="station-log-pane">
             <div class="station-log-header">
                 <div>
-                    <span class="station-kicker">{{ $eventType }} Logs</span>
+                    <span class="station-kicker">Shared Station Logs</span>
                     <h2>Recent Activity</h2>
                 </div>
                 <span class="station-status-chip {{ ($detectorStatus['service_running'] ?? false) ? 'is-online' : 'is-standby' }}" data-detector-status-chip>
@@ -75,12 +75,14 @@
                         <div class="station-log-detail-grid">
                             <div><span>Owner</span><strong>{{ $log['owner_name'] }}</strong></div>
                             <div><span>Vehicle</span><strong>{{ $log['vehicle_type'] }}</strong></div>
+                            <div><span>Entries Today</span><strong>{{ $log['entries_today_count'] ?? 0 }}</strong></div>
+                            <div><span>Exits Today</span><strong>{{ $log['exits_today_count'] ?? 0 }}</strong></div>
                             <div><span>State</span><strong>{{ $log['resulting_state'] }}</strong></div>
                             <div><span>Status</span><strong>{{ $log['status'] }}</strong></div>
                         </div>
                     </article>
                 @empty
-                    <div class="station-log-empty" data-station-log-empty>No {{ $eventType }} logs yet</div>
+                    <div class="station-log-empty" data-station-log-empty>No station logs yet</div>
                 @endforelse
             </div>
         </aside>
@@ -89,6 +91,7 @@
     @php($stationPayload = [
         'location' => $location,
         'eventType' => $eventType,
+        'logLabel' => 'station logs',
         'camera' => $camera,
         'cameraStatus' => $cameraStatus,
         'detectorStatus' => $detectorStatus,

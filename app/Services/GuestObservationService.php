@@ -59,7 +59,7 @@ class GuestObservationService
             return GuestVehicleObservation::query()->create([
                 'plate_text' => null,
                 'plate_number' => null,
-                'vehicle_type' => 'Unregistered',
+                'vehicle_type' => 'Guest',
                 'vehicle_color' => null,
                 'location' => $scanLog->scan_location,
                 'observation_source' => 'cctv',
@@ -104,6 +104,7 @@ class GuestObservationService
             ->when($dateTo !== null, function ($query) use ($dateTo): void {
                 $query->where('observed_at', '<=', $dateTo->endOfDay());
             })
+            ->orderByDesc('created_at')
             ->orderByDesc('observed_at')
             ->paginate($perPage)
             ->withQueryString();
@@ -128,8 +129,19 @@ class GuestObservationService
      */
     public function countToday(): int
     {
+        $start = today();
+        $end = $start->copy()->addDay();
+
         return GuestVehicleObservation::query()
-            ->whereDate('observed_at', today())
+            ->where(function ($query) use ($start, $end): void {
+                $query->where(function ($query) use ($start, $end): void {
+                    $query->where('observed_at', '>=', $start)
+                        ->where('observed_at', '<', $end);
+                })->orWhere(function ($query) use ($start, $end): void {
+                    $query->where('created_at', '>=', $start)
+                        ->where('created_at', '<', $end);
+                });
+            })
             ->count();
     }
 

@@ -607,6 +607,24 @@ body.app-body {
     border-bottom: 1px solid rgba(111, 75, 174, 0.12);
 }
 
+.panel-scroll-area {
+    display: grid;
+    gap: 0.75rem;
+    max-height: 500px;
+    overflow-y: auto;
+    padding-right: 0.35rem;
+    scrollbar-color: rgba(118, 80, 184, 0.48) transparent;
+}
+
+.panel-scroll-area::-webkit-scrollbar {
+    width: 8px;
+}
+
+.panel-scroll-area::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(118, 80, 184, 0.42);
+}
+
 .panel-header > div,
 .section-copy,
 .note-list,
@@ -2315,6 +2333,14 @@ th {
     gap: 0.9rem;
 }
 
+.event-log-card-list-compact {
+    gap: 0.55rem;
+}
+
+.event-log-list-view {
+    gap: 0.75rem;
+}
+
 .event-log-card {
     display: grid;
     gap: 0.9rem;
@@ -2324,6 +2350,20 @@ th {
     border-radius: 12px;
     background: #ffffff;
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.event-log-card-compact {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.85rem;
+    min-height: 68px;
+    padding: 0.7rem 0.85rem;
+    border-left-width: 4px;
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+}
+
+.event-log-list-item {
+    gap: 0.85rem;
 }
 
 .event-log-card-top,
@@ -2363,7 +2403,7 @@ th {
     display: grid;
     grid-template-columns: 140px minmax(0, 1fr);
     gap: 1rem;
-    align-items: start;
+    align-items: center;
 }
 
 .event-log-preview {
@@ -2385,6 +2425,42 @@ th {
     object-fit: cover;
 }
 
+.event-log-preview[data-empty-preview] {
+    min-height: 112px;
+}
+
+.event-log-summary-panel {
+    display: grid;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+.event-log-summary-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.event-log-summary-line span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0.28rem 0.55rem;
+    border: 1px solid #efe7fb;
+    border-radius: 999px;
+    color: #4f3b78;
+    background: #fbf9ff;
+    font-size: 0.82rem;
+    font-weight: 900;
+}
+
+.event-log-summary-panel p {
+    margin: 0;
+    color: #64748b;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+}
+
 .event-log-detail-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2401,6 +2477,44 @@ th {
 
 .event-log-card-actions {
     justify-content: flex-end;
+}
+
+.event-log-row-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.55rem;
+    white-space: nowrap;
+}
+
+.event-log-modal-panel {
+    width: min(920px, 100%);
+}
+
+.event-log-modal-body {
+    display: grid;
+    gap: 1rem;
+}
+
+.event-log-modal-image {
+    overflow: hidden;
+    border: 1px solid #efe7fb;
+    border-radius: 10px;
+    background: #fbf9ff;
+}
+
+.event-log-modal-image img {
+    width: 100%;
+    max-height: 420px;
+    object-fit: contain;
+    display: block;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    margin-top: 1rem;
 }
 
 .portal-summary-stack {
@@ -2805,11 +2919,17 @@ th {
     }
 
     .report-action-bar,
+    .event-log-card-compact,
     .event-log-card-top,
     .event-log-body {
         grid-template-columns: 1fr;
         flex-direction: column;
         align-items: stretch;
+    }
+
+    .event-log-row-actions {
+        justify-content: flex-start;
+        white-space: normal;
     }
 
     .event-log-preview {
@@ -3218,11 +3338,18 @@ th {
 @media print {
     .sidebar,
     .topbar,
+    .hero-panel,
     .hero-panel-actions,
     .button,
     .report-action-bar,
     .pagination-bar,
-    form {
+    form,
+    .modal-backdrop,
+    .event-log-row-actions {
+        display: none !important;
+    }
+
+    .page-content > :not(.printable-report-panel) {
         display: none !important;
     }
 
@@ -3234,9 +3361,30 @@ th {
         padding: 0;
     }
 
-    .panel,
+    .printable-report-panel,
     .event-log-card {
         box-shadow: none;
         break-inside: avoid;
+    }
+
+    .printable-report-panel {
+        border: 0;
+        padding: 0;
+    }
+
+    .event-log-card {
+        border: 1px solid #d1d5db;
+        border-left: 1px solid #d1d5db;
+        border-radius: 0;
+        padding: 0.55rem;
+    }
+
+    .event-log-detail-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .event-log-detail-grid div {
+        background: #ffffff;
+        border-color: #d1d5db;
     }
 }

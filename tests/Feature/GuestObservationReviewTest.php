@@ -30,13 +30,12 @@ class GuestObservationReviewTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->patch(route('guest-observations.update', $observation), [
+            ->patch(route('guest-observations.verify', $observation), [
                 'plate_number' => ' abc 1234 ',
                 'vehicle_type' => 'SUV',
                 'vehicle_color' => 'White',
                 'location' => 'entrance',
                 'observed_at' => now()->format('Y-m-d H:i:s'),
-                'status' => 'reviewed',
                 'notes' => 'Verified by guard.',
             ])
             ->assertRedirect();
@@ -46,7 +45,7 @@ class GuestObservationReviewTest extends TestCase
         $this->assertSame('ABC 1234', $observation->plate_number);
         $this->assertSame('ABC 1234', $observation->plate_text);
         $this->assertSame('SUV', $observation->vehicle_type);
-        $this->assertSame('reviewed', $observation->status);
+        $this->assertSame('White', $observation->vehicle_color);
+        $this->assertSame('verified', $observation->status);
     }
 }
-

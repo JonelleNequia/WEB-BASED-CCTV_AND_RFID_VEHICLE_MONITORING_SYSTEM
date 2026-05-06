@@ -2,7 +2,7 @@
 
 @section('title', 'Edit Vehicle | PHILCST Vehicle Access Monitoring')
 @section('page-title', 'Edit Vehicle')
-@section('page-description', 'Update registered vehicle details and RFID sticker assignment.')
+@section('page-description', 'Update registered vehicle details and assign an RFID tag from the inventory.')
 
 @section('content')
     <section class="panel">
@@ -12,6 +12,7 @@
         @php($selectedVehicleType = old('vehicle_type', $vehicle->vehicle_type))
         @php($vehicleTypeOtherValue = old('vehicle_type_other', ! in_array($selectedVehicleType, $vehicleTypes, true) && $selectedVehicleType !== 'Others' ? $selectedVehicleType : ''))
         @php($vehicleTypeSelectValue = $vehicleTypeOtherValue !== '' ? 'Others' : $selectedVehicleType)
+        @php($selectedRfidTagId = (string) old('rfid_tag_id', $vehicle->rfid_tag_id))
         <div class="panel-header">
             <div>
                 <h3>{{ $vehicle->plate_number }}</h3>
@@ -22,7 +23,6 @@
         <form method="POST" action="{{ route('vehicle-registry.update', ['vehicle' => $vehicle->getKey()]) }}" class="stack-form" data-rfid-registration-form>
             @csrf
             @method('PUT')
-            <input type="hidden" name="rfid_tag_uid" value="{{ old('rfid_tag_uid', $vehicle->rfid_tag_uid) }}">
 
             @error('vehicle')
                 <div class="alert alert-danger">{{ $message }}</div>
@@ -32,19 +32,23 @@
                 <div class="field">
                     <label for="rfid_tag_id">RFID Tag</label>
                     <select id="rfid_tag_id" name="rfid_tag_id" required>
-                        <option value="">Select available RFID tag</option>
-                        @foreach ($availableTags as $tag)
-                            <option value="{{ $tag->id }}" @selected((string) old('rfid_tag_id', $vehicle->rfid_tag_id) === (string) $tag->id)>
-                                {{ $tag->uid }}{{ $tag->vehicle_id === $vehicle->id ? ' | Current tag' : '' }}
+                        <option value="">Choose RFID tag number</option>
+                        @foreach ($assignableTags as $tag)
+                            <option value="{{ $tag->id }}" @selected($selectedRfidTagId === (string) $tag->id)>
+                                RFID #{{ $tag->tag_number ?: 'N/A' }} - {{ $tag->uid }}
+                                @if ($tag->vehicle && (int) $tag->vehicle_id === (int) $vehicle->id)
+                                    (current)
+                                @endif
                             </option>
                         @endforeach
                     </select>
+                    <div class="table-subtext">Only registered inventory tags are listed. Options are sorted by RFID tag number.</div>
                     @error('rfid_tag_id')
                         <span class="field-error">{{ $message }}</span>
                     @enderror
-                    @if ($availableTags->isEmpty())
-                        <span class="field-error">No available RFID tags. Enroll cards in RFID Inventory first.</span>
-                    @endif
+                    @error('rfid_uid')
+                        <span class="field-error">{{ $message }}</span>
+                    @enderror
                 </div>
 
                 <div class="field">
@@ -118,7 +122,6 @@
 
             <div class="button-row">
                 <button type="submit" class="button button-primary">Update Vehicle</button>
-                <a href="{{ route('rfid-inventory.index') }}" class="button button-secondary">Enroll Tags</a>
                 <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Cancel</a>
             </div>
         </form>

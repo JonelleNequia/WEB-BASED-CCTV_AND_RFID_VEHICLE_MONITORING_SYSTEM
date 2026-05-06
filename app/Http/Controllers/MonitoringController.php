@@ -66,7 +66,7 @@ class MonitoringController extends Controller
             ->map(fn (VehicleEvent $event): array => [
                 'id' => 'event-'.$event->id,
                 'kind' => $event->event_type,
-                'title' => $event->event_type.' - '.($event->plate_text ?: $event->vehicle?->plate_number ?: 'UNREGISTERED / GUEST'),
+                'title' => $event->event_type.' - '.($event->plate_text ?: $event->vehicle?->plate_number ?: 'GUEST'),
                 'subtitle' => trim(($event->event_origin_label ?? 'Vehicle Event').' | '.($event->resulting_state ?: 'Pending state')),
                 'badge' => $event->event_type === 'ENTRY' ? 'matched' : 'closed',
                 'occurred_at' => $event->event_time?->toIso8601String(),

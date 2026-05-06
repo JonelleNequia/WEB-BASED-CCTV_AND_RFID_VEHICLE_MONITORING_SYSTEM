@@ -15,39 +15,44 @@
             <a href="{{ route('stations.entrance') }}" class="button button-primary">Entrance Station</a>
             <a href="{{ route('stations.exit') }}" class="button button-primary">Exit Station</a>
             <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Vehicle Registry</a>
-            <a href="{{ route('rfid-inventory.index') }}" class="button button-secondary">RFID Inventory</a>
             <a href="{{ route('settings.index') }}" class="button button-secondary">Settings</a>
         </div>
     </section>
 
-    <div class="page-grid cards-6">
+    <div class="page-grid cards-6" data-dashboard-metrics>
         <article class="stat-card stat-card-brand">
-            <span class="stat-card-label">Vehicles Inside Campus</span>
-            <strong>{{ $vehiclesInside }}</strong>
-            <p>Current registered vehicles marked inside.</p>
-        </article>
-
-        <article class="stat-card stat-card-brand-soft">
-            <span class="stat-card-label">Total Entries Today</span>
-            <strong>{{ $entriesToday }}</strong>
-            <p>State-based ENTRY logs from RFID scans.</p>
+            <span class="stat-card-label">Total Vehicles Entered</span>
+            <strong data-dashboard-metric="total_vehicles_entered_today">{{ $totalVehiclesEnteredToday }}</strong>
+            <p>Registered ENTRY logs plus guest entrance observations today.</p>
         </article>
 
         <article class="stat-card stat-card-success">
-            <span class="stat-card-label">Total Exits Today</span>
-            <strong>{{ $exitsToday }}</strong>
-            <p>State-based EXIT logs from RFID scans.</p>
+            <span class="stat-card-label">Total Vehicles Exited</span>
+            <strong data-dashboard-metric="total_vehicles_exited_today">{{ $totalVehiclesExitedToday }}</strong>
+            <p>Registered EXIT logs plus guest exit observations today.</p>
+        </article>
+
+        <article class="stat-card stat-card-brand-soft">
+            <span class="stat-card-label">Vehicles Inside Campus</span>
+            <strong data-dashboard-metric="vehicles_inside">{{ $vehiclesInside }}</strong>
+            <p>Current registered vehicles marked inside.</p>
+        </article>
+
+        <article class="stat-card stat-card-brand">
+            <span class="stat-card-label">Registered Scans Today</span>
+            <strong data-dashboard-metric="registered_scans_today">{{ $rfidStats['registered_scans_today'] ?? 0 }}</strong>
+            <p>Verified RFID scans from recurring vehicles today.</p>
         </article>
 
         <article class="stat-card stat-card-warning">
             <span class="stat-card-label">Guest Observations Today</span>
-            <strong>{{ $guestObservationsToday }}</strong>
+            <strong data-dashboard-metric="guest_observations_today">{{ $guestObservationsToday }}</strong>
             <p>Guest monitoring records for today.</p>
         </article>
 
         <article class="stat-card stat-card-success">
             <span class="stat-card-label">Camera Status</span>
-            <strong>{{ $cameraSummary['connected'] }}/{{ $cameraSummary['total'] }}</strong>
+            <strong><span data-dashboard-metric="camera_connected">{{ $cameraSummary['connected'] }}</span>/<span data-dashboard-metric="camera_total">{{ $cameraSummary['total'] }}</span></strong>
             <p>Connected camera feeds.</p>
         </article>
     </div>
@@ -60,39 +65,37 @@
             <a href="{{ route('vehicle-events.index', ['event_type' => 'ENTRY']) }}" class="button button-secondary button-sm">Open Entry Logs</a>
         </div>
 
-        @if ($frequentEntryVehicles->isEmpty())
-            <div class="empty-state">
-                <h4>No registered entry logs yet</h4>
-                <p>Registered vehicle rankings will appear after RFID ENTRY scans.</p>
-            </div>
-        @else
-            <div class="table-responsive">
-                <table>
-                    <thead>
+        <div class="empty-state" data-dashboard-ranking-empty @unless($frequentEntryVehicles->isEmpty()) hidden @endunless>
+            <h4>No registered entry logs yet</h4>
+            <p>Registered vehicle rankings will appear after RFID ENTRY scans.</p>
+        </div>
+
+        <div class="table-responsive" data-dashboard-ranking-table @if($frequentEntryVehicles->isEmpty()) hidden @endif>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rank</th>
+                        <th>Plate</th>
+                        <th>Owner</th>
+                        <th>Category</th>
+                        <th>Total Entries</th>
+                        <th>Today</th>
+                    </tr>
+                </thead>
+                <tbody data-dashboard-ranking>
+                    @foreach ($frequentEntryVehicles as $vehicle)
                         <tr>
-                            <th>Rank</th>
-                            <th>Plate</th>
-                            <th>Owner</th>
-                            <th>Category</th>
-                            <th>Total Entries</th>
-                            <th>Today</th>
+                            <td><strong>#{{ $loop->iteration }}</strong></td>
+                            <td><strong>{{ $vehicle->plate_number }}</strong></td>
+                            <td>{{ $vehicle->vehicle_owner_name ?: 'N/A' }}</td>
+                            <td>{{ ucfirst(str_replace('_', ' ', $vehicle->category)) }}</td>
+                            <td><strong>{{ $vehicle->ranking_total_entries_count ?? $vehicle->total_entries_count }}</strong></td>
+                            <td>{{ $vehicle->ranking_entries_today_count ?? $vehicle->entries_today_count_from_logs }}</td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        @foreach ($frequentEntryVehicles as $vehicle)
-                            <tr>
-                                <td><strong>#{{ $loop->iteration }}</strong></td>
-                                <td><strong>{{ $vehicle->plate_number }}</strong></td>
-                                <td>{{ $vehicle->vehicle_owner_name ?: 'N/A' }}</td>
-                                <td>{{ ucfirst(str_replace('_', ' ', $vehicle->category)) }}</td>
-                                <td><strong>{{ $vehicle->total_entries_count }}</strong></td>
-                                <td>{{ $vehicle->entries_today_count_from_logs }}</td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
-            </div>
-        @endif
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
     </section>
 
     <div class="page-grid two-column">
@@ -104,7 +107,7 @@
                 <a href="{{ route('rfid-scans.index') }}" class="button button-secondary button-sm">Open RFID Desk</a>
             </div>
 
-            <div class="panel-scroll-area">
+            <div class="panel-scroll-area" data-dashboard-stream="rfid">
                 @forelse ($recentRfidScans as $scan)
                     <article class="stream-item stream-item-compact">
                         <div>
@@ -131,7 +134,7 @@
                 <a href="{{ route('vehicle-events.index') }}" class="button button-secondary button-sm">Open Event Logs</a>
             </div>
 
-            <div class="panel-scroll-area">
+            <div class="panel-scroll-area" data-dashboard-stream="events">
                 @forelse ($latestEvents as $event)
                     <article class="stream-item stream-item-compact">
                         <div>
@@ -152,4 +155,13 @@
         </section>
     </div>
 
+    <script id="dashboard-live-data" type="application/json">{!! json_encode([
+        'routes' => [
+            'liveState' => route('dashboard.live-state'),
+        ],
+    ], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 @endsection
+
+@push('scripts')
+    <script src="{{ asset('js/dashboard-live.js') }}"></script>
+@endpush

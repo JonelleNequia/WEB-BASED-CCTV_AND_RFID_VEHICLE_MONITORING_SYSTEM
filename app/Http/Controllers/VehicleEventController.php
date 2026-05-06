@@ -17,6 +17,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 
 class VehicleEventController extends Controller
@@ -61,6 +62,7 @@ class VehicleEventController extends Controller
                 'Plate',
                 'Owner',
                 'Vehicle Type',
+                'Color',
                 'Category',
                 'Source',
                 'Station / Camera',
@@ -79,6 +81,7 @@ class VehicleEventController extends Controller
                     $log['plate_number'],
                     $log['owner_name'],
                     $log['vehicle_type'],
+                    $log['vehicle_color'],
                     $log['category_label'],
                     $log['source_label'],
                     $log['station_label'],
@@ -301,7 +304,7 @@ class VehicleEventController extends Controller
             ->when($request->filled('match_status'), function ($query) use ($request): void {
                 $status = $request->string('match_status')->value();
 
-                if (in_array($status, ['pending_review', 'reviewed'], true)) {
+                if (in_array($status, ['pending_review', 'reviewed', 'verified'], true)) {
                     $query->where('status', $status);
 
                     return;
@@ -383,6 +386,7 @@ class VehicleEventController extends Controller
             'plate_number' => $event->plate_text ?: $vehicle?->plate_number ?: 'GUEST',
             'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',
             'vehicle_type' => $event->display_vehicle_type,
+            'vehicle_color' => $event->vehicle_color ?: 'N/A',
             'category_label' => $this->displayCategory($event->vehicle_category ?: $vehicle?->category),
             'source_label' => $event->event_origin_label,
             'station_label' => $event->camera?->camera_name ?: ($event->roi_name ?: 'No camera linked'),
@@ -395,7 +399,7 @@ class VehicleEventController extends Controller
             'match_label' => $event->match_display,
             'rfid_tag_uid' => $event->rfidScanLog?->tag_uid ?: 'N/A',
             'image_url' => $event->has_visual_evidence ? $event->vehicle_image_url : null,
-            'sort_time' => $time?->getTimestamp() ?? 0,
+            'sort_time' => $this->sortTimestamp($event->created_at, $time),
         ];
     }
 
@@ -405,6 +409,7 @@ class VehicleEventController extends Controller
     protected function guestLogPayload(GuestVehicleObservation $observation): array
     {
         $time = $observation->observed_at;
+        $statusLabel = ucfirst(str_replace('_', ' ', (string) $observation->status));
 
         return [
             'record_type' => 'guest_observation',
@@ -415,19 +420,22 @@ class VehicleEventController extends Controller
             'plate_number' => $observation->plate_number ?: $observation->plate_text ?: 'GUEST',
             'owner_name' => 'N/A',
             'vehicle_type' => $observation->vehicle_type ?: 'Vehicle',
+            'vehicle_color' => $observation->vehicle_color ?: 'N/A',
             'category_label' => 'Guest',
             'source_label' => $observation->observation_source === 'cctv' ? 'Guest CCTV' : 'Guest Manual',
             'station_label' => ucfirst($observation->location).' Station',
-            'state_label' => 'Pending Review',
+            'state_label' => $statusLabel,
             'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
             'summary_label' => 'Guest Observation #'.$observation->id.' • '.($time?->format('M d, Y • h:i A') ?: 'No time'),
             'event_time_export' => $time?->toDateTimeString(),
-            'status_label' => ucfirst(str_replace('_', ' ', $observation->status)),
-            'status_badge_class' => $observation->status === 'reviewed' ? 'matched' : 'manual-review',
+            'status_label' => $statusLabel,
+            'status_badge_class' => in_array($observation->status, ['reviewed', 'verified'], true) ? 'matched' : 'manual-review',
             'match_label' => 'Guest review',
             'rfid_tag_uid' => 'N/A',
-            'image_url' => $observation->snapshot_url,
-            'sort_time' => $time?->getTimestamp() ?? 0,
+            'image_url' => $observation->snapshot_path && Storage::disk('public')->exists($observation->snapshot_path)
+                ? $observation->snapshot_url
+                : null,
+            'sort_time' => $this->sortTimestamp($observation->created_at, $time),
         ];
     }
 
@@ -448,6 +456,7 @@ class VehicleEventController extends Controller
             'plate_number' => $vehicle?->plate_number ?: 'GUEST',
             'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',
             'vehicle_type' => $vehicle?->vehicle_type ?: 'N/A',
+            'vehicle_color' => 'N/A',
             'category_label' => $this->displayCategory($scanLog->vehicle_category ?: $vehicle?->category),
             'source_label' => 'RFID Desk',
             'station_label' => ucfirst($scanLog->scan_location).' Station',
@@ -460,7 +469,7 @@ class VehicleEventController extends Controller
             'match_label' => 'No vehicle event',
             'rfid_tag_uid' => $scanLog->tag_uid,
             'image_url' => null,
-            'sort_time' => $time?->getTimestamp() ?? 0,
+            'sort_time' => $this->sortTimestamp($scanLog->created_at, $time),
         ];
     }
 
@@ -489,6 +498,11 @@ class VehicleEventController extends Controller
         }
 
         return str((string) $category)->replace('_', ' ')->title()->value();
+    }
+
+    protected function sortTimestamp($createdAt, $eventAt): float
+    {
+        return (float) ($createdAt?->format('U.u') ?? $eventAt?->format('U.u') ?? 0);
     }
 
 }

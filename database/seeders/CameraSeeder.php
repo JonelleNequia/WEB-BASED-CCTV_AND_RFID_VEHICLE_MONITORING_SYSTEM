@@ -33,7 +33,7 @@ class CameraSeeder extends Seeder
                 'camera_name' => 'PHILCST Exit Camera',
                 'camera_role' => 'exit',
                 'source_type' => 'webcam',
-                'source_value' => '1',
+                'source_value' => '0',
                 'source_username' => null,
                 'source_password' => null,
                 'browser_device_id' => null,

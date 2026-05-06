@@ -153,6 +153,31 @@ class RfidService
     }
 
     /**
+     * Find a scanner bounce so one physical read does not create two movements.
+     */
+    public function recentDuplicateScan(
+        string $tagUid,
+        string $scanLocation,
+        int $withinSeconds = 8,
+        ?string $sourceMode = null
+    ): ?RfidScanLog {
+        $uid = $this->vehicleRegistryService->normalizeTagUid($tagUid);
+
+        if ($uid === '') {
+            return null;
+        }
+
+        return RfidScanLog::query()
+            ->with(['vehicle.rfidTag', 'vehicleRfidTag', 'correlatedVehicleEvent', 'guestVehicleObservation'])
+            ->where('tag_uid', $uid)
+            ->where('scan_location', $this->normalizeLocation($scanLocation))
+            ->when($sourceMode, fn ($query) => $query->where('source_mode', $sourceMode))
+            ->where('created_at', '>=', now()->subSeconds($withinSeconds))
+            ->latest('created_at')
+            ->first();
+    }
+
+    /**
      * Searchable RFID scan history for the RFID Desk table.
      *
      * @param  array<string, mixed>  $filters
@@ -274,7 +299,9 @@ class RfidService
     protected function resolveTag(array $data): ?RfidTag
     {
         if (! empty($data['vehicle_rfid_tag_id'])) {
-            return RfidTag::query()->with('vehicle')->find($data['vehicle_rfid_tag_id']);
+            $tag = RfidTag::query()->with('vehicle')->find($data['vehicle_rfid_tag_id']);
+
+            return $tag ? $this->ensureVehicleTagConnection($tag) : null;
         }
 
         if (blank($data['tag_uid'] ?? null)) {
@@ -283,11 +310,91 @@ class RfidService
 
         $uid = $this->vehicleRegistryService->normalizeTagUid((string) $data['tag_uid']);
 
-        return RfidTag::query()
+        $tag = RfidTag::query()
             ->with('vehicle')
             ->where('uid', $uid)
             ->orWhere('tag_uid', $uid)
             ->first();
+
+        if ($tag) {
+            return $this->ensureVehicleTagConnection($tag);
+        }
+
+        return $this->createTagFromVehicleLegacyUid($uid);
+    }
+
+    /**
+     * Keep the inventory tag row and vehicle row connected for legacy records.
+     */
+    protected function ensureVehicleTagConnection(RfidTag $tag): RfidTag
+    {
+        if ($tag->vehicle) {
+            return $tag;
+        }
+
+        $uid = $tag->uid ?: $tag->tag_uid;
+
+        $vehicle = Vehicle::query()
+            ->where('rfid_tag_id', $tag->id)
+            ->when($uid, function ($query) use ($uid): void {
+                $query->orWhere('rfid_tag_uid', $uid);
+            })
+            ->first();
+
+        if (! $vehicle) {
+            return $tag;
+        }
+
+        $tagUpdates = [
+            'vehicle_id' => $vehicle->id,
+        ];
+
+        if ($tag->status === RfidTag::STATUS_AVAILABLE) {
+            $tagUpdates['status'] = RfidTag::STATUS_ASSIGNED;
+            $tagUpdates['assigned_at'] = $tag->assigned_at ?: now();
+        }
+
+        $tag->forceFill($tagUpdates)->save();
+        $this->syncVehicleTagColumns($vehicle, $tag);
+
+        return $tag->fresh('vehicle');
+    }
+
+    /**
+     * Build the missing inventory tag row from an older vehicle.rfid_tag_uid value.
+     */
+    protected function createTagFromVehicleLegacyUid(string $uid): ?RfidTag
+    {
+        $vehicle = Vehicle::query()
+            ->where('rfid_tag_uid', $uid)
+            ->first();
+
+        if (! $vehicle) {
+            return null;
+        }
+
+        $tag = RfidTag::query()->create([
+            'uid' => $uid,
+            'status' => RfidTag::STATUS_ASSIGNED,
+            'vehicle_id' => $vehicle->id,
+            'assigned_at' => now(),
+        ]);
+
+        $this->syncVehicleTagColumns($vehicle, $tag);
+
+        return $tag->fresh('vehicle');
+    }
+
+    protected function syncVehicleTagColumns(Vehicle $vehicle, RfidTag $tag): void
+    {
+        if ((int) $vehicle->rfid_tag_id === (int) $tag->id && $vehicle->rfid_tag_uid === $tag->uid) {
+            return;
+        }
+
+        $vehicle->forceFill([
+            'rfid_tag_id' => $tag->id,
+            'rfid_tag_uid' => $tag->uid,
+        ])->save();
     }
 
     /**

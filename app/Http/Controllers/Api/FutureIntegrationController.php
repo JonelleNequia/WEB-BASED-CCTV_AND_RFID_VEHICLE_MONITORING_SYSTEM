@@ -15,7 +15,9 @@ use App\Services\RfidService;
 use App\Services\SettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class FutureIntegrationController extends Controller
 {
@@ -89,6 +91,8 @@ class FutureIntegrationController extends Controller
                 'event_time' => ['required', 'date'],
                 'vehicle_image_path' => ['nullable', 'required_if:unregistered_capture,true', 'string', 'max:255'],
                 'plate_number' => ['nullable', 'string', 'max:50'],
+                'vehicle_color' => ['nullable', 'string', 'max:50'],
+                'detected_vehicle_color' => ['nullable', 'string', 'max:50'],
                 'roi_name' => ['nullable', 'string', 'max:100'],
                 'detection_metadata' => ['nullable', 'array'],
                 'unregistered_capture' => ['sometimes', 'boolean'],
@@ -172,7 +176,7 @@ class FutureIntegrationController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Unregistered vehicle capture saved as a GUEST observation for review.',
+                'message' => 'Guest vehicle capture saved as a GUEST observation for review.',
                 'duplicate' => false,
                 'requires_capture' => false,
                 'event_id' => null,
@@ -187,12 +191,14 @@ class FutureIntegrationController extends Controller
             'camera_id' => ['required', 'integer', 'exists:cameras,id'],
             'direction' => ['required', 'string', 'in:IN,OUT'],
             'plate_number' => ['nullable', 'string', 'max:20'],
+            'vehicle_color' => ['nullable', 'string', 'max:50'],
             'image_path' => ['required', 'string', 'max:255'],
         ]);
 
         $cameraId = $validated['camera_id'];
         $direction = $validated['direction'];
         $plateNumber = $validated['plate_number'] ?? null;
+        $vehicleColor = $this->normalizeVehicleColor($validated['vehicle_color'] ?? null);
         $imagePath = $validated['image_path'];
 
         if ($direction === 'IN') {
@@ -200,6 +206,7 @@ class FutureIntegrationController extends Controller
                 $cameraId,
                 $direction,
                 $plateNumber,
+                $vehicleColor,
                 $imagePath
             );
 
@@ -273,6 +280,7 @@ class FutureIntegrationController extends Controller
             $cameraId,
             $direction,
             $plateNumber,
+            $vehicleColor,
             $imagePath
         );
 
@@ -306,7 +314,7 @@ class FutureIntegrationController extends Controller
             'plate_text' => $validated['plate_number'] ?? null,
             'plate_number' => $validated['plate_number'] ?? null,
             'vehicle_type' => $validated['detected_vehicle_type'] ?? 'Vehicle',
-            'vehicle_color' => null,
+            'vehicle_color' => $this->normalizeVehicleColor($validated['vehicle_color'] ?? $validated['detected_vehicle_color'] ?? null),
             'location' => $validated['camera_role'],
             'observation_source' => 'cctv',
             'status' => 'pending_review',
@@ -324,6 +332,7 @@ class FutureIntegrationController extends Controller
         int $cameraId,
         string $direction,
         ?string $plateNumber,
+        ?string $vehicleColor,
         string $imagePath
     ): GuestVehicleObservation {
         $camera = Camera::query()->find($cameraId);
@@ -333,7 +342,7 @@ class FutureIntegrationController extends Controller
             'plate_text' => $plateNumber,
             'plate_number' => $plateNumber,
             'vehicle_type' => 'Vehicle',
-            'vehicle_color' => null,
+            'vehicle_color' => $vehicleColor,
             'location' => $location === 'exit' ? 'exit' : 'entrance',
             'observation_source' => 'cctv',
             'status' => 'pending_review',
@@ -346,7 +355,7 @@ class FutureIntegrationController extends Controller
     }
 
     /**
-     * Let the detector poll for a verified RFID scan during its local 5-second detection window.
+     * Let the detector poll for a verified RFID scan during its local detection window.
      */
     public function rfidMatch(Request $request, SettingsService $settingsService): JsonResponse
     {
@@ -356,47 +365,64 @@ class FutureIntegrationController extends Controller
             return $authorized;
         }
 
-        $validated = $request->validate([
-            'camera_role' => ['required', 'string', 'in:entrance,exit'],
-            'event_time' => ['required', 'date'],
-            'window_seconds' => ['nullable', 'numeric', 'min:1', 'max:10'],
-            'lookback_seconds' => ['nullable', 'numeric', 'min:0', 'max:5'],
-        ]);
+        try {
+            $validated = $request->validate([
+                'camera_role' => ['required', 'string', 'in:entrance,exit'],
+                'event_time' => ['required', 'date'],
+                'window_seconds' => ['nullable', 'numeric', 'min:1', 'max:10'],
+                'lookback_seconds' => ['nullable', 'numeric', 'min:0', 'max:10'],
+            ]);
 
-        $eventTime = Carbon::parse($validated['event_time']);
-        $windowSeconds = (int) ($validated['window_seconds'] ?? 5);
-        $lookbackSeconds = (int) ($validated['lookback_seconds'] ?? 2);
-        $rfidScan = $this->findRecentVerifiedRfidScanWithinWindow(
-            $validated['camera_role'],
-            $eventTime,
-            $windowSeconds,
-            $lookbackSeconds
-        );
+            $eventTime = Carbon::parse($validated['event_time']);
+            $windowSeconds = (int) ($validated['window_seconds'] ?? 4);
+            $lookbackSeconds = (int) ($validated['lookback_seconds'] ?? 3);
+            $rfidScan = $this->findRecentVerifiedRfidScanWithinWindow(
+                $validated['camera_role'],
+                $eventTime,
+                $windowSeconds,
+                $lookbackSeconds
+            );
 
-        return response()->json([
-            'matched' => $rfidScan !== null,
-            'message' => $rfidScan
-                ? 'Verified RFID scan found for this detector window.'
-                : 'No verified RFID scan found for this detector window yet.',
-            'overlay' => $this->overlayPayload(null, $rfidScan),
-            'vehicle' => $rfidScan?->vehicle ? [
-                'id' => $rfidScan->vehicle->id,
-                'plate_number' => $rfidScan->vehicle->plate_number,
-                'owner_name' => $rfidScan->vehicle->owner_name,
-                'category' => $rfidScan->vehicle->category,
-                'vehicle_type' => $rfidScan->vehicle->vehicle_type,
-                'rfid_tag_uid' => $rfidScan->vehicle->rfidTag?->uid ?? $rfidScan->vehicle->rfid_tag_uid,
-            ] : null,
-            'action_taken' => $rfidScan?->resolved_event_type,
-            'new_state' => $rfidScan?->resulting_state,
-            'scan' => $rfidScan ? [
-                'id' => $rfidScan->id,
-                'scan_location' => $rfidScan->scan_location,
-                'scan_time' => $rfidScan->scan_time?->toIso8601String(),
-                'event_type' => $rfidScan->resolved_event_type,
-                'resulting_state' => $rfidScan->resulting_state,
-            ] : null,
-        ]);
+            return response()->json([
+                'matched' => $rfidScan !== null,
+                'message' => $rfidScan
+                    ? 'Verified RFID scan found for this detector window.'
+                    : 'No verified RFID scan found for this detector window yet.',
+                'overlay' => $this->overlayPayload(null, $rfidScan),
+                'vehicle' => $rfidScan?->vehicle ? [
+                    'id' => $rfidScan->vehicle->id,
+                    'plate_number' => $rfidScan->vehicle->plate_number,
+                    'owner_name' => $rfidScan->vehicle->owner_name,
+                    'category' => $rfidScan->vehicle->category,
+                    'vehicle_type' => $rfidScan->vehicle->vehicle_type,
+                    'rfid_tag_uid' => $rfidScan->vehicle->rfidTag?->uid ?? $rfidScan->vehicle->rfid_tag_uid,
+                ] : null,
+                'action_taken' => $rfidScan?->resolved_event_type,
+                'new_state' => $rfidScan?->resulting_state,
+                'status' => $rfidScan ? 'registered' : 'guest',
+                'scan' => $rfidScan ? [
+                    'id' => $rfidScan->id,
+                    'verification_status' => $rfidScan->verification_status,
+                    'verification_label' => $rfidScan->verificationLabel,
+                    'scan_location' => $rfidScan->scan_location,
+                    'scan_time' => $rfidScan->scan_time?->toIso8601String(),
+                    'event_type' => $rfidScan->resolved_event_type,
+                    'resulting_state' => $rfidScan->resulting_state,
+                ] : null,
+            ]);
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            Log::error('RFID match polling failed.', [
+                'message' => $exception->getMessage(),
+                'payload' => $request->query(),
+            ]);
+
+            return response()->json([
+                'matched' => false,
+                'message' => 'RFID match polling failed. Check laravel.log for details.',
+            ], 500);
+        }
     }
 
     /**
@@ -430,6 +456,8 @@ class FutureIntegrationController extends Controller
             'snapshot' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
             'snapshot_image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
             'plate_number' => ['nullable', 'string', 'max:50'],
+            'vehicle_color' => ['nullable', 'string', 'max:50'],
+            'detected_vehicle_color' => ['nullable', 'string', 'max:50'],
             'detection_metadata' => ['nullable', 'array'],
         ]);
         $snapshotFile = $request->file('snapshot')
@@ -471,7 +499,7 @@ class FutureIntegrationController extends Controller
             'plate_text' => $validated['plate_number'] ?? null,
             'plate_number' => $validated['plate_number'] ?? null,
             'vehicle_type' => $validated['detected_vehicle_type'] ?? 'Vehicle',
-            'vehicle_color' => null,
+            'vehicle_color' => $this->normalizeVehicleColor($validated['vehicle_color'] ?? $validated['detected_vehicle_color'] ?? null),
             'location' => $validated['camera_role'],
             'observation_source' => 'cctv',
             'status' => 'pending_review',
@@ -480,7 +508,7 @@ class FutureIntegrationController extends Controller
             'external_event_key' => $validated['external_event_key'],
             'detection_metadata_json' => $validated['detection_metadata'] ?? null,
             'snapshot_path' => $snapshotPath,
-            'notes' => 'No successful RFID scan was recorded within the 5-second detector window.',
+            'notes' => 'No successful RFID scan was recorded within the detector confirmation window.',
             'created_by' => null,
         ]);
 
@@ -492,7 +520,7 @@ class FutureIntegrationController extends Controller
         ]);
 
         return response()->json([
-            'message' => 'Unregistered guest observation saved for review.',
+            'message' => 'Guest observation saved for review.',
             'duplicate' => false,
             'guest_observation_id' => $observation->id,
             'status' => $observation->status,
@@ -523,29 +551,49 @@ class FutureIntegrationController extends Controller
             ], 401);
         }
 
-        $validated = $request->validate([
-            'tag_uid' => ['required', 'string', 'max:100'],
-            'scan_location' => ['required', 'in:entrance,exit'],
-            'scan_direction' => ['nullable', 'in:entry,exit'],
-            'reader_name' => ['nullable', 'string', 'max:100'],
-            'scan_time' => ['nullable', 'date'],
-            'notes' => ['nullable', 'string', 'max:1000'],
-            'payload_json' => ['nullable', 'array'],
-        ]);
+        try {
+            $validated = $request->validate([
+                'tag_uid' => ['required', 'string', 'max:100'],
+                'scan_location' => ['required', 'in:entrance,exit'],
+                'scan_direction' => ['nullable', 'in:entry,exit'],
+                'reader_name' => ['nullable', 'string', 'max:100'],
+                'scan_time' => ['nullable', 'date'],
+                'notes' => ['nullable', 'string', 'max:1000'],
+                'payload_json' => ['nullable', 'array'],
+            ]);
 
-        $scanLog = $rfidService->ingest($validated, 'hardware_placeholder');
+            $scanLog = $rfidService->ingest($validated, 'hardware_placeholder');
 
-        EventReceiveLog::query()->create([
-            'source_name' => $sourceName,
-            'payload_json' => $request->all(),
-            'status' => 'ingested',
-            'notes' => 'RFID scan received for future offline hardware integration.',
-        ]);
+            EventReceiveLog::query()->create([
+                'source_name' => $sourceName,
+                'payload_json' => $request->all(),
+                'status' => 'ingested',
+                'notes' => 'RFID scan received for future offline hardware integration.',
+            ]);
 
-        return response()->json([
-            'message' => 'RFID scan ingested and saved to the local log.',
-            ...$this->rfidScanResponsePayload($scanLog),
-        ], 201);
+            return response()->json([
+                'message' => 'RFID scan ingested and saved to the local log.',
+                ...$this->rfidScanResponsePayload($scanLog),
+            ], 201);
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            Log::error('RFID scan ingestion failed.', [
+                'message' => $exception->getMessage(),
+                'payload' => $request->all(),
+            ]);
+
+            EventReceiveLog::query()->create([
+                'source_name' => $sourceName,
+                'payload_json' => $request->all(),
+                'status' => 'failed',
+                'notes' => $exception->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'RFID scan could not be ingested. Check laravel.log for details.',
+            ], 500);
+        }
     }
 
     /**
@@ -674,19 +722,34 @@ class FutureIntegrationController extends Controller
         $from = $eventTime->copy()->subSeconds(12);
         $to = $eventTime->copy()->addSeconds(12);
 
-        return RfidScanLog::query()
+        $query = RfidScanLog::query()
             ->with('vehicle.rfidTag')
             ->where('verification_status', 'verified')
+            ->where(function ($query) use ($from, $to): void {
+                $query->whereBetween('scan_time', [$from, $to])
+                    ->orWhereBetween('created_at', [$from, $to]);
+            });
+
+        $sameStationScan = (clone $query)
             ->where('scan_location', $cameraRole)
-            ->whereBetween('scan_time', [$from, $to])
             ->latest('scan_time')
+            ->latest('created_at')
+            ->first();
+
+        if ($sameStationScan) {
+            return $sameStationScan;
+        }
+
+        return $query
+            ->latest('scan_time')
+            ->latest('created_at')
             ->first();
     }
 
     protected function findRecentVerifiedRfidScanWithinWindow(
         string $cameraRole,
         Carbon $eventTime,
-        int $windowSeconds = 5,
+        int $windowSeconds = 4,
         int $lookbackSeconds = 2
     ): ?RfidScanLog {
         $eventTime = $this->normalizeDetectorEventTime($eventTime);
@@ -694,18 +757,42 @@ class FutureIntegrationController extends Controller
         $to = now()->lessThan($windowEnd) ? now() : $windowEnd;
         $from = $eventTime->copy()->subSeconds($lookbackSeconds);
 
-        return RfidScanLog::query()
+        $query = RfidScanLog::query()
             ->with('vehicle.rfidTag')
             ->where('verification_status', 'verified')
+            ->where(function ($query) use ($from, $to): void {
+                $query->whereBetween('scan_time', [$from, $to])
+                    ->orWhereBetween('created_at', [$from, $to]);
+            });
+
+        $sameStationScan = (clone $query)
             ->where('scan_location', $cameraRole)
-            ->whereBetween('scan_time', [$from, $to])
             ->latest('scan_time')
+            ->latest('created_at')
+            ->first();
+
+        if ($sameStationScan) {
+            return $sameStationScan;
+        }
+
+        return $query
+            ->latest('scan_time')
+            ->latest('created_at')
             ->first();
     }
 
     protected function normalizeDetectorEventTime(Carbon $eventTime): Carbon
     {
         return $eventTime->copy()->setTimezone(config('app.timezone', 'UTC'));
+    }
+
+    protected function normalizeVehicleColor(?string $color): ?string
+    {
+        if (blank($color)) {
+            return null;
+        }
+
+        return str((string) $color)->trim()->title()->value();
     }
 
     protected function authorizeIntegrationRequest(Request $request, SettingsService $settingsService): ?JsonResponse
@@ -745,7 +832,7 @@ class FutureIntegrationController extends Controller
         if (! $rfidScan || ! $rfidScan->vehicle) {
             return [
                 'verification' => 'guest',
-                'label' => 'UNREGISTERED / GUEST',
+                'label' => 'GUEST',
                 'color' => 'red',
                 'event_id' => $vehicleEvent?->id,
                 'rfid_scan_id' => null,
@@ -757,7 +844,7 @@ class FutureIntegrationController extends Controller
 
         return [
             'verification' => 'registered',
-            'label' => 'REGISTERED - Plate: '.$vehicle->plate_number,
+            'label' => 'REGISTERED - '.$vehicle->plate_number,
             'color' => 'green',
             'event_id' => $vehicleEvent?->id ?? $rfidScan->correlated_vehicle_event_id,
             'rfid_scan_id' => $rfidScan->id,
@@ -781,7 +868,7 @@ class FutureIntegrationController extends Controller
     {
         return [
             'verification' => 'guest',
-            'label' => 'UNREGISTERED / GUEST',
+            'label' => 'GUEST',
             'color' => 'red',
             'guest_observation_id' => $observation->id,
             'status' => $observation->status,

@@ -126,7 +126,7 @@
 
                 const action = payload.action_taken || payload.scan?.event_type || 'SCAN';
                 const state = payload.new_state || payload.scan?.resulting_state || 'N/A';
-                const plate = payload.vehicle?.plate_number || payload.scan?.vehicle_plate || 'Unknown vehicle';
+                const plate = payload.vehicle?.plate_number || payload.scan?.vehicle_plate || 'GUEST';
                 resultBox.textContent = `${action} recorded for ${plate}. Current state: ${state}. Refreshing...`;
 
                 window.setTimeout(function () {

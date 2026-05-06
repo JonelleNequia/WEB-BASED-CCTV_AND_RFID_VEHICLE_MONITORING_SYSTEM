@@ -116,7 +116,7 @@ class VehicleEvent extends Model
      */
     public function getVehicleImageUrlAttribute(): string
     {
-        if ($this->vehicle_image_path) {
+        if ($this->vehicle_image_path && Storage::disk('public')->exists($this->vehicle_image_path)) {
             return Storage::disk('public')->url($this->vehicle_image_path);
         }
 
@@ -128,7 +128,7 @@ class VehicleEvent extends Model
      */
     public function getPlateImageUrlAttribute(): string
     {
-        if ($this->plate_image_path) {
+        if ($this->plate_image_path && Storage::disk('public')->exists($this->plate_image_path)) {
             return Storage::disk('public')->url($this->plate_image_path);
         }
 
@@ -168,7 +168,8 @@ class VehicleEvent extends Model
      */
     public function getHasVisualEvidenceAttribute(): bool
     {
-        return filled($this->vehicle_image_path) || filled($this->plate_image_path);
+        return (filled($this->vehicle_image_path) && Storage::disk('public')->exists($this->vehicle_image_path))
+            || (filled($this->plate_image_path) && Storage::disk('public')->exists($this->plate_image_path));
     }
 
     /**
@@ -226,7 +227,7 @@ class VehicleEvent extends Model
         $role = $this->camera?->camera_role;
 
         if (! $role) {
-            return 'Unknown Camera';
+            return 'No Camera Linked';
         }
 
         return ucfirst($role).' Camera';

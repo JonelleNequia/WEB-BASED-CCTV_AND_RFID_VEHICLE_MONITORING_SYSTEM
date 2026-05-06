@@ -26,6 +26,7 @@ class RfidTag extends Model
      * @var list<string>
      */
     protected $fillable = [
+        'tag_number',
         'uid',
         'status',
         'vehicle_id',
@@ -41,6 +42,7 @@ class RfidTag extends Model
     protected function casts(): array
     {
         return [
+            'tag_number' => 'integer',
             'assigned_at' => 'datetime',
             'last_scanned_at' => 'datetime',
         ];

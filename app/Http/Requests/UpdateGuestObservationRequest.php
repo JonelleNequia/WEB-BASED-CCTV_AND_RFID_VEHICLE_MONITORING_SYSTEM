@@ -22,7 +22,7 @@ class UpdateGuestObservationRequest extends FormRequest
             'vehicle_color' => ['nullable', 'string', 'max:50'],
             'location' => ['required', 'in:entrance,exit'],
             'observed_at' => ['required', 'date'],
-            'status' => ['required', 'in:pending_review,reviewed'],
+            'status' => ['required', 'in:pending_review,reviewed,verified'],
             'notes' => ['nullable', 'string', 'max:1000'],
         ];
     }

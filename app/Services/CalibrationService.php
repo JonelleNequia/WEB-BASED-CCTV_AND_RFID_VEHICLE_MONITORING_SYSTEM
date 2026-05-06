@@ -22,7 +22,7 @@ class CalibrationService
         'exit' => [
             'camera_name' => 'PHILCST Exit Camera',
             'source_type' => 'webcam',
-            'source_value' => '1',
+            'source_value' => '0',
         ],
     ];
 
@@ -140,7 +140,7 @@ class CalibrationService
             'camera_role' => $camera->camera_role,
             'role_label' => $camera->camera_role === 'entrance' ? 'Entrance Camera' : 'Exit Camera',
             'source_type' => $camera->source_type ?: 'webcam',
-            'source_value' => $camera->source_value ?: ($camera->camera_role === 'entrance' ? '0' : '1'),
+            'source_value' => $camera->source_value ?: '0',
             'source_username' => $camera->source_username ?? '',
             'source_password' => $camera->source_password ?? '',
             'browser_device_id' => $camera->browser_device_id,

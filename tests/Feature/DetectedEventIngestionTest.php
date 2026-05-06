@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\EventReceiveLog;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidTag;
 use App\Models\SystemSetting;
+use App\Models\Vehicle;
 use App\Services\RfidService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -27,6 +29,7 @@ class DetectedEventIngestionTest extends TestCase
             'external_event_key' => 'test-crossing-entrance-001',
             'camera_role' => 'entrance',
             'detected_vehicle_type' => 'Car',
+            'vehicle_color' => 'Red',
             'event_time' => now()->toIso8601String(),
             'vehicle_image_path' => 'detected-vehicle-images/entrance/test-crossing-entrance-001.jpg',
             'roi_name' => 'Entrance Trigger Line',
@@ -55,6 +58,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertSame('pending_review', $observation->status);
         $this->assertSame('entrance', $observation->location);
         $this->assertSame('Car', $observation->vehicle_type);
+        $this->assertSame('Red', $observation->vehicle_color);
     }
 
     /**
@@ -97,7 +101,7 @@ class DetectedEventIngestionTest extends TestCase
     {
         $this->seed(DatabaseSeeder::class);
 
-        $tag = RfidTag::query()->assigned()->with('vehicle')->firstOrFail();
+        $tag = $this->createAssignedVehicleWithTag('RFID-DETECT-1001', 'DET-1001');
         $scanTime = now();
 
         app(RfidService::class)->ingest([
@@ -140,6 +144,7 @@ class DetectedEventIngestionTest extends TestCase
             'external_event_key' => 'test-crossing-no-rfid-probe',
             'camera_role' => 'entrance',
             'detected_vehicle_type' => 'Car',
+            'vehicle_color' => 'White',
             'event_time' => now()->toIso8601String(),
             'roi_name' => 'Entrance Trigger Line',
         ];
@@ -161,7 +166,7 @@ class DetectedEventIngestionTest extends TestCase
     {
         $this->seed(DatabaseSeeder::class);
 
-        $tag = RfidTag::query()->assigned()->with('vehicle')->firstOrFail();
+        $tag = $this->createAssignedVehicleWithTag('RFID-DETECT-2002', 'DET-2002');
         $scanTime = now();
 
         app(RfidService::class)->ingest([
@@ -176,7 +181,34 @@ class DetectedEventIngestionTest extends TestCase
         ])->getJson(route('api.integration.rfid-match', [
             'camera_role' => 'entrance',
             'event_time' => $scanTime->copy()->subSecond()->toIso8601String(),
-            'window_seconds' => 5,
+            'window_seconds' => 4,
+        ]))
+            ->assertOk()
+            ->assertJsonPath('matched', true)
+            ->assertJsonPath('overlay.verification', 'registered')
+            ->assertJsonPath('overlay.vehicle.plate_number', $tag->vehicle->plate_number);
+    }
+
+    public function test_detector_can_poll_rfid_match_across_stations_during_detection_window(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $tag = $this->createAssignedVehicleWithTag('RFID-DETECT-CROSS-2002', 'CRS-2002');
+        $scanTime = now();
+
+        app(RfidService::class)->ingest([
+            'tag_uid' => $tag->uid,
+            'scan_location' => 'entrance',
+            'scan_time' => $scanTime->toIso8601String(),
+        ]);
+
+        $this->withHeaders([
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ])->getJson(route('api.integration.rfid-match', [
+            'camera_role' => 'exit',
+            'event_time' => $scanTime->copy()->subSecond()->toIso8601String(),
+            'window_seconds' => 4,
         ]))
             ->assertOk()
             ->assertJsonPath('matched', true)
@@ -193,7 +225,7 @@ class DetectedEventIngestionTest extends TestCase
             ['setting_value' => '']
         );
 
-        $tag = RfidTag::query()->assigned()->with('vehicle')->firstOrFail();
+        $tag = $this->createAssignedVehicleWithTag('RFID-DETECT-3003', 'DET-3003');
         $scanTime = now();
 
         app(RfidService::class)->ingest([
@@ -213,7 +245,7 @@ class DetectedEventIngestionTest extends TestCase
             ->getJson(route('api.integration.rfid-match', [
                 'camera_role' => 'entrance',
                 'event_time' => $detectorEventTime,
-                'window_seconds' => 5,
+                'window_seconds' => 4,
             ]))
             ->assertOk()
             ->assertJsonPath('matched', true)
@@ -225,7 +257,7 @@ class DetectedEventIngestionTest extends TestCase
     {
         $this->seed(DatabaseSeeder::class);
 
-        $tag = RfidTag::query()->assigned()->with('vehicle')->firstOrFail();
+        $tag = $this->createAssignedVehicleWithTag('RFID-DETECT-4004', 'DET-4004');
         $scanTime = now();
 
         app(RfidService::class)->ingest([
@@ -244,7 +276,7 @@ class DetectedEventIngestionTest extends TestCase
                 ->getJson(route('api.integration.rfid-match', [
                     'camera_role' => 'entrance',
                     'event_time' => $scanTime->copy()->subSecond()->toIso8601String(),
-                    'window_seconds' => 5,
+                    'window_seconds' => 4,
                 ]))
                 ->assertOk()
                 ->assertJsonPath('matched', true);
@@ -262,11 +294,12 @@ class DetectedEventIngestionTest extends TestCase
             'external_event_key' => 'guest-window-timeout-001',
             'camera_role' => 'entrance',
             'detected_vehicle_type' => 'Car',
+            'vehicle_color' => 'White',
             'event_time' => now()->toIso8601String(),
             'vehicle_image_path' => 'detected-vehicle-images/entrance/guest-window-timeout-001.jpg',
             'detection_metadata' => [
                 'track_id' => 44,
-                'rfid_window_seconds' => 5,
+                'rfid_window_seconds' => 4,
             ],
         ])
             ->assertCreated()
@@ -280,6 +313,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertSame('pending_review', $observation->status);
         $this->assertSame('entrance', $observation->location);
         $this->assertSame('cctv', $observation->observation_source);
+        $this->assertSame('White', $observation->vehicle_color);
     }
 
     public function test_detector_guest_observation_accepts_multipart_snapshot_upload(): void
@@ -296,10 +330,11 @@ class DetectedEventIngestionTest extends TestCase
             'detected_vehicle_type' => 'Car',
             'event_time' => now()->toIso8601String(),
             'plate_number' => 'abc1234',
+            'vehicle_color' => 'black',
             'snapshot' => UploadedFile::fake()->image('guest-upload.jpg', 640, 480),
             'detection_metadata' => json_encode([
                 'track_id' => 55,
-                'rfid_window_seconds' => 5,
+                'rfid_window_seconds' => 4,
             ]),
         ])
             ->assertCreated()
@@ -311,9 +346,240 @@ class DetectedEventIngestionTest extends TestCase
             ->firstOrFail();
 
         $this->assertStringStartsWith('guest_snapshots/', $observation->snapshot_path);
-        $this->assertSame('abc1234', $observation->plate_number);
-        $this->assertSame('abc1234', $observation->plate_text);
+        $this->assertSame('ABC1234', $observation->plate_number);
+        $this->assertSame('ABC1234', $observation->plate_text);
+        $this->assertSame('Black', $observation->vehicle_color);
         $this->assertSame(55, $observation->detection_metadata_json['track_id']);
         Storage::disk('public')->assertExists($observation->snapshot_path);
+    }
+
+    public function test_detector_guest_observation_is_suppressed_when_recent_rfid_scan_is_registered(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $tag = $this->createAssignedVehicleWithTag('RFID-GUEST-SUPPRESS-1001', 'REG-1001');
+        $scanTime = now();
+
+        app(RfidService::class)->ingest([
+            'tag_uid' => $tag->uid,
+            'scan_location' => 'entrance',
+            'scan_time' => $scanTime->toIso8601String(),
+        ], 'station_reader');
+
+        $this->withHeaders([
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ])->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-registered-suppressed-001',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $scanTime->copy()->addSecond()->toIso8601String(),
+            'snapshot' => UploadedFile::fake()->image('guest-suppressed.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 88,
+                'analysis_status' => 'pending',
+            ]),
+        ])
+            ->assertOk()
+            ->assertJsonPath('suppressed', true)
+            ->assertJsonPath('overlay.verification', 'registered')
+            ->assertJsonPath('overlay.vehicle.plate_number', 'REG-1001');
+
+        $this->assertDatabaseMissing('guest_vehicle_observations', [
+            'external_event_key' => 'guest-window-registered-suppressed-001',
+        ]);
+
+        $this->assertTrue(EventReceiveLog::query()
+            ->where('status', 'guest_observation_suppressed_registered')
+            ->exists());
+    }
+
+    public function test_detector_guest_observation_is_suppressed_when_recent_rfid_scan_is_registered_across_stations(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $tag = $this->createAssignedVehicleWithTag('RFID-GUEST-SUPPRESS-CROSS-1001', 'CRS-1001');
+        $scanTime = now();
+
+        app(RfidService::class)->ingest([
+            'tag_uid' => $tag->uid,
+            'scan_location' => 'entrance',
+            'scan_time' => $scanTime->toIso8601String(),
+        ], 'station_reader');
+
+        $this->withHeaders([
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ])->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-registered-suppressed-cross-001',
+            'camera_role' => 'exit',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $scanTime->copy()->addSecond()->toIso8601String(),
+            'snapshot' => UploadedFile::fake()->image('guest-suppressed-cross.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 89,
+                'analysis_status' => 'pending',
+            ]),
+        ])
+            ->assertOk()
+            ->assertJsonPath('suppressed', true)
+            ->assertJsonPath('overlay.verification', 'registered')
+            ->assertJsonPath('overlay.vehicle.plate_number', 'CRS-1001');
+
+        $this->assertDatabaseMissing('guest_vehicle_observations', [
+            'external_event_key' => 'guest-window-registered-suppressed-cross-001',
+        ]);
+    }
+
+    public function test_detector_guest_observation_merges_recent_duplicate_track_ids_across_stations(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $headers = [
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ];
+        $eventTime = now();
+
+        $this->withHeaders($headers)->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-duplicate-track-001',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $eventTime->toIso8601String(),
+            'plate_number' => 'gst 123',
+            'vehicle_color' => 'white',
+            'snapshot' => UploadedFile::fake()->image('guest-duplicate-a.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 91,
+            ]),
+        ])->assertCreated();
+
+        $this->withHeaders($headers)->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-duplicate-track-002',
+            'camera_role' => 'exit',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $eventTime->copy()->addSeconds(2)->toIso8601String(),
+            'snapshot' => UploadedFile::fake()->image('guest-duplicate-b.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 92,
+            ]),
+        ])
+            ->assertOk()
+            ->assertJsonPath('duplicate', true)
+            ->assertJsonPath('message', 'Recent duplicate guest observation merged.');
+
+        $this->withHeaders($headers)->postJson(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-duplicate-track-002',
+            'camera_role' => 'exit',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $eventTime->copy()->addSeconds(3)->toIso8601String(),
+            'plate_number' => 'gst 128',
+            'vehicle_color' => 'gray',
+            'detection_metadata' => [
+                'track_id' => 92,
+                'analysis_status' => 'complete',
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('duplicate', true)
+            ->assertJsonPath('message', 'Recent duplicate guest observation merged.');
+
+        $this->assertSame(1, GuestVehicleObservation::query()
+            ->whereIn('external_event_key', [
+                'guest-window-duplicate-track-001',
+                'guest-window-duplicate-track-002',
+            ])
+            ->count());
+
+        $observation = GuestVehicleObservation::query()
+            ->where('external_event_key', 'guest-window-duplicate-track-001')
+            ->firstOrFail();
+
+        $this->assertSame('GST 123', $observation->plate_number);
+        $this->assertSame('White', $observation->vehicle_color);
+        $this->assertSame('complete', $observation->detection_metadata_json['analysis_status']);
+    }
+
+    public function test_detector_guest_observation_duplicate_updates_late_ocr_details(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $headers = [
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ];
+
+        $this->withHeaders($headers)->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-two-step-001',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => now()->toIso8601String(),
+            'snapshot' => UploadedFile::fake()->image('guest-two-step.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 77,
+                'analysis_status' => 'pending',
+            ]),
+        ])->assertCreated();
+
+        $this->withHeaders($headers)->postJson(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-two-step-001',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => now()->toIso8601String(),
+            'plate_number' => 'abc 123',
+            'vehicle_color' => 'white',
+            'detection_metadata' => [
+                'track_id' => 77,
+                'analysis_status' => 'complete',
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('duplicate', true)
+            ->assertJsonPath('overlay.verification', 'guest');
+
+        $observation = GuestVehicleObservation::query()
+            ->where('external_event_key', 'guest-window-two-step-001')
+            ->firstOrFail();
+
+        $this->assertSame('ABC 123', $observation->plate_number);
+        $this->assertSame('White', $observation->vehicle_color);
+        $this->assertSame('complete', $observation->detection_metadata_json['analysis_status']);
+        $this->assertSame(1, GuestVehicleObservation::query()->where('external_event_key', 'guest-window-two-step-001')->count());
+
+        $this->assertTrue(EventReceiveLog::query()
+            ->where('status', 'guest_observation_duplicate_updated')
+            ->where('notes', 'like', '%'.$observation->id.'%')
+            ->exists());
+    }
+
+    protected function createAssignedVehicleWithTag(string $tagUid, string $plateNumber): RfidTag
+    {
+        $vehicle = Vehicle::query()->create([
+            'plate_number' => $plateNumber,
+            'vehicle_owner_name' => 'Detector Test Owner',
+            'category' => 'faculty_staff',
+            'vehicle_type' => 'Car',
+        ]);
+        $vehicle->forceFill([
+            'current_state' => Vehicle::STATE_OUTSIDE,
+        ])->save();
+
+        $tag = RfidTag::query()->create([
+            'uid' => $tagUid,
+            'status' => RfidTag::STATUS_ASSIGNED,
+            'vehicle_id' => $vehicle->id,
+            'assigned_at' => now(),
+        ]);
+
+        $vehicle->forceFill([
+            'rfid_tag_id' => $tag->id,
+            'rfid_tag_uid' => $tag->uid,
+        ])->save();
+
+        return $tag->fresh('vehicle');
     }
 }

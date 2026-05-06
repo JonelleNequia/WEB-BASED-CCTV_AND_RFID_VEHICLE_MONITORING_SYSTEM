@@ -8,7 +8,9 @@ use App\Services\RfidService;
 use App\Services\VehicleRegistryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Throwable;
@@ -24,12 +26,62 @@ class VehicleRegistryController extends Controller
     ): View {
         return view('vehicle-registry.index', [
             'vehicles' => $vehicleRegistryService->registeredVehicles(),
-            'registeredTags' => $vehicleRegistryService->registeredTags(),
             'availableTags' => $vehicleRegistryService->availableTags(),
+            'rfidTagInventory' => $vehicleRegistryService->rfidTagInventory(),
             'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
             'vehicleCategories' => $vehicleRegistryService->vehicleCategories(),
             'rfidStats' => $rfidService->stats(),
         ]);
+    }
+
+    /**
+     * Store one RFID tag in the inventory pool before vehicle assignment.
+     */
+    public function storeRfidTag(
+        Request $request,
+        VehicleRegistryService $vehicleRegistryService
+    ): RedirectResponse|JsonResponse {
+        $validated = $request->validate([
+            'tag_number' => [
+                'required',
+                'integer',
+                'min:1',
+                'max:999999',
+                Rule::unique('vehicle_rfid_tags', 'tag_number'),
+            ],
+            'uid' => ['required', 'string', 'max:100'],
+        ]);
+
+        try {
+            $tag = $vehicleRegistryService->registerRfidTag($validated);
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            Log::error('RFID tag registration failed.', [
+                'message' => $exception->getMessage(),
+                'payload' => $request->except(['_token']),
+            ]);
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'message' => 'RFID tag could not be registered. Please check the UID and try again.',
+                ], 500);
+            }
+
+            return back()
+                ->withInput()
+                ->withErrors(['uid' => 'RFID tag could not be registered. Please check the UID and try again.']);
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => 'RFID #'.$tag->tag_number.' ('.$tag->uid.') was added to the RFID inventory.',
+                'rfid_tag_id' => $tag->id,
+                'tag_number' => $tag->tag_number,
+            ], 201);
+        }
+
+        return back()->with('status', 'RFID #'.$tag->tag_number.' ('.$tag->uid.') was added to the RFID inventory.');
     }
 
     /**
@@ -77,7 +129,7 @@ class VehicleRegistryController extends Controller
     {
         return view('vehicle-registry.edit', [
             'vehicle' => $vehicle->load(['rfidTag', 'rfidTags']),
-            'availableTags' => $vehicleRegistryService->assignableTagsFor($vehicle),
+            'assignableTags' => $vehicleRegistryService->assignableTagsFor($vehicle),
             'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
             'vehicleCategories' => $vehicleRegistryService->vehicleCategories(),
         ]);

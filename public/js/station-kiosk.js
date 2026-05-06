@@ -20,6 +20,7 @@
     let rfidBufferTimer = null;
     let lastSubmittedUid = '';
     let lastSubmittedAt = 0;
+    const stationLogNodes = new Map();
 
     function formatDateTime(value, fallbackText) {
         if (!value) {
@@ -100,64 +101,122 @@
         }
     }
 
+    function stationLogKey(log) {
+        return [
+            log.record_type || 'log',
+            log.id ?? '',
+            log.event_time || '',
+            log.plate_number || '',
+        ].join(':');
+    }
+
+    function buildLogItem(log) {
+        const item = document.createElement('article');
+        const badgeRow = document.createElement('div');
+        const badge = document.createElement('span');
+        const loggedAt = document.createElement('span');
+        const main = document.createElement('div');
+        const title = document.createElement('strong');
+        const meta = document.createElement('span');
+        const details = document.createElement('div');
+        const detailItems = [
+            ['Owner', log.owner_name || 'N/A'],
+            ['Vehicle', log.vehicle_type || 'Vehicle'],
+            ['Entries Today', log.entries_today_count ?? 0],
+            ['Exits Today', log.exits_today_count ?? 0],
+            ['State', log.resulting_state || 'N/A'],
+            ['Status', log.status || 'Recorded'],
+        ];
+
+        item.className = 'station-log-item';
+        badgeRow.className = 'station-log-badge-row';
+        main.className = 'station-log-main';
+        badge.className = 'station-log-badge';
+        loggedAt.className = 'station-log-time';
+        details.className = 'station-log-detail-grid';
+
+        title.textContent = log.plate_number || 'GUEST';
+        meta.textContent = log.verification_label || 'N/A';
+        badge.textContent = log.event_type || payload.eventType || 'LOG';
+        loggedAt.textContent = log.display_time || formatDateTime(log.event_time, 'No time');
+
+        detailItems.forEach(function ([label, value]) {
+            const wrapper = document.createElement('div');
+            const labelNode = document.createElement('span');
+            const valueNode = document.createElement('strong');
+
+            labelNode.textContent = label;
+            valueNode.textContent = value;
+            wrapper.append(labelNode, valueNode);
+            details.appendChild(wrapper);
+        });
+
+        badgeRow.append(badge, loggedAt);
+        main.append(title, meta);
+        item.append(badgeRow, main, details);
+
+        return item;
+    }
+
+    function updateLogItem(item, log) {
+        const replacement = buildLogItem(log);
+        item.className = replacement.className;
+        item.replaceChildren(...replacement.childNodes);
+    }
+
     function renderLogs(logs) {
         if (!logList) {
             return;
         }
 
-        logList.innerHTML = '';
-
         if (!Array.isArray(logs) || logs.length === 0) {
+            stationLogNodes.clear();
             const empty = document.createElement('div');
             empty.className = 'station-log-empty';
-            empty.textContent = `No ${payload.eventType || 'station'} logs yet`;
-            logList.appendChild(empty);
+            empty.textContent = `No ${payload.logLabel || 'station logs'} yet`;
+            logList.replaceChildren(empty);
             return;
         }
 
-        logs.forEach(function (log) {
-            const item = document.createElement('article');
-            const badgeRow = document.createElement('div');
-            const badge = document.createElement('span');
-            const loggedAt = document.createElement('span');
-            const main = document.createElement('div');
-            const title = document.createElement('strong');
-            const meta = document.createElement('span');
-            const details = document.createElement('div');
-            const detailItems = [
-                ['Owner', log.owner_name || 'N/A'],
-                ['Vehicle', log.vehicle_type || 'Vehicle'],
-                ['State', log.resulting_state || 'N/A'],
-                ['Status', log.status || 'Recorded'],
-            ];
+        logList.querySelectorAll('.station-log-empty').forEach(function (node) {
+            node.remove();
+        });
 
-            item.className = 'station-log-item';
-            badgeRow.className = 'station-log-badge-row';
-            main.className = 'station-log-main';
-            badge.className = 'station-log-badge';
-            loggedAt.className = 'station-log-time';
-            details.className = 'station-log-detail-grid';
-
-            title.textContent = log.plate_number || 'UNKNOWN';
-            meta.textContent = log.verification_label || 'N/A';
-            badge.textContent = log.event_type || payload.eventType || 'LOG';
-            loggedAt.textContent = log.display_time || formatDateTime(log.event_time, 'No time');
-
-            detailItems.forEach(function ([label, value]) {
-                const wrapper = document.createElement('div');
-                const labelNode = document.createElement('span');
-                const valueNode = document.createElement('strong');
-
-                labelNode.textContent = label;
-                valueNode.textContent = value;
-                wrapper.append(labelNode, valueNode);
-                details.appendChild(wrapper);
+        if (stationLogNodes.size === 0) {
+            logList.querySelectorAll('.station-log-item').forEach(function (node) {
+                node.remove();
             });
+        }
 
-            badgeRow.append(badge, loggedAt);
-            main.append(title, meta);
-            item.append(badgeRow, main, details);
-            logList.appendChild(item);
+        const seen = new Set();
+
+        logs.forEach(function (log, index) {
+            const key = stationLogKey(log);
+            let item = stationLogNodes.get(key);
+
+            if (!item) {
+                item = buildLogItem(log);
+                item.dataset.stationLogKey = key;
+                stationLogNodes.set(key, item);
+            } else {
+                updateLogItem(item, log);
+            }
+
+            seen.add(key);
+
+            const currentNode = logList.children[index];
+            if (currentNode !== item) {
+                logList.insertBefore(item, currentNode || null);
+            }
+        });
+
+        Array.from(stationLogNodes.entries()).forEach(function ([key, item]) {
+            if (seen.has(key)) {
+                return;
+            }
+
+            item.remove();
+            stationLogNodes.delete(key);
         });
     }
 

@@ -140,7 +140,7 @@ class SettingsService
                 'app_url' => $integrationBaseUrl,
                 'event_ingest_url' => $integrationBaseUrl.'/api/v1/integration/events',
                 'guest_observation_url' => $integrationBaseUrl.'/api/guest-observation',
-                'rfid_match_url' => $integrationBaseUrl.'/api/check-latest-scan',
+                'rfid_match_url' => $integrationBaseUrl.'/api/latest-scan',
                 'status_url' => $integrationBaseUrl.'/api/v1/integration/status',
                 'rfid_ingest_url' => $integrationBaseUrl.'/api/v1/integration/rfid-scans',
                 'entrance_portal_label' => $settings['entrance_portal_label'] ?? 'PHILCST Entrance Portal',
@@ -189,7 +189,7 @@ class SettingsService
             Camera::query()->forRole($role)->update([
                 'camera_name' => (string) ($cameraData['camera_name'] ?? ($role === 'entrance' ? 'PHILCST Entrance Camera' : 'PHILCST Exit Camera')),
                 'source_type' => (string) ($cameraData['source_type'] ?? 'webcam'),
-                'source_value' => (string) ($cameraData['source_value'] ?? ($role === 'entrance' ? '0' : '1')),
+                'source_value' => (string) ($cameraData['source_value'] ?? '0'),
                 'source_username' => (string) ($cameraData['source_username'] ?? ''),
                 'source_password' => (string) ($cameraData['source_password'] ?? ''),
                 'status' => 'active',

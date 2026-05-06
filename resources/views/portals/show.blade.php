@@ -114,7 +114,7 @@
 
                     <div class="detail-list">
                         <div><span>Latest Tag</span><strong>{{ $latestScan?->tag_uid ?? 'No scan yet' }}</strong></div>
-                        <div><span>Vehicle</span><strong>{{ $latestScan?->vehicle?->plate_number ?? 'UNREGISTERED / GUEST' }}</strong></div>
+                        <div><span>Vehicle</span><strong>{{ $latestScan?->vehicle?->plate_number ?? 'GUEST' }}</strong></div>
                         <div><span>Category</span><strong>{{ $latestScan?->vehicle?->category ? ucfirst(str_replace('_', ' ', $latestScan->vehicle->category)) : 'N/A' }}</strong></div>
                         <div><span>Event Type</span><strong>{{ $latestScan?->resolvedEventTypeLabel ?? 'N/A' }}</strong></div>
                         <div><span>Current State</span><strong>{{ $latestScan?->resultingStateLabel ?? 'N/A' }}</strong></div>
@@ -131,7 +131,7 @@
                     </div>
 
                     <div class="detail-list">
-                        <div><span>Plate</span><strong>{{ $latestScan?->vehicle?->plate_number ?? 'Unknown' }}</strong></div>
+                        <div><span>Plate</span><strong>{{ $latestScan?->vehicle?->plate_number ?? 'GUEST' }}</strong></div>
                         <div><span>Owner</span><strong>{{ $latestScan?->vehicle?->vehicle_owner_name ?? 'N/A' }}</strong></div>
                         <div><span>Vehicle</span><strong>{{ $latestScan?->vehicle?->vehicle_type ?? 'No registered data' }}</strong></div>
                         <div><span>Reader</span><strong>{{ $latestScan?->reader_name ?? $readerName }}</strong></div>
@@ -168,7 +168,7 @@
                             <div>
                                 <strong>{{ $scan->tag_uid }}</strong>
                                 <p>
-                                    {{ $scan->vehicle?->plate_number ?? 'UNREGISTERED / GUEST' }}
+                                    {{ $scan->vehicle?->plate_number ?? 'GUEST' }}
                                     • {{ $scan->resolvedEventTypeLabel }}
                                     • {{ $scan->resultingStateLabel }}
                                 </p>

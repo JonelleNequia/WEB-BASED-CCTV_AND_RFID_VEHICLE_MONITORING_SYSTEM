@@ -124,7 +124,7 @@
                     @forelse ($recentIntegrationLogs as $log)
                         <tr>
                             <td>{{ $log->created_at->format('M d, Y h:i A') }}</td>
-                            <td>{{ $log->source_name ?: 'Unknown source' }}</td>
+                            <td>{{ $log->source_name ?: 'No source' }}</td>
                             <td>{{ ucfirst(str_replace('_', ' ', $log->status)) }}</td>
                             <td>{{ $log->notes ?: 'No details provided.' }}</td>
                             <td>{{ $log->payload_json ? 'Payload captured' : 'No payload' }}</td>

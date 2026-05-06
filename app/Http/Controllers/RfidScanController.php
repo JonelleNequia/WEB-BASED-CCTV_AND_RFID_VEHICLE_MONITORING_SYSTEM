@@ -10,7 +10,10 @@ use App\Services\VehicleRegistryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use Throwable;
 
 class RfidScanController extends Controller
 {
@@ -27,8 +30,8 @@ class RfidScanController extends Controller
             'scanLogs' => $rfidService->scanHistory($request->only(['history_q', 'scan_location', 'verification_status']), 12),
             'latestScan' => $rfidService->recentScans(1)->first(),
             'rfidStats' => $rfidService->stats(),
-            'registeredTags' => $vehicleRegistryService->registeredTags($request->string('q')->value()),
-            'filters' => $request->only(['q', 'history_q', 'scan_location', 'verification_status']),
+            'registeredTags' => $vehicleRegistryService->registeredTags(),
+            'filters' => $request->only(['history_q', 'scan_location', 'verification_status']),
             'settings' => $settingsService->all(),
         ]);
     }
@@ -40,7 +43,26 @@ class RfidScanController extends Controller
         SimulateRfidScanRequest $request,
         RfidService $rfidService
     ): RedirectResponse|JsonResponse {
-        $scanLog = $rfidService->simulate($request->validated());
+        try {
+            $scanLog = $rfidService->simulate($request->validated());
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            Log::error('Simulated RFID scan failed.', [
+                'message' => $exception->getMessage(),
+                'payload' => $request->except(['_token']),
+            ]);
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'message' => 'RFID scan could not be recorded. Check laravel.log for details.',
+                ], 500);
+            }
+
+            return back()
+                ->withInput()
+                ->withErrors(['rfid_scan' => 'RFID scan could not be recorded. Check laravel.log for details.']);
+        }
 
         $statusMessage = match ($scanLog->verification_status) {
             'verified' => 'RFID scan recorded. '

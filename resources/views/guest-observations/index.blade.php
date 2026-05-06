@@ -113,10 +113,10 @@
             <div class="panel-header">
                 <div>
                     <div class="panel-title-row">
-                        <h3>Latest Unregistered Capture</h3>
+                        <h3>Latest Guest Capture</h3>
                         @include('layouts.partials.help', [
-                            'label' => 'Explain unregistered capture',
-                            'text' => 'Unknown RFID scans create a CCTV-supported guest observation with the latest available camera frame.',
+                            'label' => 'Explain guest capture',
+                            'text' => 'Guest RFID scans and camera timeouts create CCTV-supported guest observations with the latest available camera frame.',
                         ])
                     </div>
                 </div>
@@ -129,18 +129,19 @@
                         <strong>Guard review needed</strong>
                         <span class="badge badge-manual-review">{{ ucfirst($latestUnregisteredCapture->location) }}</span>
                     </div>
-                    <img src="{{ $latestSnapshotUrl }}" alt="Unregistered vehicle capture" class="capture-preview">
+                    <img src="{{ $latestSnapshotUrl }}" alt="Guest vehicle capture" class="capture-preview">
                     <div class="detail-list">
                         <div><span>Camera</span><strong>{{ $latestUnregisteredCapture->camera?->camera_name ?: 'No camera linked' }}</strong></div>
                         <div><span>Plate</span><strong>{{ $latestUnregisteredCapture->plate_number ?: $latestUnregisteredCapture->plate_text ?: 'No plate detected' }}</strong></div>
+                        <div><span>Color</span><strong>{{ $latestUnregisteredCapture->vehicle_color ?: 'No color detected' }}</strong></div>
                         <div><span>Captured</span><strong>{{ $latestUnregisteredCapture->observed_at->format('M d, Y h:i A') }}</strong></div>
                     </div>
                     <p>{{ $latestUnregisteredCapture->notes }}</p>
                 </div>
             @else
                 <div class="empty-state">
-                    <h4>No unregistered capture yet</h4>
-                    <p>Unknown RFID scans will appear here with a CCTV snapshot when a latest frame is available.</p>
+                    <h4>No guest capture yet</h4>
+                    <p>Guest detections will appear here with a CCTV snapshot when a latest frame is available.</p>
                 </div>
             @endif
         </section>
@@ -215,8 +216,10 @@
                         <th>Time</th>
                         <th>Snapshot</th>
                         <th>Plate Number</th>
+                        <th>Color</th>
                         <th>Vehicle</th>
                         <th>Location</th>
+                        <th>Status</th>
                         <th>Camera</th>
                         <th>Notes</th>
                         <th>Action</th>
@@ -229,19 +232,25 @@
                             <td>{{ $observation->observed_at->format('M d, Y h:i A') }}</td>
                             <td><img src="{{ $snapshotUrl }}" alt="Guest vehicle snapshot" class="thumb thumb-sm"></td>
                             <td>{{ $observation->plate_number ?: $observation->plate_text ?: 'No plate' }}</td>
-                            <td>{{ trim(($observation->vehicle_color ?: '').' '.($observation->vehicle_type ?: 'N/A')) }}</td>
+                            <td>{{ $observation->vehicle_color ?: 'N/A' }}</td>
+                            <td>{{ $observation->vehicle_type ?: 'N/A' }}</td>
                             <td>{{ ucfirst($observation->location) }}</td>
+                            <td>
+                                <span class="badge {{ $observation->status === 'verified' || $observation->status === 'reviewed' ? 'badge-matched' : 'badge-manual-review' }}">
+                                    {{ ucwords(str_replace('_', ' ', $observation->status)) }}
+                                </span>
+                            </td>
                             <td>{{ $observation->camera?->camera_name ?: 'N/A' }}</td>
                             <td>{{ $observation->notes ?: 'No notes' }}</td>
                             <td>
                                 <button type="button" class="button button-secondary button-sm" data-guest-view="{{ $observation->id }}">
-                                    View Image
+                                    {{ $observation->status === 'pending_review' ? 'Review & Verify' : 'View Details' }}
                                 </button>
                             </td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="8" class="table-empty">No guest observations yet.</td>
+                            <td colspan="10" class="table-empty">No guest observations yet.</td>
                         </tr>
                     @endforelse
                 </tbody>
@@ -256,7 +265,7 @@
             <div class="modal-header">
                 <div>
                     <span class="panel-kicker">Guest Review</span>
-                    <h3 id="guest_modal_title">Captured Vehicle</h3>
+                    <h3 id="guest_modal_title">Review & Verify</h3>
                 </div>
                 <button type="button" class="button button-secondary button-sm" data-guest-modal-close>Close</button>
             </div>
@@ -268,6 +277,7 @@
                     </div>
                     <div class="detail-list">
                         <div><span>Detected Plate</span><strong data-guest-modal-plate>No plate</strong></div>
+                        <div><span>Detected Color</span><strong data-guest-modal-color>No color</strong></div>
                         <div><span>Timestamp</span><strong data-guest-modal-time>No time</strong></div>
                         <div><span>Location</span><strong data-guest-modal-location>No location</strong></div>
                         <div><span>Status</span><strong data-guest-modal-status>Pending Review</strong></div>
@@ -277,6 +287,7 @@
                 <form method="POST" action="" class="stack-form" data-guest-modal-form>
                     @csrf
                     @method('PATCH')
+                    <input type="hidden" name="status" value="verified" data-guest-modal-field="status">
 
                     <div class="form-grid">
                         <div class="field">
@@ -308,14 +319,6 @@
                             <input id="modal_observed_at" type="datetime-local" name="observed_at" data-guest-modal-field="observed_at">
                         </div>
 
-                        <div class="field">
-                            <label for="modal_status">Review Status</label>
-                            <select id="modal_status" name="status" data-guest-modal-field="status">
-                                <option value="pending_review">Pending Review</option>
-                                <option value="reviewed">Reviewed</option>
-                            </select>
-                        </div>
-
                         <div class="field span-full">
                             <label for="modal_notes">Notes</label>
                             <textarea id="modal_notes" name="notes" rows="4" data-guest-modal-field="notes"></textarea>
@@ -323,7 +326,7 @@
                     </div>
 
                     <div class="button-row">
-                        <button type="submit" class="button button-primary">Save Review</button>
+                        <button type="submit" class="button button-primary" data-guest-modal-submit>Mark as Verified</button>
                     </div>
                 </form>
             </div>
@@ -339,10 +342,12 @@
         'observed_at' => $observation->observed_at?->format('Y-m-d\TH:i'),
         'display_time' => $observation->observed_at?->format('M d, Y h:i A'),
         'status' => $observation->status,
-        'status_label' => ucfirst(str_replace('_', ' ', $observation->status)),
+        'status_label' => ucwords(str_replace('_', ' ', $observation->status)),
         'notes' => $observation->notes,
         'snapshot_url' => $observation->snapshot_path ? asset('storage/'.$observation->snapshot_path) : $observation->snapshot_url,
         'update_url' => route('guest-observations.update', $observation),
+        'verify_url' => route('guest-observations.verify', $observation),
+        'can_verify' => $observation->status === 'pending_review',
     ])->values())
     <script id="guest-observations-data" type="application/json">{!! json_encode($guestObservationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 @endsection
@@ -361,9 +366,11 @@
             const form = modal.querySelector('[data-guest-modal-form]');
             const image = modal.querySelector('[data-guest-modal-image]');
             const plate = modal.querySelector('[data-guest-modal-plate]');
+            const color = modal.querySelector('[data-guest-modal-color]');
             const time = modal.querySelector('[data-guest-modal-time]');
             const location = modal.querySelector('[data-guest-modal-location]');
             const status = modal.querySelector('[data-guest-modal-status]');
+            const submitButton = modal.querySelector('[data-guest-modal-submit]');
             const zoomFrame = modal.querySelector('[data-zoom-frame]');
 
             function setField(name, value) {
@@ -375,19 +382,21 @@
             }
 
             function openModal(observation) {
-                form.action = observation.update_url;
+                form.action = observation.verify_url || observation.update_url;
                 image.src = observation.snapshot_url;
                 plate.textContent = observation.plate_number || 'No plate detected';
+                color.textContent = observation.vehicle_color || 'No color detected';
                 time.textContent = observation.display_time || 'No time';
                 location.textContent = observation.location ? observation.location.charAt(0).toUpperCase() + observation.location.slice(1) : 'No location';
                 status.textContent = observation.status_label || 'Pending Review';
+                submitButton.textContent = observation.can_verify ? 'Mark as Verified' : 'Save Verified Details';
 
                 setField('plate_number', observation.plate_number);
                 setField('vehicle_type', observation.vehicle_type);
                 setField('vehicle_color', observation.vehicle_color);
                 setField('location', observation.location);
                 setField('observed_at', observation.observed_at);
-                setField('status', observation.status || 'pending_review');
+                setField('status', 'verified');
                 setField('notes', observation.notes);
 
                 modal.classList.remove('is-hidden');

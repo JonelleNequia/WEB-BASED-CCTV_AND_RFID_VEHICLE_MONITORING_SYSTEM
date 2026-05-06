@@ -68,6 +68,27 @@ class PendingDetailsCompletionTest extends TestCase
 
         /** @var EventService $eventService */
         $eventService = app(EventService::class);
+        $entryEvent = VehicleEvent::query()->create([
+            'event_type' => 'ENTRY',
+            'event_status' => VehicleEvent::STATUS_COMPLETED,
+            'event_origin' => 'manual',
+            'plate_text' => 'GHI-9012',
+            'vehicle_type' => 'Van',
+            'vehicle_color' => 'Silver',
+            'roi_name' => 'Entrance Trigger Line',
+            'event_time' => now()->subMinutes(10),
+            'match_status' => 'open',
+            'details_completed_at' => now()->subMinutes(10),
+        ]);
+        ActiveSession::query()->create([
+            'entry_event_id' => $entryEvent->id,
+            'plate_text' => 'GHI-9012',
+            'plate_number' => 'GHI-9012',
+            'vehicle_type' => 'Van',
+            'vehicle_color' => 'Silver',
+            'entry_time' => $entryEvent->event_time,
+            'status' => 'open',
+        ]);
 
         $vehicleEvent = $eventService->createDetectedEvent([
             'camera_role' => 'exit',

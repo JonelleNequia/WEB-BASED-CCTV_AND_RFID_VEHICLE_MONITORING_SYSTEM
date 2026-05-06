@@ -19,11 +19,6 @@ class DatabaseSeeder extends Seeder
             CameraSeeder::class,
             RoiSeeder::class,
             SystemSettingSeeder::class,
-            VehicleRegistrySeeder::class,
-            VehicleEventSeeder::class,
-            ActiveSessionSeeder::class,
-            RfidScanLogSeeder::class,
-            GuestObservationSeeder::class,
         ]);
     }
 }

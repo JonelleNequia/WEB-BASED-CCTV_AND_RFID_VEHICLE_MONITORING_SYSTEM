@@ -87,6 +87,90 @@ def bbox_center(xyxy):
     return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
 
+def _orientation(a, b, c):
+    """
+    Return the orientation for three points.
+    """
+    value = (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1])
+
+    if value > 0:
+        return 1
+
+    if value < 0:
+        return -1
+
+    return 0
+
+
+def _on_segment(a, b, c):
+    """
+    Check whether point b sits on line segment ac.
+    """
+    return (
+        min(a[0], c[0]) <= b[0] <= max(a[0], c[0])
+        and min(a[1], c[1]) <= b[1] <= max(a[1], c[1])
+    )
+
+
+def _segments_intersect(a, b, c, d):
+    """
+    Check whether segment ab intersects segment cd.
+    """
+    orientation_1 = _orientation(a, b, c)
+    orientation_2 = _orientation(a, b, d)
+    orientation_3 = _orientation(c, d, a)
+    orientation_4 = _orientation(c, d, b)
+
+    if orientation_1 != orientation_2 and orientation_3 != orientation_4:
+        return True
+
+    if orientation_1 == 0 and _on_segment(a, c, b):
+        return True
+
+    if orientation_2 == 0 and _on_segment(a, d, b):
+        return True
+
+    if orientation_3 == 0 and _on_segment(c, a, d):
+        return True
+
+    return orientation_4 == 0 and _on_segment(c, b, d)
+
+
+def bbox_intersects_line(xyxy, line):
+    """
+    Treat a vehicle as triggered when its box touches the saved trigger line.
+    This handles tracks that start on the line and never get a center-point
+    sign flip.
+    """
+    if not line:
+        return False
+
+    x1, y1, x2, y2 = xyxy
+    line_start = (line["x1"], line["y1"])
+    line_end = (line["x2"], line["y2"])
+
+    if (
+        min(x1, x2) <= line_start[0] <= max(x1, x2)
+        and min(y1, y2) <= line_start[1] <= max(y1, y2)
+    ):
+        return True
+
+    if (
+        min(x1, x2) <= line_end[0] <= max(x1, x2)
+        and min(y1, y2) <= line_end[1] <= max(y1, y2)
+    ):
+        return True
+
+    rect_edges = [
+        ((x1, y1), (x2, y1)),
+        ((x2, y1), (x2, y2)),
+        ((x2, y2), (x1, y2)),
+        ((x1, y2), (x1, y1)),
+    ]
+
+    return any(_segments_intersect(line_start, line_end, edge_start, edge_end) for edge_start, edge_end in rect_edges)
+
+
 def point_in_mask(point, mask_rect):
     """
     Keep detections inside the saved mask rectangle only.

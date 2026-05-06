@@ -1,7 +1,7 @@
 {
   "service_running": true,
   "service_message": "Dual-camera detector running.",
-  "updated_at": "2026-05-04T11:22:59.827382+08:00",
+  "updated_at": "2026-05-06T07:11:35.373973+08:00",
   "detector_model_path": "yolov8n.pt",
   "stream_server": {
     "host": "127.0.0.1",
@@ -11,8 +11,8 @@
     "entrance": {
       "camera_role": "entrance",
       "camera_name": "PHILCST Entrance Camera",
-      "camera_running": true,
-      "detection_ready": true,
+      "camera_running": false,
+      "detection_ready": false,
       "calibration_ready": true,
       "source_type": "webcam",
       "source_value": 0,
@@ -23,22 +23,22 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-05-04T11:22:59.814641+08:00",
-      "last_error": "",
-      "retry_count": 0,
-      "processed_frames": 44097,
-      "detections_seen": 120,
+      "last_capture_time": "2026-05-06T07:11:29.382160+08:00",
+      "last_error": "Camera opened, but frame capture failed.",
+      "retry_count": 1,
+      "processed_frames": 25411,
+      "detections_seen": 191,
       "active_detections": 0,
-      "crossings_logged": 0
+      "crossings_logged": 15
     },
     "exit": {
       "camera_role": "exit",
       "camera_name": "PHILCST Exit Camera",
       "camera_running": false,
       "detection_ready": false,
-      "calibration_ready": false,
+      "calibration_ready": true,
       "source_type": "webcam",
-      "source_value": 1,
+      "source_value": 0,
       "stream_url": "http://127.0.0.1:8765/stream/exit",
       "supported_vehicle_classes": [
         "Car",
@@ -46,13 +46,13 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": null,
-      "last_error": "Could not open camera source: 1",
-      "retry_count": 0,
-      "processed_frames": 0,
-      "detections_seen": 0,
+      "last_capture_time": "2026-05-06T07:11:29.385900+08:00",
+      "last_error": "Camera opened, but frame capture failed.",
+      "retry_count": 1,
+      "processed_frames": 24721,
+      "detections_seen": 191,
       "active_detections": 0,
-      "crossings_logged": 0
+      "crossings_logged": 12
     }
   }
 }
