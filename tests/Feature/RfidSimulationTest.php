@@ -9,6 +9,8 @@ use App\Models\User;
 use App\Models\Vehicle;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class RfidSimulationTest extends TestCase
@@ -127,6 +129,41 @@ class RfidSimulationTest extends TestCase
             'event_type' => 'EXIT',
             'resulting_state' => Vehicle::STATE_OUTSIDE,
         ]);
+    }
+
+    public function test_guest_rfid_scan_copies_latest_camera_frame_for_review(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+        $sourcePath = public_path('camera/entrance_latest_frame.jpg');
+
+        File::ensureDirectoryExists(dirname($sourcePath));
+        File::put($sourcePath, 'guest-frame');
+
+        try {
+            $this->actingAs($user)
+                ->postJson(route('rfid-scans.store'), [
+                    'tag_uid' => 'UNKNOWN-GUEST-1001',
+                    'scan_location' => 'entrance',
+                    'reader_name' => 'Entrance RFID Reader',
+                ])
+                ->assertCreated()
+                ->assertJsonPath('scan.verification_status', 'guest');
+
+            $scanLog = RfidScanLog::query()
+                ->with('guestVehicleObservation')
+                ->latest('id')
+                ->firstOrFail();
+            $observation = $scanLog->guestVehicleObservation;
+
+            $this->assertNotNull($observation);
+            $this->assertNotNull($observation->snapshot_path);
+            Storage::disk('public')->assertExists($observation->snapshot_path);
+        } finally {
+            File::delete($sourcePath);
+        }
     }
 
     /**

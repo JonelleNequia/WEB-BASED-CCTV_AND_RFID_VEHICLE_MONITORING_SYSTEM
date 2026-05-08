@@ -19,6 +19,8 @@ class LocalStorageService
             Storage::disk($this->mediaDisk())->makeDirectory($this->mediaDirectory($key));
         }
 
+        Storage::disk($this->mediaDisk())->makeDirectory('guest_snapshots');
+
         foreach (['rfid_exports', 'backups'] as $key) {
             Storage::disk($this->archiveDisk())->makeDirectory($this->archiveDirectory($key));
         }
@@ -62,9 +64,19 @@ class LocalStorageService
      */
     public function storeLatestCameraSnapshot(string $cameraRole): ?string
     {
-        $sourcePath = public_path('camera/'.$cameraRole.'_latest_frame.jpg');
+        $sourcePath = null;
 
-        if (! File::exists($sourcePath)) {
+        foreach ([
+            public_path('camera/'.$cameraRole.'_latest_frame.jpg'),
+            public_path('camera/'.$cameraRole.'_annotated_frame.jpg'),
+        ] as $candidatePath) {
+            if (File::isFile($candidatePath) && File::size($candidatePath) > 0) {
+                $sourcePath = $candidatePath;
+                break;
+            }
+        }
+
+        if (! $sourcePath) {
             return null;
         }
 

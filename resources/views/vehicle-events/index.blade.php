@@ -128,7 +128,7 @@
             </div>
         </div>
 
-        <div class="event-log-card-list event-log-list-view">
+        <div class="event-log-card-list event-log-list-view" data-event-log-list>
             @forelse ($logs as $log)
                 <article class="event-log-card event-log-list-item">
                     <div class="event-log-card-top">
@@ -204,12 +204,16 @@
     </div>
 
     <script id="event-log-modal-data" type="application/json">{!! json_encode($logs->getCollection()->values(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
+    <script id="event-log-realtime-data" type="application/json">{!! json_encode([
+        'recentLogsUrl' => route('api.recent-event-logs', ['limit' => 10]),
+    ], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 @endsection
 
 @push('scripts')
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const dataNode = document.getElementById('event-log-modal-data');
+            const realtimeNode = document.getElementById('event-log-realtime-data');
             const modal = document.querySelector('[data-event-log-modal]');
             const title = document.getElementById('event-log-modal-title');
             const type = document.querySelector('[data-event-log-modal-type]');
@@ -217,7 +221,9 @@
             const imageWrap = document.querySelector('[data-event-log-modal-image-wrap]');
             const image = document.querySelector('[data-event-log-modal-image]');
             const link = document.querySelector('[data-event-log-modal-link]');
-            const logs = dataNode ? JSON.parse(dataNode.textContent || '[]') : [];
+            const list = document.querySelector('[data-event-log-list]');
+            const realtimeConfig = realtimeNode ? JSON.parse(realtimeNode.textContent || '{}') : {};
+            let logs = dataNode ? JSON.parse(dataNode.textContent || '[]') : [];
 
             if (!modal || !title || !type || !detailGrid || !imageWrap || !image || !link) {
                 return;
@@ -236,6 +242,98 @@
                 ['Match', log.match_label],
                 ['Time', log.display_time],
             ];
+
+            const appendText = (parent, tagName, text, className = null) => {
+                const node = document.createElement(tagName);
+
+                if (className) {
+                    node.className = className;
+                }
+
+                node.textContent = text || '';
+                parent.appendChild(node);
+
+                return node;
+            };
+
+            const buildLogCard = (log, index) => {
+                const card = document.createElement('article');
+                const top = document.createElement('div');
+                const titleBlock = document.createElement('div');
+                const badge = document.createElement('span');
+                const titleText = document.createElement('div');
+                const actions = document.createElement('div');
+                const statusBadge = document.createElement('span');
+                const viewButton = document.createElement('button');
+                const body = document.createElement('div');
+                const preview = document.createElement('div');
+                const summary = document.createElement('div');
+                const summaryLine = document.createElement('div');
+
+                card.className = 'event-log-card event-log-list-item';
+                top.className = 'event-log-card-top';
+                titleBlock.className = 'event-log-title-block';
+                badge.className = 'station-log-badge';
+                actions.className = 'event-log-row-actions';
+                statusBadge.className = `badge badge-${log.status_badge_class || 'secondary'}`;
+                viewButton.className = 'button button-secondary button-sm';
+                body.className = 'event-log-body';
+                preview.className = 'event-log-preview';
+                summary.className = 'event-log-summary-panel';
+                summaryLine.className = 'event-log-summary-line';
+
+                badge.textContent = log.event_type || 'LOG';
+                appendText(titleText, 'strong', log.plate_number || 'GUEST');
+                appendText(titleText, 'span', log.summary_label || '');
+                titleBlock.append(badge, titleText);
+
+                statusBadge.textContent = log.status_label || 'Recorded';
+                viewButton.type = 'button';
+                viewButton.dataset.eventLogView = String(index);
+                viewButton.textContent = 'View Details';
+                actions.append(statusBadge, viewButton);
+                top.append(titleBlock, actions);
+
+                if (log.image_url) {
+                    const img = document.createElement('img');
+                    img.src = log.image_url;
+                    img.alt = `${log.record_type_label || 'Vehicle log'} snapshot`;
+                    preview.appendChild(img);
+                } else {
+                    preview.dataset.emptyPreview = '';
+                    preview.textContent = 'No Image';
+                }
+
+                appendText(summaryLine, 'span', log.station_label || 'No station');
+                appendText(summaryLine, 'span', log.display_time || 'No time');
+                appendText(summaryLine, 'span', log.source_label || 'No source');
+                summary.appendChild(summaryLine);
+                appendText(summary, 'p', `${log.vehicle_type || 'Vehicle'} | ${log.vehicle_color || 'N/A'} | ${log.category_label || 'N/A'}`);
+                body.append(preview, summary);
+                card.append(top, body);
+
+                return card;
+            };
+
+            const renderEventLogs = (items) => {
+                if (!list || !Array.isArray(items)) {
+                    return;
+                }
+
+                logs = items;
+
+                if (items.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'empty-state';
+                    appendText(empty, 'h4', 'No records matched the current filters');
+                    appendText(empty, 'p', 'Adjust the report filters to widen the visible list.');
+                    list.replaceChildren(empty);
+
+                    return;
+                }
+
+                list.replaceChildren(...items.map(buildLogCard));
+            };
 
             const openModal = (log) => {
                 title.textContent = `${log.event_type} • ${log.plate_number || 'GUEST'}`;
@@ -271,14 +369,18 @@
                 modal.setAttribute('aria-hidden', 'true');
             };
 
-            document.querySelectorAll('[data-event-log-view]').forEach((button) => {
-                button.addEventListener('click', () => {
-                    const log = logs[Number.parseInt(button.dataset.eventLogView, 10)];
+            document.addEventListener('click', (event) => {
+                const button = event.target.closest('[data-event-log-view]');
 
-                    if (log) {
-                        openModal(log);
-                    }
-                });
+                if (!button) {
+                    return;
+                }
+
+                const log = logs[Number.parseInt(button.dataset.eventLogView, 10)];
+
+                if (log) {
+                    openModal(log);
+                }
             });
 
             document.querySelectorAll('[data-event-log-modal-close]').forEach((button) => {
@@ -296,6 +398,37 @@
                     closeModal();
                 }
             });
+
+            let eventPollInFlight = false;
+
+            async function pollEventLogs() {
+                if (!realtimeConfig.recentLogsUrl || eventPollInFlight) {
+                    return;
+                }
+
+                eventPollInFlight = true;
+
+                try {
+                    const response = await fetch(realtimeConfig.recentLogsUrl, {
+                        headers: {
+                            Accept: 'application/json',
+                        },
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Event logs unavailable.');
+                    }
+
+                    const body = await response.json();
+                    renderEventLogs(body.logs || []);
+                } catch (error) {
+                    // Keep the last good Event Logs state visible during polling failures.
+                } finally {
+                    eventPollInFlight = false;
+                }
+            }
+
+            window.setInterval(pollEventLogs, 2000);
         });
     </script>
 @endpush

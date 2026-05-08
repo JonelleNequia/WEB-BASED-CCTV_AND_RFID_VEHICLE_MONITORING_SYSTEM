@@ -1,7 +1,7 @@
 {
   "service_running": true,
   "service_message": "Dual-camera detector running.",
-  "updated_at": "2026-05-06T07:11:35.373973+08:00",
+  "updated_at": "2026-05-08T08:14:18.107891+08:00",
   "detector_model_path": "yolov8n.pt",
   "stream_server": {
     "host": "127.0.0.1",
@@ -23,13 +23,13 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-05-06T07:11:29.382160+08:00",
-      "last_error": "Camera opened, but frame capture failed.",
+      "last_capture_time": "2026-05-08T08:14:08.399632+08:00",
+      "last_error": "Could not open camera source: 0",
       "retry_count": 1,
-      "processed_frames": 25411,
-      "detections_seen": 191,
+      "processed_frames": 6050,
+      "detections_seen": 114,
       "active_detections": 0,
-      "crossings_logged": 15
+      "crossings_logged": 5
     },
     "exit": {
       "camera_role": "exit",
@@ -46,13 +46,13 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-05-06T07:11:29.385900+08:00",
-      "last_error": "Camera opened, but frame capture failed.",
+      "last_capture_time": "2026-05-08T08:14:08.515742+08:00",
+      "last_error": "Could not open camera source: 0",
       "retry_count": 1,
-      "processed_frames": 24721,
-      "detections_seen": 191,
+      "processed_frames": 6061,
+      "detections_seen": 113,
       "active_detections": 0,
-      "crossings_logged": 12
+      "crossings_logged": 3
     }
   }
 }

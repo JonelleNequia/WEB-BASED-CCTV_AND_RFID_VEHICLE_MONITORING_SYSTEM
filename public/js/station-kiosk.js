@@ -260,9 +260,35 @@
                 frame.dataset.frameStream = body.stream_url;
                 startLiveStream(body.stream_url);
             }
-            renderLogs(body.logs || []);
+
+            if (!payload.routes?.recentLogs) {
+                renderLogs(body.logs || []);
+            }
         } catch (error) {
             setStatusChip(detectorChip, false, 'Detector Ready', 'State Offline');
+        }
+    }
+
+    async function refreshLogs() {
+        if (!payload.routes?.recentLogs) {
+            return;
+        }
+
+        try {
+            const response = await fetch(payload.routes.recentLogs, {
+                headers: {
+                    Accept: 'application/json',
+                },
+            });
+
+            if (!response.ok) {
+                throw new Error('Station logs unavailable.');
+            }
+
+            const body = await response.json();
+            renderLogs(body.logs || []);
+        } catch (error) {
+            // Keep the last visible logs during transient polling failures.
         }
     }
 
@@ -313,6 +339,7 @@
 
             setRfidStatus(`RFID ${status}: ${plate} (${action})`);
             refreshState();
+            refreshLogs();
         } catch (error) {
             setRfidStatus(error.message || 'RFID scan failed');
         } finally {
@@ -369,6 +396,8 @@
     renderLogs(payload.logs || []);
     startLiveStream(payload.streamUrl);
     bindRfidScanner();
+    refreshLogs();
     window.setInterval(updateClock, 1000);
     window.setInterval(refreshState, 2000);
+    window.setInterval(refreshLogs, 2000);
 })();

@@ -3,9 +3,13 @@
 namespace Tests\Feature;
 
 use App\Models\GuestVehicleObservation;
+use App\Models\RfidTag;
 use App\Models\User;
+use App\Models\Vehicle;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class EventLogReportIntegrationTest extends TestCase
@@ -43,9 +47,12 @@ class EventLogReportIntegrationTest extends TestCase
 
     public function test_event_logs_include_guest_observation_records(): void
     {
+        Storage::fake('public');
         $this->seed(DatabaseSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+        Storage::disk('public')->put('guest_snapshots/event-log-guest.jpg', 'guest-snapshot');
+
         $observation = GuestVehicleObservation::query()->create([
             'plate_number' => 'GST-LOG-01',
             'vehicle_type' => 'Car',
@@ -63,6 +70,96 @@ class EventLogReportIntegrationTest extends TestCase
             ->assertSee('GUEST')
             ->assertSee('GST-LOG-01')
             ->assertSee('White')
+            ->assertSee('/storage/guest_snapshots/event-log-guest.jpg', false)
             ->assertSee('Guest Observation #'.$observation->id);
+    }
+
+    public function test_realtime_log_endpoints_return_latest_guest_and_event_rows(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        Storage::disk('public')->put('guest_snapshots/realtime-guest.jpg', 'guest-snapshot');
+
+        GuestVehicleObservation::query()->create([
+            'plate_number' => 'GST-RT-01',
+            'vehicle_type' => 'Van',
+            'vehicle_color' => 'Blue',
+            'location' => 'entrance',
+            'observation_source' => 'cctv',
+            'status' => 'pending_review',
+            'observed_at' => now(),
+            'snapshot_path' => 'guest_snapshots/realtime-guest.jpg',
+        ]);
+
+        $this->getJson(route('api.recent-guest-logs'))
+            ->assertOk()
+            ->assertJsonPath('logs.0.plate_number', 'GST-RT-01')
+            ->assertJsonPath('logs.0.vehicle_color', 'Blue');
+
+        $this->getJson(route('api.recent-event-logs'))
+            ->assertOk()
+            ->assertJsonPath('logs.0.plate_number', 'GST-RT-01')
+            ->assertJsonPath('logs.0.event_type', 'GUEST');
+
+        $this->getJson(route('api.recent-station-logs'))
+            ->assertOk()
+            ->assertJsonPath('logs.0.plate_number', 'GST-RT-01')
+            ->assertJsonPath('logs.0.event_type', 'GUEST');
+    }
+
+    public function test_event_logs_include_guest_rfid_scan_as_guest_observation(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+        $sourcePath = public_path('camera/exit_latest_frame.jpg');
+        File::ensureDirectoryExists(dirname($sourcePath));
+        File::put($sourcePath, 'guest-event-log-frame');
+
+        try {
+            $vehicle = Vehicle::query()->create([
+                'plate_number' => 'GST-EVT-01',
+                'vehicle_owner_name' => 'Guest Event',
+                'category' => 'guest',
+                'vehicle_type' => 'Car',
+            ]);
+            $tag = RfidTag::query()->create([
+                'uid' => 'RFID-GUEST-EVT-01',
+                'status' => RfidTag::STATUS_ASSIGNED,
+                'vehicle_id' => $vehicle->id,
+                'assigned_at' => now(),
+            ]);
+            $vehicle->forceFill([
+                'rfid_tag_id' => $tag->id,
+                'rfid_tag_uid' => $tag->uid,
+            ])->save();
+
+            $this->actingAs($admin)
+                ->postJson(route('rfid-scans.store'), [
+                    'tag_uid' => $tag->uid,
+                    'scan_location' => 'exit',
+                    'reader_name' => 'Exit RFID Reader',
+                ])
+                ->assertCreated()
+                ->assertJsonPath('scan.verification_status', 'guest');
+
+            $observation = GuestVehicleObservation::query()
+                ->where('plate_number', 'GST-EVT-01')
+                ->firstOrFail();
+
+            Storage::disk('public')->assertExists($observation->snapshot_path);
+
+            $this->actingAs($admin)
+                ->get(route('vehicle-events.index'))
+                ->assertOk()
+                ->assertSee('GUEST')
+                ->assertSee('GST-EVT-01')
+                ->assertSee('/storage/'.$observation->snapshot_path, false)
+                ->assertSee('Guest Observation #'.$observation->id);
+        } finally {
+            File::delete($sourcePath);
+        }
     }
 }

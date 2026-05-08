@@ -53,16 +53,19 @@ from tracking import (
     point_in_polygon,
     point_side_of_line,
 )
-from anpr import detect_vehicle_color, read_license_plate
+from anpr import detect_vehicle_color, ocr_runtime_status, read_license_plate
 
 CAMERA_ROLES = ("entrance", "exit")
 STREAM_FRAMES = {role: None for role in CAMERA_ROLES}
 STREAM_CONDITION = threading.Condition()
 RESOLVED_OVERLAY_HOLD_SECONDS = RFID_DETECTION_WINDOW_SECONDS + 2.0
-RESOLVED_DETECTION_COOLDOWN_SECONDS = 8.0
-DUPLICATE_TRACK_IOU_THRESHOLD = 0.35
+RESOLVED_DETECTION_COOLDOWN_SECONDS = 45.0
+GUEST_TRACK_COOLDOWN_SECONDS = 10.0
+DUPLICATE_TRACK_IOU_THRESHOLD = 0.18
+DUPLICATE_TRACK_CENTER_DISTANCE_RATIO = 0.28
 MAX_GUEST_ANALYSIS_FRAMES = 5
 GUEST_ANALYSIS_FRAME_INTERVAL_SECONDS = 0.45
+LATEST_FRAME_SAVE_INTERVAL_SECONDS = 0.20
 
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
@@ -171,6 +174,25 @@ def save_frame_atomic(role, frame):
     os.replace(temp_path, output_path)
 
     return True
+
+
+def maybe_save_latest_frame(role, frame, state, now_monotonic):
+    """
+    Keep a recent raw frame on disk for Laravel-side Guest RFID snapshots.
+    """
+    last_saved_at = float(state.get("last_frame_saved_at", 0.0))
+
+    if now_monotonic - last_saved_at < LATEST_FRAME_SAVE_INTERVAL_SECONDS:
+        return False
+
+    try:
+        saved = save_frame_atomic(role, frame)
+    except Exception:
+        saved = False
+
+    state["last_frame_saved_at"] = now_monotonic
+
+    return saved
 
 
 def publish_stream_frame(role, frame):
@@ -445,6 +467,7 @@ def initial_camera_state():
         "latest_frame": None,
         "latest_camera_config": None,
         "latest_frame_version": 0,
+        "last_frame_saved_at": 0.0,
         "last_detected_frame_version": 0,
         "detections_seen": 0,
         "active_detections": 0,
@@ -454,6 +477,8 @@ def initial_camera_state():
         "track_last_seen": {},
         "track_boxes": {},
         "crossed_track_ids": {},
+        "processed_as_guest": {},
+        "tracked_vehicles": {},
         "track_overlays": {},
         "pending_windows": {},
         "recent_resolutions": [],
@@ -603,7 +628,70 @@ def cleanup_stale_tracks(state):
             state["track_sides"].pop(track_id, None)
             state["track_boxes"].pop(track_id, None)
             state["crossed_track_ids"].pop(track_id, None)
+            state["processed_as_guest"].pop(track_id, None)
+            state["tracked_vehicles"].pop(track_id, None)
             state["track_overlays"].pop(track_id, None)
+
+
+def mark_processed_as_guest_locked(state, track_id, xyxy, overlay, now_monotonic):
+    """
+    Remember that one YOLO track already produced a guest API submission.
+    """
+    state.setdefault("processed_as_guest", {})[track_id] = {
+        "processed_at": now_monotonic,
+        "expires_at": now_monotonic + GUEST_TRACK_COOLDOWN_SECONDS,
+    }
+    state.setdefault("tracked_vehicles", {}).setdefault(track_id, {
+        "first_seen": time.time(),
+        "first_seen_monotonic": now_monotonic,
+    })
+    state["tracked_vehicles"][track_id].update({
+        "status": "processed",
+        "processed_at": time.time(),
+        "processed_at_monotonic": now_monotonic,
+    })
+    state["crossed_track_ids"][track_id] = now_monotonic
+    state["track_overlays"][track_id] = (overlay or default_overlay()).copy()
+    remember_recent_resolution_locked(state, track_id, xyxy, state["track_overlays"][track_id], now_monotonic)
+
+
+def track_is_processed_as_guest_locked(state, track_id, inside_roi, now_monotonic):
+    """
+    Block repeat guest windows for a processed track while it remains in view.
+    """
+    guest_cooldown = state.get("processed_as_guest", {}).get(track_id)
+
+    if not guest_cooldown:
+        return False
+
+    if inside_roi:
+        return True
+
+    if float(guest_cooldown.get("expires_at", 0.0)) > now_monotonic:
+        return True
+
+    state["processed_as_guest"].pop(track_id, None)
+
+    return False
+
+
+def ensure_tracked_vehicle_locked(state, track_id, now_monotonic):
+    """
+    Create or return the explicit per-YOLO-track RFID checking state.
+    """
+    tracked = state.setdefault("tracked_vehicles", {}).get(track_id)
+
+    if tracked:
+        return tracked
+
+    tracked = {
+        "first_seen": time.time(),
+        "first_seen_monotonic": now_monotonic,
+        "status": "checking",
+    }
+    state["tracked_vehicles"][track_id] = tracked
+
+    return tracked
 
 
 def bbox_iou(left_xyxy, right_xyxy):
@@ -631,6 +719,33 @@ def bbox_iou(left_xyxy, right_xyxy):
         return 0.0
 
     return intersection_area / union_area
+
+
+def bboxes_look_like_same_vehicle(left_xyxy, right_xyxy):
+    """
+    Track IDs can change while the same vehicle is still cutting the trigger
+    line. Use overlap plus center distance so one physical pass keeps one
+    RFID/guest decision.
+    """
+    if bbox_iou(left_xyxy, right_xyxy) >= DUPLICATE_TRACK_IOU_THRESHOLD:
+        return True
+
+    left_center = bbox_center(left_xyxy)
+    right_center = bbox_center(right_xyxy)
+    left_x1, left_y1, left_x2, left_y2 = [float(value) for value in left_xyxy]
+    right_x1, right_y1, right_x2, right_y2 = [float(value) for value in right_xyxy]
+    left_width = max(1.0, left_x2 - left_x1)
+    left_height = max(1.0, left_y2 - left_y1)
+    right_width = max(1.0, right_x2 - right_x1)
+    right_height = max(1.0, right_y2 - right_y1)
+    reference_size = max(
+        min(left_width, right_width),
+        min(left_height, right_height),
+        1.0,
+    )
+    distance = float(np.linalg.norm(np.array(left_center) - np.array(right_center)))
+
+    return distance <= reference_size * DUPLICATE_TRACK_CENTER_DISTANCE_RATIO
 
 
 def cleanup_recent_resolutions_locked(state, now_monotonic):
@@ -666,11 +781,11 @@ def matching_active_decision_locked(state, xyxy, now_monotonic):
     cleanup_recent_resolutions_locked(state, now_monotonic)
 
     for window in state.get("pending_windows", {}).values():
-        if bbox_iou(xyxy, window.get("xyxy", (0, 0, 0, 0))) >= DUPLICATE_TRACK_IOU_THRESHOLD:
+        if bboxes_look_like_same_vehicle(xyxy, window.get("xyxy", (0, 0, 0, 0))):
             return waiting_overlay()
 
     for resolution in state.get("recent_resolutions", []):
-        if bbox_iou(xyxy, resolution.get("xyxy", (0, 0, 0, 0))) < DUPLICATE_TRACK_IOU_THRESHOLD:
+        if not bboxes_look_like_same_vehicle(xyxy, resolution.get("xyxy", (0, 0, 0, 0))):
             continue
 
         resolution["xyxy"] = tuple(xyxy)
@@ -736,7 +851,7 @@ def waiting_overlay():
     Temporary label while the RFID detection window is still open.
     """
     return {
-        "label": "CHECKING RFID",
+        "label": "CHECKING RFID...",
         "color": "amber",
         "verification": "pending",
     }
@@ -935,6 +1050,16 @@ def start_detection_window(
     display_label = vehicle_labels[class_id]
 
     with state["lock"]:
+        tracked = ensure_tracked_vehicle_locked(state, track_id, now_monotonic)
+
+        if tracked.get("status") in {"registered", "guest", "processed"}:
+            return
+
+        tracked.update({
+            "status": "checking",
+            "event_key": event_key,
+            "event_time": event_time,
+        })
         state["pending_windows"][track_id] = {
             "event_key": event_key,
             "camera_role": role,
@@ -986,6 +1111,15 @@ def apply_rfid_match_result(state, track_id, match):
         overlay = match.get("overlay") or registered_overlay(plate_number)
         state["track_overlays"][track_id] = overlay
         state["crossed_track_ids"][track_id] = now_monotonic
+        state.setdefault("tracked_vehicles", {}).setdefault(track_id, {
+            "first_seen": time.time(),
+            "first_seen_monotonic": now_monotonic,
+        })
+        state["tracked_vehicles"][track_id].update({
+            "status": "registered",
+            "registered_at": time.time(),
+            "registered_at_monotonic": now_monotonic,
+        })
         remember_recent_resolution_locked(state, track_id, window.get("xyxy", (0, 0, 0, 0)), overlay, now_monotonic)
         state["crossings_logged"] += 1
         state["pending_windows"].pop(track_id, None)
@@ -1062,10 +1196,18 @@ def analyze_guest_vehicle_details(analysis_frames):
     """
     plate_numbers = []
     vehicle_colors = []
+    runtime_status = ocr_runtime_status()
 
     for frame, xyxy in analysis_frames[:MAX_GUEST_ANALYSIS_FRAMES]:
-        plate_number = read_license_plate(frame, xyxy)
-        vehicle_color = detect_vehicle_color(frame, xyxy)
+        try:
+            plate_number = read_license_plate(frame, xyxy)
+        except Exception:
+            plate_number = None
+
+        try:
+            vehicle_color = detect_vehicle_color(frame, xyxy)
+        except Exception:
+            vehicle_color = None
 
         if plate_number:
             plate_numbers.append(plate_number)
@@ -1073,7 +1215,7 @@ def analyze_guest_vehicle_details(analysis_frames):
         if vehicle_color:
             vehicle_colors.append(vehicle_color)
 
-    return most_common_value(plate_numbers), most_common_value(vehicle_colors)
+    return most_common_value(plate_numbers), most_common_value(vehicle_colors), runtime_status
 
 
 def submit_guest_observation_for_window(role, state, track_id, laravel_client):
@@ -1106,9 +1248,24 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             "confidence": window["confidence"],
             "direction": window["direction"],
         }
-        state["track_overlays"][track_id] = default_overlay()
-        state["crossed_track_ids"][track_id] = now_monotonic
-        remember_recent_resolution_locked(state, track_id, window_payload["xyxy"], state["track_overlays"][track_id], now_monotonic)
+        tracked = ensure_tracked_vehicle_locked(state, track_id, now_monotonic)
+
+        if tracked.get("status") != "checking":
+            state["pending_windows"].pop(track_id, None)
+            return
+
+        tracked.update({
+            "status": "guest",
+            "guest_declared_at": time.time(),
+            "guest_declared_at_monotonic": now_monotonic,
+        })
+        mark_processed_as_guest_locked(
+            state,
+            track_id,
+            window_payload["xyxy"],
+            default_overlay(),
+            now_monotonic,
+        )
         state["pending_windows"].pop(track_id, None)
 
     if snapshot_frame is None:
@@ -1131,6 +1288,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
         "track_id": track_id,
         "confidence": window_payload["confidence"],
         "direction": window_payload["direction"],
+        "bbox_xyxy": list(window_payload["xyxy"]),
         "rfid_window_seconds": RFID_DETECTION_WINDOW_SECONDS,
         "analysis_status": "pending",
     }
@@ -1163,9 +1321,9 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
     if not analysis_frames:
         analysis_frames = [(snapshot_frame, window_payload["xyxy"])]
 
-    plate_number, vehicle_color = analyze_guest_vehicle_details(analysis_frames)
+    plate_number, vehicle_color, ocr_status = analyze_guest_vehicle_details(analysis_frames)
 
-    analysis_payload = {
+    guest_payload = {
         **base_payload,
         "vehicle_image_path": (initial_result.get("body") or {}).get("snapshot_path"),
         "vehicle_color": vehicle_color,
@@ -1175,9 +1333,10 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             "analysis_status": "complete",
             "plate_number": plate_number,
             "vehicle_color": vehicle_color,
+            "ocr_runtime": ocr_status,
         },
     }
-    result = laravel_client.submit_guest_observation(analysis_payload)
+    result = laravel_client.submit_guest_observation(guest_payload)
 
     with state["lock"]:
         state["track_overlays"][track_id] = result.get("overlay") or state["track_overlays"].get(track_id) or default_overlay()
@@ -1253,6 +1412,12 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
 
         center_point = bbox_center(xyxy)
         inside_roi = point_in_polygon(center_point, mask_polygon) if mask_polygon else True
+
+        with state["lock"]:
+            if track_is_processed_as_guest_locked(state, track_id, inside_roi, now_monotonic):
+                state["track_overlays"][track_id] = state["track_overlays"].get(track_id) or default_overlay()
+                continue
+
         if not inside_roi:
             continue
 
@@ -1342,6 +1507,7 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
     state["camera_running"] = True
     state["last_capture_time"] = datetime.now().astimezone().isoformat()
     state["processed_frames"] += 1
+    maybe_save_latest_frame(role, frame, state, time.monotonic())
 
     if not calibration_ready(camera_config):
         publish_stream_frame(role, frame)
@@ -1451,6 +1617,8 @@ def camera_stream_worker(role, state, model_info, stop_event):
                     publish_status_frame(role, "Frame capture failed", state["last_error"])
                     success = False
                 else:
+                    now_monotonic = time.monotonic()
+
                     with state["lock"]:
                         state["camera_running"] = True
                         state["last_capture_time"] = datetime.now().astimezone().isoformat()
@@ -1458,6 +1626,7 @@ def camera_stream_worker(role, state, model_info, stop_event):
                         state["latest_frame"] = frame
                         state["latest_camera_config"] = camera_config.copy()
                         state["latest_frame_version"] += 1
+                        maybe_save_latest_frame(role, frame, state, now_monotonic)
 
                     vehicle_labels = model_info.get("vehicle_labels", {})
 

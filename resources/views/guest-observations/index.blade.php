@@ -123,7 +123,7 @@
             </div>
 
             @if ($latestUnregisteredCapture)
-                @php($latestSnapshotUrl = $latestUnregisteredCapture->snapshot_path ? asset('storage/'.$latestUnregisteredCapture->snapshot_path) : $latestUnregisteredCapture->snapshot_url)
+                @php($latestSnapshotUrl = $latestUnregisteredCapture->snapshot_url)
                 <div class="result-card result-card-warning">
                     <div class="result-card-head">
                         <strong>Guard review needed</strong>
@@ -206,7 +206,7 @@
                     ])
                 </div>
             </div>
-            <span class="chip chip-soft">{{ $observations->total() }} total</span>
+            <span class="chip chip-soft" data-guest-total-count>{{ $observations->total() }} total</span>
         </div>
 
         <div class="table-responsive">
@@ -225,9 +225,9 @@
                         <th>Action</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody data-guest-log-body>
                     @forelse ($observations as $observation)
-                        @php($snapshotUrl = $observation->snapshot_path ? asset('storage/'.$observation->snapshot_path) : $observation->snapshot_url)
+                        @php($snapshotUrl = $observation->snapshot_url)
                         <tr>
                             <td>{{ $observation->observed_at->format('M d, Y h:i A') }}</td>
                             <td><img src="{{ $snapshotUrl }}" alt="Guest vehicle snapshot" class="thumb thumb-sm"></td>
@@ -344,18 +344,22 @@
         'status' => $observation->status,
         'status_label' => ucwords(str_replace('_', ' ', $observation->status)),
         'notes' => $observation->notes,
-        'snapshot_url' => $observation->snapshot_path ? asset('storage/'.$observation->snapshot_path) : $observation->snapshot_url,
+        'snapshot_url' => $observation->snapshot_url,
         'update_url' => route('guest-observations.update', $observation),
         'verify_url' => route('guest-observations.verify', $observation),
         'can_verify' => $observation->status === 'pending_review',
     ])->values())
     <script id="guest-observations-data" type="application/json">{!! json_encode($guestObservationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
+    <script id="guest-observations-realtime" type="application/json">{!! json_encode([
+        'recentLogsUrl' => route('api.recent-guest-logs', ['limit' => 10]),
+    ], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 @endsection
 
 @push('scripts')
     <script>
         (() => {
             const payloadNode = document.getElementById('guest-observations-data');
+            const realtimeNode = document.getElementById('guest-observations-realtime');
             const modal = document.querySelector('[data-guest-modal]');
 
             if (!payloadNode || !modal) {
@@ -363,6 +367,9 @@
             }
 
             const observations = new Map(JSON.parse(payloadNode.textContent).map((item) => [String(item.id), item]));
+            const realtimeConfig = realtimeNode ? JSON.parse(realtimeNode.textContent || '{}') : {};
+            const logBody = document.querySelector('[data-guest-log-body]');
+            const totalCount = document.querySelector('[data-guest-total-count]');
             const form = modal.querySelector('[data-guest-modal-form]');
             const image = modal.querySelector('[data-guest-modal-image]');
             const plate = modal.querySelector('[data-guest-modal-plate]');
@@ -402,14 +409,102 @@
                 modal.classList.remove('is-hidden');
             }
 
-            document.querySelectorAll('[data-guest-view]').forEach((button) => {
-                button.addEventListener('click', () => {
-                    const observation = observations.get(String(button.dataset.guestView));
+            function appendText(parent, tagName, text, className = null) {
+                const node = document.createElement(tagName);
 
-                    if (observation) {
-                        openModal(observation);
-                    }
+                if (className) {
+                    node.className = className;
+                }
+
+                node.textContent = text || '';
+                parent.appendChild(node);
+
+                return node;
+            }
+
+            function buildGuestRow(observation) {
+                const row = document.createElement('tr');
+                const timeCell = appendText(row, 'td', observation.display_time || 'No time');
+                const snapshotCell = document.createElement('td');
+                const imageNode = document.createElement('img');
+                const statusCell = document.createElement('td');
+                const statusBadge = document.createElement('span');
+                const actionCell = document.createElement('td');
+                const actionButton = document.createElement('button');
+
+                imageNode.src = observation.snapshot_url;
+                imageNode.alt = 'Guest vehicle snapshot';
+                imageNode.className = 'thumb thumb-sm';
+                snapshotCell.appendChild(imageNode);
+                row.appendChild(snapshotCell);
+
+                appendText(row, 'td', observation.plate_number || 'No plate');
+                appendText(row, 'td', observation.vehicle_color || 'N/A');
+                appendText(row, 'td', observation.vehicle_type || 'N/A');
+                appendText(row, 'td', observation.location ? observation.location.charAt(0).toUpperCase() + observation.location.slice(1) : 'N/A');
+
+                statusBadge.className = `badge ${observation.status_badge_class || 'badge-manual-review'}`;
+                statusBadge.textContent = observation.status_label || 'Pending Review';
+                statusCell.appendChild(statusBadge);
+                row.appendChild(statusCell);
+
+                appendText(row, 'td', observation.camera_name || 'N/A');
+                appendText(row, 'td', observation.notes || 'No notes');
+
+                actionButton.type = 'button';
+                actionButton.className = 'button button-secondary button-sm';
+                actionButton.dataset.guestView = observation.id;
+                actionButton.textContent = observation.can_verify ? 'Review & Verify' : 'View Details';
+                actionCell.appendChild(actionButton);
+                row.appendChild(actionCell);
+
+                timeCell.dataset.guestObservedAt = observation.observed_at || '';
+
+                return row;
+            }
+
+            function renderGuestLogs(items, total) {
+                if (!logBody || !Array.isArray(items)) {
+                    return;
+                }
+
+                observations.clear();
+                items.forEach((item) => {
+                    observations.set(String(item.id), item);
                 });
+
+                if (totalCount && Number.isFinite(Number(total))) {
+                    totalCount.textContent = `${total} total`;
+                }
+
+                if (items.length === 0) {
+                    const emptyRow = document.createElement('tr');
+                    const emptyCell = document.createElement('td');
+
+                    emptyCell.colSpan = 10;
+                    emptyCell.className = 'table-empty';
+                    emptyCell.textContent = 'No guest observations yet.';
+                    emptyRow.appendChild(emptyCell);
+                    logBody.replaceChildren(emptyRow);
+
+                    return;
+                }
+
+                logBody.replaceChildren(...items.map(buildGuestRow));
+            }
+
+            document.addEventListener('click', (event) => {
+                const button = event.target.closest('[data-guest-view]');
+
+                if (!button) {
+                    return;
+                }
+
+                const observation = observations.get(String(button.dataset.guestView));
+
+                if (observation) {
+                    openModal(observation);
+                }
             });
 
             modal.querySelector('[data-guest-modal-close]')?.addEventListener('click', () => {
@@ -443,6 +538,37 @@
                     modal.classList.add('is-hidden');
                 }
             });
+
+            let guestPollInFlight = false;
+
+            async function pollGuestLogs() {
+                if (!realtimeConfig.recentLogsUrl || guestPollInFlight) {
+                    return;
+                }
+
+                guestPollInFlight = true;
+
+                try {
+                    const response = await fetch(realtimeConfig.recentLogsUrl, {
+                        headers: {
+                            Accept: 'application/json',
+                        },
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Guest logs unavailable.');
+                    }
+
+                    const body = await response.json();
+                    renderGuestLogs(body.logs || [], body.total);
+                } catch (error) {
+                    // Keep the current table visible when a poll fails.
+                } finally {
+                    guestPollInFlight = false;
+                }
+            }
+
+            window.setInterval(pollGuestLogs, 2000);
         })();
     </script>
 @endpush

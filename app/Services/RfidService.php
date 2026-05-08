@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\RfidScanLog;
 use App\Models\RfidTag;
 use App\Models\Vehicle;
+use App\Support\PhilippineTime;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -125,7 +126,7 @@ class RfidService
                 }
             }
 
-            if ($verificationStatus === 'guest') {
+            if ($this->shouldCreateGuestObservation($verificationStatus)) {
                 $guestObservation = $this->guestObservationService->createFromUnrecognizedRfidScan($scanLog);
                 $scanLog->update([
                     'guest_vehicle_observation_id' => $guestObservation->id,
@@ -242,7 +243,8 @@ class RfidService
      */
     public function stats(): array
     {
-        $today = today()->toDateString();
+        $today = PhilippineTime::todayDateString();
+
         return [
             'registered_vehicles' => Vehicle::query()
                 ->where('category', '!=', 'guest')
@@ -257,19 +259,21 @@ class RfidService
                 ->count(),
             'entries_today' => (int) Vehicle::query()
                 ->where('category', '!=', 'guest')
-                ->whereDate('daily_count_date', $today)
+                ->where('daily_count_date', $today)
                 ->sum('entries_today_count'),
             'exits_today' => (int) Vehicle::query()
                 ->where('category', '!=', 'guest')
-                ->whereDate('daily_count_date', $today)
+                ->where('daily_count_date', $today)
                 ->sum('exits_today_count'),
             'registered_tags' => RfidTag::query()->count(),
             'available_tags' => RfidTag::query()
                 ->where('status', RfidTag::STATUS_AVAILABLE)
                 ->count(),
-            'scans_today' => RfidScanLog::query()->whereDate('scan_time', today())->count(),
+            'scans_today' => RfidScanLog::query()
+                ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
+                ->count(),
             'registered_scans_today' => RfidScanLog::query()
-                ->whereDate('scan_time', today())
+                ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
                 ->where('verification_status', 'verified')
                 ->where(function ($query): void {
                     $query->whereNull('vehicle_category')
@@ -277,15 +281,15 @@ class RfidService
                 })
                 ->count(),
             'verified_today' => RfidScanLog::query()
-                ->whereDate('scan_time', today())
+                ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
                 ->where('verification_status', 'verified')
                 ->count(),
             'attention_today' => RfidScanLog::query()
-                ->whereDate('scan_time', today())
+                ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
                 ->where('verification_status', '!=', 'verified')
                 ->count(),
             'simulated_today' => RfidScanLog::query()
-                ->whereDate('scan_time', today())
+                ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
                 ->where('source_mode', 'simulated')
                 ->count(),
         ];
@@ -418,6 +422,10 @@ class RfidService
             return 'inactive_vehicle';
         }
 
+        if (strtolower((string) $vehicle->category) === 'guest') {
+            return 'guest';
+        }
+
         if (! $vehicle->isRfidRecurring()) {
             return 'non_recurring_category';
         }
@@ -449,7 +457,7 @@ class RfidService
         $updates = [
             'current_state' => $resultingState,
             'last_seen_at' => $scanTime,
-            'daily_count_date' => $scanTime->toDateString(),
+            'daily_count_date' => PhilippineTime::localDateString($scanTime),
         ];
 
         if ($eventType === 'ENTRY') {
@@ -489,12 +497,14 @@ class RfidService
      */
     protected function resetDailyCountersIfNeeded(Vehicle $vehicle, Carbon $scanTime): void
     {
-        if ($vehicle->daily_count_date?->toDateString() === $scanTime->toDateString()) {
+        $scanDate = PhilippineTime::localDateString($scanTime);
+
+        if ($vehicle->daily_count_date?->toDateString() === $scanDate) {
             return;
         }
 
         $vehicle->fill([
-            'daily_count_date' => $scanTime->toDateString(),
+            'daily_count_date' => $scanDate,
             'entries_today_count' => 0,
             'exits_today_count' => 0,
             'first_entry_today_at' => null,
@@ -517,6 +527,11 @@ class RfidService
         return $verificationStatus === 'verified'
             && $vehicle !== null
             && $stateTransition !== null;
+    }
+
+    protected function shouldCreateGuestObservation(string $verificationStatus): bool
+    {
+        return in_array($verificationStatus, ['guest', 'non_recurring_category'], true);
     }
 
     protected function normalizeLocation(string $scanLocation): string

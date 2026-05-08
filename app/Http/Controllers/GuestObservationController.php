@@ -7,8 +7,10 @@ use App\Models\Camera;
 use App\Models\EventReceiveLog;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidScanLog;
+use App\Models\VehicleEvent;
 use App\Services\GuestObservationService;
 use App\Services\SettingsService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -23,6 +25,16 @@ use Throwable;
 
 class GuestObservationController extends Controller
 {
+    protected const DETECTOR_TRACK_DUPLICATE_WINDOW_SECONDS = 30;
+
+    protected const DETECTOR_PLATE_DUPLICATE_WINDOW_SECONDS = 180;
+
+    protected const DETECTOR_SHORT_DUPLICATE_WINDOW_SECONDS = 30;
+
+    protected const DETECTOR_SHARED_SCENE_DUPLICATE_WINDOW_SECONDS = 45;
+
+    protected const DETECTOR_SHARED_SOURCE_MIN_IOU = 0.30;
+
     /**
      * Show guest monitoring form and log history.
      */
@@ -200,20 +212,33 @@ class GuestObservationController extends Controller
                 'detection_metadata' => ['nullable', 'array'],
             ]);
 
-            $snapshotFile = $request->file('snapshot')
-                ?: $request->file('snapshot_image')
-                ?: $request->file('image');
+            $snapshotFile = $request->hasFile('snapshot')
+                ? $request->file('snapshot')
+                : ($request->hasFile('snapshot_image')
+                    ? $request->file('snapshot_image')
+                    : ($request->hasFile('image') ? $request->file('image') : null));
 
-            $existing = GuestVehicleObservation::query()
-                ->where('external_event_key', $validated['external_event_key'])
-                ->first();
+            $cameraId = $validated['camera_id']
+                ?? Camera::query()->forRole($validated['camera_role'])->value('id');
+            $cameraId = $cameraId !== null ? (int) $cameraId : null;
+
+            $existing = $this->findExistingDetectorGuestObservation($validated['external_event_key']);
 
             if ($existing) {
-                $this->updateDetectorGuestObservationDetails($existing, $validated);
+                $snapshotPath = $this->storeDetectorGuestSnapshotForObservation(
+                    $snapshotFile,
+                    $validated,
+                    $existing
+                );
+
+                DB::transaction(function () use ($existing, $validated, $snapshotPath): void {
+                    $this->updateDetectorGuestObservationDetails($existing, $validated, $snapshotPath);
+                    $this->syncDetectorGuestVehicleEvent($existing, $validated);
+                });
 
                 EventReceiveLog::query()->create([
                     'source_name' => $sourceName,
-                    'payload_json' => $this->safeGuestObservationLogPayload($request),
+                    'payload_json' => $this->safeGuestObservationLogPayload($request, $snapshotPath),
                     'status' => 'guest_observation_duplicate_updated',
                     'notes' => "Duplicate guest observation merged for ID: {$existing->id}",
                 ]);
@@ -222,6 +247,7 @@ class GuestObservationController extends Controller
                     'message' => 'Duplicate guest observation merged.',
                     'duplicate' => true,
                     'guest_observation_id' => $existing->id,
+                    'snapshot_path' => $existing->snapshot_path,
                     'overlay' => $this->guestOverlayPayload($existing),
                 ]);
             }
@@ -252,15 +278,25 @@ class GuestObservationController extends Controller
                 $validated['camera_role'],
                 Carbon::parse($validated['event_time']),
                 $this->normalizePlate($validated['plate_number'] ?? $validated['plate_text'] ?? null),
-                $validated['detection_metadata'] ?? []
+                $validated['detection_metadata'] ?? [],
+                $cameraId
             );
 
             if ($recentDuplicate) {
-                $this->updateDetectorGuestObservationDetails($recentDuplicate, $validated);
+                $snapshotPath = $this->storeDetectorGuestSnapshotForObservation(
+                    $snapshotFile,
+                    $validated,
+                    $recentDuplicate
+                );
+
+                DB::transaction(function () use ($recentDuplicate, $validated, $snapshotPath): void {
+                    $this->updateDetectorGuestObservationDetails($recentDuplicate, $validated, $snapshotPath);
+                    $this->syncDetectorGuestVehicleEvent($recentDuplicate, $validated);
+                });
 
                 EventReceiveLog::query()->create([
                     'source_name' => $sourceName,
-                    'payload_json' => $this->safeGuestObservationLogPayload($request),
+                    'payload_json' => $this->safeGuestObservationLogPayload($request, $snapshotPath),
                     'status' => 'guest_observation_recent_duplicate_merged',
                     'notes' => "Recent duplicate guest observation merged into ID: {$recentDuplicate->id}",
                 ]);
@@ -269,6 +305,7 @@ class GuestObservationController extends Controller
                     'message' => 'Recent duplicate guest observation merged.',
                     'duplicate' => true,
                     'guest_observation_id' => $recentDuplicate->id,
+                    'snapshot_path' => $recentDuplicate->snapshot_path,
                     'overlay' => $this->guestOverlayPayload($recentDuplicate),
                 ]);
             }
@@ -279,12 +316,7 @@ class GuestObservationController extends Controller
                 ]);
             }
 
-            if ($snapshotFile) {
-                Storage::disk('public')->makeDirectory('guest_snapshots');
-                $snapshotPath = $snapshotFile->store('guest_snapshots', 'public');
-            } else {
-                $snapshotPath = $validated['vehicle_image_path'] ?? null;
-            }
+            $snapshotPath = $this->storeDetectorGuestSnapshot($snapshotFile, $validated);
 
             if (! $snapshotPath) {
                 throw ValidationException::withMessages([
@@ -292,14 +324,11 @@ class GuestObservationController extends Controller
                 ]);
             }
 
-            $cameraId = $validated['camera_id']
-                ?? Camera::query()->forRole($validated['camera_role'])->value('id');
-
             $observation = DB::transaction(function () use ($validated, $cameraId, $snapshotPath): GuestVehicleObservation {
                 $plateNumber = $this->normalizePlate($validated['plate_number'] ?? $validated['plate_text'] ?? null);
                 $vehicleColor = $this->normalizeVehicleColor($validated['vehicle_color'] ?? $validated['detected_vehicle_color'] ?? null);
 
-                return GuestVehicleObservation::query()->create([
+                $observation = GuestVehicleObservation::query()->create([
                     'plate_text' => $plateNumber,
                     'plate_number' => $plateNumber,
                     'vehicle_type' => $validated['detected_vehicle_type'] ?? 'Vehicle',
@@ -315,6 +344,10 @@ class GuestObservationController extends Controller
                     'notes' => 'No successful RFID scan was recorded within the detector confirmation window.',
                     'created_by' => null,
                 ]);
+
+                $this->syncDetectorGuestVehicleEvent($observation, $validated);
+
+                return $observation->fresh();
             });
 
             EventReceiveLog::query()->create([
@@ -375,19 +408,93 @@ class GuestObservationController extends Controller
     }
 
     /**
+     * Mirror one detector guest observation into vehicle_events for station,
+     * dashboard, and report screens that read the primary event stream.
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    protected function syncDetectorGuestVehicleEvent(
+        GuestVehicleObservation $observation,
+        array $validated
+    ): VehicleEvent {
+        $observation->refresh();
+
+        $externalEventKey = $observation->external_event_key ?: ($validated['external_event_key'] ?? null);
+
+        if (blank($externalEventKey)) {
+            throw ValidationException::withMessages([
+                'external_event_key' => 'A detector guest observation needs an external event key before syncing to event logs.',
+            ]);
+        }
+
+        $eventType = $observation->location === 'exit' ? 'EXIT' : 'ENTRY';
+        $plateNumber = $this->normalizePlate(
+            $observation->plate_number
+                ?: $observation->plate_text
+                ?: ($validated['plate_number'] ?? $validated['plate_text'] ?? null)
+        );
+        $vehicleColor = $this->normalizeVehicleColor(
+            $observation->vehicle_color
+                ?: ($validated['vehicle_color'] ?? $validated['detected_vehicle_color'] ?? null)
+        );
+        $vehicleType = $observation->vehicle_type
+            ?: ($validated['detected_vehicle_type'] ?? 'Vehicle');
+
+        return VehicleEvent::query()->updateOrCreate(
+            ['external_event_key' => (string) $externalEventKey],
+            [
+                'event_type' => $eventType,
+                'event_status' => VehicleEvent::STATUS_COMPLETED,
+                'event_origin' => 'guest_cctv',
+                'direction' => $eventType === 'EXIT' ? 'OUT' : 'IN',
+                'plate_text' => $plateNumber,
+                'plate_number' => $plateNumber !== null ? substr($plateNumber, 0, 20) : null,
+                'plate_confidence' => null,
+                'vehicle_id' => null,
+                'rfid_scan_log_id' => null,
+                'vehicle_type' => $vehicleType,
+                'detected_vehicle_type' => $vehicleType,
+                'vehicle_color' => $vehicleColor,
+                'vehicle_category' => 'guest',
+                'camera_id' => $observation->camera_id,
+                'detection_metadata_json' => $observation->detection_metadata_json,
+                'details_completed_at' => now(),
+                'roi_name' => $observation->location === 'exit'
+                    ? 'Exit Guest Detector'
+                    : 'Entrance Guest Detector',
+                'event_time' => $observation->observed_at,
+                'vehicle_image_path' => $observation->snapshot_path,
+                'plate_image_path' => null,
+                'matched_entry_id' => null,
+                'match_score' => null,
+                'match_status' => 'guest',
+                'resulting_state' => 'guest',
+                'daily_entries_count' => null,
+                'daily_exits_count' => null,
+            ]
+        );
+    }
+
+    /**
      * Merge late OCR/color results into the existing record created at timeout.
      *
      * @param  array<string, mixed>  $validated
      */
     protected function updateDetectorGuestObservationDetails(
         GuestVehicleObservation $observation,
-        array $validated
+        array $validated,
+        ?string $snapshotPath = null
     ): void {
         if ($observation->status === 'verified') {
             return;
         }
 
         $updates = [];
+
+        if ($snapshotPath !== null) {
+            $updates['snapshot_path'] = $snapshotPath;
+        }
+
         $plateNumber = $this->normalizePlate($validated['plate_number'] ?? $validated['plate_text'] ?? null);
 
         if ($plateNumber !== null && blank($observation->plate_number)) {
@@ -401,17 +508,106 @@ class GuestObservationController extends Controller
             $updates['vehicle_color'] = $vehicleColor;
         }
 
-        if (! empty($validated['detection_metadata']) && is_array($validated['detection_metadata'])) {
-            $updates['detection_metadata_json'] = array_replace(
-                $observation->detection_metadata_json ?? [],
-                $validated['detection_metadata'],
-            );
+        if ($this->shouldMergeDetectorMetadata($observation, $validated)) {
+            $updates['detection_metadata_json'] = $this->mergedDetectorGuestMetadata($observation, $validated);
         }
 
         if ($updates !== []) {
             $observation->forceFill($updates)->save();
             $observation->refresh();
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     */
+    protected function storeDetectorGuestSnapshotForObservation(
+        mixed $snapshotFile,
+        array $validated,
+        GuestVehicleObservation $observation
+    ): ?string {
+        if (! $snapshotFile && ! $this->shouldReplaceGuestSnapshot($observation)) {
+            return null;
+        }
+
+        return $this->storeDetectorGuestSnapshot($snapshotFile, $validated);
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     */
+    protected function storeDetectorGuestSnapshot(mixed $snapshotFile, array $validated): ?string
+    {
+        if ($snapshotFile) {
+            if (method_exists($snapshotFile, 'isValid') && ! $snapshotFile->isValid()) {
+                throw ValidationException::withMessages([
+                    'snapshot' => 'The uploaded guest snapshot is not valid.',
+                ]);
+            }
+
+            Storage::disk('public')->makeDirectory('guest_snapshots');
+
+            return $snapshotFile->store('guest_snapshots', 'public');
+        }
+
+        return filled($validated['vehicle_image_path'] ?? null)
+            ? (string) $validated['vehicle_image_path']
+            : null;
+    }
+
+    protected function shouldReplaceGuestSnapshot(GuestVehicleObservation $observation): bool
+    {
+        return blank($observation->snapshot_path)
+            || ! Storage::disk('public')->exists($observation->snapshot_path);
+    }
+
+    protected function findExistingDetectorGuestObservation(string $externalEventKey): ?GuestVehicleObservation
+    {
+        return GuestVehicleObservation::query()
+            ->where('external_event_key', $externalEventKey)
+            ->orWhereJsonContains('detection_metadata_json->merged_event_keys', $externalEventKey)
+            ->first();
+    }
+
+    protected function shouldMergeDetectorMetadata(GuestVehicleObservation $observation, array $validated): bool
+    {
+        return (! empty($validated['detection_metadata']) && is_array($validated['detection_metadata']))
+            || $this->isMergedDetectorExternalKey($observation, $validated);
+    }
+
+    protected function mergedDetectorGuestMetadata(GuestVehicleObservation $observation, array $validated): array
+    {
+        $current = is_array($observation->detection_metadata_json)
+            ? $observation->detection_metadata_json
+            : [];
+        $incoming = (! empty($validated['detection_metadata']) && is_array($validated['detection_metadata']))
+            ? $validated['detection_metadata']
+            : [];
+        $isMergedKey = $this->isMergedDetectorExternalKey($observation, $validated);
+
+        if ($isMergedKey) {
+            foreach (['track_id', 'confidence', 'direction', 'bbox_xyxy', 'xyxy'] as $field) {
+                unset($incoming[$field]);
+            }
+        }
+
+        $merged = array_replace($current, $incoming);
+
+        if ($isMergedKey) {
+            $mergedKeys = $merged['merged_event_keys'] ?? [];
+            $mergedKeys = is_array($mergedKeys) ? $mergedKeys : [];
+            $mergedKeys[] = (string) $validated['external_event_key'];
+            $merged['merged_event_keys'] = array_values(array_unique(array_filter($mergedKeys)));
+        }
+
+        return $merged;
+    }
+
+    protected function isMergedDetectorExternalKey(GuestVehicleObservation $observation, array $validated): bool
+    {
+        return filled($validated['external_event_key'] ?? null)
+            && filled($observation->external_event_key)
+            && (string) $observation->external_event_key !== (string) $validated['external_event_key'];
     }
 
     protected function findRecentVerifiedRfidScanForGuestPayload(string $cameraRole, Carbon $eventTime): ?RfidScanLog
@@ -448,55 +644,362 @@ class GuestObservationController extends Controller
         string $cameraRole,
         Carbon $eventTime,
         ?string $plateNumber,
-        array $metadata = []
+        array $metadata = [],
+        ?int $cameraId = null
     ): ?GuestVehicleObservation {
         $eventTime = $eventTime->copy()->setTimezone(config('app.timezone', 'UTC'));
-        $from = $eventTime->copy()->subSeconds(6);
-        $to = $eventTime->copy()->addSeconds(6);
-
-        $query = GuestVehicleObservation::query()
-            ->where('observation_source', 'cctv')
-            ->where('status', 'pending_review')
-            ->where(function ($query) use ($from, $to): void {
-                $query->whereBetween('observed_at', [$from, $to])
-                    ->orWhereBetween('created_at', [$from, $to]);
-            });
-
         $trackId = $metadata['track_id'] ?? null;
 
         if (is_scalar($trackId) && $trackId !== '') {
-            $trackDuplicate = (clone $query)
-                ->where('detection_metadata_json->track_id', $trackId)
-                ->latest('created_at')
-                ->first();
+            $trackDuplicate = $this->latestTrackDetectorDuplicate(
+                $this->recentDetectorGuestObservationQuery(
+                    $eventTime,
+                    self::DETECTOR_TRACK_DUPLICATE_WINDOW_SECONDS
+                ),
+                $cameraRole,
+                $cameraId,
+                $trackId,
+                $metadata
+            );
 
             if ($trackDuplicate) {
                 return $trackDuplicate;
             }
         }
 
-        $plateDuplicate = (clone $query)
-            ->where(function ($query) use ($plateNumber): void {
-                if ($plateNumber !== null) {
-                    $query->whereNull('plate_number')
-                        ->orWhere('plate_number', $plateNumber);
+        if ($plateNumber !== null) {
+            $plateQuery = $this->recentDetectorGuestObservationQuery(
+                $eventTime,
+                self::DETECTOR_PLATE_DUPLICATE_WINDOW_SECONDS
+            );
 
-                    return;
-                }
+            $sameStationPlateDuplicate = $this->latestPlateDetectorDuplicate(
+                $plateQuery,
+                $plateNumber,
+                $cameraRole
+            );
 
-                $query->whereNull('plate_number');
-            })
-            ->latest('created_at')
-            ->first();
+            if ($sameStationPlateDuplicate) {
+                return $sameStationPlateDuplicate;
+            }
 
-        if ($plateDuplicate) {
-            return $plateDuplicate;
+            $sharedSourcePlateDuplicate = $this->latestSharedSourceDetectorDuplicate(
+                $plateQuery,
+                $cameraId,
+                $plateNumber,
+                $metadata
+            );
+
+            if ($sharedSourcePlateDuplicate) {
+                return $sharedSourcePlateDuplicate;
+            }
+
+            $nearPlateDuplicate = $this->latestPlateDetectorDuplicate(
+                $this->recentDetectorGuestObservationQuery($eventTime, self::DETECTOR_SHORT_DUPLICATE_WINDOW_SECONDS),
+                $plateNumber
+            );
+
+            if ($nearPlateDuplicate) {
+                return $nearPlateDuplicate;
+            }
+
+            $unidentifiedDuplicate = $this->recentUnidentifiedDetectorDuplicate(
+                $eventTime,
+                $cameraRole,
+                $cameraId,
+                $metadata
+            );
+
+            if ($unidentifiedDuplicate) {
+                return $unidentifiedDuplicate;
+            }
+
+            return null;
         }
 
-        return (clone $query)
-            ->where('location', '!=', $cameraRole)
+        $sameStationUnidentifiedDuplicate = $this->recentDetectorGuestObservationQuery(
+            $eventTime,
+            self::DETECTOR_SHORT_DUPLICATE_WINDOW_SECONDS
+        )
+            ->whereNull('plate_number')
+            ->where('location', $cameraRole)
             ->latest('created_at')
             ->first();
+
+        if ($sameStationUnidentifiedDuplicate) {
+            return $sameStationUnidentifiedDuplicate;
+        }
+
+        $sharedSceneDuplicate = $this->latestSharedSourceDetectorDuplicate(
+            $this->recentDetectorGuestObservationQuery(
+                $eventTime,
+                self::DETECTOR_SHARED_SCENE_DUPLICATE_WINDOW_SECONDS
+            ),
+            $cameraId,
+            null,
+            $metadata
+        );
+
+        if ($sharedSceneDuplicate) {
+            return $sharedSceneDuplicate;
+        }
+
+        return null;
+    }
+
+    protected function recentDetectorGuestObservationQuery(Carbon $eventTime, int $windowSeconds): Builder
+    {
+        $from = $eventTime->copy()->subSeconds($windowSeconds);
+        $to = $eventTime->copy()->addSeconds($windowSeconds);
+        $recentlyReceivedFrom = now()->subSeconds($windowSeconds);
+
+        return GuestVehicleObservation::query()
+            ->where('observation_source', 'cctv')
+            ->where('status', 'pending_review')
+            ->where(function ($query) use ($from, $to, $recentlyReceivedFrom): void {
+                $query->whereBetween('observed_at', [$from, $to])
+                    ->orWhereBetween('created_at', [$from, $to])
+                    ->orWhere('created_at', '>=', $recentlyReceivedFrom);
+            });
+    }
+
+    protected function recentUnidentifiedDetectorDuplicate(
+        Carbon $eventTime,
+        string $cameraRole,
+        ?int $cameraId,
+        array $metadata = []
+    ): ?GuestVehicleObservation {
+        $query = $this->recentDetectorGuestObservationQuery($eventTime, self::DETECTOR_SHORT_DUPLICATE_WINDOW_SECONDS)
+            ->whereNull('plate_number');
+
+        $sameStationDuplicate = (clone $query)
+            ->where('location', $cameraRole)
+            ->latest('created_at')
+            ->first();
+
+        if ($sameStationDuplicate) {
+            return $sameStationDuplicate;
+        }
+
+        return $this->latestSharedSourceDetectorDuplicate($query, $cameraId, null, $metadata);
+    }
+
+    protected function latestPlateDetectorDuplicate(
+        Builder $query,
+        string $plateNumber,
+        ?string $cameraRole = null
+    ): ?GuestVehicleObservation {
+        $plateFingerprint = $this->plateFingerprint($plateNumber);
+
+        if ($plateFingerprint === '') {
+            return null;
+        }
+
+        $candidateQuery = (clone $query)
+            ->where(function ($query): void {
+                $query->whereNotNull('plate_number')
+                    ->orWhereNotNull('plate_text');
+            });
+
+        if ($cameraRole !== null) {
+            $candidateQuery->where('location', $cameraRole);
+        }
+
+        $candidates = $candidateQuery
+            ->latest('created_at')
+            ->limit(25)
+            ->get();
+
+        foreach ($candidates as $candidate) {
+            if ($this->plateFingerprint($candidate->plate_number ?: $candidate->plate_text) === $plateFingerprint) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    protected function latestTrackDetectorDuplicate(
+        Builder $query,
+        string $cameraRole,
+        ?int $cameraId,
+        mixed $trackId,
+        array $metadata = []
+    ): ?GuestVehicleObservation {
+        $requestBox = $this->metadataBoundingBox($metadata);
+        $candidates = (clone $query)
+            ->where('detection_metadata_json->track_id', $trackId)
+            ->latest('created_at')
+            ->limit(25)
+            ->get();
+
+        foreach ($candidates as $candidate) {
+            if ($candidate->location === $cameraRole) {
+                return $candidate;
+            }
+
+            if (! $this->camerasShareCaptureSource($cameraId, (int) $candidate->camera_id)) {
+                continue;
+            }
+
+            $candidateBox = $this->metadataBoundingBox($candidate->detection_metadata_json ?? []);
+
+            if ($requestBox === null || $candidateBox === null) {
+                return $candidate;
+            }
+
+            if ($this->boundingBoxIou($requestBox, $candidateBox) >= self::DETECTOR_SHARED_SOURCE_MIN_IOU) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    protected function latestSharedSourceDetectorDuplicate(
+        Builder $query,
+        ?int $cameraId,
+        ?string $plateNumber = null,
+        array $metadata = []
+    ): ?GuestVehicleObservation {
+        if ($cameraId === null) {
+            return null;
+        }
+
+        $plateFingerprint = $plateNumber !== null
+            ? $this->plateFingerprint($plateNumber)
+            : null;
+        $requestBox = $this->metadataBoundingBox($metadata);
+
+        $candidates = (clone $query)
+            ->whereNotNull('camera_id')
+            ->latest('created_at')
+            ->limit(25)
+            ->get();
+
+        foreach ($candidates as $candidate) {
+            if ($plateFingerprint !== null
+                && $this->plateFingerprint($candidate->plate_number ?: $candidate->plate_text) !== $plateFingerprint) {
+                continue;
+            }
+
+            if ($this->camerasShareCaptureSource($cameraId, (int) $candidate->camera_id)) {
+                if ($plateFingerprint !== null) {
+                    return $candidate;
+                }
+
+                $candidateBox = $this->metadataBoundingBox($candidate->detection_metadata_json ?? []);
+
+                if ($requestBox === null || $candidateBox === null) {
+                    continue;
+                }
+
+                if ($this->boundingBoxIou($requestBox, $candidateBox) >= self::DETECTOR_SHARED_SOURCE_MIN_IOU) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $metadata
+     * @return array<int, float>|null
+     */
+    protected function metadataBoundingBox(?array $metadata): ?array
+    {
+        $box = $metadata['bbox_xyxy'] ?? $metadata['xyxy'] ?? null;
+
+        if (! is_array($box) || count($box) < 4) {
+            return null;
+        }
+
+        $values = array_values($box);
+
+        foreach (array_slice($values, 0, 4) as $value) {
+            if (! is_numeric($value)) {
+                return null;
+            }
+        }
+
+        $x1 = (float) $values[0];
+        $y1 = (float) $values[1];
+        $x2 = (float) $values[2];
+        $y2 = (float) $values[3];
+
+        if ($x2 <= $x1 || $y2 <= $y1) {
+            return null;
+        }
+
+        return [$x1, $y1, $x2, $y2];
+    }
+
+    /**
+     * @param  array<int, float>  $left
+     * @param  array<int, float>  $right
+     */
+    protected function boundingBoxIou(array $left, array $right): float
+    {
+        $intersectionX1 = max($left[0], $right[0]);
+        $intersectionY1 = max($left[1], $right[1]);
+        $intersectionX2 = min($left[2], $right[2]);
+        $intersectionY2 = min($left[3], $right[3]);
+        $intersectionWidth = max(0.0, $intersectionX2 - $intersectionX1);
+        $intersectionHeight = max(0.0, $intersectionY2 - $intersectionY1);
+        $intersectionArea = $intersectionWidth * $intersectionHeight;
+
+        if ($intersectionArea <= 0.0) {
+            return 0.0;
+        }
+
+        $leftArea = max(0.0, $left[2] - $left[0]) * max(0.0, $left[3] - $left[1]);
+        $rightArea = max(0.0, $right[2] - $right[0]) * max(0.0, $right[3] - $right[1]);
+        $unionArea = $leftArea + $rightArea - $intersectionArea;
+
+        return $unionArea > 0.0 ? $intersectionArea / $unionArea : 0.0;
+    }
+
+    protected function camerasShareCaptureSource(?int $leftCameraId, ?int $rightCameraId): bool
+    {
+        if ($leftCameraId === null || $rightCameraId === null) {
+            return false;
+        }
+
+        if ($leftCameraId === $rightCameraId) {
+            return true;
+        }
+
+        $cameras = Camera::query()
+            ->whereIn('id', [$leftCameraId, $rightCameraId])
+            ->get()
+            ->keyBy('id');
+
+        $leftCamera = $cameras->get($leftCameraId);
+        $rightCamera = $cameras->get($rightCameraId);
+
+        if (! $leftCamera || ! $rightCamera) {
+            return false;
+        }
+
+        $leftType = Str::lower(trim((string) $leftCamera->source_type));
+        $rightType = Str::lower(trim((string) $rightCamera->source_type));
+        $leftSource = trim((string) $leftCamera->source_value);
+        $rightSource = trim((string) $rightCamera->source_value);
+
+        return $leftType !== ''
+            && $leftType === $rightType
+            && $leftSource !== ''
+            && $leftSource === $rightSource;
+    }
+
+    protected function plateFingerprint(?string $plateNumber): string
+    {
+        if (blank($plateNumber)) {
+            return '';
+        }
+
+        return preg_replace('/[^A-Z0-9]/', '', Str::upper((string) $plateNumber)) ?? '';
     }
 
     protected function prepareManualGuestObservationRequest(Request $request): void

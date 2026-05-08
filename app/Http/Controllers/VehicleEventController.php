@@ -17,7 +17,6 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 
 class VehicleEventController extends Controller
@@ -286,8 +285,22 @@ class VehicleEventController extends Controller
 
     protected function filteredGuestLogs(Request $request, ?Carbon $dateFrom = null, ?Carbon $dateTo = null)
     {
+        $showingGuestOnly = $request->filled('event_type')
+            && $request->string('event_type')->upper()->value() === 'GUEST';
+
         return GuestVehicleObservation::query()
             ->with('camera')
+            ->when(! $showingGuestOnly, function ($query): void {
+                $query->where(function ($query): void {
+                    $query->whereNull('external_event_key')
+                        ->orWhereNotExists(function ($subquery): void {
+                            $subquery->selectRaw('1')
+                                ->from('vehicle_events')
+                                ->whereColumn('vehicle_events.external_event_key', 'guest_vehicle_observations.external_event_key')
+                                ->whereIn('vehicle_events.event_origin', ['guest_cctv', 'guest_manual']);
+                        });
+                });
+            })
             ->when($request->filled('plate_text'), function ($query) use ($request): void {
                 $plate = '%'.$request->string('plate_text')->trim().'%';
 
@@ -432,9 +445,7 @@ class VehicleEventController extends Controller
             'status_badge_class' => in_array($observation->status, ['reviewed', 'verified'], true) ? 'matched' : 'manual-review',
             'match_label' => 'Guest review',
             'rfid_tag_uid' => 'N/A',
-            'image_url' => $observation->snapshot_path && Storage::disk('public')->exists($observation->snapshot_path)
-                ? $observation->snapshot_url
-                : null,
+            'image_url' => $observation->snapshot_path ? $observation->snapshot_url : null,
             'sort_time' => $this->sortTimestamp($observation->created_at, $time),
         ];
     }

@@ -113,7 +113,7 @@ class StationController extends Controller
                 'inactive_tag' => 'RFID scan recorded, but the assigned tag is inactive.',
                 'unassigned_tag' => 'RFID scan recorded, but this tag is not assigned to a vehicle.',
                 'inactive_vehicle' => 'RFID scan recorded, but the vehicle record is inactive.',
-                'non_recurring_category' => 'RFID scan recorded, but this vehicle category does not use recurring RFID monitoring.',
+                'non_recurring_category' => 'RFID scan recorded as guest/manual review. A guest observation was created for review.',
                 'guest' => 'RFID scan recorded as GUEST. A guest observation was created for review.',
                 default => 'RFID scan recorded for manual review.',
             };
@@ -183,6 +183,15 @@ class StationController extends Controller
 
         $guestLogs = GuestVehicleObservation::query()
             ->with('camera')
+            ->where(function ($query): void {
+                $query->whereNull('external_event_key')
+                    ->orWhereNotExists(function ($subquery): void {
+                        $subquery->selectRaw('1')
+                            ->from('vehicle_events')
+                            ->whereColumn('vehicle_events.external_event_key', 'guest_vehicle_observations.external_event_key')
+                            ->whereIn('vehicle_events.event_origin', ['guest_cctv', 'guest_manual']);
+                    });
+            })
             ->latest('created_at')
             ->latest('observed_at')
             ->limit($limit * 3)

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\FutureIntegrationController;
+use App\Http\Controllers\Api\RealtimeLogController;
 use App\Http\Controllers\GuestObservationController;
 use Illuminate\Support\Facades\Route;
 
@@ -11,6 +12,12 @@ Route::middleware('throttle:1200,1')->group(function (): void {
         ->name('api.check-latest-scan');
     Route::post('/guest-observation', [GuestObservationController::class, 'store'])
         ->name('api.guest-observation');
+    Route::get('/recent-station-logs', [RealtimeLogController::class, 'stationLogs'])
+        ->name('api.recent-station-logs');
+    Route::get('/recent-guest-logs', [RealtimeLogController::class, 'guestLogs'])
+        ->name('api.recent-guest-logs');
+    Route::get('/recent-event-logs', [RealtimeLogController::class, 'eventLogs'])
+        ->name('api.recent-event-logs');
 });
 
 Route::prefix('v1/integration')

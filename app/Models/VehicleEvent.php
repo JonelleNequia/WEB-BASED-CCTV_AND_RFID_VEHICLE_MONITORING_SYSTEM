@@ -181,6 +181,10 @@ class VehicleEvent extends Model
             return 'Pending';
         }
 
+        if ($this->vehicle_category === 'guest' || in_array($this->event_origin, ['guest_cctv', 'guest_manual'], true)) {
+            return 'Guest review';
+        }
+
         if ($this->event_type === 'ENTRY') {
             return $this->is_rfid_event ? 'State based' : 'N/A';
         }
@@ -241,6 +245,7 @@ class VehicleEvent extends Model
         return match ($this->display_status) {
             self::STATUS_PENDING_DETAILS => 'pending-details',
             'manual_review' => 'manual-review',
+            'guest' => 'manual-review',
             'matched' => 'matched',
             'unmatched' => 'unmatched',
             'closed' => 'closed',

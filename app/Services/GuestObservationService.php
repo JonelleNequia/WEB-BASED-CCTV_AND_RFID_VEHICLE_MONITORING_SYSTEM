@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\GuestVehicleObservation;
 use App\Models\Camera;
 use App\Models\RfidScanLog;
+use App\Support\PhilippineTime;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
@@ -53,20 +54,27 @@ class GuestObservationService
     public function createFromUnrecognizedRfidScan(RfidScanLog $scanLog): GuestVehicleObservation
     {
         return DB::transaction(function () use ($scanLog): GuestVehicleObservation {
+            $scanLog->loadMissing('vehicle');
+
             $camera = Camera::query()->forRole($scanLog->scan_location)->first();
+            $vehicle = $scanLog->vehicle;
             $snapshotPath = $this->localStorageService->storeLatestCameraSnapshot($scanLog->scan_location);
+            $plateNumber = $this->normalizePlate($vehicle?->plate_number);
+            $vehicleType = $vehicle?->vehicle_type ?: 'Guest';
+            $statusLabel = str_replace('_', ' ', (string) $scanLog->verification_status);
 
             return GuestVehicleObservation::query()->create([
-                'plate_text' => null,
-                'plate_number' => null,
-                'vehicle_type' => 'Guest',
+                'plate_text' => $plateNumber,
+                'plate_number' => $plateNumber,
+                'vehicle_type' => $vehicleType,
                 'vehicle_color' => null,
                 'location' => $scanLog->scan_location,
                 'observation_source' => 'cctv',
+                'status' => 'pending_review',
                 'observed_at' => $scanLog->scan_time,
                 'camera_id' => $camera?->id,
                 'snapshot_path' => $snapshotPath,
-                'notes' => 'Guest RFID tag '.$scanLog->tag_uid.' scanned at '.$scanLog->scanLocationLabel.'. Guard review required.',
+                'notes' => 'Guest RFID tag '.$scanLog->tag_uid.' scanned at '.$scanLog->scanLocationLabel.' ('.$statusLabel.'). Guard review required.',
                 'created_by' => null,
             ]);
         });
@@ -129,19 +137,8 @@ class GuestObservationService
      */
     public function countToday(): int
     {
-        $start = today();
-        $end = $start->copy()->addDay();
-
         return GuestVehicleObservation::query()
-            ->where(function ($query) use ($start, $end): void {
-                $query->where(function ($query) use ($start, $end): void {
-                    $query->where('observed_at', '>=', $start)
-                        ->where('observed_at', '<', $end);
-                })->orWhere(function ($query) use ($start, $end): void {
-                    $query->where('created_at', '>=', $start)
-                        ->where('created_at', '<', $end);
-                });
-            })
+            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['observed_at', 'created_at']))
             ->count();
     }
 

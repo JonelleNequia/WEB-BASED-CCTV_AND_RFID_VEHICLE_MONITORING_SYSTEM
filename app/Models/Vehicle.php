@@ -114,6 +114,6 @@ class Vehicle extends Model
      */
     public function isRfidRecurring(): bool
     {
-        return $this->category !== 'guest';
+        return strtolower((string) $this->category) !== 'guest';
     }
 }

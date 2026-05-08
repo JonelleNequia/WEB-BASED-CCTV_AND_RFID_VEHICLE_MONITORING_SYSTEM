@@ -3,13 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\GuestVehicleObservation;
+use App\Models\RfidScanLog;
 use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Services\CalibrationService;
 use App\Services\GuestObservationService;
 use App\Services\RfidService;
+use App\Support\PhilippineTime;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\View\View;
 
@@ -103,7 +104,7 @@ class DashboardController extends Controller
 
     protected function frequentEntryVehicles(): Collection
     {
-        $today = today()->toDateString();
+        $today = PhilippineTime::todayDateString();
 
         return Vehicle::query()
             ->where('category', '!=', 'guest')
@@ -111,7 +112,7 @@ class DashboardController extends Controller
                 'vehicleEvents as total_entries_count' => fn ($query) => $query->where('event_type', 'ENTRY'),
                 'vehicleEvents as entries_today_count_from_logs' => fn ($query) => $query
                     ->where('event_type', 'ENTRY')
-                    ->whereDate('event_time', today()),
+                    ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['event_time', 'created_at'])),
             ])
             ->orderBy('plate_number')
             ->get()
@@ -142,42 +143,45 @@ class DashboardController extends Controller
      */
     protected function totalTrafficToday(): array
     {
-        $start = Carbon::today();
-        $end = $start->copy()->addDay();
-
         $registeredEntries = VehicleEvent::query()
             ->where('event_type', 'ENTRY')
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
-            ->where('event_time', '>=', $start)
-            ->where('event_time', '<', $end)
+            ->whereNotIn('event_origin', ['guest_cctv', 'guest_manual'])
+            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['event_time', 'created_at']))
             ->count();
 
         $registeredExits = VehicleEvent::query()
             ->where('event_type', 'EXIT')
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
-            ->where('event_time', '>=', $start)
-            ->where('event_time', '<', $end)
+            ->whereNotIn('event_origin', ['guest_cctv', 'guest_manual'])
+            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['event_time', 'created_at']))
             ->count();
 
         return [
-            'entries' => (int) $registeredEntries + $this->guestTrafficCount('entrance', $start, $end),
-            'exits' => (int) $registeredExits + $this->guestTrafficCount('exit', $start, $end),
+            'entries' => (int) $registeredEntries
+                + $this->guestTrafficCount('entrance')
+                + $this->unlinkedGuestRfidTrafficCount('entrance'),
+            'exits' => (int) $registeredExits
+                + $this->guestTrafficCount('exit')
+                + $this->unlinkedGuestRfidTrafficCount('exit'),
         ];
     }
 
-    protected function guestTrafficCount(string $location, Carbon $start, Carbon $end): int
+    protected function guestTrafficCount(string $location): int
     {
         return GuestVehicleObservation::query()
             ->where('location', $location)
-            ->where(function ($query) use ($start, $end): void {
-                $query->where(function ($query) use ($start, $end): void {
-                    $query->where('observed_at', '>=', $start)
-                        ->where('observed_at', '<', $end);
-                })->orWhere(function ($query) use ($start, $end): void {
-                    $query->where('created_at', '>=', $start)
-                        ->where('created_at', '<', $end);
-                });
-            })
+            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['observed_at', 'created_at']))
+            ->count();
+    }
+
+    protected function unlinkedGuestRfidTrafficCount(string $location): int
+    {
+        return RfidScanLog::query()
+            ->where('verification_status', 'guest')
+            ->where('scan_location', $location)
+            ->whereNull('guest_vehicle_observation_id')
+            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
             ->count();
     }
 
@@ -208,6 +212,15 @@ class DashboardController extends Controller
 
         $guestRows = GuestVehicleObservation::query()
             ->with('camera')
+            ->where(function ($query): void {
+                $query->whereNull('external_event_key')
+                    ->orWhereNotExists(function ($subquery): void {
+                        $subquery->selectRaw('1')
+                            ->from('vehicle_events')
+                            ->whereColumn('vehicle_events.external_event_key', 'guest_vehicle_observations.external_event_key')
+                            ->whereIn('vehicle_events.event_origin', ['guest_cctv', 'guest_manual']);
+                    });
+            })
             ->orderBy('created_at', 'desc')
             ->limit(30)
             ->get()

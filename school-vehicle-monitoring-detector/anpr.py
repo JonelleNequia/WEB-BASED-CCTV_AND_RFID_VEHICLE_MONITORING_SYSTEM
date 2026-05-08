@@ -2,12 +2,14 @@
 Lightweight ALPR helper for guest vehicle review.
 
 The detector crops the full vehicle bounding box, improves contrast, and then
-tries EasyOCR first. If EasyOCR is not installed, it falls back to pytesseract
-when available. A missing OCR engine returns None instead of generating mock
-plates, so guest records are never polluted with fake plate numbers.
+tries local EasyOCR first with model downloads disabled. If EasyOCR is not
+ready, it falls back to local pytesseract only when the tesseract binary exists.
+A missing OCR engine returns None instead of generating mock plates, so guest
+records are never polluted with fake plate numbers.
 """
 
 import re
+import shutil
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
@@ -23,9 +25,23 @@ def easyocr_reader():
         return None
 
     try:
-        return easyocr.Reader(["en"], gpu=False, verbose=False)
+        return easyocr.Reader(["en"], gpu=False, verbose=False, download_enabled=False)
+    except TypeError:
+        return None
     except Exception:
         return None
+
+
+@lru_cache(maxsize=1)
+def tesseract_binary_available() -> bool:
+    return shutil.which("tesseract") is not None
+
+
+def ocr_runtime_status() -> Dict[str, str]:
+    return {
+        "easyocr": "ready" if easyocr_reader() is not None else "unavailable_or_model_missing",
+        "tesseract": "ready" if tesseract_binary_available() else "binary_missing",
+    }
 
 
 def crop_vehicle(frame, bounding_box):
@@ -85,13 +101,16 @@ def preprocess_variants_for_ocr(crop) -> List[np.ndarray]:
 def normalize_plate_text(text: str) -> Optional[str]:
     cleaned = re.sub(r"[^A-Z0-9]", "", (text or "").upper())
 
-    if len(cleaned) < 3:
+    if len(cleaned) < 5:
         return None
 
-    if not re.search(r"[A-Z]", cleaned):
+    if not re.search(r"[A-Z]", cleaned) or not re.search(r"\d", cleaned):
         return None
 
-    if 3 <= len(cleaned) <= 4 and re.match(r"^[A-Z]+$", cleaned):
+    if re.match(r"^[A-Z]{2}\d{4,5}$", cleaned):
+        return f"{cleaned[:2]}-{cleaned[2:]}"
+
+    if re.match(r"^\d{3,4}[A-Z]{2,3}$", cleaned):
         return cleaned
 
     normalized = correct_plate_character_positions(cleaned)
@@ -165,19 +184,44 @@ def read_with_easyocr_candidates(image) -> List[Tuple[str, float]]:
         return []
 
     candidates = []
+    text_items = []
 
     for result in results:
+        bbox = result[0] if result else None
         text = result[1] if len(result) > 1 else ""
         confidence = float(result[2]) if len(result) > 2 else 0.0
 
         if confidence < 0.35:
             continue
 
+        text_items.append((bbox, text, confidence))
         plate = normalize_plate_text(text)
         if plate:
             candidates.append((plate, min(confidence, 1.0)))
 
+    if len(text_items) > 1:
+        sorted_items = sorted(text_items, key=lambda item: ocr_box_sort_key(item[0]))
+        combined_text = "".join(item[1] for item in sorted_items)
+        combined_confidence = sum(item[2] for item in sorted_items) / len(sorted_items)
+        plate = normalize_plate_text(combined_text)
+
+        if plate and combined_confidence >= 0.35:
+            candidates.append((plate, min(combined_confidence, 1.0)))
+
     return candidates
+
+
+def ocr_box_sort_key(bbox) -> Tuple[float, float]:
+    if not bbox:
+        return 0.0, 0.0
+
+    try:
+        xs = [float(point[0]) for point in bbox]
+        ys = [float(point[1]) for point in bbox]
+    except Exception:
+        return 0.0, 0.0
+
+    return sum(ys) / len(ys), sum(xs) / len(xs)
 
 
 def read_with_easyocr(image) -> Optional[str]:
@@ -192,6 +236,9 @@ def read_with_easyocr(image) -> Optional[str]:
 
 
 def read_with_tesseract_candidates(image) -> List[Tuple[str, float]]:
+    if not tesseract_binary_available():
+        return []
+
     try:
         import pytesseract
     except Exception:
@@ -354,6 +401,9 @@ def select_consensus_plate(candidates: List[Tuple[str, float]]) -> Optional[str]
     if best_count >= 2 and best_score >= 0.55:
         return best
 
+    if best_score >= 0.55:
+        return best
+
     return None
 
 
@@ -482,9 +532,10 @@ def detect_vehicle_color(frame, bounding_box) -> Optional[str]:
 
     height, width = crop.shape[:2]
     regions = [
-        crop[int(height * 0.28):int(height * 0.78), int(width * 0.14):int(width * 0.86)],
-        crop[int(height * 0.38):int(height * 0.86), int(width * 0.08):int(width * 0.92)],
-        crop[int(height * 0.22):int(height * 0.68), int(width * 0.24):int(width * 0.76)],
+        crop[int(height * 0.42):int(height * 0.82), int(width * 0.12):int(width * 0.88)],
+        crop[int(height * 0.30):int(height * 0.72), int(width * 0.18):int(width * 0.82)],
+        crop[int(height * 0.52):int(height * 0.90), int(width * 0.18):int(width * 0.82)],
+        crop[int(height * 0.34):int(height * 0.84), int(width * 0.28):int(width * 0.72)],
     ]
     scores: Dict[str, float] = {}
 
@@ -497,8 +548,10 @@ def detect_vehicle_color(frame, bounding_box) -> Optional[str]:
         scores[color] = scores.get(color, 0.0) + score
 
     if not scores:
-        return None
+        color, _ = classify_vehicle_color_sample(crop)
+
+        return color
 
     color, score = max(scores.items(), key=lambda item: item[1])
 
-    return color if score >= 0.22 else None
+    return color

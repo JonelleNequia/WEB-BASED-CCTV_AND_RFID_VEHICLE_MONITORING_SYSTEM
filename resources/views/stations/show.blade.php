@@ -99,6 +99,7 @@
         'logs' => $logs,
         'routes' => [
             'state' => route('stations.state', $location),
+            'recentLogs' => route('api.recent-station-logs', ['location' => $location, 'limit' => 14]),
             'rfidScan' => route('stations.rfid-scan', $location),
         ],
     ])

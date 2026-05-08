@@ -6,7 +6,9 @@ use App\Models\EventReceiveLog;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidTag;
 use App\Models\SystemSetting;
+use App\Models\User;
 use App\Models\Vehicle;
+use App\Models\VehicleEvent;
 use App\Services\RfidService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -351,6 +353,16 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertSame('Black', $observation->vehicle_color);
         $this->assertSame(55, $observation->detection_metadata_json['track_id']);
         Storage::disk('public')->assertExists($observation->snapshot_path);
+
+        $event = VehicleEvent::query()
+            ->where('external_event_key', 'guest-window-timeout-upload-001')
+            ->firstOrFail();
+
+        $this->assertSame('ENTRY', $event->event_type);
+        $this->assertSame('guest_cctv', $event->event_origin);
+        $this->assertSame('guest', $event->vehicle_category);
+        $this->assertSame('ABC1234', $event->plate_number);
+        $this->assertSame($observation->snapshot_path, $event->vehicle_image_path);
     }
 
     public function test_detector_guest_observation_is_suppressed_when_recent_rfid_scan_is_registered(): void
@@ -454,6 +466,7 @@ class DetectedEventIngestionTest extends TestCase
             'snapshot' => UploadedFile::fake()->image('guest-duplicate-a.jpg', 640, 480),
             'detection_metadata' => json_encode([
                 'track_id' => 91,
+                'bbox_xyxy' => [120, 140, 560, 420],
             ]),
         ])->assertCreated();
 
@@ -465,6 +478,7 @@ class DetectedEventIngestionTest extends TestCase
             'snapshot' => UploadedFile::fake()->image('guest-duplicate-b.jpg', 640, 480),
             'detection_metadata' => json_encode([
                 'track_id' => 92,
+                'bbox_xyxy' => [130, 150, 570, 430],
             ]),
         ])
             ->assertOk()
@@ -485,7 +499,7 @@ class DetectedEventIngestionTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('duplicate', true)
-            ->assertJsonPath('message', 'Recent duplicate guest observation merged.');
+            ->assertJsonPath('message', 'Duplicate guest observation merged.');
 
         $this->assertSame(1, GuestVehicleObservation::query()
             ->whereIn('external_event_key', [
@@ -501,6 +515,215 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertSame('GST 123', $observation->plate_number);
         $this->assertSame('White', $observation->vehicle_color);
         $this->assertSame('complete', $observation->detection_metadata_json['analysis_status']);
+    }
+
+    public function test_detector_guest_observation_merges_same_plate_after_track_changes_and_keeps_snapshot_for_logs(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $headers = [
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ];
+        $eventTime = now();
+
+        $firstResponse = $this->withHeaders($headers)->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-plate-long-001',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $eventTime->copy()->subSeconds(90)->toIso8601String(),
+            'plate_number' => 'aal',
+            'vehicle_color' => 'silver',
+            'snapshot' => UploadedFile::fake()->image('guest-same-plate-a.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 101,
+            ]),
+        ])
+            ->assertCreated()
+            ->assertJsonPath('duplicate', false);
+
+        $observationId = $firstResponse->json('guest_observation_id');
+
+        $this->withHeaders($headers)->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-plate-long-002',
+            'camera_role' => 'exit',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $eventTime->toIso8601String(),
+            'plate_number' => 'A A L',
+            'vehicle_color' => 'silver',
+            'snapshot' => UploadedFile::fake()->image('guest-same-plate-b.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 202,
+            ]),
+        ])
+            ->assertOk()
+            ->assertJsonPath('duplicate', true)
+            ->assertJsonPath('guest_observation_id', $observationId)
+            ->assertJsonPath('message', 'Recent duplicate guest observation merged.');
+
+        $this->assertSame(1, GuestVehicleObservation::query()
+            ->whereIn('external_event_key', [
+                'guest-window-plate-long-001',
+                'guest-window-plate-long-002',
+            ])
+            ->count());
+
+        $observation = GuestVehicleObservation::query()->findOrFail($observationId);
+
+        $this->assertSame('AAL', $observation->plate_number);
+        $this->assertStringStartsWith('guest_snapshots/', $observation->snapshot_path);
+        Storage::disk('public')->assertExists($observation->snapshot_path);
+
+        $event = VehicleEvent::query()
+            ->whereIn('external_event_key', [
+                'guest-window-plate-long-001',
+                'guest-window-plate-long-002',
+            ])
+            ->firstOrFail();
+
+        $this->assertSame(1, VehicleEvent::query()
+            ->whereIn('external_event_key', [
+                'guest-window-plate-long-001',
+                'guest-window-plate-long-002',
+            ])
+            ->count());
+        $this->assertSame('ENTRY', $event->event_type);
+        $this->assertSame('guest_cctv', $event->event_origin);
+        $this->assertSame($observation->snapshot_path, $event->vehicle_image_path);
+
+        $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+
+        $this->actingAs($admin)
+            ->get(route('guest-observations.index'))
+            ->assertOk()
+            ->assertSee($observation->snapshot_url, false);
+
+        $this->actingAs($admin)
+            ->get(route('vehicle-events.index'))
+            ->assertOk()
+            ->assertSee($observation->snapshot_url, false);
+
+        $this->assertTrue(EventReceiveLog::query()
+            ->where('status', 'guest_observation_recent_duplicate_merged')
+            ->where('notes', 'like', '%'.$observationId.'%')
+            ->exists());
+    }
+
+    public function test_detector_guest_observation_merges_unplated_same_source_cross_station_by_receive_time(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $headers = [
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ];
+        $staleDetectorTime = now()->subMinutes(2);
+
+        $firstResponse = $this->withHeaders($headers)->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-stale-same-source-001',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $staleDetectorTime->toIso8601String(),
+            'snapshot' => UploadedFile::fake()->image('guest-stale-source-a.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 301,
+                'bbox_xyxy' => [100, 120, 520, 420],
+            ]),
+        ])
+            ->assertCreated()
+            ->assertJsonPath('duplicate', false);
+
+        $observationId = $firstResponse->json('guest_observation_id');
+
+        $this->withHeaders($headers)->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-stale-same-source-002',
+            'camera_role' => 'exit',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $staleDetectorTime->toIso8601String(),
+            'snapshot' => UploadedFile::fake()->image('guest-stale-source-b.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 302,
+                'bbox_xyxy' => [108, 128, 528, 428],
+            ]),
+        ])
+            ->assertOk()
+            ->assertJsonPath('duplicate', true)
+            ->assertJsonPath('guest_observation_id', $observationId);
+
+        $this->assertSame(1, GuestVehicleObservation::query()
+            ->whereIn('external_event_key', [
+                'guest-window-stale-same-source-001',
+                'guest-window-stale-same-source-002',
+            ])
+            ->count());
+
+        $this->assertSame(1, VehicleEvent::query()
+            ->whereIn('external_event_key', [
+                'guest-window-stale-same-source-001',
+                'guest-window-stale-same-source-002',
+            ])
+            ->count());
+
+        $event = VehicleEvent::query()
+            ->where('external_event_key', 'guest-window-stale-same-source-001')
+            ->firstOrFail();
+
+        $this->assertSame('ENTRY', $event->event_type);
+        $this->assertSame('guest_cctv', $event->event_origin);
+    }
+
+    public function test_detector_guest_observation_does_not_merge_unplated_same_source_when_bbox_is_different(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $headers = [
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ];
+        $eventTime = now();
+
+        $this->withHeaders($headers)->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-source-different-box-001',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $eventTime->toIso8601String(),
+            'snapshot' => UploadedFile::fake()->image('guest-source-box-a.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 401,
+                'bbox_xyxy' => [20, 30, 240, 180],
+            ]),
+        ])->assertCreated();
+
+        $this->withHeaders($headers)->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-source-different-box-002',
+            'camera_role' => 'exit',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $eventTime->copy()->addSeconds(2)->toIso8601String(),
+            'snapshot' => UploadedFile::fake()->image('guest-source-box-b.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 402,
+                'bbox_xyxy' => [420, 320, 620, 520],
+            ]),
+        ])
+            ->assertCreated()
+            ->assertJsonPath('duplicate', false);
+
+        $this->assertSame(2, GuestVehicleObservation::query()
+            ->whereIn('external_event_key', [
+                'guest-window-source-different-box-001',
+                'guest-window-source-different-box-002',
+            ])
+            ->count());
+
+        $this->assertSame(2, VehicleEvent::query()
+            ->whereIn('external_event_key', [
+                'guest-window-source-different-box-001',
+                'guest-window-source-different-box-002',
+            ])
+            ->count());
     }
 
     public function test_detector_guest_observation_duplicate_updates_late_ocr_details(): void
@@ -549,6 +772,15 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertSame('White', $observation->vehicle_color);
         $this->assertSame('complete', $observation->detection_metadata_json['analysis_status']);
         $this->assertSame(1, GuestVehicleObservation::query()->where('external_event_key', 'guest-window-two-step-001')->count());
+
+        $event = VehicleEvent::query()
+            ->where('external_event_key', 'guest-window-two-step-001')
+            ->firstOrFail();
+
+        $this->assertSame('ABC 123', $event->plate_text);
+        $this->assertSame('ABC 123', $event->plate_number);
+        $this->assertSame('White', $event->vehicle_color);
+        $this->assertSame($observation->snapshot_path, $event->vehicle_image_path);
 
         $this->assertTrue(EventReceiveLog::query()
             ->where('status', 'guest_observation_duplicate_updated')
