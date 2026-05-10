@@ -1,7 +1,7 @@
 {
   "service_running": true,
   "service_message": "Dual-camera detector running.",
-  "updated_at": "2026-05-10T21:05:22.737634+08:00",
+  "updated_at": "2026-05-10T21:07:09.529206+08:00",
   "detector_model_path": "yolov8n.pt",
   "station_activity": {
     "active": false,
