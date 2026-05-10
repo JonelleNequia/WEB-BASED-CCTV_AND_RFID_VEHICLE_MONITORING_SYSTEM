@@ -29,6 +29,7 @@ class StationController extends Controller
     ): View {
         $location = $this->validateLocation($location);
         $settingsService->ensureCameraRuntimeConfigExists();
+        $detectorRuntimeService->markStationViewerActive($location);
 
         $camera = $calibrationService->cameraPayload()[$location];
         $detectorStatus = $detectorRuntimeService->ensureRunning();
@@ -54,6 +55,7 @@ class StationController extends Controller
     {
         $location = $this->validateLocation($location);
         $eventType = $this->eventTypeForLocation($location);
+        $detectorRuntimeService->markStationViewerActive($location);
         $runtime = $detectorRuntimeService->ensureRunning();
 
         return response()->json([

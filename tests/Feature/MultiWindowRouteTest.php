@@ -92,6 +92,9 @@ class MultiWindowRouteTest extends TestCase
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->mock(DetectorRuntimeService::class, function ($mock): void {
+            $mock->shouldReceive('markStationViewerActive')
+                ->once()
+                ->with('entrance');
             $mock->shouldReceive('ensureRunning')
                 ->once()
                 ->andReturn([
@@ -135,6 +138,9 @@ class MultiWindowRouteTest extends TestCase
         ]);
 
         $this->mock(DetectorRuntimeService::class, function ($mock): void {
+            $mock->shouldReceive('markStationViewerActive')
+                ->once()
+                ->with('entrance');
             $mock->shouldReceive('ensureRunning')
                 ->once()
                 ->andReturn([
@@ -214,6 +220,9 @@ class MultiWindowRouteTest extends TestCase
         ]);
 
         $this->mock(DetectorRuntimeService::class, function ($mock): void {
+            $mock->shouldReceive('markStationViewerActive')
+                ->once()
+                ->with('exit');
             $mock->shouldReceive('ensureRunning')
                 ->once()
                 ->andReturn([
@@ -328,6 +337,9 @@ class MultiWindowRouteTest extends TestCase
             Storage::disk('public')->assertExists($observation->snapshot_path);
 
             $this->mock(DetectorRuntimeService::class, function ($mock): void {
+                $mock->shouldReceive('markStationViewerActive')
+                    ->once()
+                    ->with('entrance');
                 $mock->shouldReceive('ensureRunning')
                     ->once()
                     ->andReturn([
@@ -417,6 +429,9 @@ class MultiWindowRouteTest extends TestCase
             ->assertCreated();
 
         $this->mock(DetectorRuntimeService::class, function ($mock): void {
+            $mock->shouldReceive('markStationViewerActive')
+                ->once()
+                ->with('entrance');
             $mock->shouldReceive('ensureRunning')
                 ->once()
                 ->andReturn([

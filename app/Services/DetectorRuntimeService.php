@@ -11,6 +11,8 @@ class DetectorRuntimeService
 
     protected const LAUNCH_COOLDOWN_SECONDS = 15;
 
+    protected const STATION_VIEWER_IDLE_AFTER_SECONDS = 10;
+
     protected const LOCK_AFTER_FAILED_ATTEMPTS = 3;
 
     protected const FAILURE_LOCK_MINUTES = 30;
@@ -24,7 +26,7 @@ class DetectorRuntimeService
     {
         $this->settingsService->ensureCameraRuntimeConfigExists();
 
-        $status = $this->readStatus();
+        $status = $this->withStationActivity($this->readStatus());
 
         if (($status['service_running'] ?? false) && $this->isFresh($status['updated_at'] ?? null)) {
             $this->registerLaunchSuccess();
@@ -44,6 +46,14 @@ class DetectorRuntimeService
             ];
         }
 
+        if (! ($status['station_activity']['active'] ?? false)) {
+            return [
+                ...$status,
+                'auto_start_attempted' => false,
+                'auto_start_message' => 'Detector is in standby until a Station page is open.',
+            ];
+        }
+
         if (! $this->canAttemptLaunch()) {
             return [
                 ...$status,
@@ -55,7 +65,7 @@ class DetectorRuntimeService
         $this->registerLaunchAttempt();
         $launched = $this->launchBackgroundProcess();
         usleep(1200000);
-        $refreshedStatus = $this->readStatus();
+        $refreshedStatus = $this->withStationActivity($this->readStatus());
         $runningAfterAttempt = ($refreshedStatus['service_running'] ?? false)
             && $this->isFresh($refreshedStatus['updated_at'] ?? null);
 
@@ -124,9 +134,127 @@ class DetectorRuntimeService
         return storage_path('logs/detector-runtime.log');
     }
 
+    public function stationActivityPath(): string
+    {
+        return storage_path('app/camera/station_activity.json');
+    }
+
+    public function markStationViewerActive(string $location): void
+    {
+        if (! in_array($location, ['entrance', 'exit'], true)) {
+            return;
+        }
+
+        $now = now();
+        $locations = $this->readStationActivityPayload()['locations'] ?? [];
+        $locations = is_array($locations) ? $locations : [];
+        $locations[$location] = $now->toIso8601String();
+        $activeSince = $now->copy()->subSeconds(self::STATION_VIEWER_IDLE_AFTER_SECONDS);
+
+        $locations = collect($locations)
+            ->filter(function ($seenAt) use ($activeSince): bool {
+                try {
+                    return Carbon::parse((string) $seenAt)->gte($activeSince);
+                } catch (\Throwable) {
+                    return false;
+                }
+            })
+            ->all();
+
+        File::ensureDirectoryExists(dirname($this->stationActivityPath()));
+        File::put(
+            $this->stationActivityPath(),
+            json_encode([
+                'updated_at' => $now->toIso8601String(),
+                'last_seen_at' => $now->toIso8601String(),
+                'active_until' => $now->copy()->addSeconds(self::STATION_VIEWER_IDLE_AFTER_SECONDS)->toIso8601String(),
+                'locations' => $locations,
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+        );
+    }
+
+    /**
+     * @return array{active: bool, active_locations: list<string>, last_seen_at: string|null, active_until: string|null, seconds_until_idle: int}
+     */
+    public function stationActivity(): array
+    {
+        $payload = $this->readStationActivityPayload();
+        $locations = is_array($payload['locations'] ?? null) ? $payload['locations'] : [];
+        $activeSince = now()->subSeconds(self::STATION_VIEWER_IDLE_AFTER_SECONDS);
+        $activeLocations = [];
+        $lastSeenAt = null;
+
+        foreach ($locations as $location => $seenAt) {
+            try {
+                $seen = Carbon::parse((string) $seenAt);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            if ($lastSeenAt === null || $seen->gt($lastSeenAt)) {
+                $lastSeenAt = $seen;
+            }
+
+            if ($seen->gte($activeSince)) {
+                $activeLocations[] = (string) $location;
+            }
+        }
+
+        try {
+            $activeUntil = filled($payload['active_until'] ?? null)
+                ? Carbon::parse((string) $payload['active_until'])
+                : ($lastSeenAt?->copy()->addSeconds(self::STATION_VIEWER_IDLE_AFTER_SECONDS));
+        } catch (\Throwable) {
+            $activeUntil = $lastSeenAt?->copy()->addSeconds(self::STATION_VIEWER_IDLE_AFTER_SECONDS);
+        }
+
+        $active = $activeLocations !== [] || ($activeUntil !== null && $activeUntil->isFuture());
+
+        return [
+            'active' => $active,
+            'active_locations' => array_values(array_unique($activeLocations)),
+            'last_seen_at' => $lastSeenAt?->toIso8601String(),
+            'active_until' => $activeUntil?->toIso8601String(),
+            'seconds_until_idle' => $activeUntil !== null
+                ? (int) max(0, now()->diffInSeconds($activeUntil, false))
+                : 0,
+        ];
+    }
+
     public function __construct(
         protected SettingsService $settingsService
     ) {
+    }
+
+    /**
+     * @param  array<string, mixed>  $status
+     * @return array<string, mixed>
+     */
+    protected function withStationActivity(array $status): array
+    {
+        $activity = $this->stationActivity();
+
+        return [
+            ...$status,
+            'station_activity' => $activity,
+            'camera_power_mode' => $activity['active'] ? 'active' : 'standby',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function readStationActivityPayload(): array
+    {
+        $path = $this->stationActivityPath();
+
+        if (! File::exists($path)) {
+            return [];
+        }
+
+        $decoded = json_decode((string) File::get($path), true);
+
+        return is_array($decoded) ? $decoded : [];
     }
 
     /**

@@ -3,14 +3,13 @@ import os
 import platform
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlparse, urlunparse
 
 import cv2
 import numpy as np
-from ultralytics import YOLO
 
 from config import (
     ALLOWED_VEHICLE_CLASS_NAMES,
@@ -31,6 +30,9 @@ from config import (
     RFID_MATCH_TIMEOUT_SECONDS,
     RFID_POLL_INTERVAL_SECONDS,
     SNAPSHOTS_DIR,
+    STATION_ACTIVITY_PATH,
+    STATION_IDLE_POLL_SECONDS,
+    STATION_VIEWER_IDLE_AFTER_SECONDS,
     STATUS_FILE_PATH,
     STATUS_WRITE_INTERVAL_SECONDS,
     STREAM_FRAME_MAX_WIDTH,
@@ -153,6 +155,82 @@ def write_text_atomic(path, content):
     temp_path = path.with_suffix(f"{path.suffix}.{os.getpid()}.{threading.get_ident()}.tmp")
     temp_path.write_text(content, encoding="utf-8")
     os.replace(temp_path, path)
+
+
+def parse_timestamp(value):
+    """
+    Parse an ISO timestamp from Laravel without assuming local or UTC format.
+    """
+    if not value:
+        return None
+
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone()
+    except ValueError:
+        return None
+
+
+def station_activity_status():
+    """
+    Read Laravel's station heartbeat so cameras sleep when no station is open.
+    """
+    default_status = {
+        "active": False,
+        "last_seen_at": None,
+        "active_until": None,
+        "seconds_until_idle": 0,
+        "active_locations": [],
+    }
+
+    try:
+        with open(STATION_ACTIVITY_PATH, "r", encoding="utf-8") as activity_file:
+            activity = json.load(activity_file)
+    except (OSError, json.JSONDecodeError):
+        return default_status
+
+    now = datetime.now().astimezone()
+    active_until = parse_timestamp(activity.get("active_until"))
+    locations = activity.get("locations") if isinstance(activity.get("locations"), dict) else {}
+    active_locations = []
+    last_seen_at = parse_timestamp(activity.get("last_seen_at"))
+
+    for location, seen_at in locations.items():
+        location_seen_at = parse_timestamp(seen_at)
+
+        if not location_seen_at:
+            continue
+
+        if last_seen_at is None or location_seen_at > last_seen_at:
+            last_seen_at = location_seen_at
+
+        if (now - location_seen_at).total_seconds() <= STATION_VIEWER_IDLE_AFTER_SECONDS:
+            active_locations.append(location)
+
+    active = bool(active_locations) or bool(active_until and active_until > now)
+
+    if active_until is None and last_seen_at is not None:
+        active_until = last_seen_at + timedelta(seconds=STATION_VIEWER_IDLE_AFTER_SECONDS)
+
+    seconds_until_idle = (
+        max(0, int((active_until - now).total_seconds()))
+        if active_until is not None
+        else 0
+    )
+
+    return {
+        "active": active,
+        "last_seen_at": last_seen_at.isoformat() if last_seen_at else None,
+        "active_until": active_until.isoformat() if active_until else None,
+        "seconds_until_idle": seconds_until_idle,
+        "active_locations": sorted(active_locations),
+    }
+
+
+def station_viewer_active():
+    """
+    Whether at least one station page has checked in recently.
+    """
+    return station_activity_status()["active"]
 
 
 def save_frame_atomic(role, frame):
@@ -550,11 +628,14 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
     """
     Build the combined detector status JSON for Laravel.
     """
+    station_activity = station_activity_status()
     payload = {
         "service_running": service_running,
         "service_message": service_message,
         "updated_at": datetime.now().astimezone().isoformat(),
         "detector_model_path": MODEL_PATH,
+        "station_activity": station_activity,
+        "camera_power_mode": "active" if station_activity["active"] else "standby",
         "stream_server": {
             "host": MJPEG_STREAM_HOST,
             "port": MJPEG_STREAM_PORT,
@@ -674,6 +755,30 @@ def cleanup_tracks_outside_roi(state, visible_roi_track_ids):
 
         if not visible_roi_track_ids:
             state["recent_resolutions"] = []
+
+
+def put_camera_in_standby(role, state):
+    """
+    Release camera resources while no station monitor is open.
+    """
+    release_capture(state)
+
+    with state["lock"]:
+        state["camera_running"] = False
+        state["detection_ready"] = False
+        state["retry_count"] = 0
+        state["active_detections"] = 0
+        state["latest_frame"] = None
+        state["latest_camera_config"] = None
+        state["last_error"] = "Camera paused because no Station page is open."
+
+    cleanup_tracks_outside_roi(state, set())
+
+    publish_status_frame(
+        role,
+        "Camera paused",
+        "Open a Station page to start live detection.",
+    )
 
 
 def mark_processed_as_guest_locked(state, track_id, xyxy, overlay, now_monotonic):
@@ -1644,6 +1749,8 @@ def build_models():
     """
     Keep one model instance per camera so tracker state does not mix across roles.
     """
+    from ultralytics import YOLO
+
     detector_models = {}
 
     for role in CAMERA_ROLES:
@@ -1657,6 +1764,36 @@ def build_models():
     return detector_models
 
 
+def ensure_detector_model_loaded(role, state, model_info):
+    """
+    Load YOLO only when a station viewer actually needs live detection.
+    """
+    if model_info.get("model") is not None and model_info.get("vehicle_labels"):
+        return True
+
+    try:
+        from ultralytics import YOLO
+
+        model = YOLO(MODEL_PATH)
+        vehicle_labels = resolve_allowed_vehicle_classes(model)
+    except Exception as error:
+        state["detection_ready"] = False
+        state["retry_count"] += 1
+        state["last_error"] = f"{role.capitalize()} detector model could not be loaded: {error}"
+        return False
+
+    model_info["model"] = model
+    model_info["vehicle_labels"] = vehicle_labels
+
+    if not vehicle_labels:
+        state["detection_ready"] = False
+        state["retry_count"] = 0
+        state["last_error"] = "The current detector model does not expose any supported vehicle classes."
+        return False
+
+    return True
+
+
 def camera_stream_worker(role, state, model_info, stop_event):
     """
     Read and publish camera frames independently from YOLO inference.
@@ -1665,6 +1802,12 @@ def camera_stream_worker(role, state, model_info, stop_event):
         try:
             runtime_config = load_runtime_config()
             camera_config = runtime_config["cameras"][role]
+
+            if not station_viewer_active():
+                put_camera_in_standby(role, state)
+                stop_event.wait(STATION_IDLE_POLL_SECONDS)
+                continue
+
             capture, capture_source = ensure_capture(camera_config, state)
 
             if capture is None or not capture.isOpened():
@@ -1709,7 +1852,11 @@ def camera_stream_worker(role, state, model_info, stop_event):
                     elif not vehicle_labels:
                         state["detection_ready"] = False
                         state["retry_count"] = 0
-                        state["last_error"] = "The current detector model does not expose any supported vehicle classes."
+                        state["last_error"] = (
+                            "Detector model is loading."
+                            if model_info.get("model") is None
+                            else "The current detector model does not expose any supported vehicle classes."
+                        )
                         publish_stream_frame(role, frame)
                     else:
                         refresh_pending_window_snapshots(frame, state)
@@ -1756,18 +1903,28 @@ def camera_detection_worker(role, state, model_info, stop_event):
     Run YOLO tracking in a separate worker so live MJPEG publishing stays smooth.
     """
     while not stop_event.is_set():
+        if not station_viewer_active():
+            with state["lock"]:
+                state["detection_ready"] = False
+                state["active_detections"] = 0
+            stop_event.wait(STATION_IDLE_POLL_SECONDS)
+            continue
+
         frame, camera_config = next_detection_frame(state)
 
         if frame is None:
             stop_event.wait(CAPTURE_INTERVAL_SECONDS)
             continue
 
-        vehicle_labels = model_info.get("vehicle_labels", {})
-
-        if not calibration_ready(camera_config) or not vehicle_labels:
+        if not calibration_ready(camera_config):
             stop_event.wait(CAPTURE_INTERVAL_SECONDS)
             continue
 
+        if not ensure_detector_model_loaded(role, state, model_info):
+            stop_event.wait(RECONNECT_DELAY_SECONDS)
+            continue
+
+        vehicle_labels = model_info.get("vehicle_labels", {})
         runtime_config = load_runtime_config()
         laravel_client = LaravelEventClient(runtime_config)
 
@@ -1806,7 +1963,7 @@ def run_detector_loop():
 
     runtime_config = load_runtime_config()
     camera_states = {role: initial_camera_state() for role in CAMERA_ROLES}
-    detector_models = {role: {"vehicle_labels": {}} for role in CAMERA_ROLES}
+    detector_models = {role: {"model": None, "vehicle_labels": {}} for role in CAMERA_ROLES}
     write_status(
         runtime_config,
         camera_states,
@@ -1816,7 +1973,6 @@ def run_detector_loop():
     )
 
     try:
-        detector_models = build_models()
         stop_event = threading.Event()
         workers = []
 

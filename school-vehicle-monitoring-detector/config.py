@@ -7,6 +7,7 @@ PUBLIC_CAMERA_DIR = PROJECT_ROOT / "public" / "camera"
 SNAPSHOTS_DIR = PUBLIC_CAMERA_DIR / "snapshots"
 STATUS_FILE_PATH = PUBLIC_CAMERA_DIR / "camera_status.json"
 RUNTIME_CONFIG_PATH = PROJECT_ROOT / "storage" / "app" / "camera" / "camera_runtime_config.json"
+STATION_ACTIVITY_PATH = PROJECT_ROOT / "storage" / "app" / "camera" / "station_activity.json"
 PUBLIC_STORAGE_DIR = PROJECT_ROOT / "storage" / "app" / "public"
 DETECTED_IMAGE_DIR = PUBLIC_STORAGE_DIR / "detected-vehicle-images"
 
@@ -26,6 +27,8 @@ YOLO_IMAGE_SIZE = 640
 RFID_DETECTION_WINDOW_SECONDS = 4.0
 RFID_POLL_INTERVAL_SECONDS = 0.5
 CAMERA_RETRY_DELAY_SECONDS = 2.0
+STATION_VIEWER_IDLE_AFTER_SECONDS = 10.0
+STATION_IDLE_POLL_SECONDS = 1.0
 
 # Detection settings.
 MODEL_PATH = "yolov8n.pt"

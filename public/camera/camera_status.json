@@ -1,8 +1,16 @@
 {
   "service_running": true,
   "service_message": "Dual-camera detector running.",
-  "updated_at": "2026-05-09T06:03:38.747275+08:00",
+  "updated_at": "2026-05-10T21:05:22.737634+08:00",
   "detector_model_path": "yolov8n.pt",
+  "station_activity": {
+    "active": false,
+    "last_seen_at": "2026-05-10T21:01:20+08:00",
+    "active_until": "2026-05-10T21:01:30+08:00",
+    "seconds_until_idle": 0,
+    "active_locations": []
+  },
+  "camera_power_mode": "standby",
   "stream_server": {
     "host": "127.0.0.1",
     "port": 8765
@@ -23,13 +31,13 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-05-09T06:03:32.961951+08:00",
-      "last_error": "Camera opened, but frame capture failed.",
-      "retry_count": 1,
-      "processed_frames": 3676,
-      "detections_seen": 100,
+      "last_capture_time": "2026-05-10T21:01:29.837789+08:00",
+      "last_error": "Camera paused because no Station page is open.",
+      "retry_count": 0,
+      "processed_frames": 3685,
+      "detections_seen": 156,
       "active_detections": 0,
-      "crossings_logged": 3
+      "crossings_logged": 5
     },
     "exit": {
       "camera_role": "exit",
@@ -40,16 +48,11 @@
       "source_type": "webcam",
       "source_value": 0,
       "stream_url": "http://127.0.0.1:8765/stream/exit",
-      "supported_vehicle_classes": [
-        "Car",
-        "Motorcycle",
-        "Bus",
-        "Truck"
-      ],
-      "last_capture_time": "2026-05-09T06:03:33.181079+08:00",
-      "last_error": "Camera opened, but frame capture failed.",
-      "retry_count": 1,
-      "processed_frames": 3660,
+      "supported_vehicle_classes": [],
+      "last_capture_time": "2026-05-10T21:01:29.838178+08:00",
+      "last_error": "Camera paused because no Station page is open.",
+      "retry_count": 0,
+      "processed_frames": 3689,
       "detections_seen": 0,
       "active_detections": 0,
       "crossings_logged": 0
