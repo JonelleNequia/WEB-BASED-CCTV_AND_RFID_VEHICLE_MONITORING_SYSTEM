@@ -788,6 +788,60 @@ class DetectedEventIngestionTest extends TestCase
             ->exists());
     }
 
+    public function test_detector_guest_observation_same_event_complete_analysis_replaces_previous_ai_details(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $headers = [
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ];
+
+        $this->withHeaders($headers)->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-two-step-replace-001',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => now()->toIso8601String(),
+            'plate_number' => 'TMP 000',
+            'vehicle_color' => 'gray',
+            'snapshot' => UploadedFile::fake()->image('guest-two-step-replace.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 78,
+                'analysis_status' => 'pending',
+            ]),
+        ])->assertCreated();
+
+        $this->withHeaders($headers)->postJson(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-two-step-replace-001',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => now()->toIso8601String(),
+            'plate_number' => 'abc 123',
+            'vehicle_color' => 'white',
+            'detection_metadata' => [
+                'track_id' => 78,
+                'analysis_status' => 'complete',
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('duplicate', true);
+
+        $observation = GuestVehicleObservation::query()
+            ->where('external_event_key', 'guest-window-two-step-replace-001')
+            ->firstOrFail();
+
+        $this->assertSame('ABC 123', $observation->plate_number);
+        $this->assertSame('White', $observation->vehicle_color);
+
+        $event = VehicleEvent::query()
+            ->where('external_event_key', 'guest-window-two-step-replace-001')
+            ->firstOrFail();
+
+        $this->assertSame('ABC 123', $event->plate_number);
+        $this->assertSame('White', $event->vehicle_color);
+    }
+
     protected function createAssignedVehicleWithTag(string $tagUid, string $plateNumber): RfidTag
     {
         $vehicle = Vehicle::query()->create([

@@ -1,7 +1,7 @@
 {
   "service_running": true,
   "service_message": "Dual-camera detector running.",
-  "updated_at": "2026-05-08T08:14:18.107891+08:00",
+  "updated_at": "2026-05-09T06:03:38.747275+08:00",
   "detector_model_path": "yolov8n.pt",
   "stream_server": {
     "host": "127.0.0.1",
@@ -23,20 +23,20 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-05-08T08:14:08.399632+08:00",
-      "last_error": "Could not open camera source: 0",
+      "last_capture_time": "2026-05-09T06:03:32.961951+08:00",
+      "last_error": "Camera opened, but frame capture failed.",
       "retry_count": 1,
-      "processed_frames": 6050,
-      "detections_seen": 114,
+      "processed_frames": 3676,
+      "detections_seen": 100,
       "active_detections": 0,
-      "crossings_logged": 5
+      "crossings_logged": 3
     },
     "exit": {
       "camera_role": "exit",
       "camera_name": "PHILCST Exit Camera",
       "camera_running": false,
       "detection_ready": false,
-      "calibration_ready": true,
+      "calibration_ready": false,
       "source_type": "webcam",
       "source_value": 0,
       "stream_url": "http://127.0.0.1:8765/stream/exit",
@@ -46,13 +46,13 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-05-08T08:14:08.515742+08:00",
-      "last_error": "Could not open camera source: 0",
+      "last_capture_time": "2026-05-09T06:03:33.181079+08:00",
+      "last_error": "Camera opened, but frame capture failed.",
       "retry_count": 1,
-      "processed_frames": 6061,
-      "detections_seen": 113,
+      "processed_frames": 3660,
+      "detections_seen": 0,
       "active_detections": 0,
-      "crossings_logged": 3
+      "crossings_logged": 0
     }
   }
 }

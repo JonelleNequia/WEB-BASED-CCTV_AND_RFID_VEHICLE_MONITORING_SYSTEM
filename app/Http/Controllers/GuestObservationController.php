@@ -495,16 +495,20 @@ class GuestObservationController extends Controller
             $updates['snapshot_path'] = $snapshotPath;
         }
 
+        $sameExternalEvent = filled($validated['external_event_key'] ?? null)
+            && filled($observation->external_event_key)
+            && (string) $validated['external_event_key'] === (string) $observation->external_event_key;
+        $analysisComplete = ($validated['detection_metadata']['analysis_status'] ?? null) === 'complete';
         $plateNumber = $this->normalizePlate($validated['plate_number'] ?? $validated['plate_text'] ?? null);
 
-        if ($plateNumber !== null && blank($observation->plate_number)) {
+        if ($plateNumber !== null && (blank($observation->plate_number) || ($sameExternalEvent && $analysisComplete))) {
             $updates['plate_number'] = $plateNumber;
             $updates['plate_text'] = $plateNumber;
         }
 
         $vehicleColor = $this->normalizeVehicleColor($validated['vehicle_color'] ?? $validated['detected_vehicle_color'] ?? null);
 
-        if ($vehicleColor !== null && blank($observation->vehicle_color)) {
+        if ($vehicleColor !== null && (blank($observation->vehicle_color) || ($sameExternalEvent && $analysisComplete))) {
             $updates['vehicle_color'] = $vehicleColor;
         }
 

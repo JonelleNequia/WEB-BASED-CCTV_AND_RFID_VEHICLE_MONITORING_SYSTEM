@@ -58,8 +58,8 @@ from anpr import detect_vehicle_color, ocr_runtime_status, read_license_plate
 CAMERA_ROLES = ("entrance", "exit")
 STREAM_FRAMES = {role: None for role in CAMERA_ROLES}
 STREAM_CONDITION = threading.Condition()
-RESOLVED_OVERLAY_HOLD_SECONDS = RFID_DETECTION_WINDOW_SECONDS + 2.0
-RESOLVED_DETECTION_COOLDOWN_SECONDS = 45.0
+RESOLVED_OVERLAY_HOLD_SECONDS = 1.25
+RESOLVED_DETECTION_COOLDOWN_SECONDS = 1.5
 GUEST_TRACK_COOLDOWN_SECONDS = 10.0
 DUPLICATE_TRACK_IOU_THRESHOLD = 0.18
 DUPLICATE_TRACK_CENTER_DISTANCE_RATIO = 0.28
@@ -633,6 +633,49 @@ def cleanup_stale_tracks(state):
             state["track_overlays"].pop(track_id, None)
 
 
+def forget_track_locked(state, track_id):
+    """
+    Drop detector state for a track that is no longer active in the ROI.
+    """
+    if track_id in state["pending_windows"]:
+        return
+
+    state["track_last_seen"].pop(track_id, None)
+    state["track_sides"].pop(track_id, None)
+    state["track_boxes"].pop(track_id, None)
+    state["crossed_track_ids"].pop(track_id, None)
+    state["processed_as_guest"].pop(track_id, None)
+    state["tracked_vehicles"].pop(track_id, None)
+    state["track_overlays"].pop(track_id, None)
+
+
+def cleanup_tracks_outside_roi(state, visible_roi_track_ids):
+    """
+    Make station overlays and recent decisions follow the ROI strictly.
+    """
+    visible_roi_track_ids = set(visible_roi_track_ids)
+
+    with state["lock"]:
+        known_track_ids = set()
+
+        for key in (
+            "track_last_seen",
+            "track_sides",
+            "track_boxes",
+            "crossed_track_ids",
+            "processed_as_guest",
+            "tracked_vehicles",
+            "track_overlays",
+        ):
+            known_track_ids.update(state.get(key, {}).keys())
+
+        for track_id in known_track_ids - visible_roi_track_ids:
+            forget_track_locked(state, track_id)
+
+        if not visible_roi_track_ids:
+            state["recent_resolutions"] = []
+
+
 def mark_processed_as_guest_locked(state, track_id, xyxy, overlay, now_monotonic):
     """
     Remember that one YOLO track already produced a guest API submission.
@@ -924,6 +967,8 @@ def render_annotated_frame(role, frame, results, camera_config, state, vehicle_l
     """
     annotated = frame.copy()
     draw_calibration_guides(annotated, camera_config)
+    frame_height, frame_width = frame.shape[:2]
+    mask_polygon = normalized_polygon_to_pixels(camera_config.get("calibration_mask"), frame_width, frame_height)
     boxes = results.boxes if results is not None else None
     drawn_track_ids = set()
 
@@ -935,6 +980,9 @@ def render_annotated_frame(role, frame, results, camera_config, state, vehicle_l
 
         for track_id, class_id, confidence, xyxy in zip(ids, classes, confidences, coordinates):
             if class_id not in vehicle_labels:
+                continue
+
+            if not bbox_inside_roi(xyxy, mask_polygon):
                 continue
 
             overlay = state["track_overlays"].get(track_id) or detection_overlay()
@@ -964,6 +1012,9 @@ def render_annotated_frame(role, frame, results, camera_config, state, vehicle_l
         overlay = fallback_overlays.get(track_id)
 
         if not overlay:
+            continue
+
+        if not bbox_inside_roi(box.get("xyxy", (0, 0, 0, 0)), mask_polygon):
             continue
 
         hold_seconds = (
@@ -1013,6 +1064,13 @@ def current_track_boxes(results):
         }
         for track_id, class_id, confidence, xyxy in zip(ids, classes, confidences, coordinates)
     }
+
+
+def bbox_inside_roi(xyxy, mask_polygon):
+    """
+    Treat a detection as active only when its center is inside the saved ROI.
+    """
+    return point_in_polygon(bbox_center(xyxy), mask_polygon) if mask_polygon else False
 
 
 def refresh_pending_window_snapshots(frame, state):
@@ -1380,9 +1438,16 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
     line = normalized_line_to_pixels(camera_config.get("calibration_line"), frame_width, frame_height)
     boxes = results.boxes
 
+    if not mask_polygon or not line:
+        state["active_detections"] = 0
+        cleanup_tracks_outside_roi(state, set())
+        cleanup_stale_tracks(state)
+        return
+
     if boxes is None or boxes.id is None:
         state["active_detections"] = 0
         update_detection_windows(role, frame, results, state, laravel_client)
+        cleanup_tracks_outside_roi(state, set())
         cleanup_stale_tracks(state)
         return
 
@@ -1391,11 +1456,20 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
     confidences = boxes.conf.cpu().tolist()
     coordinates = boxes.xyxy.cpu().tolist()
     active_detections = 0
+    visible_roi_track_ids = set()
 
     for track_id, class_id, confidence, xyxy in zip(ids, classes, confidences, coordinates):
         if class_id not in vehicle_labels:
             continue
 
+        inside_roi = bbox_inside_roi(xyxy, mask_polygon)
+
+        if not inside_roi:
+            with state["lock"]:
+                forget_track_locked(state, track_id)
+            continue
+
+        visible_roi_track_ids.add(track_id)
         active_detections += 1
         now_monotonic = time.monotonic()
 
@@ -1411,24 +1485,20 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
             state["track_overlays"].setdefault(track_id, detection_overlay())
 
         center_point = bbox_center(xyxy)
-        inside_roi = point_in_polygon(center_point, mask_polygon) if mask_polygon else True
 
         with state["lock"]:
             if track_is_processed_as_guest_locked(state, track_id, inside_roi, now_monotonic):
                 state["track_overlays"][track_id] = state["track_overlays"].get(track_id) or default_overlay()
                 continue
 
-        if not inside_roi:
-            continue
-
-        current_side = point_side_of_line(center_point, line) if line else 0
+        current_side = point_side_of_line(center_point, line)
 
         with state["lock"]:
             previous_side = state["track_sides"].get(track_id)
             state["track_sides"][track_id] = current_side
 
-        line_touched = bbox_intersects_line(xyxy, line) if line else False
-        triggered = (crossed_line(previous_side, current_side) or line_touched) if line else previous_side is None
+        line_touched = bbox_intersects_line(xyxy, line)
+        triggered = crossed_line(previous_side, current_side) or line_touched
 
         if not triggered:
             continue
@@ -1448,7 +1518,7 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
         if already_handled:
             continue
 
-        if line and previous_side is not None and current_side is not None:
+        if previous_side is not None and current_side is not None:
             if previous_side < 0 and current_side > 0:
                 direction = "IN"
             elif previous_side > 0 and current_side < 0:
@@ -1474,6 +1544,7 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
 
     state["active_detections"] = active_detections
     update_detection_windows(role, frame, results, state, laravel_client)
+    cleanup_tracks_outside_roi(state, visible_roi_track_ids)
     cleanup_stale_tracks(state)
 
 
@@ -1513,7 +1584,7 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
         publish_stream_frame(role, frame)
         state["detection_ready"] = False
         state["retry_count"] = 0
-        state["last_error"] = "Calibration mask or trigger line is missing. Save calibration before auto logging starts."
+        state["last_error"] = "Calibration ROI mask and trigger line are required before auto logging starts."
         return True
 
     vehicle_labels = model_info["vehicle_labels"]
@@ -1633,7 +1704,7 @@ def camera_stream_worker(role, state, model_info, stop_event):
                     if not calibration_ready(camera_config):
                         state["detection_ready"] = False
                         state["retry_count"] = 0
-                        state["last_error"] = "Calibration mask or trigger line is missing. Save calibration before auto logging starts."
+                        state["last_error"] = "Calibration ROI mask and trigger line are required before auto logging starts."
                         publish_stream_frame(role, frame)
                     elif not vehicle_labels:
                         state["detection_ready"] = False
