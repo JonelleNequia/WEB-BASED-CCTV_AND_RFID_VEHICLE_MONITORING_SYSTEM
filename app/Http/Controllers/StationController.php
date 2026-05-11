@@ -115,9 +115,9 @@ class StationController extends Controller
                 'inactive_tag' => 'RFID scan recorded, but the assigned tag is inactive.',
                 'unassigned_tag' => 'RFID scan recorded, but this tag is not assigned to a vehicle.',
                 'inactive_vehicle' => 'RFID scan recorded, but the vehicle record is inactive.',
-                'non_recurring_category' => 'RFID scan recorded as guest/manual review. A guest observation was created for review.',
-                'guest' => 'RFID scan recorded as GUEST. A guest observation was created for review.',
-                default => 'RFID scan recorded for manual review.',
+                'non_recurring_category' => 'RFID scan recorded as guest/manual monitoring. A guest observation was created.',
+                'guest' => 'RFID scan recorded as GUEST. A guest observation was created.',
+                default => 'RFID scan recorded.',
             };
 
             return response()->json([
@@ -199,8 +199,6 @@ class StationController extends Controller
             ->limit($limit * 3)
             ->get()
             ->map(function (GuestVehicleObservation $observation): array {
-                $statusLabel = ucwords(str_replace('_', ' ', (string) $observation->status));
-
                 return [
                     'id' => 'guest-'.$observation->id,
                     'record_type' => 'guest_observation',
@@ -211,12 +209,12 @@ class StationController extends Controller
                     'camera_role' => $observation->camera?->camera_role,
                     'scan_location' => $observation->location,
                     'verification_label' => 'GUEST',
-                    'resulting_state' => $statusLabel,
+                    'resulting_state' => 'Guest',
                     'entries_today_count' => 0,
                     'exits_today_count' => 0,
                     'event_time' => $observation->observed_at?->toIso8601String(),
                     'display_time' => $observation->observed_at?->format('M d, Y • h:i:s A'),
-                    'status' => $statusLabel,
+                    'status' => 'Guest',
                     'snapshot_url' => $observation->snapshot_url,
                     'sort_time' => $this->sortTimestamp($observation->created_at, $observation->observed_at),
                 ];

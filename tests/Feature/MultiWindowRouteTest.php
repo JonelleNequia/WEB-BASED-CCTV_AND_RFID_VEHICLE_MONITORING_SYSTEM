@@ -164,7 +164,7 @@ class MultiWindowRouteTest extends TestCase
             ->assertJsonFragment([
                 'event_type' => 'GUEST',
                 'verification_label' => 'GUEST',
-                'resulting_state' => 'Pending Review',
+                'resulting_state' => 'Guest',
             ]);
     }
 

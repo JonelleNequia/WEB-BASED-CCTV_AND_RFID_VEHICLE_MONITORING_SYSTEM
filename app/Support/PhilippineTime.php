@@ -24,8 +24,27 @@ class PhilippineTime
      */
     public static function todayWindow(): array
     {
-        $localStart = Carbon::now(self::TIMEZONE)->startOfDay();
-        $localEnd = $localStart->copy()->addDay();
+        return self::periodWindow('today');
+    }
+
+    /**
+     * @return array{local_start: Carbon, local_end: Carbon, storage_start: Carbon, storage_end: Carbon}
+     */
+    public static function periodWindow(string $period): array
+    {
+        $now = Carbon::now(self::TIMEZONE);
+        $localStart = match ($period) {
+            'week' => $now->copy()->startOfWeek(CarbonInterface::MONDAY)->startOfDay(),
+            'month' => $now->copy()->startOfMonth(),
+            'year' => $now->copy()->startOfYear(),
+            default => $now->copy()->startOfDay(),
+        };
+        $localEnd = match ($period) {
+            'week' => $localStart->copy()->addWeek(),
+            'month' => $localStart->copy()->addMonth(),
+            'year' => $localStart->copy()->addYear(),
+            default => $localStart->copy()->addDay(),
+        };
         $storageTimezone = config('app.timezone', 'UTC');
 
         return [
@@ -38,7 +57,12 @@ class PhilippineTime
 
     public static function constrainToday($query, string $column): void
     {
-        $window = self::todayWindow();
+        self::constrainPeriod($query, $column, 'today');
+    }
+
+    public static function constrainPeriod($query, string $column, string $period): void
+    {
+        $window = self::periodWindow($period);
         $start = $column === 'created_at' ? $window['storage_start'] : $window['local_start'];
         $end = $column === 'created_at' ? $window['storage_end'] : $window['local_end'];
 
@@ -51,7 +75,15 @@ class PhilippineTime
      */
     public static function constrainTodayAny($query, array $columns): void
     {
-        $window = self::todayWindow();
+        self::constrainPeriodAny($query, $columns, 'today');
+    }
+
+    /**
+     * @param  array<int, string>  $columns
+     */
+    public static function constrainPeriodAny($query, array $columns, string $period): void
+    {
+        $window = self::periodWindow($period);
 
         $query->where(function ($query) use ($columns, $window): void {
             foreach ($columns as $column) {

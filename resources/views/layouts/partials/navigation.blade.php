@@ -61,12 +61,6 @@
                 'icon' => 'calibration',
             ],
             [
-                'label' => 'Review Queue',
-                'route' => route('manual-review.index'),
-                'active' => request()->routeIs('manual-review.*'),
-                'icon' => 'review',
-            ],
-            [
                 'label' => 'System Status',
                 'route' => route('system-status.index'),
                 'active' => request()->routeIs('system-status.*'),

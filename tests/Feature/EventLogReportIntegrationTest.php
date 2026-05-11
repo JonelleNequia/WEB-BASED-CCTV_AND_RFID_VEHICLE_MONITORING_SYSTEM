@@ -6,8 +6,10 @@ use App\Models\GuestVehicleObservation;
 use App\Models\RfidTag;
 use App\Models\User;
 use App\Models\Vehicle;
+use App\Models\VehicleEvent;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -72,6 +74,48 @@ class EventLogReportIntegrationTest extends TestCase
             ->assertSee('White')
             ->assertSee('/storage/guest_snapshots/event-log-guest.jpg', false)
             ->assertSee('Guest Observation #'.$observation->id);
+    }
+
+    public function test_event_logs_can_filter_records_by_current_month(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+        $now = Carbon::parse('2026-05-10 10:00:00', 'Asia/Manila');
+        $this->travelTo($now);
+
+        try {
+            VehicleEvent::query()->create([
+                'event_type' => 'ENTRY',
+                'event_status' => VehicleEvent::STATUS_COMPLETED,
+                'event_origin' => 'manual',
+                'plate_text' => 'MON-2026',
+                'vehicle_type' => 'Car',
+                'detected_vehicle_type' => 'Car',
+                'event_time' => Carbon::parse('2026-05-08 09:00:00', 'Asia/Manila'),
+                'match_status' => 'open',
+            ]);
+
+            VehicleEvent::query()->create([
+                'event_type' => 'ENTRY',
+                'event_status' => VehicleEvent::STATUS_COMPLETED,
+                'event_origin' => 'manual',
+                'plate_text' => 'APR-2026',
+                'vehicle_type' => 'Car',
+                'detected_vehicle_type' => 'Car',
+                'event_time' => Carbon::parse('2026-04-30 23:59:00', 'Asia/Manila'),
+                'match_status' => 'open',
+            ]);
+
+            $this->actingAs($admin)
+                ->get(route('vehicle-events.index', ['period' => 'month']))
+                ->assertOk()
+                ->assertSee('This Month Logs')
+                ->assertSee('MON-2026')
+                ->assertDontSee('APR-2026');
+        } finally {
+            $this->travelBack();
+        }
     }
 
     public function test_realtime_log_endpoints_return_latest_guest_and_event_rows(): void

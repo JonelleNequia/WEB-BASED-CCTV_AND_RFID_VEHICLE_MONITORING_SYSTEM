@@ -71,12 +71,12 @@ class RfidScanController extends Controller
                 .($scanLog->vehicle?->plate_number ?? 'registered vehicle')
                 .' and current state is '
                 .$scanLog->resultingStateLabel.'.',
-            'non_recurring_category' => 'RFID scan recorded as guest/manual monitoring. A guest observation was created for review.',
+            'non_recurring_category' => 'RFID scan recorded as guest/manual monitoring. A guest observation was created.',
             'inactive_tag' => 'RFID scan recorded, but the assigned tag is inactive.',
             'unassigned_tag' => 'RFID scan recorded, but this tag is still available in inventory and is not assigned to a vehicle.',
             'inactive_vehicle' => 'RFID scan recorded, but the vehicle record is inactive.',
-            'guest' => 'RFID scan recorded as GUEST. A guest observation was created for review.',
-            default => 'RFID scan recorded for manual review.',
+            'guest' => 'RFID scan recorded as GUEST. A guest observation was created.',
+            default => 'RFID scan recorded.',
         };
 
         if ($request->expectsJson()) {

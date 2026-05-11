@@ -126,22 +126,16 @@
     function renderRanking(rows) {
         const table = document.querySelector('[data-dashboard-ranking-table]');
         const body = document.querySelector('[data-dashboard-ranking]');
-        const empty = document.querySelector('[data-dashboard-ranking-empty]');
 
-        if (!table || !body || !empty) {
+        if (!table || !body) {
             return;
         }
 
         body.innerHTML = '';
 
         if (!Array.isArray(rows) || rows.length === 0) {
-            table.hidden = true;
-            empty.hidden = false;
             return;
         }
-
-        table.hidden = false;
-        empty.hidden = true;
 
         rows.forEach(function (row) {
             const tr = document.createElement('tr');
@@ -172,6 +166,28 @@
         });
     }
 
+    function renderTrafficSummary(summary) {
+        if (!summary || typeof summary !== 'object') {
+            return;
+        }
+
+        Object.entries(summary).forEach(function ([period, row]) {
+            const periodRow = document.querySelector(`[data-dashboard-period="${period}"]`);
+
+            if (!periodRow) {
+                return;
+            }
+
+            ['entries', 'exits', 'registered_scans', 'guest_observations'].forEach(function (metric) {
+                const node = periodRow.querySelector(`[data-dashboard-period-metric="${metric}"]`);
+
+                if (node) {
+                    node.textContent = row?.[metric] ?? 0;
+                }
+            });
+        });
+    }
+
     function renderState(body) {
         const metrics = body.metrics || {};
 
@@ -179,6 +195,7 @@
             setMetric(name, value);
         });
 
+        renderTrafficSummary(body.traffic_summary || {});
         renderStream(
             'rfid',
             body.recent_rfid_scans || [],

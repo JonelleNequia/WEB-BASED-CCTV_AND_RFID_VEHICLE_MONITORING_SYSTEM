@@ -182,7 +182,7 @@ class VehicleEvent extends Model
         }
 
         if ($this->vehicle_category === 'guest' || in_array($this->event_origin, ['guest_cctv', 'guest_manual'], true)) {
-            return 'Guest review';
+            return 'Guest';
         }
 
         if ($this->event_type === 'ENTRY') {

@@ -12,6 +12,7 @@ use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Services\EventService;
 use App\Services\VehicleRegistryService;
+use App\Support\PhilippineTime;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -26,20 +27,25 @@ class VehicleEventController extends Controller
      */
     public function index(Request $request): View
     {
-        $logs = $this->paginatedUnifiedLogs($request, 10);
+        $filteredLogs = $this->filteredUnifiedLogs($request);
+        $logs = $this->paginatedUnifiedLogCollection($request, $filteredLogs, 10);
 
         return view('vehicle-events.index', [
             'logs' => $logs,
             'events' => $logs,
+            'eventLogSummary' => $this->eventLogSummary($filteredLogs),
+            'selectedPeriodLabel' => $this->selectedPeriodLabel($request),
             'filters' => $request->only([
                 'plate_text',
                 'event_type',
                 'match_status',
                 'date_from',
                 'date_to',
+                'period',
                 'category',
                 'vehicle_owner_name',
             ]),
+            'periodOptions' => $this->periodOptions(),
             'categoryOptions' => $this->categoryOptions(),
         ]);
     }
@@ -187,7 +193,64 @@ class VehicleEventController extends Controller
         }
     }
 
-    protected function filteredEventsQuery(Request $request, ?Carbon $dateFrom = null, ?Carbon $dateTo = null)
+    /**
+     * @return array<string, string>
+     */
+    protected function periodOptions(): array
+    {
+        return [
+            'today' => 'Today',
+            'week' => 'This Week',
+            'month' => 'This Month',
+            'year' => 'This Year',
+        ];
+    }
+
+    protected function selectedPeriod(Request $request): ?string
+    {
+        $period = $request->string('period')->lower()->value();
+
+        return array_key_exists($period, $this->periodOptions()) ? $period : null;
+    }
+
+    protected function selectedPeriodLabel(Request $request): string
+    {
+        $period = $this->selectedPeriod($request);
+
+        if ($period !== null) {
+            return $this->periodOptions()[$period];
+        }
+
+        if ($request->filled('date_from') || $request->filled('date_to')) {
+            return 'Custom Range';
+        }
+
+        return 'All Records';
+    }
+
+    /**
+     * @return array{0: Carbon|null, 1: Carbon|null}
+     */
+    protected function dateWindowForRequest(Request $request): array
+    {
+        $period = $this->selectedPeriod($request);
+
+        if ($period !== null) {
+            $window = PhilippineTime::periodWindow($period);
+
+            return [$window['local_start'], $window['local_end']];
+        }
+
+        $dateFrom = $this->parseDate($request->string('date_from')->value());
+        $dateTo = $this->parseDate($request->string('date_to')->value());
+
+        return [
+            $dateFrom?->copy()->startOfDay(),
+            $dateTo?->copy()->addDay()->startOfDay(),
+        ];
+    }
+
+    protected function filteredEventsQuery(Request $request, ?Carbon $dateFrom = null, ?Carbon $dateUntil = null)
     {
         return VehicleEvent::query()
             ->with(['camera', 'matchedEntry', 'vehicle', 'rfidScanLog.vehicleRfidTag'])
@@ -228,8 +291,8 @@ class VehicleEventController extends Controller
             ->when($dateFrom !== null, function ($query) use ($dateFrom): void {
                 $query->where('event_time', '>=', $dateFrom->copy()->startOfDay());
             })
-            ->when($dateTo !== null, function ($query) use ($dateTo): void {
-                $query->where('event_time', '<=', $dateTo->copy()->endOfDay());
+            ->when($dateUntil !== null, function ($query) use ($dateUntil): void {
+                $query->where('event_time', '<', $dateUntil);
             });
     }
 
@@ -242,6 +305,16 @@ class VehicleEventController extends Controller
     protected function paginatedUnifiedLogs(Request $request, int $perPage): LengthAwarePaginator
     {
         $logs = $this->filteredUnifiedLogs($request);
+
+        return $this->paginatedUnifiedLogCollection($request, $logs, $perPage);
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $logs
+     * @return LengthAwarePaginator<int, array<string, mixed>>
+     */
+    protected function paginatedUnifiedLogCollection(Request $request, Collection $logs, int $perPage): LengthAwarePaginator
+    {
         $page = max(1, (int) $request->query('page', 1));
         $items = $logs->forPage($page, $perPage)->values();
 
@@ -262,17 +335,16 @@ class VehicleEventController extends Controller
      */
     protected function filteredUnifiedLogs(Request $request): Collection
     {
-        $dateFrom = $this->parseDate($request->string('date_from')->value());
-        $dateTo = $this->parseDate($request->string('date_to')->value());
+        [$dateFrom, $dateUntil] = $this->dateWindowForRequest($request);
 
-        $eventLogs = $this->filteredEventsQuery($request, $dateFrom, $dateTo)
+        $eventLogs = $this->filteredEventsQuery($request, $dateFrom, $dateUntil)
             ->get()
             ->map(fn (VehicleEvent $event): array => $this->vehicleEventLogPayload($event));
 
-        $guestLogs = $this->filteredGuestLogs($request, $dateFrom, $dateTo)
+        $guestLogs = $this->filteredGuestLogs($request, $dateFrom, $dateUntil)
             ->get()
             ->map(fn (GuestVehicleObservation $observation): array => $this->guestLogPayload($observation));
-        $rfidOnlyLogs = $this->filteredRfidOnlyLogs($request, $dateFrom, $dateTo)
+        $rfidOnlyLogs = $this->filteredRfidOnlyLogs($request, $dateFrom, $dateUntil)
             ->get()
             ->map(fn (RfidScanLog $scanLog): array => $this->rfidOnlyLogPayload($scanLog));
 
@@ -283,7 +355,7 @@ class VehicleEventController extends Controller
             ->values();
     }
 
-    protected function filteredGuestLogs(Request $request, ?Carbon $dateFrom = null, ?Carbon $dateTo = null)
+    protected function filteredGuestLogs(Request $request, ?Carbon $dateFrom = null, ?Carbon $dateUntil = null)
     {
         $showingGuestOnly = $request->filled('event_type')
             && $request->string('event_type')->upper()->value() === 'GUEST';
@@ -331,12 +403,12 @@ class VehicleEventController extends Controller
             ->when($dateFrom !== null, function ($query) use ($dateFrom): void {
                 $query->where('observed_at', '>=', $dateFrom->copy()->startOfDay());
             })
-            ->when($dateTo !== null, function ($query) use ($dateTo): void {
-                $query->where('observed_at', '<=', $dateTo->copy()->endOfDay());
+            ->when($dateUntil !== null, function ($query) use ($dateUntil): void {
+                $query->where('observed_at', '<', $dateUntil);
             });
     }
 
-    protected function filteredRfidOnlyLogs(Request $request, ?Carbon $dateFrom = null, ?Carbon $dateTo = null)
+    protected function filteredRfidOnlyLogs(Request $request, ?Carbon $dateFrom = null, ?Carbon $dateUntil = null)
     {
         return RfidScanLog::query()
             ->with(['vehicle', 'vehicleRfidTag'])
@@ -377,9 +449,24 @@ class VehicleEventController extends Controller
             ->when($dateFrom !== null, function ($query) use ($dateFrom): void {
                 $query->where('scan_time', '>=', $dateFrom->copy()->startOfDay());
             })
-            ->when($dateTo !== null, function ($query) use ($dateTo): void {
-                $query->where('scan_time', '<=', $dateTo->copy()->endOfDay());
+            ->when($dateUntil !== null, function ($query) use ($dateUntil): void {
+                $query->where('scan_time', '<', $dateUntil);
             });
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $logs
+     * @return array{total: int, entries: int, exits: int, guests: int, rfid: int}
+     */
+    protected function eventLogSummary(Collection $logs): array
+    {
+        return [
+            'total' => $logs->count(),
+            'entries' => $logs->where('event_type', 'ENTRY')->count(),
+            'exits' => $logs->where('event_type', 'EXIT')->count(),
+            'guests' => $logs->where('event_type', 'GUEST')->count(),
+            'rfid' => $logs->where('event_type', 'RFID')->count(),
+        ];
     }
 
     /**
@@ -422,8 +509,6 @@ class VehicleEventController extends Controller
     protected function guestLogPayload(GuestVehicleObservation $observation): array
     {
         $time = $observation->observed_at;
-        $statusLabel = ucfirst(str_replace('_', ' ', (string) $observation->status));
-
         return [
             'record_type' => 'guest_observation',
             'record_type_label' => 'Guest Observation',
@@ -437,13 +522,13 @@ class VehicleEventController extends Controller
             'category_label' => 'Guest',
             'source_label' => $observation->observation_source === 'cctv' ? 'Guest CCTV' : 'Guest Manual',
             'station_label' => ucfirst($observation->location).' Station',
-            'state_label' => $statusLabel,
+            'state_label' => 'Guest',
             'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
             'summary_label' => 'Guest Observation #'.$observation->id.' • '.($time?->format('M d, Y • h:i A') ?: 'No time'),
             'event_time_export' => $time?->toDateTimeString(),
-            'status_label' => $statusLabel,
-            'status_badge_class' => in_array($observation->status, ['reviewed', 'verified'], true) ? 'matched' : 'manual-review',
-            'match_label' => 'Guest review',
+            'status_label' => 'Guest',
+            'status_badge_class' => 'secondary',
+            'match_label' => 'Guest',
             'rfid_tag_uid' => 'N/A',
             'image_url' => $observation->snapshot_path ? $observation->snapshot_url : null,
             'sort_time' => $this->sortTimestamp($observation->created_at, $time),

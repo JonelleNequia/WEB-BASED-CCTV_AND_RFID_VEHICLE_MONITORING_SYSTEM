@@ -22,6 +22,7 @@ class CalibrationController extends Controller
         SettingsService $settingsService
     ): View {
         $settingsService->ensureCameraRuntimeConfigExists();
+        $detectorRuntimeService->markCalibrationViewerActive();
         $detectorStatus = $detectorRuntimeService->ensureRunning();
         $cameras = $calibrationService->cameraPayload();
 
@@ -34,6 +35,17 @@ class CalibrationController extends Controller
         return view('calibration.index', [
             'cameras' => $cameras,
             'detectorStatus' => $detectorStatus,
+        ]);
+    }
+
+    public function heartbeat(DetectorRuntimeService $detectorRuntimeService): JsonResponse
+    {
+        $detectorRuntimeService->markCalibrationViewerActive();
+        $detectorStatus = $detectorRuntimeService->ensureRunning();
+
+        return response()->json([
+            'runtime' => $detectorStatus,
+            'generated_at' => now()->toIso8601String(),
         ]);
     }
 

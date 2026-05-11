@@ -1,6 +1,8 @@
 (function () {
     const cameraApi = window.PHILCSTBrowserCamera;
     const payloadNode = document.getElementById('camera-calibration-data');
+    const HEARTBEAT_INTERVAL_MS = 4000;
+    const STREAM_RECONNECT_INTERVAL_MS = 5000;
 
     if (!cameraApi || !payloadNode) {
         return;
@@ -9,6 +11,7 @@
     const payload = JSON.parse(payloadNode.textContent);
     const cardElements = document.querySelectorAll('[data-calibration-camera]');
     const cards = {};
+    const lastStreamReconnectAt = {};
 
     class CalibrationCard {
         constructor(element, camera, routes) {
@@ -492,6 +495,9 @@
                     card.render();
                 }
             }, 2000);
+
+            await sendCalibrationHeartbeat();
+            window.setInterval(sendCalibrationHeartbeat, HEARTBEAT_INTERVAL_MS);
         } catch (error) {
             const errorState = cameraApi.mediaErrorState(error, 'Unable to access detector streams.');
 
@@ -500,6 +506,47 @@
                 card.updateConnection(errorState.status, errorState.label, errorState.message);
                 await card.syncState();
             }
+        }
+    }
+
+    async function sendCalibrationHeartbeat() {
+        if (!payload.routes.heartbeat) {
+            return;
+        }
+
+        try {
+            const response = await fetch(payload.routes.heartbeat, {
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            });
+
+            if (!response.ok) {
+                return;
+            }
+
+            const body = await response.json().catch(function () {
+                return {};
+            });
+            const cameras = body.runtime?.cameras || {};
+
+            for (const [role, cameraStatus] of Object.entries(cameras)) {
+                if (cards[role] && cameraStatus.stream_url) {
+                    cards[role].streamUrl = cameraStatus.stream_url;
+
+                    if (cards[role].connectionStatus !== 'connected') {
+                        const now = Date.now();
+
+                        if (!lastStreamReconnectAt[role] || now - lastStreamReconnectAt[role] >= STREAM_RECONNECT_INTERVAL_MS) {
+                            lastStreamReconnectAt[role] = now;
+                            await cards[role].connectStream();
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            return;
         }
     }
 

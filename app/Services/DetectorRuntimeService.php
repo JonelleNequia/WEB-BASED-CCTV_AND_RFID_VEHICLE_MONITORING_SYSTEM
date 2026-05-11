@@ -145,10 +145,33 @@ class DetectorRuntimeService
             return;
         }
 
+        $this->markCameraViewerActive([$location]);
+    }
+
+    public function markCalibrationViewerActive(): void
+    {
+        $this->markCameraViewerActive(['entrance', 'exit']);
+    }
+
+    /**
+     * @param  list<string>  $locationsToMark
+     */
+    protected function markCameraViewerActive(array $locationsToMark): void
+    {
         $now = now();
+        $locationsToMark = array_values(array_intersect($locationsToMark, ['entrance', 'exit']));
+
+        if ($locationsToMark === []) {
+            return;
+        }
+
         $locations = $this->readStationActivityPayload()['locations'] ?? [];
         $locations = is_array($locations) ? $locations : [];
-        $locations[$location] = $now->toIso8601String();
+
+        foreach ($locationsToMark as $location) {
+            $locations[$location] = $now->toIso8601String();
+        }
+
         $activeSince = $now->copy()->subSeconds(self::STATION_VIEWER_IDLE_AFTER_SECONDS);
 
         $locations = collect($locations)

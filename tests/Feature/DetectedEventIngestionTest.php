@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\ActiveSession;
 use App\Models\EventReceiveLog;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidTag;
@@ -362,7 +363,80 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertSame('guest_cctv', $event->event_origin);
         $this->assertSame('guest', $event->vehicle_category);
         $this->assertSame('ABC1234', $event->plate_number);
+        $this->assertSame('open', $event->match_status);
+        $this->assertSame('INSIDE', $event->resulting_state);
         $this->assertSame($observation->snapshot_path, $event->vehicle_image_path);
+
+        $this->assertDatabaseHas('active_sessions', [
+            'entry_event_id' => $event->id,
+            'plate_number' => 'ABC1234',
+            'status' => 'open',
+        ]);
+    }
+
+    public function test_detector_guest_exit_closes_the_open_guest_session(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $headers = [
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ];
+        $eventTime = now();
+        $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+        $baselineInside = (int) $this->actingAs($admin)
+            ->getJson(route('dashboard.live-state'))
+            ->json('metrics.vehicles_inside');
+
+        $this->withHeaders($headers)->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-persistent-entry-001',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $eventTime->toIso8601String(),
+            'plate_number' => 'PGS-777',
+            'vehicle_color' => 'white',
+            'snapshot' => UploadedFile::fake()->image('guest-persistent-entry.jpg', 640, 480),
+            'detection_metadata' => json_encode(['track_id' => 155]),
+        ])->assertCreated();
+
+        $entryEvent = VehicleEvent::query()
+            ->where('external_event_key', 'guest-persistent-entry-001')
+            ->firstOrFail();
+
+        $this->assertSame('open', ActiveSession::query()->where('entry_event_id', $entryEvent->id)->value('status'));
+        $this->actingAs($admin)
+            ->getJson(route('dashboard.live-state'))
+            ->assertJsonPath('metrics.vehicles_inside', $baselineInside + 1);
+
+        $this->travel(4)->minutes();
+
+        $this->withHeaders($headers)->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-persistent-exit-001',
+            'camera_role' => 'exit',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $eventTime->copy()->addMinutes(10)->toIso8601String(),
+            'plate_number' => 'PGS 777',
+            'vehicle_color' => 'white',
+            'snapshot' => UploadedFile::fake()->image('guest-persistent-exit.jpg', 640, 480),
+            'detection_metadata' => json_encode(['track_id' => 255]),
+        ])->assertCreated();
+
+        $exitEvent = VehicleEvent::query()
+            ->where('external_event_key', 'guest-persistent-exit-001')
+            ->firstOrFail();
+
+        $this->assertSame('EXIT', $exitEvent->event_type);
+        $this->assertSame('closed', $exitEvent->match_status);
+        $this->assertSame('OUTSIDE', $exitEvent->resulting_state);
+        $this->assertSame($entryEvent->id, $exitEvent->matched_entry_id);
+        $this->assertSame('closed', ActiveSession::query()->where('entry_event_id', $entryEvent->id)->value('status'));
+        $this->assertNotNull(ActiveSession::query()->where('entry_event_id', $entryEvent->id)->value('time_out'));
+        $this->actingAs($admin)
+            ->getJson(route('dashboard.live-state'))
+            ->assertJsonPath('metrics.vehicles_inside', $baselineInside);
+
+        $this->travelBack();
     }
 
     public function test_detector_guest_observation_is_suppressed_when_recent_rfid_scan_is_registered(): void
@@ -781,6 +855,13 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertSame('ABC 123', $event->plate_number);
         $this->assertSame('White', $event->vehicle_color);
         $this->assertSame($observation->snapshot_path, $event->vehicle_image_path);
+        $this->assertDatabaseHas('active_sessions', [
+            'entry_event_id' => $event->id,
+            'plate_text' => 'ABC 123',
+            'plate_number' => 'ABC 123',
+            'vehicle_color' => 'White',
+            'status' => 'open',
+        ]);
 
         $this->assertTrue(EventReceiveLog::query()
             ->where('status', 'guest_observation_duplicate_updated')

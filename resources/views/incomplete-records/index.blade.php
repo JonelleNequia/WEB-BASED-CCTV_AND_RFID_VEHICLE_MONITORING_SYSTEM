@@ -13,7 +13,6 @@
 
         <div class="hero-panel-actions">
             <a href="{{ route('vehicle-events.index') }}" class="button button-secondary">Event Logs</a>
-            <a href="{{ route('manual-review.index') }}" class="button button-secondary">Review Queue</a>
         </div>
     </section>
 

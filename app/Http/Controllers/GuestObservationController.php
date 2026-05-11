@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\UpdateGuestObservationRequest;
+use App\Models\ActiveSession;
 use App\Models\Camera;
 use App\Models\EventReceiveLog;
 use App\Models\GuestVehicleObservation;
@@ -101,7 +102,7 @@ class GuestObservationController extends Controller
         $validated = $request->validated();
         $plateNumber = $this->normalizePlate($validated['plate_number'] ?? null);
 
-        $guestVehicleObservation->update([
+        $updates = [
             'plate_number' => $plateNumber,
             'plate_text' => $plateNumber,
             'vehicle_type' => $validated['vehicle_type'] ?? null,
@@ -110,7 +111,15 @@ class GuestObservationController extends Controller
             'observed_at' => $validated['observed_at'],
             'status' => $validated['status'],
             'notes' => $validated['notes'] ?? null,
-        ]);
+        ];
+
+        DB::transaction(function () use ($guestVehicleObservation, $updates): void {
+            $guestVehicleObservation->update($updates);
+
+            if (filled($guestVehicleObservation->external_event_key)) {
+                $this->syncDetectorGuestVehicleEvent($guestVehicleObservation, []);
+            }
+        });
 
         return back()->with('status', 'Guest observation updated.');
     }
@@ -131,7 +140,7 @@ class GuestObservationController extends Controller
 
         $plateNumber = $this->normalizePlate($validated['plate_number'] ?? null);
 
-        $guestVehicleObservation->update([
+        $updates = [
             'plate_number' => $plateNumber,
             'plate_text' => $plateNumber,
             'vehicle_type' => $validated['vehicle_type'] ?? null,
@@ -140,7 +149,15 @@ class GuestObservationController extends Controller
             'observed_at' => Carbon::parse($validated['observed_at']),
             'status' => 'verified',
             'notes' => $validated['notes'] ?? null,
-        ]);
+        ];
+
+        DB::transaction(function () use ($guestVehicleObservation, $updates): void {
+            $guestVehicleObservation->update($updates);
+
+            if (filled($guestVehicleObservation->external_event_key)) {
+                $this->syncDetectorGuestVehicleEvent($guestVehicleObservation, []);
+            }
+        });
 
         return back()->with('status', 'Guest observation marked as verified.');
     }
@@ -358,7 +375,7 @@ class GuestObservationController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Guest observation saved for review.',
+                'message' => 'Guest observation saved.',
                 'duplicate' => false,
                 'guest_observation_id' => $observation->id,
                 'status' => $observation->status,
@@ -440,7 +457,11 @@ class GuestObservationController extends Controller
         $vehicleType = $observation->vehicle_type
             ?: ($validated['detected_vehicle_type'] ?? 'Vehicle');
 
-        return VehicleEvent::query()->updateOrCreate(
+        $existingEvent = VehicleEvent::query()
+            ->where('external_event_key', (string) $externalEventKey)
+            ->first();
+
+        $event = VehicleEvent::query()->updateOrCreate(
             ['external_event_key' => (string) $externalEventKey],
             [
                 'event_type' => $eventType,
@@ -467,12 +488,168 @@ class GuestObservationController extends Controller
                 'plate_image_path' => null,
                 'matched_entry_id' => null,
                 'match_score' => null,
-                'match_status' => 'guest',
-                'resulting_state' => 'guest',
+                'match_status' => $eventType === 'ENTRY' ? 'open' : 'unmatched',
+                'resulting_state' => $eventType === 'ENTRY' ? 'INSIDE' : 'OUTSIDE',
                 'daily_entries_count' => null,
                 'daily_exits_count' => null,
             ]
         );
+
+        if ($existingEvent && $eventType === 'EXIT' && $existingEvent->matched_entry_id) {
+            $event->forceFill([
+                'matched_entry_id' => $existingEvent->matched_entry_id,
+            ])->save();
+        }
+
+        $this->applyGuestVehicleSessionState($event);
+
+        return $event->fresh(['camera', 'matchedEntry.camera', 'activeSession']);
+    }
+
+    /**
+     * Keep guest vehicles persistent: ENTRY opens a session, EXIT closes it.
+     */
+    protected function applyGuestVehicleSessionState(VehicleEvent $event): void
+    {
+        if (! $this->isGuestVehicleEvent($event)) {
+            return;
+        }
+
+        if ($event->event_type === 'ENTRY') {
+            $session = ActiveSession::query()->firstOrCreate(
+                ['entry_event_id' => $event->id],
+                [
+                    'plate_text' => $event->plate_text,
+                    'plate_number' => $event->plate_number ?: ($event->plate_text !== null ? substr($event->plate_text, 0, 20) : null),
+                    'vehicle_type' => $event->vehicle_type,
+                    'vehicle_color' => $event->vehicle_color,
+                    'entry_time' => $event->event_time,
+                    'status' => 'open',
+                ]
+            );
+
+            $this->syncGuestSessionDetails($session, $event);
+
+            $event->forceFill([
+                'match_status' => $session->status === 'closed' ? 'closed' : 'open',
+                'resulting_state' => 'INSIDE',
+            ])->save();
+
+            return;
+        }
+
+        if ($event->event_type !== 'EXIT') {
+            return;
+        }
+
+        ActiveSession::query()
+            ->where('entry_event_id', $event->id)
+            ->delete();
+
+        $session = $event->matched_entry_id
+            ? ActiveSession::query()->where('entry_event_id', $event->matched_entry_id)->first()
+            : $this->findOpenGuestSessionForExit($event);
+
+        if (! $session) {
+            $event->forceFill([
+                'matched_entry_id' => null,
+                'match_score' => null,
+                'match_status' => 'unmatched',
+                'resulting_state' => 'OUTSIDE',
+            ])->save();
+
+            return;
+        }
+
+        $session->forceFill([
+            'status' => 'closed',
+            'time_out' => $event->event_time,
+        ])->save();
+
+        $event->forceFill([
+            'matched_entry_id' => $session->entry_event_id,
+            'match_score' => null,
+            'match_status' => 'closed',
+            'resulting_state' => 'OUTSIDE',
+        ])->save();
+
+        $session->entryEvent?->forceFill([
+            'match_status' => 'closed',
+            'resulting_state' => 'INSIDE',
+        ])->save();
+    }
+
+    protected function findOpenGuestSessionForExit(VehicleEvent $event): ?ActiveSession
+    {
+        $plate = $this->normalizePlate($event->plate_text ?: $event->plate_number);
+
+        $query = ActiveSession::query()
+            ->with('entryEvent')
+            ->where('status', 'open')
+            ->where('entry_event_id', '!=', $event->id)
+            ->where('entry_time', '<=', $event->event_time)
+            ->whereHas('entryEvent', function ($entryQuery): void {
+                $entryQuery->where(function ($guestQuery): void {
+                    $guestQuery->where('vehicle_category', 'guest')
+                        ->orWhereIn('event_origin', ['guest_cctv', 'guest_manual']);
+                });
+            });
+
+        if ($plate !== null) {
+            $fingerprint = $this->plateFingerprint($plate);
+
+            return $query
+                ->orderByDesc('entry_time')
+                ->limit(50)
+                ->get()
+                ->first(function (ActiveSession $session) use ($fingerprint): bool {
+                    return $fingerprint !== ''
+                        && in_array($fingerprint, [
+                            $this->plateFingerprint($session->plate_text),
+                            $this->plateFingerprint($session->plate_number),
+                        ], true);
+                });
+        }
+
+        if ($plate === null) {
+            if (filled($event->vehicle_type)) {
+                $query->where('vehicle_type', $event->vehicle_type);
+            }
+
+            if (filled($event->vehicle_color)) {
+                $query->where('vehicle_color', $event->vehicle_color);
+            }
+        }
+
+        return $query->orderByDesc('entry_time')->first();
+    }
+
+    protected function isGuestVehicleEvent(VehicleEvent $event): bool
+    {
+        return $event->vehicle_category === 'guest'
+            || in_array($event->event_origin, ['guest_cctv', 'guest_manual'], true);
+    }
+
+    protected function syncGuestSessionDetails(ActiveSession $session, VehicleEvent $event): void
+    {
+        $updates = [];
+
+        if (filled($event->plate_text)) {
+            $updates['plate_text'] = $event->plate_text;
+            $updates['plate_number'] = $event->plate_number ?: substr($event->plate_text, 0, 20);
+        }
+
+        if (filled($event->vehicle_type)) {
+            $updates['vehicle_type'] = $event->vehicle_type;
+        }
+
+        if (filled($event->vehicle_color)) {
+            $updates['vehicle_color'] = $event->vehicle_color;
+        }
+
+        if ($updates !== []) {
+            $session->forceFill($updates)->save();
+        }
     }
 
     /**

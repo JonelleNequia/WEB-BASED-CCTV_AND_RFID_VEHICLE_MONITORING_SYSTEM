@@ -250,6 +250,13 @@ class EventService
         $session = ActiveSession::query()
             ->where('status', 'open')
             ->where('entry_time', '<=', $event->event_time)
+            ->whereHas('entryEvent', function ($entryQuery): void {
+                $entryQuery->whereNotIn('event_origin', ['guest_cctv', 'guest_manual'])
+                    ->where(function ($categoryQuery): void {
+                        $categoryQuery->whereNull('vehicle_category')
+                            ->orWhere('vehicle_category', '!=', 'guest');
+                    });
+            })
             ->where(function ($query) use ($event): void {
                 $query->whereHas('entryEvent', function ($entryQuery) use ($event): void {
                     $entryQuery->where('vehicle_id', $event->vehicle_id);

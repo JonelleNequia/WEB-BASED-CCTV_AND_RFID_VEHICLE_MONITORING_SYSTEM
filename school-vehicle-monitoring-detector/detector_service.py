@@ -66,6 +66,8 @@ GUEST_TRACK_COOLDOWN_SECONDS = 10.0
 DUPLICATE_TRACK_IOU_THRESHOLD = 0.18
 DUPLICATE_TRACK_CENTER_DISTANCE_RATIO = 0.28
 MAX_GUEST_ANALYSIS_FRAMES = 5
+MAX_GUEST_OCR_ANALYSIS_FRAMES = 2
+MAX_GUEST_COLOR_ANALYSIS_FRAMES = 3
 GUEST_ANALYSIS_FRAME_INTERVAL_SECONDS = 0.45
 LATEST_FRAME_SAVE_INTERVAL_SECONDS = 0.20
 
@@ -1353,6 +1355,41 @@ def most_common_value(values):
     return sorted(counts, key=lambda value: (counts[value], len(value)), reverse=True)[0]
 
 
+def analyze_guest_vehicle_color(analysis_frames):
+    """
+    Run the fast color classifier before the slower OCR pass so the Guest record
+    gets useful visible-vehicle data even if OCR takes too long.
+    """
+    vehicle_colors = []
+    frame_results = []
+    started_at = time.monotonic()
+
+    for index, (frame, xyxy) in enumerate(analysis_frames[:MAX_GUEST_COLOR_ANALYSIS_FRAMES]):
+        color_error = None
+
+        try:
+            vehicle_color = detect_vehicle_color(frame, xyxy)
+        except Exception as error:
+            vehicle_color = None
+            color_error = str(error)
+
+        if vehicle_color:
+            vehicle_colors.append(vehicle_color)
+
+        frame_results.append({
+            "index": index,
+            "bbox_xyxy": [float(value) for value in xyxy],
+            "vehicle_color": vehicle_color,
+            "color_error": color_error,
+        })
+
+    return most_common_value(vehicle_colors), {
+        "frames_checked": len(frame_results),
+        "elapsed_seconds": round(time.monotonic() - started_at, 3),
+        "frame_results": frame_results,
+    }
+
+
 def analyze_guest_vehicle_details(analysis_frames):
     """
     Run plate/color analysis across several YOLO-aligned frames from one window.
@@ -1360,17 +1397,24 @@ def analyze_guest_vehicle_details(analysis_frames):
     plate_numbers = []
     vehicle_colors = []
     runtime_status = ocr_runtime_status()
+    frame_results = []
+    started_at = time.monotonic()
 
-    for frame, xyxy in analysis_frames[:MAX_GUEST_ANALYSIS_FRAMES]:
+    for index, (frame, xyxy) in enumerate(analysis_frames[:MAX_GUEST_OCR_ANALYSIS_FRAMES]):
+        plate_error = None
+        color_error = None
+
         try:
             plate_number = read_license_plate(frame, xyxy)
-        except Exception:
+        except Exception as error:
             plate_number = None
+            plate_error = str(error)
 
         try:
             vehicle_color = detect_vehicle_color(frame, xyxy)
-        except Exception:
+        except Exception as error:
             vehicle_color = None
+            color_error = str(error)
 
         if plate_number:
             plate_numbers.append(plate_number)
@@ -1378,7 +1422,25 @@ def analyze_guest_vehicle_details(analysis_frames):
         if vehicle_color:
             vehicle_colors.append(vehicle_color)
 
-    return most_common_value(plate_numbers), most_common_value(vehicle_colors), runtime_status
+        frame_results.append({
+            "index": index,
+            "bbox_xyxy": [float(value) for value in xyxy],
+            "plate_number": plate_number,
+            "vehicle_color": vehicle_color,
+            "plate_error": plate_error,
+            "color_error": color_error,
+        })
+
+    return (
+        most_common_value(plate_numbers),
+        most_common_value(vehicle_colors),
+        runtime_status,
+        {
+            "frames_checked": len(frame_results),
+            "elapsed_seconds": round(time.monotonic() - started_at, 3),
+            "frame_results": frame_results,
+        },
+    )
 
 
 def submit_guest_observation_for_window(role, state, track_id, laravel_client):
@@ -1484,7 +1546,39 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
     if not analysis_frames:
         analysis_frames = [(snapshot_frame, window_payload["xyxy"])]
 
-    plate_number, vehicle_color, ocr_status = analyze_guest_vehicle_details(analysis_frames)
+    vehicle_color, color_analysis = analyze_guest_vehicle_color(analysis_frames)
+
+    if vehicle_color:
+        color_payload = {
+            **base_payload,
+            "vehicle_image_path": (initial_result.get("body") or {}).get("snapshot_path"),
+            "vehicle_color": vehicle_color,
+            "detection_metadata": {
+                **base_metadata,
+                "analysis_status": "color_ready",
+                "vehicle_color": vehicle_color,
+                "color_analysis": color_analysis,
+            },
+        }
+        color_result = laravel_client.submit_guest_observation(color_payload)
+
+        with state["lock"]:
+            state["track_overlays"][track_id] = color_result.get("overlay") or state["track_overlays"].get(track_id) or default_overlay()
+            remember_recent_resolution_locked(state, track_id, window_payload["xyxy"], state["track_overlays"][track_id], time.monotonic())
+
+            if not color_result.get("accepted"):
+                state["last_error"] = color_result.get("message", "Guest vehicle color could not be saved.")
+
+    plate_number, detailed_vehicle_color, ocr_status, analysis_details = analyze_guest_vehicle_details(analysis_frames)
+    vehicle_color = detailed_vehicle_color or vehicle_color
+
+    print(
+        f"{role.capitalize()} guest analysis {window_payload['event_key']}: "
+        f"plate={plate_number or 'None'} color={vehicle_color or 'None'} "
+        f"ocr_frames={analysis_details['frames_checked']} "
+        f"ocr_elapsed={analysis_details['elapsed_seconds']}s",
+        flush=True,
+    )
 
     guest_payload = {
         **base_payload,
@@ -1497,6 +1591,8 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             "plate_number": plate_number,
             "vehicle_color": vehicle_color,
             "ocr_runtime": ocr_status,
+            "color_analysis": color_analysis,
+            "analysis_details": analysis_details,
         },
     }
     result = laravel_client.submit_guest_observation(guest_payload)

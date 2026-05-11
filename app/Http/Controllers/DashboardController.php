@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ActiveSession;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidScanLog;
 use App\Models\Vehicle;
@@ -51,6 +52,7 @@ class DashboardController extends Controller
                 'camera_connected' => $data['cameraSummary']['connected'],
                 'camera_total' => $data['cameraSummary']['total'],
             ],
+            'traffic_summary' => $data['trafficSummary'],
             'recent_rfid_scans' => $data['recentRfidScans']->values(),
             'latest_events' => $data['latestEvents']->values(),
             'frequent_entry_vehicles' => $data['frequentEntryVehicles']
@@ -80,15 +82,17 @@ class DashboardController extends Controller
         $rfidStats = $rfidService->stats();
         $cameraStatuses = collect($calibrationService->cameraPayload());
         $connectedCameras = $cameraStatuses->where('last_connection_status', 'connected')->count();
-        $totalTraffic = $this->totalTrafficToday();
+        $trafficSummary = $this->trafficSummary();
+        $totalTraffic = $trafficSummary['today'];
 
         return [
-            'vehiclesInside' => $rfidStats['vehicles_inside'],
+            'vehiclesInside' => $rfidStats['vehicles_inside'] + $this->guestVehiclesInsideCount(),
             'entriesToday' => $rfidStats['entries_today'],
             'exitsToday' => $rfidStats['exits_today'],
             'totalVehiclesEnteredToday' => $totalTraffic['entries'],
             'totalVehiclesExitedToday' => $totalTraffic['exits'],
             'guestObservationsToday' => $guestObservationService->countToday(),
+            'trafficSummary' => $trafficSummary,
             'latestEvents' => $this->recentEventActivities(),
             'frequentEntryVehicles' => $this->frequentEntryVehicles(),
             'rfidStats' => $rfidStats,
@@ -138,50 +142,125 @@ class DashboardController extends Controller
             ->values();
     }
 
+    protected function guestVehiclesInsideCount(): int
+    {
+        return ActiveSession::query()
+            ->where('status', 'open')
+            ->whereHas('entryEvent', function ($query): void {
+                $query->where(function ($guestQuery): void {
+                    $guestQuery->where('vehicle_category', 'guest')
+                        ->orWhereIn('event_origin', ['guest_cctv', 'guest_manual']);
+                });
+            })
+            ->count();
+    }
+
     /**
      * @return array{entries: int, exits: int}
      */
     protected function totalTrafficToday(): array
     {
+        return $this->totalTrafficForPeriod('today');
+    }
+
+    /**
+     * @return array<string, array{label: string, entries: int, exits: int, registered_scans: int, guest_observations: int}>
+     */
+    protected function trafficSummary(): array
+    {
+        return collect($this->periodOptions())
+            ->mapWithKeys(function (string $label, string $period): array {
+                $traffic = $this->totalTrafficForPeriod($period);
+
+                return [
+                    $period => [
+                        'label' => $label,
+                        'entries' => $traffic['entries'],
+                        'exits' => $traffic['exits'],
+                        'registered_scans' => $this->registeredScanCount($period),
+                        'guest_observations' => $this->guestObservationCount($period),
+                    ],
+                ];
+            })
+            ->all();
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function periodOptions(): array
+    {
+        return [
+            'today' => 'Today',
+            'week' => 'This Week',
+            'month' => 'This Month',
+            'year' => 'This Year',
+        ];
+    }
+
+    /**
+     * @return array{entries: int, exits: int}
+     */
+    protected function totalTrafficForPeriod(string $period): array
+    {
         $registeredEntries = VehicleEvent::query()
             ->where('event_type', 'ENTRY')
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->whereNotIn('event_origin', ['guest_cctv', 'guest_manual'])
-            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['event_time', 'created_at']))
+            ->where(fn ($query) => PhilippineTime::constrainPeriodAny($query, ['event_time', 'created_at'], $period))
             ->count();
 
         $registeredExits = VehicleEvent::query()
             ->where('event_type', 'EXIT')
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->whereNotIn('event_origin', ['guest_cctv', 'guest_manual'])
-            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['event_time', 'created_at']))
+            ->where(fn ($query) => PhilippineTime::constrainPeriodAny($query, ['event_time', 'created_at'], $period))
             ->count();
 
         return [
             'entries' => (int) $registeredEntries
-                + $this->guestTrafficCount('entrance')
-                + $this->unlinkedGuestRfidTrafficCount('entrance'),
+                + $this->guestTrafficCount('entrance', $period)
+                + $this->unlinkedGuestRfidTrafficCount('entrance', $period),
             'exits' => (int) $registeredExits
-                + $this->guestTrafficCount('exit')
-                + $this->unlinkedGuestRfidTrafficCount('exit'),
+                + $this->guestTrafficCount('exit', $period)
+                + $this->unlinkedGuestRfidTrafficCount('exit', $period),
         ];
     }
 
-    protected function guestTrafficCount(string $location): int
+    protected function guestTrafficCount(string $location, string $period = 'today'): int
     {
         return GuestVehicleObservation::query()
             ->where('location', $location)
-            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['observed_at', 'created_at']))
+            ->where(fn ($query) => PhilippineTime::constrainPeriodAny($query, ['observed_at', 'created_at'], $period))
             ->count();
     }
 
-    protected function unlinkedGuestRfidTrafficCount(string $location): int
+    protected function unlinkedGuestRfidTrafficCount(string $location, string $period = 'today'): int
     {
         return RfidScanLog::query()
             ->where('verification_status', 'guest')
             ->where('scan_location', $location)
             ->whereNull('guest_vehicle_observation_id')
-            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
+            ->where(fn ($query) => PhilippineTime::constrainPeriodAny($query, ['scan_time', 'created_at'], $period))
+            ->count();
+    }
+
+    protected function registeredScanCount(string $period): int
+    {
+        return RfidScanLog::query()
+            ->where(fn ($query) => PhilippineTime::constrainPeriodAny($query, ['scan_time', 'created_at'], $period))
+            ->where('verification_status', 'verified')
+            ->where(function ($query): void {
+                $query->whereNull('vehicle_category')
+                    ->orWhere('vehicle_category', '!=', 'guest');
+            })
+            ->count();
+    }
+
+    protected function guestObservationCount(string $period): int
+    {
+        return GuestVehicleObservation::query()
+            ->where(fn ($query) => PhilippineTime::constrainPeriodAny($query, ['observed_at', 'created_at'], $period))
             ->count();
     }
 
@@ -226,14 +305,13 @@ class DashboardController extends Controller
             ->get()
             ->map(function (GuestVehicleObservation $observation): array {
                 $time = $observation->observed_at;
-                $statusLabel = ucwords(str_replace('_', ' ', (string) $observation->status));
 
                 return [
                     'title' => 'GUEST',
-                    'summary' => 'Guest Observation #'.$observation->id.' • '.ucfirst((string) $observation->location).' Station • '.$statusLabel,
+                    'summary' => 'Guest Observation #'.$observation->id.' • '.ucfirst((string) $observation->location).' Station',
                     'display_time' => $time?->format('M d, Y h:i A') ?: 'No time',
                     'badge_label' => 'GUEST',
-                    'badge_class' => in_array($observation->status, ['reviewed', 'verified'], true) ? 'matched' : 'manual-review',
+                    'badge_class' => 'secondary',
                     'sort_time' => $observation->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,
                 ];
             });
@@ -285,8 +363,8 @@ class DashboardController extends Controller
                     'title' => 'GUEST • GUEST',
                     'summary' => 'Guest Observation #'.$observation->id.' • '.ucfirst((string) $observation->location).' Station',
                     'display_time' => $time?->format('M d, Y h:i A') ?: 'No time',
-                    'badge_label' => ucwords(str_replace('_', ' ', (string) $observation->status)),
-                    'badge_class' => in_array($observation->status, ['reviewed', 'verified'], true) ? 'matched' : 'manual-review',
+                    'badge_label' => 'GUEST',
+                    'badge_class' => 'secondary',
                     'sort_time' => $observation->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,
                 ];
             });

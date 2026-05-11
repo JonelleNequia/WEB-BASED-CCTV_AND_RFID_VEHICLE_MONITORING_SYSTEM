@@ -6,6 +6,7 @@ use App\Models\Camera;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\File;
 use Tests\TestCase;
 
 class CalibrationSaveTest extends TestCase
@@ -63,5 +64,23 @@ class CalibrationSaveTest extends TestCase
             'y2' => 0.80,
         ], $camera->calibration_line_json);
         $this->assertNotNull($camera->last_connected_at);
+    }
+
+    public function test_calibration_heartbeat_keeps_detector_camera_runtime_active(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+        File::delete(storage_path('app/camera/station_activity.json'));
+
+        $this->actingAs($user)
+            ->getJson(route('calibration.heartbeat'))
+            ->assertOk()
+            ->assertJsonPath('runtime.camera_power_mode', 'active');
+
+        $activity = json_decode((string) File::get(storage_path('app/camera/station_activity.json')), true);
+
+        $this->assertArrayHasKey('entrance', $activity['locations']);
+        $this->assertArrayHasKey('exit', $activity['locations']);
     }
 }

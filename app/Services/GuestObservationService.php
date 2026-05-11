@@ -49,7 +49,7 @@ class GuestObservationService
     }
 
     /**
-     * Create a CCTV-supported guest review record from a guest RFID scan.
+     * Create a CCTV-supported guest observation record from a guest RFID scan.
      */
     public function createFromUnrecognizedRfidScan(RfidScanLog $scanLog): GuestVehicleObservation
     {
@@ -74,7 +74,7 @@ class GuestObservationService
                 'observed_at' => $scanLog->scan_time,
                 'camera_id' => $camera?->id,
                 'snapshot_path' => $snapshotPath,
-                'notes' => 'Guest RFID tag '.$scanLog->tag_uid.' scanned at '.$scanLog->scanLocationLabel.' ('.$statusLabel.'). Guard review required.',
+                'notes' => 'Guest RFID tag '.$scanLog->tag_uid.' scanned at '.$scanLog->scanLocationLabel.' ('.$statusLabel.').',
                 'created_by' => null,
             ]);
         });

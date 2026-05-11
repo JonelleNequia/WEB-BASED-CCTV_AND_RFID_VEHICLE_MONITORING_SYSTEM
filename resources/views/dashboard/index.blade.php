@@ -60,17 +60,46 @@
     <section class="panel">
         <div class="panel-header">
             <div>
+                <h3>Traffic Summary</h3>
+            </div>
+            <a href="{{ route('vehicle-events.index', ['period' => 'month']) }}" class="button button-secondary button-sm">Open Monthly Logs</a>
+        </div>
+
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Timeframe</th>
+                        <th>Entered</th>
+                        <th>Exited</th>
+                        <th>Registered Scans</th>
+                        <th>Guest Observations</th>
+                    </tr>
+                </thead>
+                <tbody data-dashboard-traffic-summary>
+                    @foreach ($trafficSummary as $period => $summary)
+                        <tr data-dashboard-period="{{ $period }}">
+                            <td><strong>{{ $summary['label'] }}</strong></td>
+                            <td data-dashboard-period-metric="entries">{{ $summary['entries'] }}</td>
+                            <td data-dashboard-period-metric="exits">{{ $summary['exits'] }}</td>
+                            <td data-dashboard-period-metric="registered_scans">{{ $summary['registered_scans'] }}</td>
+                            <td data-dashboard-period-metric="guest_observations">{{ $summary['guest_observations'] }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <div>
                 <h3>Frequent Entry Ranking</h3>
             </div>
             <a href="{{ route('vehicle-events.index', ['event_type' => 'ENTRY']) }}" class="button button-secondary button-sm">Open Entry Logs</a>
         </div>
 
-        <div class="empty-state" data-dashboard-ranking-empty @unless($frequentEntryVehicles->isEmpty()) hidden @endunless>
-            <h4>No registered entry logs yet</h4>
-            <p>Registered vehicle rankings will appear after RFID ENTRY scans.</p>
-        </div>
-
-        <div class="table-responsive" data-dashboard-ranking-table @if($frequentEntryVehicles->isEmpty()) hidden @endif>
+        <div class="table-responsive" data-dashboard-ranking-table>
             <table>
                 <thead>
                     <tr>

@@ -176,7 +176,7 @@ class FutureIntegrationController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Guest vehicle capture saved as a GUEST observation for review.',
+                'message' => 'Guest vehicle capture saved as a GUEST observation.',
                 'duplicate' => false,
                 'requires_capture' => false,
                 'event_id' => null,
@@ -520,7 +520,7 @@ class FutureIntegrationController extends Controller
         ]);
 
         return response()->json([
-            'message' => 'Guest observation saved for review.',
+            'message' => 'Guest observation saved.',
             'duplicate' => false,
             'guest_observation_id' => $observation->id,
             'status' => $observation->status,

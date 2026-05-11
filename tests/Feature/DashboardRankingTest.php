@@ -116,7 +116,11 @@ class DashboardRankingTest extends TestCase
             ->assertOk()
             ->assertJsonPath('metrics.total_vehicles_entered_today', 4)
             ->assertJsonPath('metrics.total_vehicles_exited_today', 2)
-            ->assertJsonPath('metrics.guest_observations_today', 3);
+            ->assertJsonPath('metrics.guest_observations_today', 3)
+            ->assertJsonPath('traffic_summary.today.entries', 4)
+            ->assertJsonPath('traffic_summary.week.entries', 4)
+            ->assertJsonPath('traffic_summary.month.entries', 4)
+            ->assertJsonPath('traffic_summary.year.entries', 4);
     }
 
     public function test_dashboard_today_counts_reset_on_philippine_midnight(): void

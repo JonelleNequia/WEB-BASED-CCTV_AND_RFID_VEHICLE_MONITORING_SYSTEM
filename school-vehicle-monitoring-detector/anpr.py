@@ -10,11 +10,16 @@ records are never polluted with fake plate numbers.
 
 import re
 import shutil
+import time
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+
+MAX_OCR_CANDIDATES = 6
+MAX_OCR_VARIANTS_PER_CANDIDATE = 2
+OCR_TIME_BUDGET_SECONDS = 8.0
 
 
 @lru_cache(maxsize=1)
@@ -112,6 +117,9 @@ def normalize_plate_text(text: str) -> Optional[str]:
 
     if re.match(r"^\d{3,4}[A-Z]{2,3}$", cleaned):
         return cleaned
+
+    if re.match(r"^[A-Z]{4}\d{3}$", cleaned):
+        return f"{cleaned[:3]}-{cleaned[4:]}"
 
     normalized = correct_plate_character_positions(cleaned)
 
@@ -371,6 +379,56 @@ def fallback_vehicle_regions(vehicle_crop) -> List[np.ndarray]:
     return [region for region in regions if region.size]
 
 
+def crop_fraction(image, x1_ratio, y1_ratio, x2_ratio, y2_ratio):
+    height, width = image.shape[:2]
+    x1 = max(0, min(width - 1, int(width * x1_ratio)))
+    y1 = max(0, min(height - 1, int(height * y1_ratio)))
+    x2 = max(x1 + 1, min(width, int(width * x2_ratio)))
+    y2 = max(y1 + 1, min(height, int(height * y2_ratio)))
+    crop = image[y1:y2, x1:x2]
+
+    return crop if crop.size else None
+
+
+def heuristic_plate_regions(vehicle_crop) -> List[np.ndarray]:
+    """
+    Add bounded front/rear plate search windows when contour detection misses the
+    plate. Full lower-half OCR is slow and often loses small visible plates.
+    """
+    height, width = vehicle_crop.shape[:2]
+
+    if height < 80 or width < 140:
+        return []
+
+    region_specs = [
+        (0.50, 0.46, 0.82, 0.84),
+        (0.34, 0.46, 0.66, 0.84),
+        (0.18, 0.46, 0.50, 0.84),
+        (0.02, 0.46, 0.34, 0.84),
+        (0.52, 0.36, 0.88, 0.74),
+        (0.32, 0.36, 0.68, 0.74),
+        (0.08, 0.36, 0.44, 0.74),
+        (0.42, 0.54, 0.90, 0.94),
+    ]
+    regions = []
+
+    for spec in region_specs:
+        region = crop_fraction(vehicle_crop, *spec)
+
+        if region is not None:
+            regions.append(region)
+
+    return regions
+
+
+def crop_signature(crop) -> Tuple[Tuple[int, int], bytes]:
+    try:
+        preview = cv2.resize(crop, (16, 16), interpolation=cv2.INTER_AREA)
+        return crop.shape[:2], preview.tobytes()
+    except Exception:
+        return crop.shape[:2], b""
+
+
 def select_consensus_plate(candidates: List[Tuple[str, float]]) -> Optional[str]:
     """
     Prefer plates repeated across OCR variants; avoid saving one-off low-confidence
@@ -395,6 +453,9 @@ def select_consensus_plate(candidates: List[Tuple[str, float]]) -> Optional[str]
     best_score = scores[best]
     best_count = counts[best]
 
+    if re.match(r"^[A-Z]{3}-\d{3,4}$", best) and best_score >= 0.42:
+        return best
+
     if best_score >= 0.70:
         return best
 
@@ -412,26 +473,35 @@ def read_license_plate(frame, bounding_box) -> Optional[str]:
     Attempt to read a plate number from the detected vehicle crop.
     """
     crop = crop_vehicle(frame, bounding_box)
-    candidates = plate_like_crops(crop)
-
-    if not candidates:
-        candidates = fallback_vehicle_regions(crop)
+    candidates = (
+        plate_like_crops(crop)
+        + heuristic_plate_regions(crop)
+    )
 
     seen_shapes = set()
 
     ocr_candidates = []
+    started_at = time.monotonic()
 
-    for candidate in candidates:
-        shape_key = candidate.shape[:2]
+    for candidate in candidates[:MAX_OCR_CANDIDATES]:
+        shape_key = crop_signature(candidate)
 
         if shape_key in seen_shapes:
             continue
 
         seen_shapes.add(shape_key)
 
-        for prepared in preprocess_variants_for_ocr(candidate):
+        for prepared in preprocess_variants_for_ocr(candidate)[:MAX_OCR_VARIANTS_PER_CANDIDATE]:
             ocr_candidates.extend(read_with_easyocr_candidates(prepared))
             ocr_candidates.extend(read_with_tesseract_candidates(prepared))
+
+        selected_plate = select_consensus_plate(ocr_candidates)
+
+        if selected_plate and re.match(r"^[A-Z]{3}-\d{3,4}$", selected_plate):
+            return selected_plate
+
+        if time.monotonic() - started_at >= OCR_TIME_BUDGET_SECONDS:
+            break
 
     return select_consensus_plate(ocr_candidates)
 
@@ -532,12 +602,15 @@ def detect_vehicle_color(frame, bounding_box) -> Optional[str]:
 
     height, width = crop.shape[:2]
     regions = [
+        crop[int(height * 0.24):int(height * 0.54), int(width * 0.38):int(width * 0.78)],
+        crop[int(height * 0.28):int(height * 0.62), int(width * 0.46):int(width * 0.86)],
         crop[int(height * 0.42):int(height * 0.82), int(width * 0.12):int(width * 0.88)],
         crop[int(height * 0.30):int(height * 0.72), int(width * 0.18):int(width * 0.82)],
         crop[int(height * 0.52):int(height * 0.90), int(width * 0.18):int(width * 0.82)],
         crop[int(height * 0.34):int(height * 0.84), int(width * 0.28):int(width * 0.72)],
     ]
     scores: Dict[str, float] = {}
+    max_scores: Dict[str, float] = {}
 
     for region in regions:
         color, score = classify_vehicle_color_sample(region)
@@ -546,6 +619,7 @@ def detect_vehicle_color(frame, bounding_box) -> Optional[str]:
             continue
 
         scores[color] = scores.get(color, 0.0) + score
+        max_scores[color] = max(max_scores.get(color, 0.0), score)
 
     if not scores:
         color, _ = classify_vehicle_color_sample(crop)
@@ -553,5 +627,12 @@ def detect_vehicle_color(frame, bounding_box) -> Optional[str]:
         return color
 
     color, score = max(scores.items(), key=lambda item: item[1])
+
+    if (
+        color == "Gray"
+        and scores.get("White", 0.0) >= 0.70
+        and max_scores.get("White", 0.0) >= 0.40
+    ):
+        return "White"
 
     return color

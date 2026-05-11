@@ -46,7 +46,7 @@
                 </div>
             </div>
 
-            <form method="POST" action="{{ route('guest-observations.store') }}" enctype="multipart/form-data" class="stack-form">
+            <form method="POST" action="{{ route('guest-observations.store') }}" enctype="multipart/form-data" class="stack-form guest-observation-form">
                 @csrf
                 <input type="hidden" name="observation_source" value="manual">
 
@@ -126,8 +126,8 @@
                 @php($latestSnapshotUrl = $latestUnregisteredCapture->snapshot_url)
                 <div class="result-card result-card-warning">
                     <div class="result-card-head">
-                        <strong>Guard review needed</strong>
-                        <span class="badge badge-manual-review">{{ ucfirst($latestUnregisteredCapture->location) }}</span>
+                        <strong>Guest captured</strong>
+                        <span class="badge badge-secondary">{{ ucfirst($latestUnregisteredCapture->location) }}</span>
                     </div>
                     <img src="{{ $latestSnapshotUrl }}" alt="Guest vehicle capture" class="capture-preview">
                     <div class="detail-list">
@@ -160,7 +160,7 @@
             </div>
         </div>
 
-            <form method="GET" action="{{ route('guest-observations.index') }}" class="form-grid filter-grid">
+            <form method="GET" action="{{ route('guest-observations.index') }}" class="form-grid filter-grid guest-filter-grid">
                 <div class="field">
                     <label for="filter_plate_text">Plate</label>
                     <input id="filter_plate_text" type="text" name="plate_text" value="{{ $filters['plate_text'] ?? '' }}">
@@ -209,8 +209,20 @@
             <span class="chip chip-soft" data-guest-total-count>{{ $observations->total() }} total</span>
         </div>
 
-        <div class="table-responsive">
-            <table>
+        <div class="table-responsive guest-log-table-wrap">
+            <table class="guest-log-table">
+                <colgroup>
+                    <col class="guest-col-time">
+                    <col class="guest-col-snapshot">
+                    <col class="guest-col-plate">
+                    <col class="guest-col-color">
+                    <col class="guest-col-vehicle">
+                    <col class="guest-col-location">
+                    <col class="guest-col-status">
+                    <col class="guest-col-camera">
+                    <col class="guest-col-notes">
+                    <col class="guest-col-action">
+                </colgroup>
                 <thead>
                     <tr>
                         <th>Time</th>
@@ -219,7 +231,7 @@
                         <th>Color</th>
                         <th>Vehicle</th>
                         <th>Location</th>
-                        <th>Status</th>
+                        <th>Type</th>
                         <th>Camera</th>
                         <th>Notes</th>
                         <th>Action</th>
@@ -236,15 +248,13 @@
                             <td>{{ $observation->vehicle_type ?: 'N/A' }}</td>
                             <td>{{ ucfirst($observation->location) }}</td>
                             <td>
-                                <span class="badge {{ $observation->status === 'verified' || $observation->status === 'reviewed' ? 'badge-matched' : 'badge-manual-review' }}">
-                                    {{ ucwords(str_replace('_', ' ', $observation->status)) }}
-                                </span>
+                                <span class="badge badge-secondary">Guest</span>
                             </td>
                             <td>{{ $observation->camera?->camera_name ?: 'N/A' }}</td>
                             <td>{{ $observation->notes ?: 'No notes' }}</td>
                             <td>
                                 <button type="button" class="button button-secondary button-sm" data-guest-view="{{ $observation->id }}">
-                                    {{ $observation->status === 'pending_review' ? 'Review & Verify' : 'View Details' }}
+                                    View Details
                                 </button>
                             </td>
                         </tr>
@@ -264,8 +274,8 @@
         <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="guest_modal_title">
             <div class="modal-header">
                 <div>
-                    <span class="panel-kicker">Guest Review</span>
-                    <h3 id="guest_modal_title">Review & Verify</h3>
+                    <span class="panel-kicker">Guest Details</span>
+                    <h3 id="guest_modal_title">Guest Observation</h3>
                 </div>
                 <button type="button" class="button button-secondary button-sm" data-guest-modal-close>Close</button>
             </div>
@@ -280,7 +290,7 @@
                         <div><span>Detected Color</span><strong data-guest-modal-color>No color</strong></div>
                         <div><span>Timestamp</span><strong data-guest-modal-time>No time</strong></div>
                         <div><span>Location</span><strong data-guest-modal-location>No location</strong></div>
-                        <div><span>Status</span><strong data-guest-modal-status>Pending Review</strong></div>
+                        <div><span>Type</span><strong data-guest-modal-status>Guest</strong></div>
                     </div>
                 </div>
 
@@ -326,7 +336,7 @@
                     </div>
 
                     <div class="button-row">
-                        <button type="submit" class="button button-primary" data-guest-modal-submit>Mark as Verified</button>
+                        <button type="submit" class="button button-primary" data-guest-modal-submit>Save Guest Details</button>
                     </div>
                 </form>
             </div>
@@ -342,12 +352,11 @@
         'observed_at' => $observation->observed_at?->format('Y-m-d\TH:i'),
         'display_time' => $observation->observed_at?->format('M d, Y h:i A'),
         'status' => $observation->status,
-        'status_label' => ucwords(str_replace('_', ' ', $observation->status)),
+        'status_label' => 'Guest',
+        'status_badge_class' => 'badge-secondary',
         'notes' => $observation->notes,
         'snapshot_url' => $observation->snapshot_url,
         'update_url' => route('guest-observations.update', $observation),
-        'verify_url' => route('guest-observations.verify', $observation),
-        'can_verify' => $observation->status === 'pending_review',
     ])->values())
     <script id="guest-observations-data" type="application/json">{!! json_encode($guestObservationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
     <script id="guest-observations-realtime" type="application/json">{!! json_encode([
@@ -389,14 +398,14 @@
             }
 
             function openModal(observation) {
-                form.action = observation.verify_url || observation.update_url;
+                form.action = observation.update_url;
                 image.src = observation.snapshot_url;
                 plate.textContent = observation.plate_number || 'No plate detected';
                 color.textContent = observation.vehicle_color || 'No color detected';
                 time.textContent = observation.display_time || 'No time';
                 location.textContent = observation.location ? observation.location.charAt(0).toUpperCase() + observation.location.slice(1) : 'No location';
-                status.textContent = observation.status_label || 'Pending Review';
-                submitButton.textContent = observation.can_verify ? 'Mark as Verified' : 'Save Verified Details';
+                status.textContent = observation.status_label || 'Guest';
+                submitButton.textContent = 'Save Guest Details';
 
                 setField('plate_number', observation.plate_number);
                 setField('vehicle_type', observation.vehicle_type);
@@ -443,8 +452,8 @@
                 appendText(row, 'td', observation.vehicle_type || 'N/A');
                 appendText(row, 'td', observation.location ? observation.location.charAt(0).toUpperCase() + observation.location.slice(1) : 'N/A');
 
-                statusBadge.className = `badge ${observation.status_badge_class || 'badge-manual-review'}`;
-                statusBadge.textContent = observation.status_label || 'Pending Review';
+                statusBadge.className = `badge ${observation.status_badge_class || 'badge-secondary'}`;
+                statusBadge.textContent = observation.status_label || 'Guest';
                 statusCell.appendChild(statusBadge);
                 row.appendChild(statusCell);
 
@@ -454,7 +463,7 @@
                 actionButton.type = 'button';
                 actionButton.className = 'button button-secondary button-sm';
                 actionButton.dataset.guestView = observation.id;
-                actionButton.textContent = observation.can_verify ? 'Review & Verify' : 'View Details';
+                actionButton.textContent = 'View Details';
                 actionCell.appendChild(actionButton);
                 row.appendChild(actionCell);
 

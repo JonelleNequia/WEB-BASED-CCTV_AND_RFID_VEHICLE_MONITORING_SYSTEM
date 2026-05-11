@@ -209,7 +209,7 @@
                         </strong>
                         <p>{{ $latestScan->vehicle?->vehicle_type ?: 'Check registry details or guest observation for this scan.' }}</p>
                         @if ($latestScan->guestVehicleObservation)
-                            <p>Guest observation #{{ $latestScan->guestVehicleObservation->id }} is ready for manual review.</p>
+                            <p>Guest observation #{{ $latestScan->guestVehicleObservation->id }} was recorded.</p>
                         @endif
                     </div>
                 </div>
@@ -559,7 +559,7 @@
                     }
 
                     const scan = payload.scan || {};
-                    resultBox.textContent = `${payload.message} ${scan.guest_observation_id ? 'Guest observation #' + scan.guest_observation_id + ' was created for review.' : ''} Refreshing latest result...`;
+                    resultBox.textContent = `${payload.message} ${scan.guest_observation_id ? 'Guest observation #' + scan.guest_observation_id + ' was created.' : ''} Refreshing latest result...`;
                     window.setTimeout(() => {
                         window.location.href = '{{ route('rfid-scans.index') }}';
                     }, 500);

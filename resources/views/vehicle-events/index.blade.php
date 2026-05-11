@@ -21,11 +21,42 @@
             @if (auth()->user()?->isAdmin())
                 <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Registry</a>
                 <a href="{{ route('guest-observations.index') }}" class="button button-secondary">Guest Monitoring</a>
-                <a href="{{ route('manual-review.index') }}" class="button button-secondary">Review Queue</a>
                 <a href="{{ route('vehicle-events.create') }}" class="button button-primary">Quick Manual Log</a>
             @endif
         </div>
     </section>
+
+    <div class="page-grid cards-5">
+        <article class="stat-card stat-card-brand">
+            <span class="stat-card-label">{{ $selectedPeriodLabel }} Logs</span>
+            <strong>{{ $eventLogSummary['total'] }}</strong>
+            <p>All visible records in the current range.</p>
+        </article>
+
+        <article class="stat-card stat-card-success">
+            <span class="stat-card-label">Entries</span>
+            <strong>{{ $eventLogSummary['entries'] }}</strong>
+            <p>ENTRY logs in the current range.</p>
+        </article>
+
+        <article class="stat-card stat-card-brand-soft">
+            <span class="stat-card-label">Exits</span>
+            <strong>{{ $eventLogSummary['exits'] }}</strong>
+            <p>EXIT logs in the current range.</p>
+        </article>
+
+        <article class="stat-card stat-card-warning">
+            <span class="stat-card-label">Guests</span>
+            <strong>{{ $eventLogSummary['guests'] }}</strong>
+            <p>Guest observations in the current range.</p>
+        </article>
+
+        <article class="stat-card">
+            <span class="stat-card-label">RFID Only</span>
+            <strong>{{ $eventLogSummary['rfid'] }}</strong>
+            <p>RFID scan records without linked events.</p>
+        </article>
+    </div>
 
     <section class="panel printable-report-panel">
         <div class="panel-header">
@@ -44,6 +75,16 @@
             <div class="field">
                 <label for="plate_text">Plate</label>
                 <input id="plate_text" type="text" name="plate_text" value="{{ $filters['plate_text'] ?? '' }}" placeholder="ABC-1234">
+            </div>
+
+            <div class="field">
+                <label for="period">Timeframe</label>
+                <select id="period" name="period">
+                    <option value="">All / Custom Dates</option>
+                    @foreach ($periodOptions as $value => $label)
+                        <option value="{{ $value }}" @selected(($filters['period'] ?? '') === $value)>{{ $label }}</option>
+                    @endforeach
+                </select>
             </div>
 
             <div class="field">
@@ -76,7 +117,7 @@
                 <label for="match_status">Status</label>
                 <select id="match_status" name="match_status">
                     <option value="">All</option>
-                    @foreach (['open', 'closed', 'matched', 'manual_review', 'unmatched', 'pending_review', 'reviewed', 'verified'] as $status)
+                    @foreach (['open', 'closed', 'matched', 'unmatched', 'verified'] as $status)
                         <option value="{{ $status }}" @selected(($filters['match_status'] ?? '') === $status)>
                             {{ str_replace('_', ' ', ucfirst($status)) }}
                         </option>
@@ -101,6 +142,18 @@
                 </div>
             </div>
         </form>
+
+        <div class="report-action-bar">
+            <div>
+                <strong>Quick Timeframes</strong>
+                <span>Open the same log list by day, week, month, or year.</span>
+            </div>
+            <div class="button-row">
+                @foreach ($periodOptions as $period => $label)
+                    <a href="{{ route('vehicle-events.index', ['period' => $period]) }}" class="button button-secondary button-sm">{{ $label }}</a>
+                @endforeach
+            </div>
+        </div>
     </section>
 
     <section class="panel">
@@ -205,7 +258,7 @@
 
     <script id="event-log-modal-data" type="application/json">{!! json_encode($logs->getCollection()->values(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
     <script id="event-log-realtime-data" type="application/json">{!! json_encode([
-        'recentLogsUrl' => route('api.recent-event-logs', ['limit' => 10]),
+        'recentLogsUrl' => request()->except('page') === [] ? route('api.recent-event-logs', ['limit' => 10]) : null,
     ], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 @endsection
 

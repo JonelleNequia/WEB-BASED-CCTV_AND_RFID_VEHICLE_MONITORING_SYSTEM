@@ -22,9 +22,27 @@ class MatchingService
      */
     public function matchExitEvent(VehicleEvent $exitEvent): array
     {
+        $isGuestExit = $this->isGuestVehicleEvent($exitEvent);
+
         $sessions = ActiveSession::query()
             ->with(['entryEvent.camera'])
             ->where('status', 'open')
+            ->whereHas('entryEvent', function ($query) use ($isGuestExit): void {
+                if ($isGuestExit) {
+                    $query->where(function ($guestQuery): void {
+                        $guestQuery->where('vehicle_category', 'guest')
+                            ->orWhereIn('event_origin', ['guest_cctv', 'guest_manual']);
+                    });
+
+                    return;
+                }
+
+                $query->whereNotIn('event_origin', ['guest_cctv', 'guest_manual'])
+                    ->where(function ($categoryQuery): void {
+                        $categoryQuery->whereNull('vehicle_category')
+                            ->orWhere('vehicle_category', '!=', 'guest');
+                    });
+            })
             ->orderBy('entry_time')
             ->get();
 
@@ -171,5 +189,11 @@ class MatchingService
         $exitCamera = Str::lower($exitEvent->camera?->camera_name ?? '');
 
         return Str::contains($entryCamera, 'entrance') && Str::contains($exitCamera, 'exit');
+    }
+
+    protected function isGuestVehicleEvent(VehicleEvent $event): bool
+    {
+        return $event->vehicle_category === 'guest'
+            || in_array($event->event_origin, ['guest_cctv', 'guest_manual'], true);
     }
 }

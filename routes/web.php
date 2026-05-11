@@ -5,7 +5,6 @@ use App\Http\Controllers\CalibrationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EvidenceController;
 use App\Http\Controllers\GuestObservationController;
-use App\Http\Controllers\ManualReviewController;
 use App\Http\Controllers\MonitoringController;
 use App\Http\Controllers\RfidScanController;
 use App\Http\Controllers\SettingsController;
@@ -87,6 +86,7 @@ Route::middleware('auth')->group(function (): void {
         Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('settings.update');
         Route::get('/camera-calibration', [CalibrationController::class, 'index'])->name('calibration.index');
+        Route::get('/camera-calibration/heartbeat', [CalibrationController::class, 'heartbeat'])->name('calibration.heartbeat');
         Route::put('/calibration', [CalibrationController::class, 'update'])->name('calibration.update');
         Route::put('/camera-browser/state', [CalibrationController::class, 'syncState'])->name('camera-browser.state');
         Route::get('/evidence/rfid-scans/{rfidScanLog}/payload', [EvidenceController::class, 'downloadRfidPayload'])
@@ -96,11 +96,7 @@ Route::middleware('auth')->group(function (): void {
             ->whereNumber('vehicleEvent')
             ->name('vehicle-events.complete');
 
-        Route::get('/manual-review', [ManualReviewController::class, 'index'])->name('manual-review.index');
-        Route::patch('/manual-review/{vehicleEvent}/mark-matched', [ManualReviewController::class, 'markMatched'])
-            ->name('manual-review.mark-matched');
-        Route::patch('/manual-review/{vehicleEvent}/mark-unmatched', [ManualReviewController::class, 'markUnmatched'])
-            ->name('manual-review.mark-unmatched');
+        Route::redirect('/manual-review', '/vehicle-events')->name('manual-review.index');
 
         Route::redirect('/incomplete-records', '/guest-observations')->name('incomplete-records.index');
         Route::get('/system-status', [SystemStatusController::class, 'index'])->name('system-status.index');

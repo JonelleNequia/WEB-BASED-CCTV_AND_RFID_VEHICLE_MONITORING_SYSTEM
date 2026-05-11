@@ -150,14 +150,14 @@ class RealtimeLogController extends Controller
             'observed_at' => $observation->observed_at?->format('Y-m-d\TH:i'),
             'display_time' => $observation->observed_at?->format('M d, Y h:i A'),
             'status' => $observation->status,
-            'status_label' => ucwords(str_replace('_', ' ', (string) $observation->status)),
-            'status_badge_class' => in_array($observation->status, ['reviewed', 'verified'], true) ? 'badge-matched' : 'badge-manual-review',
+            'status_label' => 'Guest',
+            'status_badge_class' => 'badge-secondary',
             'notes' => $observation->notes,
             'snapshot_url' => $observation->snapshot_url,
             'camera_name' => $observation->camera?->camera_name ?: 'N/A',
             'update_url' => route('guest-observations.update', $observation),
             'verify_url' => route('guest-observations.verify', $observation),
-            'can_verify' => $observation->status === 'pending_review',
+            'can_verify' => false,
         ];
     }
 
@@ -201,8 +201,6 @@ class RealtimeLogController extends Controller
      */
     protected function stationGuestObservationPayload(GuestVehicleObservation $observation): array
     {
-        $statusLabel = ucwords(str_replace('_', ' ', (string) $observation->status));
-
         return [
             'id' => 'guest-'.$observation->id,
             'record_type' => 'guest_observation',
@@ -213,12 +211,12 @@ class RealtimeLogController extends Controller
             'camera_role' => $observation->camera?->camera_role,
             'scan_location' => $observation->location,
             'verification_label' => 'GUEST',
-            'resulting_state' => $statusLabel,
+            'resulting_state' => 'Guest',
             'entries_today_count' => 0,
             'exits_today_count' => 0,
             'event_time' => $observation->observed_at?->toIso8601String(),
             'display_time' => $observation->observed_at?->format('M d, Y • h:i:s A'),
-            'status' => $statusLabel,
+            'status' => 'Guest',
             'snapshot_url' => $observation->snapshot_url,
             'sort_time' => $this->sortTimestamp($observation->created_at, $observation->observed_at),
         ];
@@ -264,8 +262,6 @@ class RealtimeLogController extends Controller
     protected function guestEventLogPayload(GuestVehicleObservation $observation): array
     {
         $time = $observation->observed_at;
-        $statusLabel = ucfirst(str_replace('_', ' ', (string) $observation->status));
-
         return [
             'record_type' => 'guest_observation',
             'record_type_label' => 'Guest Observation',
@@ -279,13 +275,13 @@ class RealtimeLogController extends Controller
             'category_label' => 'Guest',
             'source_label' => $observation->observation_source === 'cctv' ? 'Guest CCTV' : 'Guest Manual',
             'station_label' => ucfirst($observation->location).' Station',
-            'state_label' => $statusLabel,
+            'state_label' => 'Guest',
             'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
             'summary_label' => 'Guest Observation #'.$observation->id.' • '.($time?->format('M d, Y • h:i A') ?: 'No time'),
             'event_time_export' => $time?->toDateTimeString(),
-            'status_label' => $statusLabel,
-            'status_badge_class' => in_array($observation->status, ['reviewed', 'verified'], true) ? 'matched' : 'manual-review',
-            'match_label' => 'Guest review',
+            'status_label' => 'Guest',
+            'status_badge_class' => 'secondary',
+            'match_label' => 'Guest',
             'rfid_tag_uid' => 'N/A',
             'image_url' => $observation->snapshot_path ? $observation->snapshot_url : null,
             'sort_time' => $this->sortTimestamp($observation->created_at, $time),

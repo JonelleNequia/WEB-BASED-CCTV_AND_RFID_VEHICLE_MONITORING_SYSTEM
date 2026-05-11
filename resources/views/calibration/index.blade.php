@@ -113,6 +113,7 @@
         'routes' => [
             'save' => route('calibration.update'),
             'state' => route('camera-browser.state'),
+            'heartbeat' => route('calibration.heartbeat'),
         ],
     ])
     <script id="camera-calibration-data" type="application/json">{!! json_encode($calibrationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
