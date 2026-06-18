@@ -178,7 +178,7 @@ class StationController extends Controller
                     'exits_today_count' => (int) $exitsToday,
                     'event_time' => $event->event_time?->toIso8601String(),
                     'display_time' => $event->event_time?->format('M d, Y • h:i:s A'),
-                    'status' => $event->display_status,
+                    'status' => $event->display_status_label,
                     'sort_time' => $this->sortTimestamp($event->created_at, $event->event_time),
                 ];
             });

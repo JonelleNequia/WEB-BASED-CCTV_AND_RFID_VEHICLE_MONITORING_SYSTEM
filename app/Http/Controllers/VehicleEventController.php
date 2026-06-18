@@ -47,6 +47,7 @@ class VehicleEventController extends Controller
             ]),
             'periodOptions' => $this->periodOptions(),
             'categoryOptions' => $this->categoryOptions(),
+            'printReports' => $this->printReportPayload($request),
         ]);
     }
 
@@ -55,45 +56,40 @@ class VehicleEventController extends Controller
      */
     public function exportCsv(Request $request)
     {
-        $logs = $this->paginatedUnifiedLogs($request, 10);
-        $filename = 'vehicle-events-'.now()->format('Ymd-His').'.csv';
+        $singleLog = $this->singleUnifiedLog($request);
+        $rows = $singleLog !== null
+            ? collect([$singleLog])
+            : $this->paginatedUnifiedLogs($request, 10)->getCollection();
+        $filename = $singleLog !== null
+            ? str($singleLog['record_type'].'-'.$singleLog['id'].'-'.now()->format('Ymd-His'))->slug().'.csv'
+            : 'vehicle-events-'.now()->format('Ymd-His').'.csv';
 
-        return response()->streamDownload(function () use ($logs): void {
+        return response()->streamDownload(function () use ($rows): void {
             $handle = fopen('php://output', 'w');
             fputcsv($handle, [
-                'Record Type',
-                'ID',
                 'Type',
                 'Plate',
                 'Owner',
-                'Vehicle Type',
+                'Vehicle',
                 'Color',
-                'Category',
-                'Source',
-                'Station / Camera',
+                'Station',
                 'State',
-                'Event Time',
+                'Time',
                 'Status',
-                'Match Status',
                 'RFID Tag',
             ]);
 
-            $logs->getCollection()->each(function (array $log) use ($handle): void {
+            $rows->each(function (array $log) use ($handle): void {
                 fputcsv($handle, [
-                    $log['record_type_label'],
-                    $log['id'],
                     $log['event_type'],
                     $log['plate_number'],
                     $log['owner_name'],
                     $log['vehicle_type'],
                     $log['vehicle_color'],
-                    $log['category_label'],
-                    $log['source_label'],
                     $log['station_label'],
                     $log['state_label'],
                     $log['event_time_export'],
                     $log['status_label'],
-                    $log['match_label'],
                     $log['rfid_tag_uid'],
                 ]);
             });
@@ -102,6 +98,40 @@ class VehicleEventController extends Controller
         }, $filename, [
             'Content-Type' => 'text/csv',
         ]);
+    }
+
+    /**
+     * Resolve one unified log row for compact record-level exports.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function singleUnifiedLog(Request $request): ?array
+    {
+        if (! $request->filled('record_type') || ! $request->filled('record_id')) {
+            return null;
+        }
+
+        $recordType = $request->string('record_type')->value();
+        $recordId = (int) $request->integer('record_id');
+
+        return match ($recordType) {
+            'vehicle_event' => ($event = VehicleEvent::query()
+                ->with(['camera', 'matchedEntry', 'vehicle', 'rfidScanLog.vehicleRfidTag'])
+                ->find($recordId))
+                    ? $this->vehicleEventLogPayload($event)
+                    : abort(404),
+            'guest_observation' => ($observation = GuestVehicleObservation::query()
+                ->with('camera')
+                ->find($recordId))
+                    ? $this->guestLogPayload($observation)
+                    : abort(404),
+            'rfid_scan' => ($scanLog = RfidScanLog::query()
+                ->with(['vehicle', 'vehicleRfidTag'])
+                ->find($recordId))
+                    ? $this->rfidOnlyLogPayload($scanLog)
+                    : abort(404),
+            default => abort(404),
+        };
     }
 
     /**
@@ -226,6 +256,61 @@ class VehicleEventController extends Controller
         }
 
         return 'All Records';
+    }
+
+    /**
+     * Build compact report datasets for browser print.
+     *
+     * @return array<string, array{label:string, rows:\Illuminate\Support\Collection<int, array<string, string>>}>
+     */
+    protected function printReportPayload(Request $request): array
+    {
+        $reports = [
+            'all' => ['label' => 'All Records', 'period' => null],
+            'today' => ['label' => 'Today', 'period' => 'today'],
+            'week' => ['label' => 'This Week', 'period' => 'week'],
+            'year' => ['label' => 'This Year', 'period' => 'year'],
+        ];
+
+        return collect($reports)
+            ->map(function (array $report) use ($request): array {
+                $reportRequest = $this->reportRequest($request, $report['period']);
+
+                return [
+                    'label' => $report['label'],
+                    'rows' => $this->filteredUnifiedLogs($reportRequest)
+                        ->map(fn (array $log): array => $this->compactPrintRow($log))
+                        ->values(),
+                ];
+            })
+            ->all();
+    }
+
+    protected function reportRequest(Request $request, ?string $period): Request
+    {
+        $query = $request->except(['page', 'period', 'date_from', 'date_to']);
+
+        if ($period !== null) {
+            $query['period'] = $period;
+        }
+
+        return Request::create($request->url(), 'GET', $query);
+    }
+
+    /**
+     * @param  array<string, mixed>  $log
+     * @return array<string, string>
+     */
+    protected function compactPrintRow(array $log): array
+    {
+        return [
+            'timestamp' => (string) ($log['event_time_export'] ?: $log['display_time'] ?: 'N/A'),
+            'plate_number' => (string) ($log['plate_number'] ?: 'GUEST'),
+            'owner_name' => (string) ($log['owner_name'] ?: 'N/A'),
+            'state' => (string) ($log['state_label'] ?: 'N/A'),
+            'status' => (string) ($log['status_label'] ?: 'N/A'),
+            'rfid_tag' => (string) ($log['rfid_tag_uid'] ?: 'N/A'),
+        ];
     }
 
     /**
@@ -482,6 +567,10 @@ class VehicleEventController extends Controller
             'record_type_label' => 'Vehicle Event',
             'id' => $event->id,
             'detail_url' => route('vehicle-events.show', $event),
+            'export_url' => route('vehicle-events.export.csv', [
+                'record_type' => 'vehicle_event',
+                'record_id' => $event->id,
+            ]),
             'event_type' => $event->event_type,
             'plate_number' => $event->plate_text ?: $vehicle?->plate_number ?: 'GUEST',
             'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',
@@ -494,7 +583,7 @@ class VehicleEventController extends Controller
             'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
             'summary_label' => 'Vehicle Event #'.$event->id.' • '.($time?->format('M d, Y • h:i A') ?: 'No time'),
             'event_time_export' => $time?->toDateTimeString(),
-            'status_label' => str($event->display_status)->replace('_', ' ')->title()->value(),
+            'status_label' => $event->display_status_label,
             'status_badge_class' => $event->status_badge_class,
             'match_label' => $event->match_display,
             'rfid_tag_uid' => $event->rfidScanLog?->tag_uid ?: 'N/A',
@@ -514,6 +603,10 @@ class VehicleEventController extends Controller
             'record_type_label' => 'Guest Observation',
             'id' => $observation->id,
             'detail_url' => route('guest-observations.index', ['plate_text' => $observation->plate_number ?: $observation->plate_text]),
+            'export_url' => route('vehicle-events.export.csv', [
+                'record_type' => 'guest_observation',
+                'record_id' => $observation->id,
+            ]),
             'event_type' => 'GUEST',
             'plate_number' => $observation->plate_number ?: $observation->plate_text ?: 'GUEST',
             'owner_name' => 'N/A',
@@ -548,6 +641,10 @@ class VehicleEventController extends Controller
             'record_type_label' => 'RFID Scan',
             'id' => $scanLog->id,
             'detail_url' => route('rfid-scans.index', ['history_q' => $scanLog->tag_uid]),
+            'export_url' => route('vehicle-events.export.csv', [
+                'record_type' => 'rfid_scan',
+                'record_id' => $scanLog->id,
+            ]),
             'event_type' => 'RFID',
             'plate_number' => $vehicle?->plate_number ?: 'GUEST',
             'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',

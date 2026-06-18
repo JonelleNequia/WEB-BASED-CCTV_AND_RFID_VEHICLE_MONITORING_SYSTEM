@@ -2586,10 +2586,10 @@ th {
 
 .event-log-row-actions {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: flex-end;
     gap: 0.55rem;
-    white-space: nowrap;
 }
 
 .event-log-modal-panel {
@@ -2613,6 +2613,109 @@ th {
     max-height: 420px;
     object-fit: contain;
     display: block;
+}
+
+.event-log-print-sheet {
+    display: none;
+}
+
+.event-log-print-header {
+    display: grid;
+    gap: 0.1rem;
+    margin-bottom: 0.45rem;
+    border-bottom: 1px solid #d1d5db;
+    padding-bottom: 0.35rem;
+}
+
+.event-log-print-header span,
+.event-log-print-header p {
+    margin: 0;
+    color: #475569;
+    font-size: 0.72rem;
+    font-weight: 800;
+}
+
+.event-log-print-header h2 {
+    margin: 0;
+    color: #111827;
+    font-size: 1rem;
+    line-height: 1.15;
+}
+
+.event-log-print-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.22rem;
+}
+
+.event-log-print-grid div {
+    display: grid;
+    gap: 0.05rem;
+    min-width: 0;
+    border: 1px solid #d1d5db;
+    padding: 0.24rem 0.3rem;
+}
+
+.event-log-print-grid span {
+    color: #64748b;
+    font-size: 0.62rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.event-log-print-grid strong {
+    color: #111827;
+    font-size: 0.72rem;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+}
+
+.event-log-print-image {
+    margin-top: 0.45rem;
+    border: 1px solid #d1d5db;
+    padding: 0.25rem;
+}
+
+.event-log-print-image img {
+    display: block;
+    max-width: 100%;
+    max-height: 220px;
+    object-fit: contain;
+    margin: 0 auto;
+}
+
+.event-log-print-empty {
+    margin: 0;
+    border: 1px solid #d1d5db;
+    padding: 0.45rem;
+    color: #475569;
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+
+.event-log-print-table {
+    width: 100%;
+    border-collapse: collapse;
+    color: #111827;
+    font-size: 0.66rem;
+    table-layout: fixed;
+}
+
+.event-log-print-table th,
+.event-log-print-table td {
+    border: 1px solid #d1d5db;
+    padding: 0.18rem 0.22rem;
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.event-log-print-table th {
+    color: #334155;
+    background: #f8fafc;
+    font-size: 0.6rem;
+    font-weight: 900;
+    text-transform: uppercase;
 }
 
 .modal-actions {
@@ -3454,8 +3557,18 @@ th {
         display: none !important;
     }
 
-    .page-content > :not(.printable-report-panel) {
+    .page-content > :not(.printable-report-panel):not(.event-log-print-sheet) {
         display: none !important;
+    }
+
+    body.is-printing-event-log .page-content > :not(.event-log-print-sheet) {
+        display: none !important;
+    }
+
+    body.is-printing-event-log .event-log-print-sheet {
+        display: block !important;
+        color: #111827;
+        font-size: 10px;
     }
 
     .app-shell,

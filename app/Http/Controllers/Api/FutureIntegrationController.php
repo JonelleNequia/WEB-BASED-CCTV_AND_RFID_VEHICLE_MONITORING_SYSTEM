@@ -13,6 +13,7 @@ use Carbon\Carbon;
 use App\Services\DetectorRuntimeService;
 use App\Services\RfidService;
 use App\Services\SettingsService;
+use App\Support\PlateNumber;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -197,7 +198,7 @@ class FutureIntegrationController extends Controller
 
         $cameraId = $validated['camera_id'];
         $direction = $validated['direction'];
-        $plateNumber = $validated['plate_number'] ?? null;
+        $plateNumber = PlateNumber::normalize($validated['plate_number'] ?? null);
         $vehicleColor = $this->normalizeVehicleColor($validated['vehicle_color'] ?? null);
         $imagePath = $validated['image_path'];
 
@@ -309,10 +310,11 @@ class FutureIntegrationController extends Controller
     {
         $cameraId = $validated['camera_id']
             ?? Camera::query()->forRole($validated['camera_role'])->value('id');
+        $plateNumber = PlateNumber::normalize($validated['plate_number'] ?? null);
 
         return GuestVehicleObservation::query()->create([
-            'plate_text' => $validated['plate_number'] ?? null,
-            'plate_number' => $validated['plate_number'] ?? null,
+            'plate_text' => $plateNumber,
+            'plate_number' => $plateNumber,
             'vehicle_type' => $validated['detected_vehicle_type'] ?? 'Vehicle',
             'vehicle_color' => $this->normalizeVehicleColor($validated['vehicle_color'] ?? $validated['detected_vehicle_color'] ?? null),
             'location' => $validated['camera_role'],
@@ -337,6 +339,7 @@ class FutureIntegrationController extends Controller
     ): GuestVehicleObservation {
         $camera = Camera::query()->find($cameraId);
         $location = $camera?->camera_role ?: ($direction === 'OUT' ? 'exit' : 'entrance');
+        $plateNumber = PlateNumber::normalize($plateNumber);
 
         return GuestVehicleObservation::query()->create([
             'plate_text' => $plateNumber,
@@ -495,9 +498,11 @@ class FutureIntegrationController extends Controller
             ]);
         }
 
+        $plateNumber = PlateNumber::normalize($validated['plate_number'] ?? null);
+
         $observation = GuestVehicleObservation::query()->create([
-            'plate_text' => $validated['plate_number'] ?? null,
-            'plate_number' => $validated['plate_number'] ?? null,
+            'plate_text' => $plateNumber,
+            'plate_number' => $plateNumber,
             'vehicle_type' => $validated['detected_vehicle_type'] ?? 'Vehicle',
             'vehicle_color' => $this->normalizeVehicleColor($validated['vehicle_color'] ?? $validated['detected_vehicle_color'] ?? null),
             'location' => $validated['camera_role'],

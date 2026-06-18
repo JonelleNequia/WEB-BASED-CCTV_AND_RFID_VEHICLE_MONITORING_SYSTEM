@@ -20,6 +20,12 @@ import numpy as np
 MAX_OCR_CANDIDATES = 6
 MAX_OCR_VARIANTS_PER_CANDIDATE = 2
 OCR_TIME_BUDGET_SECONDS = 8.0
+PLATE_LAYOUTS = (
+    (3, 4),
+    (3, 3),
+    (2, 5),
+    (2, 4),
+)
 
 
 @lru_cache(maxsize=1)
@@ -49,11 +55,11 @@ def ocr_runtime_status() -> Dict[str, str]:
     }
 
 
-def crop_vehicle(frame, bounding_box):
+def crop_vehicle(frame, bounding_box, padding_ratio=0.08, min_padding=8):
     frame_height, frame_width = frame.shape[:2]
     x1, y1, x2, y2 = [int(value) for value in bounding_box]
-    padding_x = max(int((x2 - x1) * 0.08), 8)
-    padding_y = max(int((y2 - y1) * 0.08), 8)
+    padding_x = max(int((x2 - x1) * padding_ratio), min_padding)
+    padding_y = max(int((y2 - y1) * padding_ratio), min_padding)
 
     crop_x1 = max(x1 - padding_x, 0)
     crop_y1 = max(y1 - padding_y, 0)
@@ -112,34 +118,133 @@ def normalize_plate_text(text: str) -> Optional[str]:
     if not re.search(r"[A-Z]", cleaned) or not re.search(r"\d", cleaned):
         return None
 
-    if re.match(r"^[A-Z]{2}\d{4,5}$", cleaned):
-        return f"{cleaned[:2]}-{cleaned[2:]}"
+    reordered_plate = number_first_plate_candidate(cleaned)
 
-    if re.match(r"^\d{3,4}[A-Z]{2,3}$", cleaned):
-        return cleaned
+    if reordered_plate:
+        return reordered_plate
 
-    if re.match(r"^[A-Z]{4}\d{3}$", cleaned):
-        return f"{cleaned[:3]}-{cleaned[4:]}"
+    candidates = plate_layout_candidates(cleaned)
 
-    normalized = correct_plate_character_positions(cleaned)
-
-    if re.match(r"^[A-Z]{3}\d{4}$", normalized):
-        return f"{normalized[:3]}-{normalized[3:]}"
-
-    if re.match(r"^[A-Z]{3}\d{3}$", normalized):
-        return f"{normalized[:3]}-{normalized[3:]}"
-
-    if 6 <= len(cleaned) <= 8 and re.search(r"\d", cleaned):
-        return cleaned
+    if candidates:
+        return candidates[0]
 
     return None
 
 
-def correct_plate_character_positions(text: str) -> str:
+def number_first_plate_candidate(text: str) -> Optional[str]:
+    """
+    OCR sometimes returns separated plate groups in visual order as 233DPF.
+    Save that as the expected letter-first PH plate format: DPF-233.
+    """
+    for prefix_len, digit_len in PLATE_LAYOUTS:
+        match = re.fullmatch(rf"(\d{{{digit_len}}})([A-Z]{{{prefix_len}}})", text)
+
+        if match:
+            digits, letters = match.groups()
+
+            return f"{letters}-{digits}"
+
+    return None
+
+
+def plate_layout_candidates(text: str) -> List[str]:
+    """
+    Accept only letter-first PH-style plate candidates after number-first
+    OCR group ordering has already been normalized.
+    """
+    candidates: List[Tuple[int, int, int, str]] = []
+
+    for priority, (prefix_len, digit_len) in enumerate(PLATE_LAYOUTS):
+        total_len = prefix_len + digit_len
+
+        if len(text) == total_len:
+            candidate = format_plate(text, prefix_len)
+
+            if candidate:
+                candidates.append((0, priority, 0, candidate))
+
+        if len(text) == total_len:
+            candidate = correct_plate_character_positions(text, prefix_len, digit_len)
+
+            if candidate:
+                candidates.append((2, priority, 0, candidate))
+
+        pattern = re.compile(rf"(?<![A-Z0-9])[A-Z]{{{prefix_len}}}\d{{{digit_len}}}(?![A-Z0-9])")
+
+        for match in pattern.finditer(text):
+            candidate = format_plate(match.group(0), prefix_len)
+
+            if candidate:
+                candidates.append((1, priority, match.start() + 1, candidate))
+
+        for start in range(0, max(len(text) - total_len + 1, 0)):
+            window = text[start:start + total_len]
+
+            if not is_plausible_corrected_plate_window(window, prefix_len):
+                continue
+
+            candidate = correct_plate_character_positions(window, prefix_len, digit_len)
+
+            if candidate:
+                candidates.append((2, priority, start + 2, candidate))
+
+    if not candidates:
+        return []
+
+    candidates.sort(key=lambda item: (item[0], item[1], item[2], -len(item[3])))
+
+    unique = []
+    seen = set()
+
+    for _, _, _, candidate in candidates:
+        if candidate in seen:
+            continue
+
+        seen.add(candidate)
+        unique.append(candidate)
+
+    return unique
+
+
+def format_plate(text: str, prefix_len: int) -> Optional[str]:
+    prefix = text[:prefix_len]
+    suffix = text[prefix_len:]
+
+    if not prefix.isalpha() or not suffix.isdigit():
+        return None
+
+    return f"{prefix}-{suffix}"
+
+
+def is_plausible_corrected_plate_window(text: str, prefix_len: int) -> bool:
+    """
+    Let OCR corrections recover common swaps while keeping the format letter-first.
+    This prevents number-first strings like 123ABC from being accepted.
+    """
+    prefix = text[:prefix_len]
+    suffix = text[prefix_len:]
+
+    if not prefix or not suffix:
+        return False
+
+    if sum(character.isalpha() for character in prefix) < max(prefix_len - 1, 1):
+        return False
+
+    if sum(character.isdigit() for character in suffix) < max(len(suffix) - 1, 1):
+        return False
+
+    return True
+
+
+def correct_plate_character_positions(text: str, prefix_len: int = 3, digit_len: int = 4) -> Optional[str]:
     """
     Apply only position-safe OCR corrections for common PH plate layouts.
     """
-    cleaned = text[:7]
+    total_len = prefix_len + digit_len
+
+    if len(text) != total_len:
+        return None
+
     prefix_map = {
         "0": "O",
         "1": "I",
@@ -163,13 +268,15 @@ def correct_plate_character_positions(text: str) -> str:
     }
     corrected = []
 
-    for index, character in enumerate(cleaned):
-        if index < 3:
+    for index, character in enumerate(text):
+        if index < prefix_len:
             corrected.append(prefix_map.get(character, character))
         else:
             corrected.append(suffix_map.get(character, character))
 
-    return "".join(corrected)
+    corrected_text = "".join(corrected)
+
+    return format_plate(corrected_text, prefix_len)
 
 
 def read_with_easyocr_candidates(image) -> List[Tuple[str, float]]:
@@ -446,7 +553,7 @@ def select_consensus_plate(candidates: List[Tuple[str, float]]) -> Optional[str]
 
     ranked = sorted(
         scores,
-        key=lambda plate: (scores[plate], counts[plate], len(plate)),
+        key=lambda plate: (scores[plate], counts[plate], plate_layout_rank(plate), len(plate)),
         reverse=True,
     )
     best = ranked[0]
@@ -466,6 +573,22 @@ def select_consensus_plate(candidates: List[Tuple[str, float]]) -> Optional[str]
         return best
 
     return None
+
+
+def plate_layout_rank(plate: str) -> int:
+    if re.match(r"^[A-Z]{3}-\d{4}$", plate):
+        return 4
+
+    if re.match(r"^[A-Z]{3}-\d{3}$", plate):
+        return 3
+
+    if re.match(r"^[A-Z]{2}-\d{5}$", plate):
+        return 2
+
+    if re.match(r"^[A-Z]{2}-\d{4}$", plate):
+        return 1
+
+    return 0
 
 
 def read_license_plate(frame, bounding_box) -> Optional[str]:
@@ -506,15 +629,16 @@ def read_license_plate(frame, bounding_box) -> Optional[str]:
     return select_consensus_plate(ocr_candidates)
 
 
-def dominant_neutral_color(black_ratio, white_ratio, gray_ratio, gray_value_mean) -> Optional[str]:
+def dominant_neutral_color(black_ratio, white_ratio, silver_ratio, gray_ratio) -> Optional[str]:
     neutral_scores = {
         "Black": black_ratio,
         "White": white_ratio,
-        "Silver" if gray_value_mean >= 150 else "Gray": gray_ratio,
+        "Silver": silver_ratio,
+        "Gray": gray_ratio,
     }
     color, score = max(neutral_scores.items(), key=lambda item: item[1])
 
-    return color if score >= 0.18 else None
+    return color if score >= 0.20 else None
 
 
 def classify_vehicle_color_sample(sample) -> Tuple[Optional[str], float]:
@@ -540,32 +664,25 @@ def classify_vehicle_color_sample(sample) -> Tuple[Optional[str], float]:
     value = hsv[:, 2]
     total_pixels = float(len(hsv))
 
-    valid_body_mask = value >= 32
-    black_mask = value < 48
-    white_mask = valid_body_mask & (saturation < 32) & (value >= 190)
-    gray_mask = valid_body_mask & (saturation < 48) & (value >= 55) & (value < 190)
-    chroma_mask = valid_body_mask & (saturation >= 55) & (value >= 60)
+    black_mask = value < 44
+    neutral_mask = (saturation < 70) & (value >= 36)
+    white_mask = neutral_mask & (value >= 165)
+    silver_mask = neutral_mask & (value >= 112) & (value < 175)
+    gray_mask = neutral_mask & (value >= 58) & (value < 128)
+    chroma_mask = (saturation >= 58) & (value >= 55)
 
     black_ratio = float(np.count_nonzero(black_mask)) / total_pixels
     white_ratio = float(np.count_nonzero(white_mask)) / total_pixels
+    silver_ratio = float(np.count_nonzero(silver_mask)) / total_pixels
     gray_ratio = float(np.count_nonzero(gray_mask)) / total_pixels
-    gray_value_mean = float(value[gray_mask].mean()) if np.any(gray_mask) else 0.0
 
-    if black_ratio >= 0.50:
-        return "Black", black_ratio
-
-    if white_ratio >= 0.34:
-        return "White", white_ratio
-
-    if gray_ratio >= 0.42:
-        return "Silver" if gray_value_mean >= 150 else "Gray", gray_ratio
+    neutral_values = value[neutral_mask]
+    neutral_ratio = float(len(neutral_values)) / total_pixels if total_pixels else 0.0
+    neutral_mean = float(neutral_values.mean()) if len(neutral_values) else 0.0
+    neutral_p75 = float(np.percentile(neutral_values, 75)) if len(neutral_values) else 0.0
 
     chroma_hue = hue[chroma_mask]
     chroma_total = len(chroma_hue)
-
-    if chroma_total < total_pixels * 0.10:
-        color = dominant_neutral_color(black_ratio, white_ratio, gray_ratio, gray_value_mean)
-        return color, max(black_ratio, white_ratio, gray_ratio)
 
     color_ranges = [
         ("Red", (chroma_hue <= 10) | (chroma_hue >= 170)),
@@ -581,11 +698,51 @@ def classify_vehicle_color_sample(sample) -> Tuple[Optional[str], float]:
     }
     color, count = max(counts.items(), key=lambda item: item[1])
 
-    if count <= 0 or count < chroma_total * 0.32:
-        neutral_color = dominant_neutral_color(black_ratio, white_ratio, gray_ratio, gray_value_mean)
-        return neutral_color, max(black_ratio, white_ratio, gray_ratio)
+    if (
+        chroma_total >= total_pixels * 0.10
+        and count > 0
+        and count >= chroma_total * 0.34
+    ):
+        return color, count / float(chroma_total)
 
-    return color, count / float(chroma_total)
+    if black_ratio >= 0.58 and black_ratio >= max(white_ratio, silver_ratio, gray_ratio) * 1.30:
+        return "Black", black_ratio
+
+    if white_ratio >= 0.28 or (neutral_ratio >= 0.42 and neutral_mean >= 155 and neutral_p75 >= 165):
+        return "White", max(white_ratio, neutral_ratio)
+
+    if silver_ratio >= 0.34 or (neutral_ratio >= 0.42 and neutral_mean >= 118 and neutral_p75 >= 135):
+        return "Silver", max(silver_ratio, neutral_ratio)
+
+    if gray_ratio >= 0.30 or neutral_ratio >= 0.36:
+        return "Gray", max(gray_ratio, neutral_ratio)
+
+    neutral_color = dominant_neutral_color(black_ratio, white_ratio, silver_ratio, gray_ratio)
+    return neutral_color, max(black_ratio, white_ratio, silver_ratio, gray_ratio)
+
+
+def body_color_regions(vehicle_crop) -> List[np.ndarray]:
+    """
+    Sample probable paint/body panels. Avoid padded edges, wheels, plate area,
+    and the lowest crop bands where road and shadows commonly dominate.
+    """
+    region_specs = [
+        (0.20, 0.20, 0.80, 0.54),
+        (0.18, 0.34, 0.82, 0.68),
+        (0.30, 0.24, 0.70, 0.64),
+        (0.10, 0.30, 0.46, 0.72),
+        (0.54, 0.30, 0.90, 0.72),
+        (0.24, 0.48, 0.76, 0.78),
+    ]
+    regions = []
+
+    for spec in region_specs:
+        region = crop_fraction(vehicle_crop, *spec)
+
+        if region is not None and region.size:
+            regions.append(region)
+
+    return regions
 
 
 def detect_vehicle_color(frame, bounding_box) -> Optional[str]:
@@ -595,20 +752,12 @@ def detect_vehicle_color(frame, bounding_box) -> Optional[str]:
     Multiple body-focused samples reduce false gray/black results from windows,
     tires, shadows, and background pixels.
     """
-    crop = crop_vehicle(frame, bounding_box)
+    crop = crop_vehicle(frame, bounding_box, padding_ratio=0.0, min_padding=0)
 
     if crop.size == 0:
         return None
 
-    height, width = crop.shape[:2]
-    regions = [
-        crop[int(height * 0.24):int(height * 0.54), int(width * 0.38):int(width * 0.78)],
-        crop[int(height * 0.28):int(height * 0.62), int(width * 0.46):int(width * 0.86)],
-        crop[int(height * 0.42):int(height * 0.82), int(width * 0.12):int(width * 0.88)],
-        crop[int(height * 0.30):int(height * 0.72), int(width * 0.18):int(width * 0.82)],
-        crop[int(height * 0.52):int(height * 0.90), int(width * 0.18):int(width * 0.82)],
-        crop[int(height * 0.34):int(height * 0.84), int(width * 0.28):int(width * 0.72)],
-    ]
+    regions = body_color_regions(crop)
     scores: Dict[str, float] = {}
     max_scores: Dict[str, float] = {}
 
@@ -622,17 +771,27 @@ def detect_vehicle_color(frame, bounding_box) -> Optional[str]:
         max_scores[color] = max(max_scores.get(color, 0.0), score)
 
     if not scores:
-        color, _ = classify_vehicle_color_sample(crop)
+        color, score = classify_vehicle_color_sample(crop)
 
-        return color
+        return color if score >= 0.24 else None
 
     color, score = max(scores.items(), key=lambda item: item[1])
 
+    if score < 0.42 and max_scores.get(color, 0.0) < 0.28:
+        return None
+
     if (
         color == "Gray"
-        and scores.get("White", 0.0) >= 0.70
-        and max_scores.get("White", 0.0) >= 0.40
+        and scores.get("White", 0.0) >= 0.60
+        and max_scores.get("White", 0.0) >= 0.32
     ):
         return "White"
+
+    if (
+        color == "Black"
+        and score < 0.90
+        and max(scores.get("White", 0.0), scores.get("Silver", 0.0), scores.get("Gray", 0.0)) >= score * 0.75
+    ):
+        return max(("White", "Silver", "Gray"), key=lambda name: scores.get(name, 0.0))
 
     return color

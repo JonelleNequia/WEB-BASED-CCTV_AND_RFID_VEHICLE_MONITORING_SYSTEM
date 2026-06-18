@@ -5,12 +5,12 @@ namespace App\Services;
 use App\Models\GuestVehicleObservation;
 use App\Models\Camera;
 use App\Models\RfidScanLog;
+use App\Support\PlateNumber;
 use App\Support\PhilippineTime;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 
 class GuestObservationService
 {
@@ -161,13 +161,7 @@ class GuestObservationService
      */
     protected function normalizePlate(?string $plate): ?string
     {
-        if (blank($plate)) {
-            return null;
-        }
-
-        $normalized = preg_replace('/\s+/', ' ', (string) $plate) ?? (string) $plate;
-
-        return Str::upper(trim($normalized));
+        return PlateNumber::normalize($plate);
     }
 
     protected function normalizeLocation(mixed $location): string

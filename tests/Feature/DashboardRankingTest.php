@@ -123,6 +123,66 @@ class DashboardRankingTest extends TestCase
             ->assertJsonPath('traffic_summary.year.entries', 4);
     }
 
+    public function test_dashboard_recent_events_do_not_duplicate_mirrored_guest_observations(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+        $eventTime = now();
+
+        GuestVehicleObservation::query()->create([
+            'plate_number' => 'DPF-233',
+            'plate_text' => 'DPF-233',
+            'vehicle_type' => 'Car',
+            'vehicle_color' => 'White',
+            'location' => 'entrance',
+            'observation_source' => 'cctv',
+            'status' => 'pending_review',
+            'observed_at' => $eventTime,
+            'external_event_key' => 'dashboard-mirrored-guest-001',
+        ]);
+
+        VehicleEvent::query()->create([
+            'event_type' => 'ENTRY',
+            'event_status' => VehicleEvent::STATUS_COMPLETED,
+            'event_origin' => 'guest_cctv',
+            'plate_text' => 'DPF-233',
+            'plate_number' => 'DPF-233',
+            'vehicle_type' => 'Car',
+            'detected_vehicle_type' => 'Car',
+            'vehicle_color' => 'White',
+            'vehicle_category' => 'guest',
+            'event_time' => $eventTime,
+            'external_event_key' => 'dashboard-mirrored-guest-001',
+            'match_status' => 'open',
+            'resulting_state' => 'INSIDE',
+        ]);
+
+        VehicleEvent::query()->create([
+            'event_type' => 'EXIT',
+            'event_status' => VehicleEvent::STATUS_COMPLETED,
+            'event_origin' => 'manual',
+            'plate_text' => 'EXIT-1001',
+            'plate_number' => 'EXIT-1001',
+            'vehicle_type' => 'Car',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $eventTime->copy()->subMinute(),
+            'match_status' => 'closed',
+            'resulting_state' => 'OUTSIDE',
+        ]);
+
+        $latestEvents = collect($this->actingAs($user)
+            ->getJson(route('dashboard.live-state'))
+            ->assertOk()
+            ->json('latest_events'));
+
+        $this->assertTrue($latestEvents->contains(fn (array $event): bool => $event['title'] === 'ENTRY • DPF-233'
+            && $event['badge_label'] === 'Entry'));
+        $this->assertTrue($latestEvents->contains(fn (array $event): bool => $event['title'] === 'EXIT • EXIT-1001'
+            && $event['badge_label'] === 'Exit'));
+        $this->assertFalse($latestEvents->contains(fn (array $event): bool => $event['title'] === 'GUEST • GUEST'));
+    }
+
     public function test_dashboard_today_counts_reset_on_philippine_midnight(): void
     {
         $user = User::factory()->create();

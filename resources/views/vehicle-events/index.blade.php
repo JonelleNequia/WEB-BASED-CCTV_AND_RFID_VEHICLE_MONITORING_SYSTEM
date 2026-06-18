@@ -117,9 +117,9 @@
                 <label for="match_status">Status</label>
                 <select id="match_status" name="match_status">
                     <option value="">All</option>
-                    @foreach (['open', 'closed', 'matched', 'unmatched', 'verified'] as $status)
+                    @foreach (['open' => 'Entry', 'closed' => 'Exit', 'matched' => 'Matched', 'unmatched' => 'Unmatched', 'verified' => 'Verified'] as $status => $label)
                         <option value="{{ $status }}" @selected(($filters['match_status'] ?? '') === $status)>
-                            {{ str_replace('_', ' ', ucfirst($status)) }}
+                            {{ $label }}
                         </option>
                     @endforeach
                 </select>
@@ -154,6 +154,20 @@
                 @endforeach
             </div>
         </div>
+
+        <div class="report-action-bar">
+            <div>
+                <strong>Print Reports</strong>
+                <span>Print compact Event Logs by all records, day, week, or year.</span>
+            </div>
+            <div class="button-row">
+                @foreach ($printReports as $reportKey => $report)
+                    <button type="button" class="button button-secondary button-sm" data-event-log-report-print="{{ $reportKey }}">
+                        Print {{ $report['label'] }}
+                    </button>
+                @endforeach
+            </div>
+        </div>
     </section>
 
     <section class="panel">
@@ -168,17 +182,6 @@
                 </div>
             </div>
             <span class="chip chip-soft">{{ $logs->total() }} total</span>
-        </div>
-
-        <div class="report-action-bar">
-            <div>
-                <strong>Report Actions</strong>
-                <span>Print or export only the records visible on this filtered page.</span>
-            </div>
-            <div class="button-row">
-                <button type="button" class="button button-primary" onclick="window.print()">Print</button>
-                <a href="{{ route('vehicle-events.export.csv', request()->query()) }}" class="button button-secondary">Export CSV</a>
-            </div>
         </div>
 
         <div class="event-log-card-list event-log-list-view" data-event-log-list>
@@ -196,8 +199,10 @@
                         <div class="event-log-row-actions">
                             <span class="badge badge-{{ $log['status_badge_class'] }}">{{ $log['status_label'] }}</span>
                             <button type="button" class="button button-secondary button-sm" data-event-log-view="{{ $loop->index }}">
-                                View Details
+                                Details
                             </button>
+                            <button type="button" class="button button-primary button-sm" data-event-log-print="{{ $loop->index }}">Print</button>
+                            <a href="{{ $log['export_url'] }}" class="button button-secondary button-sm">CSV</a>
                         </div>
                     </div>
 
@@ -251,12 +256,17 @@
 
             <div class="modal-actions">
                 <a href="#" class="button button-primary button-sm" data-event-log-modal-link>Open Full Record</a>
+                <button type="button" class="button button-primary button-sm" data-event-log-modal-print>Print</button>
+                <a href="#" class="button button-secondary button-sm" data-event-log-modal-export>CSV</a>
                 <button type="button" class="button button-secondary button-sm" data-event-log-modal-close>Close</button>
             </div>
         </div>
     </div>
 
+    <section class="event-log-print-sheet" data-event-log-print-sheet hidden></section>
+
     <script id="event-log-modal-data" type="application/json">{!! json_encode($logs->getCollection()->values(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
+    <script id="event-log-report-data" type="application/json" data-payload="{{ base64_encode(json_encode($printReports, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)) }}"></script>
     <script id="event-log-realtime-data" type="application/json">{!! json_encode([
         'recentLogsUrl' => request()->except('page') === [] ? route('api.recent-event-logs', ['limit' => 10]) : null,
     ], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
@@ -266,6 +276,7 @@
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const dataNode = document.getElementById('event-log-modal-data');
+            const reportNode = document.getElementById('event-log-report-data');
             const realtimeNode = document.getElementById('event-log-realtime-data');
             const modal = document.querySelector('[data-event-log-modal]');
             const title = document.getElementById('event-log-modal-title');
@@ -274,11 +285,16 @@
             const imageWrap = document.querySelector('[data-event-log-modal-image-wrap]');
             const image = document.querySelector('[data-event-log-modal-image]');
             const link = document.querySelector('[data-event-log-modal-link]');
+            const modalPrintButton = document.querySelector('[data-event-log-modal-print]');
+            const modalExportLink = document.querySelector('[data-event-log-modal-export]');
+            const printSheet = document.querySelector('[data-event-log-print-sheet]');
             const list = document.querySelector('[data-event-log-list]');
             const realtimeConfig = realtimeNode ? JSON.parse(realtimeNode.textContent || '{}') : {};
             let logs = dataNode ? JSON.parse(dataNode.textContent || '[]') : [];
+            const printReports = reportNode ? JSON.parse(atob(reportNode.dataset.payload || 'e30=')) : {};
+            let activeModalLog = null;
 
-            if (!modal || !title || !type || !detailGrid || !imageWrap || !image || !link) {
+            if (!modal || !title || !type || !detailGrid || !imageWrap || !image || !link || !modalPrintButton || !modalExportLink || !printSheet) {
                 return;
             }
 
@@ -289,6 +305,23 @@
                 ['Category', log.category_label],
                 ['Source', log.source_label],
                 ['Station / Camera', log.station_label],
+                ['RFID Tag', log.rfid_tag_uid],
+                ['State', log.state_label],
+                ['Status', log.status_label],
+                ['Match', log.match_label],
+                ['Time', log.display_time],
+            ];
+
+            const printDetailsFor = (log) => [
+                ['Record', `${log.record_type_label || 'Log'} #${log.id || 'N/A'}`],
+                ['Log Type', log.event_type],
+                ['Plate', log.plate_number || 'GUEST'],
+                ['Owner', log.owner_name],
+                ['Vehicle', log.vehicle_type],
+                ['Color', log.vehicle_color],
+                ['Category', log.category_label],
+                ['Source', log.source_label],
+                ['Station', log.station_label],
                 ['RFID Tag', log.rfid_tag_uid],
                 ['State', log.state_label],
                 ['Status', log.status_label],
@@ -318,6 +351,8 @@
                 const actions = document.createElement('div');
                 const statusBadge = document.createElement('span');
                 const viewButton = document.createElement('button');
+                const printButton = document.createElement('button');
+                const csvLink = document.createElement('a');
                 const body = document.createElement('div');
                 const preview = document.createElement('div');
                 const summary = document.createElement('div');
@@ -330,6 +365,8 @@
                 actions.className = 'event-log-row-actions';
                 statusBadge.className = `badge badge-${log.status_badge_class || 'secondary'}`;
                 viewButton.className = 'button button-secondary button-sm';
+                printButton.className = 'button button-primary button-sm';
+                csvLink.className = 'button button-secondary button-sm';
                 body.className = 'event-log-body';
                 preview.className = 'event-log-preview';
                 summary.className = 'event-log-summary-panel';
@@ -343,8 +380,13 @@
                 statusBadge.textContent = log.status_label || 'Recorded';
                 viewButton.type = 'button';
                 viewButton.dataset.eventLogView = String(index);
-                viewButton.textContent = 'View Details';
-                actions.append(statusBadge, viewButton);
+                viewButton.textContent = 'Details';
+                printButton.type = 'button';
+                printButton.dataset.eventLogPrint = String(index);
+                printButton.textContent = 'Print';
+                csvLink.href = log.export_url || '#';
+                csvLink.textContent = 'CSV';
+                actions.append(statusBadge, viewButton, printButton, csvLink);
                 top.append(titleBlock, actions);
 
                 if (log.image_url) {
@@ -368,6 +410,139 @@
                 return card;
             };
 
+            const printLog = (log) => {
+                if (!log) {
+                    return;
+                }
+
+                printSheet.innerHTML = '';
+
+                const header = document.createElement('div');
+                const kicker = document.createElement('span');
+                const heading = document.createElement('h2');
+                const meta = document.createElement('p');
+                const grid = document.createElement('div');
+
+                header.className = 'event-log-print-header';
+                kicker.textContent = 'PHILCST Vehicle Monitoring';
+                heading.textContent = `${log.event_type || 'LOG'} - ${log.plate_number || 'GUEST'}`;
+                meta.textContent = `${log.record_type_label || 'Record'} #${log.id || 'N/A'}`;
+                header.append(kicker, heading, meta);
+
+                grid.className = 'event-log-print-grid';
+                printDetailsFor(log).forEach(([label, value]) => {
+                    const item = document.createElement('div');
+                    const labelNode = document.createElement('span');
+                    const valueNode = document.createElement('strong');
+
+                    labelNode.textContent = label;
+                    valueNode.textContent = value || 'N/A';
+                    item.append(labelNode, valueNode);
+                    grid.appendChild(item);
+                });
+
+                printSheet.append(header, grid);
+
+                if (log.image_url) {
+                    const imageBox = document.createElement('div');
+                    const imageNode = document.createElement('img');
+
+                    imageBox.className = 'event-log-print-image';
+                    imageNode.src = log.image_url;
+                    imageNode.alt = `${log.record_type_label || 'Vehicle log'} snapshot`;
+                    imageBox.appendChild(imageNode);
+                    printSheet.appendChild(imageBox);
+                }
+
+                printSheet.hidden = false;
+                document.body.classList.add('is-printing-event-log');
+
+                const cleanupPrint = () => {
+                    document.body.classList.remove('is-printing-event-log');
+                    printSheet.hidden = true;
+                    printSheet.innerHTML = '';
+                    window.removeEventListener('afterprint', cleanupPrint);
+                };
+
+                window.addEventListener('afterprint', cleanupPrint);
+                window.print();
+            };
+
+            const printReport = (report) => {
+                if (!report) {
+                    return;
+                }
+
+                const rows = Array.isArray(report.rows) ? report.rows : [];
+                printSheet.innerHTML = '';
+
+                const header = document.createElement('div');
+                const kicker = document.createElement('span');
+                const heading = document.createElement('h2');
+                const meta = document.createElement('p');
+
+                header.className = 'event-log-print-header';
+                kicker.textContent = 'PHILCST Vehicle Monitoring';
+                heading.textContent = `Event Logs - ${report.label || 'Report'}`;
+                meta.textContent = `${rows.length} record${rows.length === 1 ? '' : 's'}`;
+                header.append(kicker, heading, meta);
+                printSheet.appendChild(header);
+
+                if (rows.length === 0) {
+                    const empty = document.createElement('p');
+                    empty.className = 'event-log-print-empty';
+                    empty.textContent = 'No records found for this report.';
+                    printSheet.appendChild(empty);
+                } else {
+                    const table = document.createElement('table');
+                    const thead = document.createElement('thead');
+                    const tbody = document.createElement('tbody');
+                    const headerRow = document.createElement('tr');
+                    const columns = [
+                        ['timestamp', 'Timestamp'],
+                        ['plate_number', 'Plate Number'],
+                        ['owner_name', 'Owner Name'],
+                        ['state', 'State'],
+                        ['status', 'Status'],
+                        ['rfid_tag', 'RFID Tag'],
+                    ];
+
+                    table.className = 'event-log-print-table';
+
+                    columns.forEach(([, label]) => {
+                        appendText(headerRow, 'th', label);
+                    });
+
+                    thead.appendChild(headerRow);
+
+                    rows.forEach((row) => {
+                        const tr = document.createElement('tr');
+
+                        columns.forEach(([key]) => {
+                            appendText(tr, 'td', row[key] || 'N/A');
+                        });
+
+                        tbody.appendChild(tr);
+                    });
+
+                    table.append(thead, tbody);
+                    printSheet.appendChild(table);
+                }
+
+                printSheet.hidden = false;
+                document.body.classList.add('is-printing-event-log');
+
+                const cleanupPrint = () => {
+                    document.body.classList.remove('is-printing-event-log');
+                    printSheet.hidden = true;
+                    printSheet.innerHTML = '';
+                    window.removeEventListener('afterprint', cleanupPrint);
+                };
+
+                window.addEventListener('afterprint', cleanupPrint);
+                window.print();
+            };
+
             const renderEventLogs = (items) => {
                 if (!list || !Array.isArray(items)) {
                     return;
@@ -389,9 +564,11 @@
             };
 
             const openModal = (log) => {
+                activeModalLog = log;
                 title.textContent = `${log.event_type} • ${log.plate_number || 'GUEST'}`;
                 type.textContent = `${log.record_type_label} #${log.id}`;
                 link.href = log.detail_url;
+                modalExportLink.href = log.export_url || '#';
                 detailGrid.innerHTML = '';
 
                 detailsFor(log).forEach(([label, value]) => {
@@ -420,9 +597,27 @@
             const closeModal = () => {
                 modal.classList.add('is-hidden');
                 modal.setAttribute('aria-hidden', 'true');
+                activeModalLog = null;
             };
 
             document.addEventListener('click', (event) => {
+                const reportButton = event.target.closest('[data-event-log-report-print]');
+
+                if (reportButton) {
+                    printReport(printReports[reportButton.dataset.eventLogReportPrint]);
+
+                    return;
+                }
+
+                const printButton = event.target.closest('[data-event-log-print]');
+
+                if (printButton) {
+                    const log = logs[Number.parseInt(printButton.dataset.eventLogPrint, 10)];
+                    printLog(log);
+
+                    return;
+                }
+
                 const button = event.target.closest('[data-event-log-view]');
 
                 if (!button) {
@@ -434,6 +629,10 @@
                 if (log) {
                     openModal(log);
                 }
+            });
+
+            modalPrintButton.addEventListener('click', () => {
+                printLog(activeModalLog);
             });
 
             document.querySelectorAll('[data-event-log-modal-close]').forEach((button) => {

@@ -11,6 +11,7 @@ use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
 use App\Services\GuestObservationService;
 use App\Services\SettingsService;
+use App\Support\PlateNumber;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -164,13 +165,7 @@ class GuestObservationController extends Controller
 
     protected function normalizePlate(?string $plate): ?string
     {
-        if (blank($plate)) {
-            return null;
-        }
-
-        $normalized = preg_replace('/\s+/', ' ', $plate) ?? $plate;
-
-        return Str::upper(trim($normalized));
+        return PlateNumber::normalize($plate);
     }
 
     protected function normalizeVehicleColor(?string $color): ?string

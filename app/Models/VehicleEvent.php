@@ -148,6 +148,18 @@ class VehicleEvent extends Model
     }
 
     /**
+     * Show movement-friendly labels instead of internal session states.
+     */
+    public function getDisplayStatusLabelAttribute(): string
+    {
+        return match ($this->display_status) {
+            'open' => 'Entry',
+            'closed' => 'Exit',
+            default => str($this->display_status)->replace('_', ' ')->title()->value(),
+        };
+    }
+
+    /**
      * Show the vehicle type that came from detection or manual completion.
      */
     public function getDisplayVehicleTypeAttribute(): string

@@ -374,6 +374,49 @@ class DetectedEventIngestionTest extends TestCase
         ]);
     }
 
+    public function test_detector_guest_observation_saves_number_first_ocr_as_letter_first_plate(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $this->withHeaders([
+            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Source-Name' => 'phpunit-detector',
+        ])->post(route('api.guest-observation'), [
+            'external_event_key' => 'guest-window-number-first-ocr-001',
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => now()->toIso8601String(),
+            'plate_number' => '233DPF',
+            'vehicle_color' => 'white',
+            'snapshot' => UploadedFile::fake()->image('guest-number-first.jpg', 640, 480),
+            'detection_metadata' => json_encode([
+                'track_id' => 56,
+                'rfid_window_seconds' => 4,
+            ]),
+        ])->assertCreated();
+
+        $observation = GuestVehicleObservation::query()
+            ->where('external_event_key', 'guest-window-number-first-ocr-001')
+            ->firstOrFail();
+
+        $this->assertSame('DPF-233', $observation->plate_number);
+        $this->assertSame('DPF-233', $observation->plate_text);
+
+        $event = VehicleEvent::query()
+            ->where('external_event_key', 'guest-window-number-first-ocr-001')
+            ->firstOrFail();
+
+        $this->assertSame('DPF-233', $event->plate_number);
+        $this->assertSame('DPF-233', $event->plate_text);
+        $this->assertDatabaseHas('active_sessions', [
+            'entry_event_id' => $event->id,
+            'plate_number' => 'DPF-233',
+            'plate_text' => 'DPF-233',
+            'status' => 'open',
+        ]);
+    }
+
     public function test_detector_guest_exit_closes_the_open_guest_session(): void
     {
         Storage::fake('public');

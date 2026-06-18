@@ -191,7 +191,7 @@ class RealtimeLogController extends Controller
             'exits_today_count' => (int) $exitsToday,
             'event_time' => $event->event_time?->toIso8601String(),
             'display_time' => $event->event_time?->format('M d, Y • h:i:s A'),
-            'status' => $event->display_status,
+            'status' => $event->display_status_label,
             'sort_time' => $this->sortTimestamp($event->created_at, $event->event_time),
         ];
     }
@@ -235,6 +235,10 @@ class RealtimeLogController extends Controller
             'record_type_label' => 'Vehicle Event',
             'id' => $event->id,
             'detail_url' => route('vehicle-events.show', $event),
+            'export_url' => route('vehicle-events.export.csv', [
+                'record_type' => 'vehicle_event',
+                'record_id' => $event->id,
+            ]),
             'event_type' => $event->event_type,
             'plate_number' => $event->plate_text ?: $vehicle?->plate_number ?: 'GUEST',
             'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',
@@ -247,7 +251,7 @@ class RealtimeLogController extends Controller
             'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
             'summary_label' => 'Vehicle Event #'.$event->id.' • '.($time?->format('M d, Y • h:i A') ?: 'No time'),
             'event_time_export' => $time?->toDateTimeString(),
-            'status_label' => str($event->display_status)->replace('_', ' ')->title()->value(),
+            'status_label' => $event->display_status_label,
             'status_badge_class' => $event->status_badge_class,
             'match_label' => $event->match_display,
             'rfid_tag_uid' => $event->rfidScanLog?->tag_uid ?: 'N/A',
@@ -267,6 +271,10 @@ class RealtimeLogController extends Controller
             'record_type_label' => 'Guest Observation',
             'id' => $observation->id,
             'detail_url' => route('guest-observations.index', ['plate_text' => $observation->plate_number ?: $observation->plate_text]),
+            'export_url' => route('vehicle-events.export.csv', [
+                'record_type' => 'guest_observation',
+                'record_id' => $observation->id,
+            ]),
             'event_type' => 'GUEST',
             'plate_number' => $observation->plate_number ?: $observation->plate_text ?: 'GUEST',
             'owner_name' => 'N/A',

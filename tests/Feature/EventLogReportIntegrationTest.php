@@ -29,11 +29,49 @@ class EventLogReportIntegrationTest extends TestCase
             ->assertOk()
             ->assertSee('Vehicle operations logs')
             ->assertSee('Vehicle Owner Name')
-            ->assertSee('Report Actions')
-            ->assertSee('Export CSV')
+            ->assertSee('data-event-log-print', false)
+            ->assertSee('Print Reports')
+            ->assertSee('Print All Records')
+            ->assertSee('Print Today')
+            ->assertSee('Print This Week')
+            ->assertSee('Print This Year')
+            ->assertSee('event-log-report-data', false)
+            ->assertSee('CSV')
             ->assertSee('event-log-list-view', false)
             ->assertSee('Color')
             ->assertDontSee('Daily and date-range reports');
+    }
+
+    public function test_event_log_record_csv_export_contains_one_compact_record(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+        $event = VehicleEvent::query()->create([
+            'event_type' => 'ENTRY',
+            'event_status' => VehicleEvent::STATUS_COMPLETED,
+            'event_origin' => 'manual',
+            'plate_text' => 'ONE-1001',
+            'vehicle_type' => 'Car',
+            'detected_vehicle_type' => 'Car',
+            'vehicle_color' => 'White',
+            'event_time' => now(),
+            'match_status' => 'open',
+            'resulting_state' => 'INSIDE',
+        ]);
+
+        $response = $this->actingAs($admin)
+            ->get(route('vehicle-events.export.csv', [
+                'record_type' => 'vehicle_event',
+                'record_id' => $event->id,
+            ]))
+            ->assertOk();
+
+        $csv = $response->streamedContent();
+
+        $this->assertStringContainsString('Type,Plate,Owner,Vehicle,Color,Station,State,Time,Status,"RFID Tag"', $csv);
+        $this->assertStringContainsString('ENTRY,ONE-1001', $csv);
+        $this->assertStringNotContainsString('Record Type,ID', $csv);
     }
 
     public function test_legacy_reports_route_redirects_to_event_logs(): void

@@ -2,7 +2,7 @@
 
 @section('title', 'System Status | PHILCST Vehicle Monitoring')
 @section('page-title', 'System Status')
-@section('page-description', 'Admin view for camera service health and integration activity.')
+@section('page-description', 'Admin view for camera service health.')
 
 @section('content')
     <section class="hero-panel hero-panel-compact">
@@ -95,47 +95,4 @@
             </article>
         @endforeach
     </div>
-
-    <section class="panel">
-        <div class="panel-header">
-            <div>
-                <div class="panel-title-row">
-                    <h3>Recent Integration Activity</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Integration activity help',
-                        'text' => 'Shows recent incoming events and scans from integrations.',
-                    ])
-                </div>
-            </div>
-        </div>
-
-        <div class="table-responsive">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Time</th>
-                        <th>Source</th>
-                        <th>Status</th>
-                        <th>Details</th>
-                        <th>Payload</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse ($recentIntegrationLogs as $log)
-                        <tr>
-                            <td>{{ $log->created_at->format('M d, Y h:i A') }}</td>
-                            <td>{{ $log->source_name ?: 'No source' }}</td>
-                            <td>{{ ucfirst(str_replace('_', ' ', $log->status)) }}</td>
-                            <td>{{ $log->notes ?: 'No details provided.' }}</td>
-                            <td>{{ $log->payload_json ? 'Payload captured' : 'No payload' }}</td>
-                        </tr>
-                    @empty
-                        <tr>
-                            <td colspan="5" class="table-empty">No integration activity yet.</td>
-                        </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-    </section>
 @endsection

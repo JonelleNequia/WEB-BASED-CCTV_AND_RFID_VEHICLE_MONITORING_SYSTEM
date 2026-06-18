@@ -1355,6 +1355,40 @@ def most_common_value(values):
     return sorted(counts, key=lambda value: (counts[value], len(value)), reverse=True)[0]
 
 
+def most_common_color(values):
+    """
+    Pick the most repeated color without favoring longer color names on ties.
+    """
+    counts = {}
+    first_seen = {}
+
+    for index, value in enumerate(values):
+        if not value:
+            continue
+
+        counts[value] = counts.get(value, 0) + 1
+        first_seen.setdefault(value, index)
+
+    if not counts:
+        return None
+
+    return sorted(
+        counts,
+        key=lambda value: (counts[value], -first_seen[value]),
+        reverse=True,
+    )[0]
+
+
+def reconcile_guest_vehicle_color(initial_color, final_color):
+    """
+    Keep the wider fast color consensus when a later smaller OCR pass disagrees.
+    """
+    if initial_color and final_color and initial_color != final_color:
+        return initial_color
+
+    return final_color or initial_color
+
+
 def analyze_guest_vehicle_color(analysis_frames):
     """
     Run the fast color classifier before the slower OCR pass so the Guest record
@@ -1383,7 +1417,7 @@ def analyze_guest_vehicle_color(analysis_frames):
             "color_error": color_error,
         })
 
-    return most_common_value(vehicle_colors), {
+    return most_common_color(vehicle_colors), {
         "frames_checked": len(frame_results),
         "elapsed_seconds": round(time.monotonic() - started_at, 3),
         "frame_results": frame_results,
@@ -1433,7 +1467,7 @@ def analyze_guest_vehicle_details(analysis_frames):
 
     return (
         most_common_value(plate_numbers),
-        most_common_value(vehicle_colors),
+        most_common_color(vehicle_colors),
         runtime_status,
         {
             "frames_checked": len(frame_results),
@@ -1570,7 +1604,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
                 state["last_error"] = color_result.get("message", "Guest vehicle color could not be saved.")
 
     plate_number, detailed_vehicle_color, ocr_status, analysis_details = analyze_guest_vehicle_details(analysis_frames)
-    vehicle_color = detailed_vehicle_color or vehicle_color
+    vehicle_color = reconcile_guest_vehicle_color(vehicle_color, detailed_vehicle_color)
 
     print(
         f"{role.capitalize()} guest analysis {window_payload['event_key']}: "

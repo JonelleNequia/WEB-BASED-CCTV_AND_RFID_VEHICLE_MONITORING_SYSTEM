@@ -1,12 +1,12 @@
 {
   "service_running": true,
   "service_message": "Dual-camera detector running.",
-  "updated_at": "2026-05-11T11:00:35.457946+08:00",
+  "updated_at": "2026-05-15T10:16:17.261882+08:00",
   "detector_model_path": "yolov8n.pt",
   "station_activity": {
     "active": false,
-    "last_seen_at": "2026-05-11T10:57:24+08:00",
-    "active_until": "2026-05-11T10:57:34+08:00",
+    "last_seen_at": "2026-05-13T19:20:39+08:00",
+    "active_until": "2026-05-13T19:20:49+08:00",
     "seconds_until_idle": 0,
     "active_locations": []
   },
@@ -31,13 +31,13 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-05-11T10:57:33.967915+08:00",
+      "last_capture_time": "2026-05-13T19:20:48.999904+08:00",
       "last_error": "Camera paused because no Station page is open.",
       "retry_count": 0,
-      "processed_frames": 577,
-      "detections_seen": 0,
+      "processed_frames": 18022,
+      "detections_seen": 473,
       "active_detections": 0,
-      "crossings_logged": 0
+      "crossings_logged": 12
     },
     "exit": {
       "camera_role": "exit",
@@ -49,10 +49,10 @@
       "source_value": 0,
       "stream_url": "http://127.0.0.1:8765/stream/exit",
       "supported_vehicle_classes": [],
-      "last_capture_time": "2026-05-11T10:57:33.968832+08:00",
+      "last_capture_time": "2026-05-13T19:20:49.000766+08:00",
       "last_error": "Camera paused because no Station page is open.",
       "retry_count": 0,
-      "processed_frames": 571,
+      "processed_frames": 18063,
       "detections_seen": 0,
       "active_detections": 0,
       "crossings_logged": 0

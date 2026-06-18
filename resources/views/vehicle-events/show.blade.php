@@ -13,7 +13,7 @@
 
         <div class="hero-panel-actions">
             <span class="badge badge-{{ $vehicleEvent->status_badge_class }}">
-                {{ str_replace('_', ' ', ucfirst($vehicleEvent->display_status)) }}
+                {{ $vehicleEvent->display_status_label }}
             </span>
             <a href="{{ route('vehicle-events.index') }}" class="button button-secondary">Back to Logs</a>
         </div>
@@ -35,7 +35,7 @@
 
             <div class="detail-list">
                 <div><span>Log Type</span><strong>{{ $vehicleEvent->event_type }}</strong></div>
-                <div><span>Status</span><strong>{{ str_replace('_', ' ', ucfirst($vehicleEvent->display_status)) }}</strong></div>
+                <div><span>Status</span><strong>{{ $vehicleEvent->display_status_label }}</strong></div>
                 <div><span>Source</span><strong>{{ $vehicleEvent->event_origin_label }}</strong></div>
                 <div><span>Plate</span><strong>{{ $vehicleEvent->plate_text ?: $vehicleEvent->vehicle?->plate_number ?: 'GUEST' }}</strong></div>
                 <div><span>Vehicle</span><strong>{{ $vehicleEvent->vehicle_color ?: 'Pending color' }} {{ $vehicleEvent->display_vehicle_type }}</strong></div>

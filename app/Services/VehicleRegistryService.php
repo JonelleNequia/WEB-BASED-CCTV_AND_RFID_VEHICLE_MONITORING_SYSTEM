@@ -25,7 +25,7 @@ class VehicleRegistryService
                 'rfid_tag_id' => $tag->id,
                 'rfid_tag_uid' => $tag->uid,
                 'plate_number' => $this->normalizePlate((string) $data['plate_number']),
-                'vehicle_owner_name' => $data['vehicle_owner_name'] ?: null,
+                'vehicle_owner_name' => $this->normalizeOwnerName($data['vehicle_owner_name'] ?? null),
                 'category' => $this->normalizeCategory((string) ($data['category'] ?? 'faculty_staff')),
                 'vehicle_type' => $this->normalizeVehicleType((string) $data['vehicle_type']),
             ]);
@@ -50,7 +50,7 @@ class VehicleRegistryService
                 'rfid_tag_id' => $tag->id,
                 'rfid_tag_uid' => $tag->uid,
                 'plate_number' => $this->normalizePlate((string) $data['plate_number']),
-                'vehicle_owner_name' => $data['vehicle_owner_name'] ?: null,
+                'vehicle_owner_name' => $this->normalizeOwnerName($data['vehicle_owner_name'] ?? null),
                 'category' => $this->normalizeCategory((string) ($data['category'] ?? 'faculty_staff')),
                 'vehicle_type' => $this->normalizeVehicleType((string) $data['vehicle_type']),
             ])->save();
@@ -198,6 +198,17 @@ class VehicleRegistryService
     public function normalizeTagUid(string $tagUid): string
     {
         return RfidTag::normalizeUid($tagUid);
+    }
+
+    public function normalizeOwnerName(mixed $ownerName): ?string
+    {
+        if (blank($ownerName)) {
+            return null;
+        }
+
+        $normalized = preg_replace('/\s+/', ' ', (string) $ownerName) ?? (string) $ownerName;
+
+        return trim($normalized);
     }
 
     public function normalizeCategory(string $category): string

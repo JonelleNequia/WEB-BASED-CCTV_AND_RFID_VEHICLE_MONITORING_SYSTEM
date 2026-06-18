@@ -100,6 +100,81 @@ class VehicleRegistryTest extends TestCase
         $this->assertTrue($vehicle->isRfidRecurring());
     }
 
+    public function test_vehicle_registry_rejects_same_owner_and_plate_with_different_uid(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+        $assignedTag = RfidTag::query()->create([
+            'uid' => 'RFID-DUP-1001-A',
+            'status' => RfidTag::STATUS_ASSIGNED,
+            'assigned_at' => now(),
+        ]);
+        $vehicle = Vehicle::query()->create([
+            'rfid_tag_id' => $assignedTag->id,
+            'rfid_tag_uid' => $assignedTag->uid,
+            'plate_number' => 'DUP-1001',
+            'vehicle_owner_name' => 'Duplicate Owner',
+            'category' => 'student',
+            'vehicle_type' => 'Car',
+        ]);
+        $assignedTag->forceFill(['vehicle_id' => $vehicle->id])->save();
+        $newTag = RfidTag::query()->create([
+            'uid' => 'RFID-DUP-1001-B',
+            'status' => RfidTag::STATUS_AVAILABLE,
+        ]);
+
+        $this->actingAs($user)
+            ->from(route('vehicle-registry.index'))
+            ->post(route('vehicle-registry.store'), [
+                'rfid_tag_id' => $newTag->id,
+                'plate_number' => 'dup 1001',
+                'vehicle_owner_name' => ' duplicate   owner ',
+                'category' => 'student',
+                'vehicle_type' => 'Car',
+            ])
+            ->assertRedirect(route('vehicle-registry.index'))
+            ->assertSessionHasErrors('plate_number');
+
+        $this->assertDatabaseMissing('vehicles', [
+            'rfid_tag_uid' => 'RFID-DUP-1001-B',
+        ]);
+        $this->assertSame(RfidTag::STATUS_AVAILABLE, $newTag->fresh()->status);
+    }
+
+    public function test_vehicle_registry_allows_same_owner_with_different_plate_and_uid(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+        Vehicle::query()->create([
+            'plate_number' => 'OWN-1001',
+            'vehicle_owner_name' => 'Shared Owner',
+            'category' => 'faculty_staff',
+            'vehicle_type' => 'Car',
+        ]);
+        $tag = RfidTag::query()->create([
+            'uid' => 'RFID-OWN-2002',
+            'status' => RfidTag::STATUS_AVAILABLE,
+        ]);
+
+        $this->actingAs($user)
+            ->post(route('vehicle-registry.store'), [
+                'rfid_tag_id' => $tag->id,
+                'plate_number' => 'OWN-2002',
+                'vehicle_owner_name' => 'Shared Owner',
+                'category' => 'faculty_staff',
+                'vehicle_type' => 'Truck',
+            ])
+            ->assertRedirect();
+
+        $this->assertDatabaseHas('vehicles', [
+            'plate_number' => 'OWN-2002',
+            'vehicle_owner_name' => 'Shared Owner',
+            'rfid_tag_uid' => 'RFID-OWN-2002',
+        ]);
+    }
+
     public function test_vehicle_registry_edit_updates_existing_vehicle(): void
     {
         $this->seed(DatabaseSeeder::class);

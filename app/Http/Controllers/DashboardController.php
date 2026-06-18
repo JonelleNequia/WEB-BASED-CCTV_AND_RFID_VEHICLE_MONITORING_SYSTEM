@@ -289,25 +289,17 @@ class DashboardController extends Controller
                 ];
             });
 
-        $guestRows = GuestVehicleObservation::query()
+        $guestRows = $this->unmirroredGuestObservationsQuery()
             ->with('camera')
-            ->where(function ($query): void {
-                $query->whereNull('external_event_key')
-                    ->orWhereNotExists(function ($subquery): void {
-                        $subquery->selectRaw('1')
-                            ->from('vehicle_events')
-                            ->whereColumn('vehicle_events.external_event_key', 'guest_vehicle_observations.external_event_key')
-                            ->whereIn('vehicle_events.event_origin', ['guest_cctv', 'guest_manual']);
-                    });
-            })
             ->orderBy('created_at', 'desc')
             ->limit(30)
             ->get()
             ->map(function (GuestVehicleObservation $observation): array {
                 $time = $observation->observed_at;
+                $plate = $this->guestDisplayPlate($observation);
 
                 return [
-                    'title' => 'GUEST',
+                    'title' => $plate,
                     'summary' => 'Guest Observation #'.$observation->id.' • '.ucfirst((string) $observation->location).' Station',
                     'display_time' => $time?->format('M d, Y h:i A') ?: 'No time',
                     'badge_label' => 'GUEST',
@@ -345,25 +337,26 @@ class DashboardController extends Controller
                     'title' => $event->event_type.' • '.$plate,
                     'summary' => $event->event_origin_label.' • '.$event->display_vehicle_type,
                     'display_time' => $time?->format('M d, Y h:i A') ?: 'No time',
-                    'badge_label' => str($event->display_status)->replace('_', ' ')->title()->value(),
+                    'badge_label' => $event->display_status_label,
                     'badge_class' => $event->status_badge_class,
                     'sort_time' => $event->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,
                 ];
             });
 
-        $guestRows = GuestVehicleObservation::query()
+        $guestRows = $this->unmirroredGuestObservationsQuery()
             ->with('camera')
             ->orderBy('created_at', 'desc')
             ->limit(30)
             ->get()
             ->map(function (GuestVehicleObservation $observation): array {
                 $time = $observation->observed_at;
+                $eventType = $observation->location === 'exit' ? 'EXIT' : 'ENTRY';
 
                 return [
-                    'title' => 'GUEST • GUEST',
+                    'title' => $eventType.' • '.$this->guestDisplayPlate($observation),
                     'summary' => 'Guest Observation #'.$observation->id.' • '.ucfirst((string) $observation->location).' Station',
                     'display_time' => $time?->format('M d, Y h:i A') ?: 'No time',
-                    'badge_label' => 'GUEST',
+                    'badge_label' => $eventType === 'EXIT' ? 'Exit' : 'Entry',
                     'badge_class' => 'secondary',
                     'sort_time' => $observation->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,
                 ];
@@ -374,5 +367,26 @@ class DashboardController extends Controller
             ->sortByDesc('sort_time')
             ->take(30)
             ->values();
+    }
+
+    protected function unmirroredGuestObservationsQuery()
+    {
+        return GuestVehicleObservation::query()
+            ->where(function ($query): void {
+                $query->whereNull('external_event_key')
+                    ->orWhereNotExists(function ($subquery): void {
+                        $subquery->selectRaw('1')
+                            ->from('vehicle_events')
+                            ->whereColumn('vehicle_events.external_event_key', 'guest_vehicle_observations.external_event_key')
+                            ->whereIn('vehicle_events.event_origin', ['guest_cctv', 'guest_manual']);
+                    });
+            });
+    }
+
+    protected function guestDisplayPlate(GuestVehicleObservation $observation): string
+    {
+        return $observation->plate_number
+            ?: $observation->plate_text
+            ?: 'Guest Vehicle';
     }
 }

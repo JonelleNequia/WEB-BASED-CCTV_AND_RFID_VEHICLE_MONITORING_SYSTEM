@@ -26,10 +26,7 @@ class StoreVehicleRegistrationRequest extends FormRequest
      */
     public function rules(): array
     {
-        $routeVehicle = $this->route('vehicle');
-        $vehicleId = $routeVehicle instanceof Vehicle
-            ? $routeVehicle->getKey()
-            : $routeVehicle;
+        $vehicleId = $this->routeVehicleId();
 
         return [
             'rfid_tag_id' => [
@@ -96,6 +93,14 @@ class StoreVehicleRegistrationRequest extends FormRequest
             ]);
         }
 
+        if ($this->filled('vehicle_owner_name')) {
+            $normalizedOwner = preg_replace('/\s+/', ' ', (string) $this->input('vehicle_owner_name'));
+
+            $this->merge([
+                'vehicle_owner_name' => trim((string) $normalizedOwner),
+            ]);
+        }
+
         if (! $this->filled('category')) {
             $this->merge(['category' => 'faculty_staff']);
         }
@@ -116,6 +121,8 @@ class StoreVehicleRegistrationRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
+            $this->validateUniqueOwnerPlatePair($validator);
+
             if (! $this->filled('rfid_tag_id')) {
                 return;
             }
@@ -135,5 +142,54 @@ class StoreVehicleRegistrationRequest extends FormRequest
                 $validator->errors()->add('rfid_tag_id', 'The selected RFID tag is not available.');
             }
         });
+    }
+
+    protected function validateUniqueOwnerPlatePair(Validator $validator): void
+    {
+        if (! $this->filled('plate_number') || ! $this->filled('vehicle_owner_name')) {
+            return;
+        }
+
+        $plateFingerprint = $this->plateFingerprint((string) $this->input('plate_number'));
+        $ownerFingerprint = $this->ownerFingerprint((string) $this->input('vehicle_owner_name'));
+
+        if ($plateFingerprint === '' || $ownerFingerprint === '') {
+            return;
+        }
+
+        $vehicleId = $this->routeVehicleId();
+        $duplicate = Vehicle::query()
+            ->when($vehicleId, fn ($query) => $query->whereKeyNot($vehicleId))
+            ->get(['id', 'plate_number', 'vehicle_owner_name'])
+            ->first(fn (Vehicle $vehicle): bool => $this->plateFingerprint((string) $vehicle->plate_number) === $plateFingerprint
+                && $this->ownerFingerprint((string) $vehicle->vehicle_owner_name) === $ownerFingerprint);
+
+        if ($duplicate) {
+            $validator->errors()->add(
+                'plate_number',
+                'This plate number is already registered for the same vehicle owner.'
+            );
+        }
+    }
+
+    protected function routeVehicleId(): mixed
+    {
+        $routeVehicle = $this->route('vehicle');
+
+        return $routeVehicle instanceof Vehicle
+            ? $routeVehicle->getKey()
+            : $routeVehicle;
+    }
+
+    protected function plateFingerprint(string $plateNumber): string
+    {
+        return preg_replace('/[^A-Z0-9]/', '', Str::upper($plateNumber)) ?? '';
+    }
+
+    protected function ownerFingerprint(string $ownerName): string
+    {
+        $normalized = preg_replace('/\s+/', ' ', trim($ownerName)) ?? $ownerName;
+
+        return Str::lower($normalized);
     }
 }
