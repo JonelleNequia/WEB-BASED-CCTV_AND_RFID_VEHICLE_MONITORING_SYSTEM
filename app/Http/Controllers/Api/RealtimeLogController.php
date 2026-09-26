@@ -64,7 +64,7 @@ class RealtimeLogController extends Controller
     protected function stationLogRows(int $limit): array
     {
         $eventLogs = VehicleEvent::query()
-            ->with(['camera', 'vehicle', 'rfidScanLog'])
+            ->with(['camera', 'vehicle', 'rfidScanLog', 'guestVisit.rfidTag'])
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->latest('created_at')
             ->latest('event_time')
@@ -193,6 +193,8 @@ class RealtimeLogController extends Controller
             'display_time' => $event->event_time?->format('M d, Y • h:i:s A'),
             'status' => $event->display_status_label,
             'sort_time' => $this->sortTimestamp($event->created_at, $event->event_time),
+            // Phase 4: guest pass events show the pass number.
+            ...VehicleEvent::guestPassLogFields($event),
         ];
     }
 

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\RfidTag;
 use App\Http\Requests\StoreVehicleRegistrationRequest;
 use App\Models\Vehicle;
 use App\Services\RfidService;
@@ -37,12 +38,29 @@ class VehicleRegistryController extends Controller
      * Show the standalone RFID tag inventory workspace.
      */
     public function rfidInventory(
+        Request $request,
         VehicleRegistryService $vehicleRegistryService,
         RfidService $rfidService
     ): View {
+        // Phase 4: filter by tag type and show separate vehicle / guest pass stats.
+        $tagType = in_array($request->query('tag_type'), RfidTag::TYPES, true) ? $request->query('tag_type') : null;
+        $allTags = $vehicleRegistryService->rfidTagInventory();
+        $vehicleTags = $allTags->where('tag_type', RfidTag::TYPE_VEHICLE);
+        $guestPasses = $allTags->where('tag_type', RfidTag::TYPE_GUEST_PASS);
+
         return view('rfid-inventory.index', [
-            'rfidTagInventory' => $vehicleRegistryService->rfidTagInventory(),
+            'rfidTagInventory' => $tagType ? $allTags->where('tag_type', $tagType)->values() : $allTags,
             'rfidStats' => $rfidService->stats(),
+            'tagTypeFilter' => $tagType,
+            'tagStats' => [
+                'vehicle_available' => $vehicleTags->where('status', RfidTag::STATUS_AVAILABLE)->count(),
+                'vehicle_assigned' => $vehicleTags->where('status', RfidTag::STATUS_ASSIGNED)->count(),
+                'vehicle_total' => $vehicleTags->count(),
+                'pass_available' => $guestPasses->where('status', RfidTag::STATUS_AVAILABLE)->count(),
+                'pass_issued' => $guestPasses->where('status', RfidTag::STATUS_ISSUED)->count(),
+                'pass_lost' => $guestPasses->where('status', RfidTag::STATUS_LOST)->count(),
+                'pass_total' => $guestPasses->count(),
+            ],
         ]);
     }
 
@@ -62,6 +80,8 @@ class VehicleRegistryController extends Controller
                 Rule::unique('vehicle_rfid_tags', 'tag_number'),
             ],
             'uid' => ['required', 'string', 'max:100'],
+            // Phase 4: Vehicle tag or Guest Pass.
+            'tag_type' => ['nullable', Rule::in(RfidTag::TYPES)],
         ]);
 
         try {
@@ -95,7 +115,7 @@ class VehicleRegistryController extends Controller
 
         return redirect()
             ->route('rfid-inventory.index')
-            ->with('status', 'RFID #'.$tag->tag_number.' ('.$tag->uid.') was added to the RFID inventory.');
+            ->with('status', ($tag->isGuestPass() ? $tag->label.' · ' : '').'RFID #'.$tag->tag_number.' ('.$tag->uid.') was added to the RFID inventory.');
     }
 
     /**

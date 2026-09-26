@@ -5,7 +5,6 @@
 @section('page-description', 'Register RFID tag UIDs and keep the tag inventory separate from vehicle records.')
 
 @section('content')
-    @php($assignedTags = $rfidTagInventory->where('status', 'assigned')->count())
 
     <section class="hero-panel hero-panel-compact">
         <div class="hero-panel-copy">
@@ -23,23 +22,36 @@
         </div>
     </section>
 
-    <div class="page-grid cards-3">
-        <article class="stat-card stat-card-brand">
-            <span class="stat-card-label">Registered Tags</span>
-            <strong>{{ $rfidStats['registered_tags'] ?? 0 }}</strong>
-            <p>All RFID UIDs saved in the local inventory.</p>
-        </article>
-
+    {{-- Phase 4: separate stats for vehicle tags and guest passes. --}}
+    <div class="page-grid cards-5">
         <article class="stat-card stat-card-success">
-            <span class="stat-card-label">Available Tags</span>
-            <strong>{{ $rfidStats['available_tags'] ?? 0 }}</strong>
-            <p>Tags ready to assign to vehicle records.</p>
+            <span class="stat-card-label">Vehicle Tags Available</span>
+            <strong>{{ $tagStats['vehicle_available'] }}</strong>
+            <p>Ready to assign in Vehicle Registry.</p>
         </article>
 
         <article class="stat-card stat-card-brand-soft">
-            <span class="stat-card-label">Assigned Tags</span>
-            <strong>{{ $assignedTags }}</strong>
-            <p>Tags already connected to registered vehicles.</p>
+            <span class="stat-card-label">Vehicle Tags Assigned</span>
+            <strong>{{ $tagStats['vehicle_assigned'] }}</strong>
+            <p>{{ $tagStats['vehicle_total'] }} vehicle tags in total.</p>
+        </article>
+
+        <article class="stat-card stat-card-brand">
+            <span class="stat-card-label">Guest Passes Available</span>
+            <strong>{{ $tagStats['pass_available'] }}</strong>
+            <p>{{ $tagStats['pass_total'] }} guest passes in total.</p>
+        </article>
+
+        <article class="stat-card stat-card-brand-soft">
+            <span class="stat-card-label">Guest Passes Issued</span>
+            <strong>{{ $tagStats['pass_issued'] }}</strong>
+            <p>Currently with a guest inside.</p>
+        </article>
+
+        <article class="stat-card stat-card-warning">
+            <span class="stat-card-label">Guest Passes Lost</span>
+            <strong>{{ $tagStats['pass_lost'] }}</strong>
+            <p>Scans of lost passes raise an alert.</p>
         </article>
     </div>
 
@@ -58,6 +70,18 @@
 
         <form method="POST" action="{{ route('rfid-inventory.store') }}" class="form-grid filter-grid" data-rfid-inventory-form>
             @csrf
+
+            {{-- Phase 4: Vehicle tag or reusable Guest Pass (gets the next G-xx number). --}}
+            <div class="field">
+                <label for="inventory_tag_type">Tag Type</label>
+                <select id="inventory_tag_type" name="tag_type">
+                    <option value="vehicle" @selected(old('tag_type', $tagTypeFilter ?? 'vehicle') === 'vehicle')>Vehicle tag</option>
+                    <option value="guest_pass" @selected(old('tag_type', $tagTypeFilter) === 'guest_pass')>Guest Pass</option>
+                </select>
+                @error('tag_type')
+                    <span class="field-error">{{ $message }}</span>
+                @enderror
+            </div>
 
             <div class="field">
                 <label for="inventory_tag_number">RFID Tag No.</label>
@@ -108,7 +132,14 @@
             <div>
                 <h3>Tag Inventory</h3>
             </div>
-            <span class="chip chip-soft">{{ $rfidTagInventory->count() }} records</span>
+            {{-- Phase 4: filter by tag type. --}}
+            <div class="inline-status-list">
+                @foreach ([null => 'All', 'vehicle' => 'Vehicle tags', 'guest_pass' => 'Guest passes'] as $value => $label)
+                    <a href="{{ route('rfid-inventory.index', array_filter(['tag_type' => $value])) }}"
+                       class="chip {{ ($tagTypeFilter ?? null) === ($value ?: null) ? 'chip-brand' : 'chip-soft' }}">{{ $label }}</a>
+                @endforeach
+                <span class="chip chip-soft">{{ $rfidTagInventory->count() }} records</span>
+            </div>
         </div>
 
         <div class="table-responsive">
@@ -116,6 +147,7 @@
                 <thead>
                     <tr>
                         <th>RFID No.</th>
+                        <th>Type</th>
                         <th>RFID UID</th>
                         <th>Status</th>
                         <th>Assigned Vehicle</th>
@@ -127,14 +159,28 @@
                     @forelse ($rfidTagInventory as $tag)
                         <tr>
                             <td><strong>#{{ $tag->tag_number ?: 'N/A' }}</strong></td>
+                            <td>
+                                @if ($tag->isGuestPass())
+                                    <span class="badge badge-open">Guest Pass {{ $tag->display_number }}</span>
+                                @else
+                                    <span class="badge badge-secondary">Vehicle</span>
+                                @endif
+                            </td>
                             <td><strong>{{ $tag->uid }}</strong></td>
                             <td>
-                                <span class="badge {{ $tag->status === 'available' ? 'badge-secondary' : ($tag->status === 'assigned' ? 'badge-matched' : 'badge-unmatched') }}">
+                                <span class="badge {{ match ($tag->status) {
+                                    'available' => 'badge-secondary',
+                                    'assigned', 'issued' => 'badge-matched',
+                                    'lost' => 'badge-manual-review',
+                                    default => 'badge-unmatched',
+                                } }}">
                                     {{ ucfirst($tag->status) }}
                                 </span>
                             </td>
                             <td>
-                                @if ($tag->vehicle)
+                                @if ($tag->isGuestPass())
+                                    <span class="table-subtext">{{ $tag->status === 'issued' ? 'With a guest' : 'Guest pass pool' }}</span>
+                                @elseif ($tag->vehicle)
                                     <strong>{{ $tag->vehicle->plate_number }}</strong>
                                     <div class="table-subtext">{{ $tag->vehicle->vehicle_owner_name ?: 'No owner' }}</div>
                                 @else
@@ -146,7 +192,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="6" class="table-empty">No RFID tags registered yet.</td>
+                            <td colspan="7" class="table-empty">No RFID tags registered yet.</td>
                         </tr>
                     @endforelse
                 </tbody>

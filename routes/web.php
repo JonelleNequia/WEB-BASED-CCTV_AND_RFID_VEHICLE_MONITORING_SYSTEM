@@ -51,6 +51,10 @@ Route::middleware(['auth', 'detector'])->group(function (): void {
     Route::post('/guest-passes/{rfidTag}/issue', [GuestPassController::class, 'issue'])
         ->whereNumber('rfidTag')
         ->name('guest-passes.issue');
+    // Phase 4: Exit Station "Card returned" button.
+    Route::post('/guest-passes/visits/{guestVisit}/card-returned', [GuestPassController::class, 'cardReturned'])
+        ->whereNumber('guestVisit')
+        ->name('guest-passes.visits.card-returned');
 
     Route::get('/monitoring', fn () => redirect()->route('stations.entrance'))->name('monitoring.index');
     Route::get('/monitoring/live-state', [MonitoringController::class, 'liveState'])->name('monitoring.live-state');
@@ -73,6 +77,17 @@ Route::middleware(['auth', 'detector'])->group(function (): void {
         Route::put('/vehicle-registry/{vehicle}', [VehicleRegistryController::class, 'update'])->name('vehicle-registry.update');
         Route::get('/rfid-scans', [RfidScanController::class, 'index'])->name('rfid-scans.index');
         Route::post('/rfid-scans/simulate', [RfidScanController::class, 'store'])->name('rfid-scans.store');
+        // Phase 4: Guest Passes page and visit actions.
+        Route::get('/guest-passes', [GuestPassController::class, 'index'])->name('guest-passes.index');
+        Route::get('/guest-passes/visits/{guestVisit}', [GuestPassController::class, 'show'])
+            ->whereNumber('guestVisit')
+            ->name('guest-passes.visits.show');
+        Route::post('/guest-passes/visits/{guestVisit}/close', [GuestPassController::class, 'close'])
+            ->whereNumber('guestVisit')
+            ->name('guest-passes.visits.close');
+        Route::post('/guest-passes/visits/{guestVisit}/lost', [GuestPassController::class, 'markLost'])
+            ->whereNumber('guestVisit')
+            ->name('guest-passes.visits.lost');
         Route::get('/guest-observations', [GuestObservationController::class, 'index'])->name('guest-observations.index');
         Route::post('/guest-observations', [GuestObservationController::class, 'store'])->name('guest-observations.store');
         Route::patch('/guest-observations/{guestVehicleObservation}', [GuestObservationController::class, 'update'])

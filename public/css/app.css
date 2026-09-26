@@ -3662,3 +3662,182 @@ th {
         border-color: #d1d5db;
     }
 }
+
+/* Phase 4: Guest Passes page actions */
+.guest-pass-actions {
+    flex-wrap: nowrap;
+    align-items: flex-start;
+}
+
+.guest-pass-action {
+    position: relative;
+}
+
+.guest-pass-action > summary {
+    list-style: none;
+}
+
+.guest-pass-action > summary::-webkit-details-marker {
+    display: none;
+}
+
+.guest-pass-action[open] > form {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.4rem);
+    z-index: 20;
+    width: 16rem;
+    padding: 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--card);
+    box-shadow: var(--shadow-md);
+}
+
+/* Phase 4: Station pop-ups (Issue Guest Pass, Card returned) and alert banner */
+.station-alert {
+    position: fixed;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    max-width: min(92vw, 44rem);
+    padding: 0.85rem 1.1rem;
+    border-radius: var(--radius-sm);
+    background: var(--danger);
+    color: #ffffff;
+    box-shadow: var(--shadow-lg);
+}
+
+.station-alert[hidden],
+.station-modal[hidden] {
+    display: none;
+}
+
+.station-alert-close,
+.station-modal-close {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.station-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(23, 18, 38, 0.72);
+}
+
+.station-modal-card {
+    width: min(100%, 60rem);
+    max-height: 94vh;
+    overflow: auto;
+    display: grid;
+    gap: 1rem;
+    padding: 1.4rem;
+    border-radius: var(--radius-md);
+    background: #ffffff;
+    color: var(--text);
+    box-shadow: var(--shadow-lg);
+}
+
+.station-modal-card-sm {
+    width: min(100%, 30rem);
+}
+
+.station-modal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.station-modal-head h2 {
+    margin: 0.2rem 0 0;
+    color: var(--station-brand-dark);
+}
+
+.station-modal-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 1rem;
+}
+
+.station-modal-body-stack {
+    grid-template-columns: 1fr;
+}
+
+.station-modal-snapshot {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    background: #171226;
+}
+
+.station-modal-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.7rem;
+}
+
+.station-modal-fields label {
+    display: grid;
+    gap: 0.3rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+.station-modal-fields input,
+.station-modal-fields select {
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    font: inherit;
+    font-weight: 500;
+}
+
+.station-modal-error {
+    margin: 0;
+    color: var(--danger);
+    font-weight: 700;
+}
+
+.station-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.6rem;
+}
+
+.station-button {
+    padding: 0.75rem 1.2rem;
+    border: 0;
+    border-radius: 999px;
+    background: var(--station-brand);
+    color: #ffffff;
+    font: inherit;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.station-button-secondary {
+    background: var(--station-brand-soft);
+    color: var(--station-brand-dark);
+}
+
+@media (max-width: 760px) {
+    .station-modal-body,
+    .station-modal-fields {
+        grid-template-columns: 1fr;
+    }
+}

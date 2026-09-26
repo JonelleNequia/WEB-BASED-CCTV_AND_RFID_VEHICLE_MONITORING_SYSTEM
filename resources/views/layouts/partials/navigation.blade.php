@@ -39,9 +39,10 @@
             'icon' => 'rfid',
         ],
         [
-            'label' => 'Guest Monitoring',
-            'route' => route('guest-observations.index'),
-            'active' => request()->routeIs('guest-observations.*'),
+            // Phase 4: Guest Monitoring became Guest Passes.
+            'label' => 'Guest Passes',
+            'route' => route('guest-passes.index'),
+            'active' => request()->routeIs('guest-passes.*', 'guest-observations.*'),
             'icon' => 'guest',
         ],
         [

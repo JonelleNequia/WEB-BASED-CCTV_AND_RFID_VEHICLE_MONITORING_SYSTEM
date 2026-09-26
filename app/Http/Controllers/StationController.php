@@ -7,7 +7,9 @@ use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
 use App\Services\CalibrationService;
 use App\Services\DetectorRuntimeService;
+use App\Services\GuestPassService;
 use App\Services\RfidIngestService;
+use App\Support\RfidIngestResult;
 use App\Services\SettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -78,7 +80,12 @@ class StationController extends Controller
     /**
      * Record one RFID scan typed by the USB reader while a station window is focused.
      */
-    public function rfidScan(string $location, Request $request, RfidIngestService $rfidIngestService): JsonResponse
+    public function rfidScan(
+        string $location,
+        Request $request,
+        RfidIngestService $rfidIngestService,
+        GuestPassService $guestPassService
+    ): JsonResponse
     {
         $location = $this->validateLocation($location);
 
@@ -105,6 +112,18 @@ class StationController extends Controller
             return response()->json([
                 ...$this->stationScanPayload($result->scanLog, $result->isDuplicate()),
                 ...$result->toArray(),
+                // Phase 4: data for the Entrance "Issue Guest Pass" pop-up and
+                // the Exit "Card returned" reminder.
+                'issue' => $result->requiresIssue() ? $this->issuePrompt($result, $guestPassService) : null,
+                'card_return' => $result->outcome === RfidIngestResult::GUEST_PASS_EXIT && $result->guestVisit
+                    ? [
+                        'url' => route('guest-passes.visits.card-returned', $result->guestVisit),
+                        'pass_label' => $result->scanLog->vehicleRfidTag?->label,
+                        'id_presented' => $result->guestVisit->id_presented,
+                        'plate' => $result->guestVisit->plate,
+                        'driver_name' => $result->guestVisit->driver_name,
+                    ]
+                    : null,
             ], $result->isDuplicate() ? 200 : 201);
         } catch (ValidationException $exception) {
             throw $exception;
@@ -122,12 +141,45 @@ class StationController extends Controller
     }
 
     /**
+     * Phase 4: prefill the Issue Guest Pass pop-up with the latest camera
+     * snapshot and the plate/color the detector read at the Entrance.
+     *
+     * @return array<string, mixed>
+     */
+    protected function issuePrompt(RfidIngestResult $result, GuestPassService $guestPassService): array
+    {
+        $pass = $result->scanLog->vehicleRfidTag;
+        $recentCapture = GuestVehicleObservation::query()
+            ->where('location', 'entrance')
+            ->where('observation_source', 'cctv')
+            ->where('created_at', '>=', now()->subMinutes(2))
+            ->latest('created_at')
+            ->first();
+
+        return [
+            'url' => route('guest-passes.issue', $pass),
+            'rfid_scan_log_id' => $result->scanLog->id,
+            'pass_label' => $pass?->label,
+            'requires_id' => $guestPassService->requiresId(),
+            'valid_minutes' => $guestPassService->validityMinutes(),
+            'prefill' => [
+                'plate' => $recentCapture?->plate_number ?: $recentCapture?->plate_text,
+                'color' => $recentCapture?->vehicle_color,
+                'vehicle_type' => $recentCapture?->vehicle_type,
+                'snapshot_url' => $recentCapture?->snapshot_path
+                    ? $recentCapture->snapshot_url
+                    : asset('camera/entrance_latest_frame.jpg').'?t='.now()->timestamp,
+            ],
+        ];
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     protected function recentLogs(int $limit = 14): array
     {
         $eventLogs = VehicleEvent::query()
-            ->with(['camera', 'vehicle', 'rfidScanLog'])
+            ->with(['camera', 'vehicle', 'rfidScanLog', 'guestVisit.rfidTag'])
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->latest('created_at')
             ->latest('event_time')
@@ -162,6 +214,8 @@ class StationController extends Controller
                     'display_time' => $event->event_time?->format('M d, Y • h:i:s A'),
                     'status' => $event->display_status_label,
                     'sort_time' => $this->sortTimestamp($event->created_at, $event->event_time),
+                    // Phase 4: guest pass events show the pass number, not "GUEST / Owner N/A".
+                    ...VehicleEvent::guestPassLogFields($event),
                 ];
             });
 

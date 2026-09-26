@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\SimulateRfidScanRequest;
 use App\Models\RfidScanLog;
+use App\Support\PhilippineTime;
+use App\Models\RfidTag;
 use App\Services\RfidService;
 use App\Services\SettingsService;
 use App\Services\VehicleRegistryService;
@@ -31,6 +33,16 @@ class RfidScanController extends Controller
             'latestScan' => $rfidService->recentScans(1)->first(),
             'rfidStats' => $rfidService->stats(),
             'registeredTags' => $vehicleRegistryService->registeredTags(),
+            // Phase 4: guest passes can be simulated too.
+            'guestPasses' => RfidTag::query()->guestPasses()->orderBy('display_number')->get(),
+            // Phase 4: anomalies and lost/disabled pass alerts for "Needs Attention".
+            'attentionItems' => RfidScanLog::query()
+                ->with('vehicleRfidTag')
+                ->where('is_anomaly', true)
+                ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
+                ->latest('scan_time')
+                ->limit(5)
+                ->get(),
             'filters' => $request->only(['history_q', 'scan_location', 'verification_status']),
             'settings' => $settingsService->all(),
         ]);
@@ -66,7 +78,9 @@ class RfidScanController extends Controller
                 ->withErrors(['rfid_scan' => 'RFID scan could not be recorded. Check laravel.log for details.']);
         }
 
-        $statusMessage = $result->message;
+        $statusMessage = $result->requiresIssue()
+            ? $result->message.' The RFID Desk cannot issue passes: use the Entrance Station or the Guest Passes page.'
+            : $result->message;
 
         if ($request->expectsJson()) {
             return response()->json([

@@ -29,7 +29,21 @@
             'plate_search' => strtolower($plate.' '.$category),
             'search' => strtolower($tag->uid.' '.$owner.' '.$plate.' '.$category.' '.($tag->vehicle?->vehicle_type ?: '')),
         ];
-    })->values())
+    })->values()->concat($guestPasses->map(fn ($pass) => [
+        // Phase 4: guest passes in the simulation picker.
+        'id' => $pass->id,
+        'uid' => $pass->uid,
+        'owner' => $pass->label,
+        'plate' => ucfirst($pass->status),
+        'category' => 'Guest Pass',
+        'uid_label' => $pass->uid.' - '.$pass->label,
+        'plate_label' => 'Guest Pass - '.ucfirst($pass->status),
+        'label' => $pass->uid.' - '.$pass->label,
+        'description' => 'Guest Pass - '.ucfirst($pass->status),
+        'uid_search' => strtolower($pass->uid.' '.$pass->display_number),
+        'plate_search' => strtolower('guest pass '.$pass->display_number),
+        'search' => strtolower($pass->uid.' guest pass '.$pass->display_number.' '.$pass->status),
+    ]))->values())
     @php($selectedRegisteredTagId = (string) old('vehicle_rfid_tag_id', ''))
     @php($selectedRegisteredTag = $registeredTagOptions->first(fn ($option) => (string) $option['id'] === $selectedRegisteredTagId))
 
@@ -95,7 +109,17 @@
                 </span>
             </div>
             <strong>{{ $rfidStats['attention_today'] ?? 0 }}</strong>
-            <p>Scans that need checking before access is trusted.</p>
+            {{-- Phase 4: today's anomalies and lost/disabled pass alerts. --}}
+            @forelse ($attentionItems as $item)
+                <p class="table-subtext">
+                    {{ $item->scan_time?->format('h:i A') }} · {{ ucfirst($item->scan_location) }} · {{ $item->anomaly_reason }}
+                </p>
+            @empty
+                <p>No anomalies or lost-pass alerts today.</p>
+            @endforelse
+            @if (($rfidStats['attention_today'] ?? 0) > 0)
+                <a href="{{ route('rfid-scans.index', ['verification_status' => 'anomaly']) }}" class="table-subtext">View all flagged scans</a>
+            @endif
         </article>
     </div>
 
@@ -107,7 +131,7 @@
                         <h3>Scan RFID</h3>
                         @include('layouts.partials.help', [
                             'label' => 'Explain RFID scan form',
-                            'text' => 'For recurring registered vehicles, scan type is decided automatically from current state: outside means ENTRY, inside means EXIT.',
+                            'text' => 'Station readers record ENTRY at the Entrance and EXIT at the Exit. This desk simulation toggles registered vehicles (outside = ENTRY, inside = EXIT). Guest passes follow the station rules.',
                         ])
                     </div>
                 </div>
@@ -118,7 +142,7 @@
 
                 <div class="form-grid">
                     <div class="field span-full">
-                        <label for="vehicle_rfid_tag_id">Registered Tag</label>
+                        <label for="vehicle_rfid_tag_id">Registered Tag or Guest Pass</label>
                         <input id="vehicle_rfid_tag_id" type="hidden" name="vehicle_rfid_tag_id" value="{{ $selectedRegisteredTagId }}" data-rfid-combobox-value>
                         <div class="combobox" data-rfid-combobox>
                             <input
@@ -126,7 +150,7 @@
                                 type="search"
                                 value="{{ $selectedRegisteredTag['label'] ?? '' }}"
                                 autocomplete="off"
-                                placeholder="Type owner name, plate number, or RFID UID"
+                                placeholder="Type owner, plate, RFID UID, or G-01"
                                 data-rfid-combobox-input
                             >
                             <button type="button" class="combobox-clear" data-rfid-combobox-clear aria-label="Clear selected RFID tag">Clear</button>
@@ -159,8 +183,14 @@
                 </div>
 
                 <div class="mini-note">
-                    <strong>State-based RFID logic is active.</strong>
-                    <p>Same station scan can become ENTRY or EXIT depending on the vehicle's latest inside/outside state.</p>
+                    {{-- Phase 4: replaced the old "same station can become ENTRY or EXIT" note. --}}
+                    <strong>Station readers decide the direction.</strong>
+                    <p>
+                        At the stations, Entrance always records ENTRY and Exit always records EXIT; a mismatch is flagged for review.
+                        This desk keeps the inside/outside toggle for registered vehicles. Guest passes follow the station rules:
+                        an available pass at Entrance must be issued (Entrance Station or Guest Passes page), and an issued pass at Exit closes the visit.
+                        The same tag at the same station is ignored for {{ $settings['rfid_cooldown_seconds'] ?? 60 }} seconds.
+                    </p>
                 </div>
 
                 <div class="button-row">
@@ -260,7 +290,7 @@
                 <label for="verification_status">Result</label>
                 <select id="verification_status" name="verification_status">
                     <option value="">All</option>
-                    @foreach (['verified' => 'Registered', 'guest' => 'Guest', 'inactive_tag' => 'Inactive Tag', 'unassigned_tag' => 'Unassigned Tag', 'inactive_vehicle' => 'Inactive Vehicle', 'non_recurring_category' => 'Manual Review'] as $value => $label)
+                    @foreach (['anomaly' => 'Needs attention (flagged)', 'verified' => 'Registered', 'guest_pass_entry' => 'Guest Pass Entry', 'guest_pass_exit' => 'Guest Pass Exit', 'guest_pass_available' => 'Guest Pass (to issue)', 'guest_pass_not_issued' => 'Guest Pass not issued', 'guest_pass_lost' => 'Lost Guest Pass', 'guest' => 'Guest', 'inactive_tag' => 'Inactive Tag', 'unassigned_tag' => 'Unassigned Tag', 'inactive_vehicle' => 'Inactive Vehicle', 'non_recurring_category' => 'Manual Review'] as $value => $label)
                         <option value="{{ $value }}" @selected(($filters['verification_status'] ?? '') === $value)>{{ $label }}</option>
                     @endforeach
                 </select>

@@ -110,6 +110,41 @@ class VehicleEvent extends Model
     }
 
     /**
+     * Phase 4: log fields that replace "GUEST / Owner N/A" for guest pass events.
+     *
+     * @return array<string, string>
+     */
+    public static function guestPassLogFields(self $event): array
+    {
+        $visit = $event->guestVisit;
+
+        if (! $visit) {
+            return [];
+        }
+
+        $passLabel = $visit->rfidTag?->label ?? 'Guest Pass';
+
+        return [
+            'plate_number' => $visit->plate ?: ($visit->rfidTag?->display_number ?? 'GUEST'),
+            'owner_name' => $visit->driver_name ?: 'Guest',
+            'verification_label' => $passLabel,
+            'resulting_state' => $event->event_type === 'EXIT' ? 'Outside' : 'Inside',
+        ];
+    }
+
+    /**
+     * Phase 4: "Guest Pass #G-03" instead of the generic origin label.
+     */
+    public function getSourceDisplayLabelAttribute(): string
+    {
+        if ($this->event_origin === 'guest_pass' && $this->guestVisit?->rfidTag) {
+            return $this->guestVisit->rfidTag->label;
+        }
+
+        return $this->event_origin_label;
+    }
+
+    /**
      * Get the matched entry candidate for an exit event.
      */
     public function matchedEntry(): BelongsTo

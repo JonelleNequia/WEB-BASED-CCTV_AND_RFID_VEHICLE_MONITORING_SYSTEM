@@ -123,6 +123,13 @@ class RfidService
                 $query->where('scan_location', $filters['scan_location'] === 'exit' ? 'exit' : 'entrance');
             })
             ->when(! empty($filters['verification_status']), function ($query) use ($filters): void {
+                // Phase 4: "anomaly" filters every flagged scan.
+                if ($filters['verification_status'] === 'anomaly') {
+                    $query->where('is_anomaly', true);
+
+                    return;
+                }
+
                 $query->where('verification_status', $filters['verification_status']);
             })
             ->orderByDesc('scan_time')
@@ -199,9 +206,10 @@ class RfidService
                 ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
                 ->where('verification_status', 'verified')
                 ->count(),
+            // Phase 4: "Needs Attention" = flagged anomalies and lost/disabled pass alerts.
             'attention_today' => RfidScanLog::query()
                 ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
-                ->where('verification_status', '!=', 'verified')
+                ->where('is_anomaly', true)
                 ->count(),
             'simulated_today' => RfidScanLog::query()
                 ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
