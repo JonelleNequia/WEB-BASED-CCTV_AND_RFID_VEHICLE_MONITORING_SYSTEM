@@ -30,7 +30,8 @@ Route::middleware('guest')->group(function (): void {
         ->name('login.store');
 });
 
-Route::middleware('auth')->group(function (): void {
+// Phase 1: 'detector' keeps vehicle detection running on every signed-in page.
+Route::middleware(['auth', 'detector'])->group(function (): void {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
 
     Route::get('/station/entrance', [StationController::class, 'show'])

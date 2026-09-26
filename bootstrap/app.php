@@ -18,6 +18,8 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'admin' => \App\Http\Middleware\EnsureAdmin::class,
+            // Phase 1: added
+            'detector' => \App\Http\Middleware\EnsureDetectorRunning::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

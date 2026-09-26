@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\StoresLocalTime;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -11,6 +12,7 @@ use Illuminate\Support\Facades\Storage;
 class VehicleEvent extends Model
 {
     use HasFactory;
+    use StoresLocalTime;
 
     public const STATUS_PENDING_DETAILS = 'pending_details';
 

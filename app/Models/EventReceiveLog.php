@@ -2,12 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\StoresLocalTime;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class EventReceiveLog extends Model
 {
     use HasFactory;
+    use StoresLocalTime;
 
     /**
      * The attributes that are mass assignable.

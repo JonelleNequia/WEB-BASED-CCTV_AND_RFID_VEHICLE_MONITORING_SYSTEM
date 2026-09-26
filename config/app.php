@@ -65,7 +65,8 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    // Phase 1: the school runs on Philippine time (was hardcoded to UTC).
+    'timezone' => env('APP_TIMEZONE', 'Asia/Manila'),
 
     /*
     |--------------------------------------------------------------------------

@@ -43,7 +43,8 @@
                 </span>
             </div>
             <strong>{{ $rfidStats['vehicles_inside'] ?? 0 }}</strong>
-            <p>Vehicles currently marked inside by RFID movement state.</p>
+            {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
+            <p>{{ $rfidStats['registered_inside'] ?? 0 }} registered · {{ $rfidStats['guests_inside'] ?? 0 }} guests</p>
         </article>
 
         <article class="stat-card stat-card-success">

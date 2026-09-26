@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\ActiveSession;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidScanLog;
 use App\Models\Vehicle;
@@ -86,7 +85,8 @@ class DashboardController extends Controller
         $totalTraffic = $trafficSummary['today'];
 
         return [
-            'vehiclesInside' => $rfidStats['vehicles_inside'] + $this->guestVehiclesInsideCount(),
+            // Phase 1: same shared count as Vehicle Registry and RFID Desk.
+            'vehiclesInside' => $rfidStats['vehicles_inside'],
             'entriesToday' => $rfidStats['entries_today'],
             'exitsToday' => $rfidStats['exits_today'],
             'totalVehiclesEnteredToday' => $totalTraffic['entries'],
@@ -140,19 +140,6 @@ class DashboardController extends Controller
             })
             ->take(5)
             ->values();
-    }
-
-    protected function guestVehiclesInsideCount(): int
-    {
-        return ActiveSession::query()
-            ->where('status', 'open')
-            ->whereHas('entryEvent', function ($query): void {
-                $query->where(function ($guestQuery): void {
-                    $guestQuery->where('vehicle_category', 'guest')
-                        ->orWhereIn('event_origin', ['guest_cctv', 'guest_manual']);
-                });
-            })
-            ->count();
     }
 
     /**

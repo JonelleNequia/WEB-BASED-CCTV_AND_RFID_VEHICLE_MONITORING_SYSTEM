@@ -19,7 +19,8 @@ class RfidService
         protected LocalStorageService $localStorageService,
         protected VehicleRegistryService $vehicleRegistryService,
         protected EventService $eventService,
-        protected GuestObservationService $guestObservationService
+        protected GuestObservationService $guestObservationService,
+        protected VehicleOccupancyService $vehicleOccupancyService
     ) {
     }
 
@@ -244,6 +245,8 @@ class RfidService
     public function stats(): array
     {
         $today = PhilippineTime::todayDateString();
+        // Phase 1: one shared inside count for Dashboard, Registry and RFID Desk.
+        $inside = $this->vehicleOccupancyService->counts();
 
         return [
             'registered_vehicles' => Vehicle::query()
@@ -252,18 +255,16 @@ class RfidService
             'guest_vehicles' => Vehicle::query()
                 ->where('category', 'guest')
                 ->count(),
-            'vehicles_inside' => Vehicle::query()
-                ->where('category', '!=', 'guest')
-                ->where('status', 'active')
-                ->where('current_state', Vehicle::STATE_INSIDE)
-                ->count(),
+            'vehicles_inside' => $inside['total'],
+            'registered_inside' => $inside['registered'],
+            'guests_inside' => $inside['guests'],
             'entries_today' => (int) Vehicle::query()
                 ->where('category', '!=', 'guest')
-                ->where('daily_count_date', $today)
+                ->whereDate('daily_count_date', $today) // Phase 1: column holds 'Y-m-d 00:00:00'
                 ->sum('entries_today_count'),
             'exits_today' => (int) Vehicle::query()
                 ->where('category', '!=', 'guest')
-                ->where('daily_count_date', $today)
+                ->whereDate('daily_count_date', $today) // Phase 1: column holds 'Y-m-d 00:00:00'
                 ->sum('exits_today_count'),
             'registered_tags' => RfidTag::query()->count(),
             'available_tags' => RfidTag::query()

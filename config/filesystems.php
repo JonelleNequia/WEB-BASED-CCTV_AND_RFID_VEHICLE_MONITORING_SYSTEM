@@ -41,7 +41,9 @@ return [
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
+            // Phase 1: root-relative URL so snapshots load on any host/port
+            // (APP_URL pointed at :8001 while the app runs on :8000).
+            'url' => env('PUBLIC_STORAGE_URL', '/storage'),
             'visibility' => 'public',
             'throw' => false,
             'report' => false,

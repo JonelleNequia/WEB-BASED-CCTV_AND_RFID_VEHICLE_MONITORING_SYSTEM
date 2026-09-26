@@ -35,7 +35,8 @@
         <article class="stat-card stat-card-brand-soft">
             <span class="stat-card-label">Vehicles Inside Campus</span>
             <strong data-dashboard-metric="vehicles_inside">{{ $vehiclesInside }}</strong>
-            <p>Current registered vehicles marked inside.</p>
+            {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
+            <p>{{ $rfidStats['registered_inside'] ?? 0 }} registered · {{ $rfidStats['guests_inside'] ?? 0 }} guests</p>
         </article>
 
         <article class="stat-card stat-card-brand">

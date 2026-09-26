@@ -46,13 +46,9 @@ class DetectorRuntimeService
             ];
         }
 
-        if (! ($status['station_activity']['active'] ?? false)) {
-            return [
-                ...$status,
-                'auto_start_attempted' => false,
-                'auto_start_message' => 'Detector is in standby until a Station page is open.',
-            ];
-        }
+        // Phase 1: removed the "standby until a Station page is open" gate.
+        // Vehicle detection must run whenever the system is on; only the live
+        // MJPEG stream idles when nobody is watching (handled in Python).
 
         if (! $this->canAttemptLaunch()) {
             return [
@@ -232,16 +228,39 @@ class DetectorRuntimeService
             })
             ->all();
 
-        File::ensureDirectoryExists(dirname($this->stationActivityPath()));
-        File::put(
+        $this->writeJsonAtomic(
             $this->stationActivityPath(),
-            json_encode([
+            [
                 'updated_at' => $now->toIso8601String(),
                 'last_seen_at' => $now->toIso8601String(),
                 'active_until' => $now->copy()->addSeconds(self::STATION_VIEWER_IDLE_AFTER_SECONDS)->toIso8601String(),
                 'locations' => $locations,
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+            ]
         );
+    }
+
+    /**
+     * Phase 1: write JSON through a temp file + rename.
+     *
+     * Python reads station_activity.json many times per second. File::put()
+     * truncates first, so Python sometimes read an empty file, treated it as
+     * "no Station page open", paused the camera and dropped the RTSP
+     * connection. rename() replaces the file in one step.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    protected function writeJsonAtomic(string $path, array $payload): void
+    {
+        File::ensureDirectoryExists(dirname($path));
+
+        $temporaryPath = $path.'.'.getmypid().'.'.bin2hex(random_bytes(4)).'.tmp';
+        File::put($temporaryPath, json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        if (! @rename($temporaryPath, $path)) {
+            // Windows cannot rename over a file another process has open.
+            File::put($path, (string) File::get($temporaryPath));
+            File::delete($temporaryPath);
+        }
     }
 
     /**
@@ -405,7 +424,11 @@ class DetectorRuntimeService
                 .' && start "" /B '.escapeshellarg($pythonExecutable)
                 .' '.escapeshellarg($scriptPath)
                 .' >> '.escapeshellarg($logPath).' 2>&1',
-            default => 'cd '.escapeshellarg($workingDirectory)
+            // Phase 1: close inherited descriptors 3-9 first. Without this the
+            // detector inherited the PHP dev server's listening socket and kept
+            // port 8000 busy, so "php artisan serve" moved to :8001 and
+            // requests to :8000 hung.
+            default => 'exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; cd '.escapeshellarg($workingDirectory)
                 .' && nohup '.escapeshellarg($pythonExecutable)
                 .' '.escapeshellarg($scriptPath)
                 .' >> '.escapeshellarg($logPath).' 2>&1 &',
@@ -492,11 +515,7 @@ class DetectorRuntimeService
 
     protected function writeLaunchState(array $state): void
     {
-        File::ensureDirectoryExists(dirname($this->launchStatePath()));
-        File::put(
-            $this->launchStatePath(),
-            json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
-        );
+        $this->writeJsonAtomic($this->launchStatePath(), $state);
     }
 
     protected function registerLaunchAttempt(): void

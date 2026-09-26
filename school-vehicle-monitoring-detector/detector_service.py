@@ -33,7 +33,6 @@ from config import (
     RFID_POLL_INTERVAL_SECONDS,
     SNAPSHOTS_DIR,
     STATION_ACTIVITY_PATH,
-    STATION_IDLE_POLL_SECONDS,
     STATION_VIEWER_IDLE_AFTER_SECONDS,
     STATUS_FILE_PATH,
     STATUS_WRITE_INTERVAL_SECONDS,
@@ -174,9 +173,40 @@ def parse_timestamp(value):
         return None
 
 
+# Phase 1: last successfully parsed heartbeat, reused when a read fails.
+_STATION_ACTIVITY_CACHE = {"status": None, "read_at": 0.0}
+_STATION_ACTIVITY_LOCK = threading.Lock()
+STATION_ACTIVITY_CACHE_SECONDS = 0.5
+
+
 def station_activity_status():
     """
-    Read Laravel's station heartbeat so cameras sleep when no station is open.
+    Read Laravel's station heartbeat so the live stream idles when no station is open.
+
+    Phase 1: cached for 0.5s (it was re-read for every frame), and a failed or
+    partial read keeps the last good value instead of reporting "no viewer".
+    Laravel now also writes the file atomically.
+    """
+    now_monotonic = time.monotonic()
+
+    with _STATION_ACTIVITY_LOCK:
+        cached = _STATION_ACTIVITY_CACHE["status"]
+
+        if cached is not None and now_monotonic - _STATION_ACTIVITY_CACHE["read_at"] < STATION_ACTIVITY_CACHE_SECONDS:
+            return cached
+
+    status = _read_station_activity_status(cached)
+
+    with _STATION_ACTIVITY_LOCK:
+        _STATION_ACTIVITY_CACHE["status"] = status
+        _STATION_ACTIVITY_CACHE["read_at"] = now_monotonic
+
+    return status
+
+
+def _read_station_activity_status(last_good_status=None):
+    """
+    Parse station_activity.json once.
     """
     default_status = {
         "active": False,
@@ -189,8 +219,11 @@ def station_activity_status():
     try:
         with open(STATION_ACTIVITY_PATH, "r", encoding="utf-8") as activity_file:
             activity = json.load(activity_file)
-    except (OSError, json.JSONDecodeError):
+    except FileNotFoundError:
         return default_status
+    except (OSError, json.JSONDecodeError):
+        # Phase 1: a half-written file used to pause the cameras.
+        return last_good_status or default_status
 
     now = datetime.now().astimezone()
     active_until = parse_timestamp(activity.get("active_until"))
@@ -923,30 +956,6 @@ def cleanup_tracks_outside_roi(state, visible_roi_track_ids):
 
         if not visible_roi_track_ids:
             state["recent_resolutions"] = []
-
-
-def put_camera_in_standby(role, state):
-    """
-    Release camera resources while no station monitor is open.
-    """
-    release_capture(state)
-
-    with state["lock"]:
-        state["camera_running"] = False
-        state["detection_ready"] = False
-        state["retry_count"] = 0
-        state["active_detections"] = 0
-        state["latest_frame"] = None
-        state["latest_camera_config"] = None
-        state["last_error"] = "Camera paused because no Station page is open."
-
-    cleanup_tracks_outside_roi(state, set())
-
-    publish_status_frame(
-        role,
-        "Camera paused",
-        "Open a Station page to start live detection.",
-    )
 
 
 def mark_processed_as_guest_locked(state, track_id, xyxy, overlay, now_monotonic):
@@ -2118,11 +2127,10 @@ def camera_stream_worker(role, state, model_info, stop_event):
             runtime_config = load_runtime_config()
             camera_config = runtime_config["cameras"][role]
 
-            if not station_viewer_active():
-                put_camera_in_standby(role, state)
-                stop_event.wait(STATION_IDLE_POLL_SECONDS)
-                continue
-
+            # Phase 1: the camera is no longer released when no Station page is
+            # open. Capture keeps running so vehicle detection never stops;
+            # only the MJPEG publishing below is skipped without a viewer.
+            viewer_active = station_viewer_active()
             capture, capture_source = ensure_capture(camera_config, state)
 
             if capture is None or not capture.isOpened():
@@ -2132,7 +2140,8 @@ def camera_stream_worker(role, state, model_info, stop_event):
                 if time.monotonic() >= state.get("retry_after", 0.0):
                     state["retry_count"] += 1
                 state["last_error"] = camera_open_error(camera_config, capture_source, state)
-                publish_status_frame(role, "Camera source unavailable", state["last_error"])
+                if viewer_active:
+                    publish_status_frame(role, "Camera source unavailable", state["last_error"])
                 success = False
             else:
                 has_frame, frame = read_fresh_frame(capture)
@@ -2143,7 +2152,8 @@ def camera_stream_worker(role, state, model_info, stop_event):
                     state["detection_ready"] = False
                     state["retry_count"] += 1
                     state["last_error"] = "Camera opened, but frame capture failed."
-                    publish_status_frame(role, "Frame capture failed", state["last_error"])
+                    if viewer_active:
+                        publish_status_frame(role, "Frame capture failed", state["last_error"])
                     success = False
                 else:
                     now_monotonic = time.monotonic()
@@ -2159,11 +2169,14 @@ def camera_stream_worker(role, state, model_info, stop_event):
 
                     vehicle_labels = model_info.get("vehicle_labels", {})
 
+                    # Phase 1: drawing + JPEG encoding only happen while a
+                    # Station/Calibration page is watching the stream.
                     if not calibration_ready(camera_config):
                         state["detection_ready"] = False
                         state["retry_count"] = 0
                         state["last_error"] = "Calibration ROI mask and trigger line are required before auto logging starts."
-                        publish_stream_frame(role, frame)
+                        if viewer_active:
+                            publish_stream_frame(role, frame)
                     elif not vehicle_labels:
                         state["detection_ready"] = False
                         state["retry_count"] = 0
@@ -2172,11 +2185,13 @@ def camera_stream_worker(role, state, model_info, stop_event):
                             if model_info.get("model") is None
                             else "The current detector model does not expose any supported vehicle classes."
                         )
-                        publish_stream_frame(role, frame)
+                        if viewer_active:
+                            publish_stream_frame(role, frame)
                     else:
                         refresh_pending_window_snapshots(frame, state)
-                        live_frame = render_annotated_frame(role, frame, None, camera_config, state, vehicle_labels)
-                        publish_stream_frame(role, live_frame)
+                        if viewer_active:
+                            live_frame = render_annotated_frame(role, frame, None, camera_config, state, vehicle_labels)
+                            publish_stream_frame(role, live_frame)
 
                     success = True
         except Exception as error:
@@ -2223,13 +2238,8 @@ def camera_detection_worker(role, state, model_info, stop_event):
     Run YOLO tracking in a separate worker so live MJPEG publishing stays smooth.
     """
     while not stop_event.is_set():
-        if not station_viewer_active():
-            with state["lock"]:
-                state["detection_ready"] = False
-                state["active_detections"] = 0
-            stop_event.wait(STATION_IDLE_POLL_SECONDS)
-            continue
-
+        # Phase 1: removed the "no Station page open" gate. Detection runs
+        # whenever the detector is on.
         frame, camera_config = next_detection_frame(state)
 
         if frame is None:
