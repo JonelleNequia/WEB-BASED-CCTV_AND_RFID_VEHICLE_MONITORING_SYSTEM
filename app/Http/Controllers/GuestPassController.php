@@ -26,24 +26,33 @@ class GuestPassController extends Controller
     {
         $guestPassService->markOverstays();
 
+        // UI Phase 4: active visits (overstay first) on top, history below.
         $filters = $request->only(['status', 'q', 'date']);
-        $status = $filters['status'] ?? 'open';
+        $historyStatus = in_array($filters['status'] ?? null, [GuestVisit::STATUS_COMPLETED, GuestVisit::STATUS_LOST_TAG], true)
+            ? $filters['status']
+            : null;
+        $search = function ($query) use ($filters): void {
+            $term = '%'.trim((string) ($filters['q'] ?? '')).'%';
+            $query->where(function ($query) use ($term): void {
+                $query->where('plate', 'like', $term)
+                    ->orWhere('driver_name', 'like', $term)
+                    ->orWhereHas('rfidTag', fn ($tagQuery) => $tagQuery->where('display_number', 'like', $term));
+            });
+        };
+
+        $activeVisits = GuestVisit::query()
+            ->with(['rfidTag', 'issuer'])
+            ->open()
+            ->orderByRaw("CASE status WHEN 'overstay' THEN 0 ELSE 1 END")
+            ->orderBy('entry_at')
+            ->get();
 
         $visits = GuestVisit::query()
             ->with(['rfidTag', 'issuer'])
-            ->when($status === 'open', fn ($query) => $query->open())
-            ->when(in_array($status, [GuestVisit::STATUS_ACTIVE, GuestVisit::STATUS_COMPLETED, GuestVisit::STATUS_OVERSTAY, GuestVisit::STATUS_LOST_TAG], true),
-                fn ($query) => $query->where('status', $status))
-            ->when(filled($filters['q'] ?? null), function ($query) use ($filters): void {
-                $term = '%'.trim((string) $filters['q']).'%';
-                $query->where(function ($query) use ($term): void {
-                    $query->where('plate', 'like', $term)
-                        ->orWhere('driver_name', 'like', $term)
-                        ->orWhereHas('rfidTag', fn ($tagQuery) => $tagQuery->where('display_number', 'like', $term));
-                });
-            })
+            ->whereNotIn('status', GuestVisit::OPEN_STATUSES)
+            ->when($historyStatus, fn ($query) => $query->where('status', $historyStatus))
+            ->when(filled($filters['q'] ?? null), $search)
             ->when(filled($filters['date'] ?? null), fn ($query) => $query->whereDate('entry_at', $filters['date']))
-            ->orderByRaw("CASE status WHEN 'overstay' THEN 0 WHEN 'active' THEN 1 ELSE 2 END")
             ->latest('entry_at')
             ->paginate(15)
             ->withQueryString();
@@ -52,8 +61,9 @@ class GuestPassController extends Controller
 
         // UI Phase 2: Guests page.
         return view('guests.index', [
+            'activeVisits' => $activeVisits,
             'visits' => $visits,
-            'filters' => ['status' => $status] + $filters,
+            'filters' => ['status' => $historyStatus] + $filters,
             'stats' => [
                 'active_guests' => GuestVisit::query()->open()->count(),
                 'overstay' => GuestVisit::query()->where('status', GuestVisit::STATUS_OVERSTAY)->count(),

@@ -241,7 +241,8 @@ class Phase4UiTest extends TestCase
             ->get(route('dashboard.index'))
             ->assertOk()
             ->assertSee('Active Guests')
-            ->assertSee('No-pass Alerts')
+            ->assertSee('Needs attention')
+            ->assertSee('no-pass')
             ->assertDontSee('Guest Observations Today');
 
         $this->actingAs($this->admin)
@@ -262,7 +263,7 @@ class Phase4UiTest extends TestCase
             ->get(route('logs.index'))
             ->assertOk()
             ->assertSee('Guest Pass #G-01')
-            ->assertSee('No-pass Alert');
+            ->assertSee('Alerts');
 
         $this->actingAs($this->admin)
             ->get(route('logs.index', ['log_type' => 'guest_pass']))

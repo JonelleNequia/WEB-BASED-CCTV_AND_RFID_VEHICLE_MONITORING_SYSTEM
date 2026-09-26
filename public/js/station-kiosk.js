@@ -163,6 +163,7 @@
             }
 
             setRfidStatus(body.message || 'Guest pass issued.');
+            showScanResult('pass', body.guest_visit?.pass ? `Guest Pass ${body.guest_visit.pass}` : 'Guest pass issued', `ENTRY · ${body.guest_visit?.plate || 'Guest'}`);
             closeIssueModal();
             refreshLogs();
         } catch (error) {
@@ -205,7 +206,62 @@
         }
     }
 
+    /* UI Phase 4: big VERIFIED / GUEST PASS / DENIED / ALERT banner. */
+    const resultBox = document.querySelector('[data-scan-result]');
+    const RESULT_LOOK = {
+        verified: { word: 'VERIFIED', icon: '✓' },
+        pass: { word: 'GUEST PASS', icon: 'G' },
+        denied: { word: 'DENIED', icon: '✕' },
+        alert: { word: 'ALERT', icon: '!' },
+    };
+
+    function showScanResult(kind, title, detail) {
+        if (!resultBox) {
+            return;
+        }
+
+        const look = RESULT_LOOK[kind] || RESULT_LOOK.alert;
+        resultBox.className = `scan-result is-${kind} is-fresh`;
+        resultBox.querySelector('[data-scan-icon]').textContent = look.icon;
+        resultBox.querySelector('[data-scan-word]').textContent = look.word;
+        resultBox.querySelector('[data-scan-title]').textContent = title || '';
+        resultBox.querySelector('[data-scan-detail]').textContent = detail || '';
+        resultBox.querySelector('[data-scan-time]').textContent = window.ui ? window.ui.formatTime(new Date(), '', true) : '';
+        window.setTimeout(function () {
+            resultBox.classList.remove('is-fresh');
+        }, 1200);
+    }
+
+    function scanResultFor(body) {
+        const status = body.scan?.verification_status || '';
+        const plate = body.vehicle?.plate_number;
+        const pass = body.guest_pass?.label || body.guest_pass?.display_number;
+        const tag = body.scan?.tag_uid;
+
+        if (body.outcome === 'recorded') {
+            return ['verified', plate, [body.action_taken, body.vehicle?.owner_name].filter(Boolean).join(' · ')];
+        }
+        if (body.outcome === 'guest_pass_exit') {
+            return ['pass', pass, `EXIT · ${body.guest_visit?.plate || 'Guest'} · collect the card, return the ID`];
+        }
+        if (body.outcome === 'issue_required') {
+            return ['pass', pass, 'Fill in the Issue form to let the guest in'];
+        }
+        if (body.outcome === 'ignored') {
+            return ['pass', pass, body.message];
+        }
+        if (['guest', 'inactive_vehicle', 'unassigned_tag', 'non_recurring_category'].includes(status)) {
+            return ['denied', plate || `Tag ${tag}`, body.anomaly_reason || body.message];
+        }
+
+        return ['alert', plate || pass || `Tag ${tag}`, body.anomaly_reason || body.message];
+    }
+
     function handleScanResult(body) {
+        if (!body.duplicate_ignored) {
+            showScanResult(...scanResultFor(body));
+        }
+
         if (body.issue) {
             openIssueModal(body.issue);
         }
@@ -264,50 +320,24 @@
         ].join(':');
     }
 
+    // UI Phase 4: one short line per log (plate, type, time).
     function buildLogItem(log) {
         const item = document.createElement('article');
-        const badgeRow = document.createElement('div');
         const badge = document.createElement('span');
-        const loggedAt = document.createElement('span');
-        const main = document.createElement('div');
-        const title = document.createElement('strong');
-        const meta = document.createElement('span');
-        const details = document.createElement('div');
-        const detailItems = [
-            ['Owner', log.owner_name || 'N/A'],
-            ['Vehicle', log.vehicle_type || 'Vehicle'],
-            ['Entries Today', log.entries_today_count ?? 0],
-            ['Exits Today', log.exits_today_count ?? 0],
-            ['State', log.resulting_state || 'N/A'],
-            ['Status', log.status || 'Recorded'],
-        ];
+        const plate = document.createElement('strong');
+        const type = document.createElement('span');
+        const time = document.createElement('time');
 
-        item.className = 'station-log-item';
-        badgeRow.className = 'station-log-badge-row';
-        main.className = 'station-log-main';
+        item.className = 'station-log-item station-log-compact' + (log.no_pass_alert ? ' is-alert' : '');
         badge.className = 'station-log-badge';
-        loggedAt.className = 'station-log-time';
-        details.className = 'station-log-detail-grid';
-
-        title.textContent = log.plate_number || 'GUEST';
-        meta.textContent = log.verification_label || 'N/A';
         badge.textContent = log.event_type || payload.eventType || 'LOG';
-        loggedAt.textContent = log.display_time || formatDateTime(log.event_time, 'No time');
+        plate.textContent = log.plate_number || '—';
+        type.className = 'station-log-type';
+        type.textContent = log.verification_label || '';
+        time.className = 'station-log-time';
+        time.textContent = window.ui && log.event_time ? window.ui.formatTime(log.event_time) : (log.display_time || '');
 
-        detailItems.forEach(function ([label, value]) {
-            const wrapper = document.createElement('div');
-            const labelNode = document.createElement('span');
-            const valueNode = document.createElement('strong');
-
-            labelNode.textContent = label;
-            valueNode.textContent = value;
-            wrapper.append(labelNode, valueNode);
-            details.appendChild(wrapper);
-        });
-
-        badgeRow.append(badge, loggedAt);
-        main.append(title, meta);
-        item.append(badgeRow, main, details);
+        item.append(badge, plate, type, time);
 
         return item;
     }
@@ -339,6 +369,7 @@
             : 'No tag or guest pass was read. Check the vehicle.';
 
         showAlert('Vehicle with no pass', `${plate}: ${hint}`);
+        showScanResult('alert', `NO PASS · ${plate}`, hint);
     }
 
     function renderLogs(logs) {
@@ -521,6 +552,7 @@
             refreshLogs();
         } catch (error) {
             setRfidStatus(error.message || 'RFID scan failed');
+            showScanResult('denied', `Tag ${uid}`, error.message || 'RFID scan failed');
         } finally {
             focusRfidInput();
         }

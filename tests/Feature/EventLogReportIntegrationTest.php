@@ -28,7 +28,7 @@ class EventLogReportIntegrationTest extends TestCase
             ->get(route('logs.index'))
             ->assertOk()
             ->assertSee('class="page-header"', false)
-            ->assertSee('Event Logs')
+            ->assertSee('All Events')
             ->assertSee('Vehicle Owner Name')
             ->assertSee('data-event-log-print', false)
             ->assertSee('Print Reports')
@@ -150,7 +150,7 @@ class EventLogReportIntegrationTest extends TestCase
             $this->actingAs($admin)
                 ->get(route('logs.index', ['period' => 'month']))
                 ->assertOk()
-                ->assertSee('This Month Logs')
+                ->assertSee('This Month')
                 ->assertSee('MON-2026')
                 ->assertDontSee('APR-2026');
         } finally {

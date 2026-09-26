@@ -16,6 +16,7 @@ use App\Support\DisplayTime;
 use App\Support\PhilippineTime;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
@@ -26,10 +27,19 @@ class VehicleEventController extends Controller
     /**
      * Display a searchable and paginated event log.
      */
-    public function index(Request $request): View
+    public function index(Request $request): View|JsonResponse
     {
         $filteredLogs = $this->filteredUnifiedLogs($request);
-        $logs = $this->paginatedUnifiedLogCollection($request, $filteredLogs, 10);
+        $logs = $this->paginatedUnifiedLogCollection($request, $filteredLogs, 15);
+
+        // UI Phase 4: the Activity Logs table refreshes itself with the same filters.
+        if ($request->wantsJson()) {
+            return response()->json([
+                'logs' => $logs->getCollection()->values(),
+                'total' => $logs->total(),
+                'summary' => $this->eventLogSummary($filteredLogs),
+            ]);
+        }
 
         // UI Phase 2: Activity Logs › All Events tab.
         return view('logs.index', [
@@ -50,6 +60,7 @@ class VehicleEventController extends Controller
                 'log_type',
             ]),
             'logTypeOptions' => self::LOG_TYPES,
+            'logFilterChips' => self::LOG_FILTER_CHIPS,
             'periodOptions' => $this->periodOptions(),
             'categoryOptions' => $this->categoryOptions(),
             'printReports' => $this->printReportPayload($request),
@@ -62,9 +73,12 @@ class VehicleEventController extends Controller
     public function exportCsv(Request $request)
     {
         $singleLog = $this->singleUnifiedLog($request);
-        $rows = $singleLog !== null
-            ? collect([$singleLog])
-            : $this->paginatedUnifiedLogs($request, 10)->getCollection();
+        // UI Phase 4: the toolbar CSV (all=1) exports every filtered row, not only the visible page.
+        $rows = match (true) {
+            $singleLog !== null => collect([$singleLog]),
+            $request->boolean('all') => $this->filteredUnifiedLogs($request),
+            default => $this->paginatedUnifiedLogs($request, 10)->getCollection(),
+        };
         $filename = $singleLog !== null
             ? str($singleLog['record_type'].'-'.$singleLog['id'].'-'.now()->format('Ymd-His'))->slug().'.csv'
             : 'vehicle-events-'.now()->format('Ymd-His').'.csv';
@@ -275,6 +289,8 @@ class VehicleEventController extends Controller
     protected function printReportPayload(Request $request): array
     {
         $reports = [
+            // UI Phase 4: "Current list" prints exactly what the filters show.
+            'current' => ['label' => 'Current List', 'period' => false],
             'all' => ['label' => 'All Records', 'period' => null],
             'today' => ['label' => 'Today', 'period' => 'today'],
             'week' => ['label' => 'This Week', 'period' => 'week'],
@@ -283,7 +299,9 @@ class VehicleEventController extends Controller
 
         return collect($reports)
             ->map(function (array $report) use ($request): array {
-                $reportRequest = $this->reportRequest($request, $report['period']);
+                $reportRequest = $report['period'] === false
+                    ? Request::create($request->url(), 'GET', $request->except('page'))
+                    : $this->reportRequest($request, $report['period']);
 
                 return [
                     'label' => $report['label'],
@@ -453,6 +471,11 @@ class VehicleEventController extends Controller
                 array_key_exists((string) $request->query('log_type'), self::LOG_TYPES),
                 fn (Collection $logs) => $logs->where('log_type', (string) $request->query('log_type'))
             )
+            // UI Phase 4: "Alerts" chip = no-pass alerts, anomalies, lost/disabled pass scans.
+            ->when(
+                $request->query('log_type') === 'alerts',
+                fn (Collection $logs) => $logs->where('is_alert', true)
+            )
             ->sortByDesc('sort_time')
             ->values();
     }
@@ -465,6 +488,15 @@ class VehicleEventController extends Controller
         'guest_pass' => 'Guest Pass',
         'manual' => 'Manual',
         'no_pass_alert' => 'No-pass Alert',
+    ];
+
+    /** UI Phase 4: filter chips on Activity Logs › All Events. */
+    public const LOG_FILTER_CHIPS = [
+        '' => 'All',
+        'registered' => 'Registered',
+        'guest_pass' => 'Guest Pass',
+        'manual' => 'Manual',
+        'alerts' => 'Alerts',
     ];
 
     /**
@@ -641,6 +673,8 @@ class VehicleEventController extends Controller
             'match_label' => $event->match_display,
             'rfid_tag_uid' => $event->rfidScanLog?->tag_uid ?: 'N/A',
             'image_url' => $event->has_visual_evidence ? $event->vehicle_image_url : null,
+            'is_alert' => filled($event->anomaly_reason) && $event->match_status !== VehicleEvent::MATCH_NO_PASS_RESOLVED,
+            'alert_reason' => $event->anomaly_reason,
             'sort_time' => $this->sortTimestamp($event->created_at, $time),
             ...$this->logTypeFields(
                 $this->vehicleEventLogType($event),
@@ -683,6 +717,8 @@ class VehicleEventController extends Controller
             'match_label' => 'Guest',
             'rfid_tag_uid' => 'N/A',
             'image_url' => $observation->snapshot_path ? $observation->snapshot_url : null,
+            'is_alert' => $observation->observation_source === 'cctv' && $observation->status !== GuestVehicleObservation::STATUS_RESOLVED,
+            'alert_reason' => $observation->observation_source === 'cctv' ? 'Vehicle with no pass' : null,
             'sort_time' => $this->sortTimestamp($observation->created_at, $time),
             ...$this->logTypeFields($observation->observation_source === 'cctv' ? 'no_pass_alert' : 'manual', true),
         ];
@@ -722,6 +758,8 @@ class VehicleEventController extends Controller
             'match_label' => 'No vehicle event',
             'rfid_tag_uid' => $scanLog->tag_uid,
             'image_url' => null,
+            'is_alert' => (bool) $scanLog->is_anomaly || in_array($scanLog->verification_status, ['guest', 'guest_pass_lost', 'guest_pass_disabled', 'inactive_tag'], true),
+            'alert_reason' => $scanLog->anomaly_reason,
             'sort_time' => $this->sortTimestamp($scanLog->created_at, $time),
             ...$this->logTypeFields(
                 match (true) {

@@ -1,4 +1,4 @@
-{{-- UI Phase 2: Guests page (was Guest Passes). Visits here; the pass cards are in Registry › Guest Passes. --}}
+{{-- UI Phase 2/4: Guests page. Guests inside now (overstay first) on top, history below. The pass cards are in Registry › Guest Passes. --}}
 @extends('layouts.app')
 
 @section('title', 'Guests | PHILCST Vehicle Monitoring')
@@ -32,7 +32,7 @@
     <x-stat-row>
         <x-stat label="Active Guests" :value="$stats['active_guests']" tone="brand" hint="Inside with a pass (incl. overstay)" data-guest-pass-stat="active_guests" />
         <x-stat label="Passes Available" :value="$stats['passes_available'].' / '.$stats['passes_total']" :hint="$stats['passes_lost'].' lost pass(es)'" :href="route('registry.index', ['tab' => 'passes'])" />
-        <x-stat label="Overstay" :value="$stats['overstay']" tone="warning" hint="Past their valid-until time" :href="route('guests.index', ['status' => 'overstay'])" />
+        <x-stat label="Overstay" :value="$stats['overstay']" tone="warning" hint="Highlighted at the top of Inside now" />
     </x-stat-row>
 
     <x-drawer id="issue-pass-drawer" title="Issue Guest Pass" :open="$errors->hasAny(['id_presented', 'rfid_tag_id', 'plate'])">
@@ -98,96 +98,135 @@
         @endif
     </x-drawer>
 
-    <x-table title="Guest Visits" :paginator="$visits" :empty="$visits->isEmpty()" empty-title="No guest visits for this filter.">
-        <x-slot:toolbar><span class="text-muted">{{ $visits->total() }} visit(s)</span></x-slot:toolbar>
-        <x-slot:filters>
-        <form method="GET" action="{{ route('guests.index') }}" class="form-grid filter-grid">
-            <div class="field">
-                <label for="filter_status">Status</label>
-                <select id="filter_status" name="status">
-                    @foreach (['open' => 'Inside (active + overstay)', 'all' => 'All', 'active' => 'Active', 'overstay' => 'Overstay', 'completed' => 'Completed', 'lost_tag' => 'Lost pass'] as $value => $label)
-                        <option value="{{ $value }}" @selected(($filters['status'] ?? 'open') === $value)>{{ $label }}</option>
-                    @endforeach
-                </select>
-            </div>
-            <div class="field">
-                <label for="filter_q">Pass / Plate / Driver</label>
-                <input id="filter_q" type="text" name="q" value="{{ $filters['q'] ?? '' }}" placeholder="G-03 or ABC 1234">
-            </div>
-            <div class="field">
-                <label for="filter_date">Entry Date</label>
+    {{-- UI Phase 4: guests inside now (overstay first, highlighted). --}}
+    <x-table title="Inside now" :empty="$activeVisits->isEmpty()" empty-title="No guests inside." empty-text="Issue a guest pass at the Entrance Station, or here when the reader is not available.">
+        <x-slot:toolbar><span class="text-muted">{{ $activeVisits->count() }} active</span></x-slot:toolbar>
+        <x-slot:emptyAction>
+            <button type="button" class="button button-primary button-sm" data-drawer-open="issue-pass-drawer">Issue Guest Pass</button>
+        </x-slot:emptyAction>
+        <thead>
+            <tr>
+                <th>Pass</th>
+                <th>Plate</th>
+                <th>Driver</th>
+                <th>Purpose</th>
+                <th>Entered</th>
+                <th>Duration</th>
+                <th>Valid Until</th>
+                <th>Status</th>
+                <th><span class="sr-only">Actions</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach ($activeVisits as $visit)
+                <tr @class(['is-alert-row' => $visit->status === 'overstay'])>
+                    <td><strong>{{ $visit->rfidTag?->display_number ?? '—' }}</strong></td>
+                    <td>{{ $visit->plate ?: 'No plate' }}</td>
+                    <td>{{ $visit->driver_name ?: '—' }}</td>
+                    <td>
+                        {{ $visit->purpose ?: '—' }}
+                        @if ($visit->destination)
+                            <div class="table-subtext">{{ $visit->destination }}</div>
+                        @endif
+                    </td>
+                    <td class="nowrap"><x-datetime :value="$visit->entry_at" format="time" /></td>
+                    <td class="nowrap" data-duration-since="{{ $visit->entry_at?->toIso8601String() }}">{{ $duration($visit) }}</td>
+                    <td class="nowrap"><x-datetime :value="$visit->valid_until" format="time" /></td>
+                    <td><x-badge :status="$visit->status" :label="$statusLabel($visit->status)" /></td>
+                    <td class="row-actions">
+                        <a href="{{ route('guest-passes.visits.show', $visit) }}" class="button button-secondary button-sm">View</a>
+                        <button type="button" class="button button-secondary button-sm" data-visit-action="close"
+                                data-url="{{ route('guest-passes.visits.close', $visit) }}" data-label="{{ $visit->rfidTag?->label }} · {{ $visit->plate ?: 'No plate' }}">Close</button>
+                        <button type="button" class="button button-subtle-danger button-sm" data-visit-action="lost"
+                                data-url="{{ route('guest-passes.visits.lost', $visit) }}" data-label="{{ $visit->rfidTag?->label }} · {{ $visit->plate ?: 'No plate' }}">Lost</button>
+                    </td>
+                </tr>
+            @endforeach
+        </tbody>
+    </x-table>
+
+    {{-- UI Phase 4: finished visits. --}}
+    <x-table title="History" :paginator="$visits" :empty="$visits->isEmpty()" empty-title="No finished visits for this filter.">
+        <x-slot:toolbar>
+            <form method="GET" action="{{ route('guests.index') }}" class="toolbar-search">
+                <label class="sr-only" for="filter_q">Pass, plate or driver</label>
+                <input id="filter_q" type="search" name="q" value="{{ $filters['q'] ?? '' }}" placeholder="G-03, plate or driver">
+                <label class="sr-only" for="filter_date">Entry date</label>
                 <input id="filter_date" type="date" name="date" value="{{ $filters['date'] ?? '' }}">
+                <label class="sr-only" for="filter_status">Result</label>
+                <select id="filter_status" name="status">
+                    <option value="">All results</option>
+                    <option value="completed" @selected(($filters['status'] ?? '') === 'completed')>Completed</option>
+                    <option value="lost_tag" @selected(($filters['status'] ?? '') === 'lost_tag')>Lost pass</option>
+                </select>
+                <button type="submit" class="button button-secondary button-sm">Filter</button>
+                @if (array_filter($filters ?? []))
+                    <a href="{{ route('guests.index') }}" class="button button-secondary button-sm">Reset</a>
+                @endif
+            </form>
+        </x-slot:toolbar>
+        <thead>
+            <tr>
+                <th>Pass</th>
+                <th>Plate</th>
+                <th>Driver</th>
+                <th>Purpose</th>
+                <th>Entry</th>
+                <th>Exit</th>
+                <th>Duration</th>
+                <th>Result</th>
+                <th><span class="sr-only">Actions</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach ($visits as $visit)
+                <tr>
+                    <td><strong>{{ $visit->rfidTag?->display_number ?? '—' }}</strong></td>
+                    <td>{{ $visit->plate ?: 'No plate' }}</td>
+                    <td>{{ $visit->driver_name ?: '—' }}</td>
+                    <td>{{ $visit->purpose ?: '—' }}</td>
+                    <td class="nowrap"><x-datetime :value="$visit->entry_at" /></td>
+                    <td class="nowrap"><x-datetime :value="$visit->exit_at" /></td>
+                    <td class="nowrap">{{ $duration($visit) }}</td>
+                    <td><x-badge :status="$visit->status === 'lost_tag' ? 'lost' : $visit->status" :label="$statusLabel($visit->status)" /></td>
+                    <td class="row-actions"><a href="{{ route('guest-passes.visits.show', $visit) }}" class="button button-secondary button-sm">View</a></td>
+                </tr>
+            @endforeach
+        </tbody>
+    </x-table>
+
+    <x-modal id="close-visit-modal" title="Close visit">
+        <form method="POST" action="#" class="stack-form" data-visit-form="close">
+            @csrf
+            <p class="text-muted" data-visit-label></p>
+            <div class="field">
+                <label for="close_reason">Reason</label>
+                <input id="close_reason" type="text" name="reason" required maxlength="255" placeholder="Left through the service gate" autofocus>
             </div>
-            <div class="field field-actions">
-                <div class="button-row">
-                    <button type="submit" class="button button-secondary">Apply</button>
-                    <a href="{{ route('guests.index') }}" class="button button-secondary">Reset</a>
-                </div>
+            <p class="field-help">The pass becomes available again.</p>
+            <div class="button-row">
+                <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
+                <button type="submit" class="button button-primary">Close visit</button>
             </div>
         </form>
-        </x-slot:filters>
+    </x-modal>
 
-                <thead>
-                    <tr>
-                        <th>Pass</th>
-                        <th>Plate</th>
-                        <th>Driver</th>
-                        <th>Purpose</th>
-                        <th>Entry</th>
-                        <th>Exit</th>
-                        <th>Duration</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach ($visits as $visit)
-                        <tr>
-                            <td><strong>{{ $visit->rfidTag?->display_number ?? 'N/A' }}</strong></td>
-                            <td>{{ $visit->plate ?: 'No plate' }}</td>
-                            <td>{{ $visit->driver_name ?: 'N/A' }}</td>
-                            <td>
-                                {{ $visit->purpose ?: 'N/A' }}
-                                @if ($visit->destination)
-                                    <div class="table-subtext">{{ $visit->destination }}</div>
-                                @endif
-                            </td>
-                            <td><x-datetime :value="$visit->entry_at" /></td>
-                            <td>
-                                <x-datetime :value="$visit->exit_at" fallback="Inside" />
-                                @if ($visit->isOpen() && $visit->valid_until)
-                                    <div class="table-subtext">Valid until <x-datetime :value="$visit->valid_until" format="time" /></div>
-                                @endif
-                            </td>
-                            <td>{{ $duration($visit) }}</td>
-                            <td><x-badge :status="$visit->status === 'lost_tag' ? 'lost' : $visit->status" :label="$statusLabel($visit->status)" /></td>
-                            <td>
-                                <div class="button-row guest-pass-actions">
-                                    <a href="{{ route('guest-passes.visits.show', $visit) }}" class="button button-secondary button-sm">View</a>
-                                    @if ($visit->isOpen())
-                                        <details class="guest-pass-action">
-                                            <summary class="button button-secondary button-sm">Close</summary>
-                                            <form method="POST" action="{{ route('guest-passes.visits.close', $visit) }}" class="stack-form">
-                                                @csrf
-                                                <input type="text" name="reason" placeholder="Reason (required)" required maxlength="255">
-                                                <button type="submit" class="button button-primary button-sm">Close visit</button>
-                                            </form>
-                                        </details>
-                                        <details class="guest-pass-action">
-                                            <summary class="button button-subtle-danger button-sm">Lost</summary>
-                                            <form method="POST" action="{{ route('guest-passes.visits.lost', $visit) }}" class="stack-form">
-                                                @csrf
-                                                <input type="text" name="reason" placeholder="Notes (optional)" maxlength="255">
-                                                <button type="submit" class="button button-subtle-danger button-sm">Mark pass lost</button>
-                                            </form>
-                                        </details>
-                                    @endif
-                                </div>
-                            </td>
-                        </tr>
-                    @endforeach
-                </tbody>
-    </x-table>
+    <x-modal id="lost-visit-modal" title="Mark pass lost">
+        <form method="POST" action="#" class="stack-form" data-visit-form="lost">
+            @csrf
+            <p class="text-muted" data-visit-label></p>
+            <div class="field">
+                <label for="lost_reason">Notes (optional)</label>
+                <input id="lost_reason" type="text" name="reason" maxlength="255" placeholder="Guest drove off with the card" autofocus>
+            </div>
+            <p class="field-help">The visit ends and scans of this card will raise an alert.</p>
+            <div class="button-row">
+                <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
+                <button type="submit" class="button button-subtle-danger">Mark lost</button>
+            </div>
+        </form>
+    </x-modal>
+
 
     <x-drawer id="manual-guest-drawer" title="Manual guest entry (fallback)">
             <p class="field-help">
@@ -258,6 +297,31 @@
                 select.addEventListener('change', () => { form.action = select.value; });
                 form.action = select.value;
             }
+
+            // UI Phase 4: Close / Lost open a small dialog for the reason.
+            document.querySelectorAll('[data-visit-action]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const action = button.dataset.visitAction;
+                    const visitForm = document.querySelector(`[data-visit-form="${action}"]`);
+                    visitForm.action = button.dataset.url;
+                    visitForm.querySelector('[data-visit-label]').textContent = button.dataset.label;
+                    visitForm.reset();
+                    window.ui.openDrawer(action === 'close' ? 'close-visit-modal' : 'lost-visit-modal');
+                });
+            });
+
+            // Live durations for guests inside.
+            const pad = (value) => String(value).padStart(2, '0');
+            const tick = () => document.querySelectorAll('[data-duration-since]').forEach((cell) => {
+                const since = Date.parse(cell.dataset.durationSince);
+                if (Number.isNaN(since)) {
+                    return;
+                }
+                const minutes = Math.max(0, Math.floor((Date.now() - since) / 60000));
+                cell.textContent = `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m`;
+            });
+            tick();
+            window.setInterval(tick, 30000);
         });
     </script>
 @endpush

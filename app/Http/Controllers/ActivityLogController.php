@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ResolvesTab;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 
@@ -20,7 +21,7 @@ class ActivityLogController extends Controller
         'alerts' => 'Alerts',
     ];
 
-    public function index(Request $request): View
+    public function index(Request $request): View|JsonResponse
     {
         return match ($this->resolveTab($request, self::TABS)) {
             'scans' => app()->call([app(RfidScanController::class), 'history']),

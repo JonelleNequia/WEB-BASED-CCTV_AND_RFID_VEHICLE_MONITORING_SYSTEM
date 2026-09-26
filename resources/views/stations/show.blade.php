@@ -51,6 +51,17 @@
         </section>
 
         <aside class="station-log-pane">
+            {{-- UI Phase 4: big scan result the guard can read from a distance. --}}
+            <section class="scan-result is-idle" data-scan-result aria-live="assertive" aria-atomic="true">
+                <span class="scan-result-icon" data-scan-icon aria-hidden="true">•</span>
+                <div class="scan-result-body">
+                    <strong class="scan-result-word" data-scan-word>READY</strong>
+                    <span class="scan-result-title" data-scan-title>Tap a tag on the reader</span>
+                    <span class="scan-result-detail" data-scan-detail></span>
+                </div>
+                <time class="scan-result-time" data-scan-time></time>
+            </section>
+
             <div class="station-log-header">
                 <div>
                     <span class="station-kicker">Shared Station Logs</span>
@@ -62,24 +73,13 @@
             </div>
 
             <div class="station-log-list" data-station-log-list>
+                {{-- UI Phase 4: one short line per log (plate, type, time). --}}
                 @forelse ($logs as $log)
-                    <article class="station-log-item">
-                        <div class="station-log-badge-row">
-                            <span class="station-log-badge">{{ $log['event_type'] }}</span>
-                            <span class="station-log-time">{{ $log['display_time'] }}</span>
-                        </div>
-                        <div class="station-log-main">
-                            <strong>{{ $log['plate_number'] }}</strong>
-                            <span>{{ $log['verification_label'] }}</span>
-                        </div>
-                        <div class="station-log-detail-grid">
-                            <div><span>Owner</span><strong>{{ $log['owner_name'] }}</strong></div>
-                            <div><span>Vehicle</span><strong>{{ $log['vehicle_type'] }}</strong></div>
-                            <div><span>Entries Today</span><strong>{{ $log['entries_today_count'] ?? 0 }}</strong></div>
-                            <div><span>Exits Today</span><strong>{{ $log['exits_today_count'] ?? 0 }}</strong></div>
-                            <div><span>State</span><strong>{{ $log['resulting_state'] }}</strong></div>
-                            <div><span>Status</span><strong>{{ $log['status'] }}</strong></div>
-                        </div>
+                    <article class="station-log-item station-log-compact">
+                        <span class="station-log-badge">{{ $log['event_type'] }}</span>
+                        <strong>{{ $log['plate_number'] }}</strong>
+                        <span class="station-log-type">{{ $log['verification_label'] }}</span>
+                        <time class="station-log-time">{{ \App\Support\DisplayTime::time($log['event_time'] ?? null) }}</time>
                     </article>
                 @empty
                     <div class="station-log-empty" data-station-log-empty>No station logs yet</div>

@@ -7,6 +7,7 @@ use App\Models\GuestVisit;
 use App\Models\RfidScanLog;
 use App\Models\Vehicle;
 use App\Models\VehicleEvent;
+use App\Services\AlertSummaryService;
 use App\Services\CalibrationService;
 use App\Services\GuestObservationService;
 use App\Services\GuestPassService;
@@ -57,7 +58,11 @@ class DashboardController extends Controller
                 'registered_scans_today' => $data['rfidStats']['registered_scans_today'] ?? 0,
                 'camera_connected' => $data['cameraSummary']['connected'],
                 'camera_total' => $data['cameraSummary']['total'],
+                // UI Phase 4
+                'alerts_total' => $data['alertCounts']['total'],
             ],
+            'attention' => $data['attentionItems'],
+            'hourly' => $data['hourlyTraffic'],
             'traffic_summary' => $data['trafficSummary'],
             'recent_rfid_scans' => $data['recentRfidScans']->values(),
             'latest_events' => $data['latestEvents']->values(),
@@ -116,6 +121,10 @@ class DashboardController extends Controller
                 ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
                 ->count(),
             'trafficSummary' => $trafficSummary,
+            // UI Phase 4: dashboard KPIs, "Needs attention" and hourly chart.
+            'alertCounts' => app(AlertSummaryService::class)->counts(),
+            'attentionItems' => app(AlertSummaryService::class)->items(8),
+            'hourlyTraffic' => $this->hourlyTrafficToday(),
             'latestEvents' => $this->recentEventActivities(),
             'frequentEntryVehicles' => $this->frequentEntryVehicles(),
             'rfidStats' => $rfidStats,
@@ -163,6 +172,43 @@ class DashboardController extends Controller
             })
             ->take(5)
             ->values();
+    }
+
+    /**
+     * UI Phase 4: entries and exits per hour today (Asia/Manila), for the
+     * dashboard chart. Same sources as the Entries/Exits totals.
+     *
+     * @return list<array{hour: int, label: string, entries: int, exits: int}>
+     */
+    protected function hourlyTrafficToday(): array
+    {
+        $window = PhilippineTime::periodWindow('today');
+        $hours = collect(range(0, 23))->mapWithKeys(fn (int $hour) => [$hour => ['entries' => 0, 'exits' => 0]])->all();
+        $bump = function (?\DateTimeInterface $time, string $key) use (&$hours): void {
+            if ($time) {
+                $hours[(int) DisplayTime::format($time, 'G')][$key]++;
+            }
+        };
+
+        VehicleEvent::query()
+            ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
+            ->whereIn('event_type', ['ENTRY', 'EXIT'])
+            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['event_time']))
+            ->get(['event_type', 'event_time'])
+            ->each(fn (VehicleEvent $event) => $bump($event->event_time, $event->event_type === 'EXIT' ? 'exits' : 'entries'));
+
+        $this->unmirroredGuestObservationsQuery()
+            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['observed_at']))
+            ->get(['location', 'observed_at'])
+            ->each(fn (GuestVehicleObservation $observation) => $bump($observation->observed_at, $observation->location === 'exit' ? 'exits' : 'entries'));
+
+        return collect($hours)
+            ->map(fn (array $counts, int $hour) => [
+                'hour' => $hour,
+                'label' => DisplayTime::format($window['local_start']->copy()->setTime($hour, 0), 'g A'),
+            ] + $counts)
+            ->values()
+            ->all();
     }
 
     /**
