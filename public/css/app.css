@@ -3841,3 +3841,15 @@ th {
         grid-template-columns: 1fr;
     }
 }
+
+/* Phase 4: Settings checkbox row */
+.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-weight: 500;
+}
+
+.checkbox-row input {
+    width: auto;
+}

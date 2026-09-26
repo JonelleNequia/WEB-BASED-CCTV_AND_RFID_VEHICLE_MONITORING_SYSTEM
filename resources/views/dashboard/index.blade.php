@@ -19,7 +19,7 @@
         </div>
     </section>
 
-    <div class="page-grid cards-6" data-dashboard-metrics>
+    <div class="page-grid cards-4" data-dashboard-metrics>
         <article class="stat-card stat-card-brand">
             <span class="stat-card-label">Total Vehicles Entered</span>
             <strong data-dashboard-metric="total_vehicles_entered_today">{{ $totalVehiclesEnteredToday }}</strong>
@@ -45,10 +45,27 @@
             <p>Verified RFID scans from recurring vehicles today.</p>
         </article>
 
+        {{-- Phase 4: replaced "Guest Observations Today" with guest pass cards and alerts. --}}
+        <article class="stat-card stat-card-brand-soft">
+            <span class="stat-card-label">Active Guests</span>
+            <strong data-dashboard-metric="active_guests">{{ $activeGuests }}</strong>
+            <p><a href="{{ route('guest-passes.index') }}">Guests inside with a pass</a></p>
+        </article>
+
         <article class="stat-card stat-card-warning">
-            <span class="stat-card-label">Guest Observations Today</span>
-            <strong data-dashboard-metric="guest_observations_today">{{ $guestObservationsToday }}</strong>
-            <p>Guest monitoring records for today.</p>
+            <span class="stat-card-label">Overstay</span>
+            <strong data-dashboard-metric="overstay_guests">{{ $overstayGuests }}</strong>
+            <p><a href="{{ route('guest-passes.index', ['status' => 'overstay']) }}">Past their valid-until time</a></p>
+        </article>
+
+        <article class="stat-card stat-card-warning">
+            <span class="stat-card-label">No-pass Alerts</span>
+            <strong data-dashboard-metric="no_pass_alerts_today">{{ $noPassAlertsToday }}</strong>
+            <p>
+                Vehicles the camera saw without an RFID scan today ·
+                <span data-dashboard-metric="pass_alerts_today">{{ $passAlertsToday }}</span> lost/disabled pass scan(s).
+                <a href="{{ route('vehicle-events.index', ['log_type' => 'no_pass_alert']) }}">Review</a>
+            </p>
         </article>
 
         <article class="stat-card stat-card-success">

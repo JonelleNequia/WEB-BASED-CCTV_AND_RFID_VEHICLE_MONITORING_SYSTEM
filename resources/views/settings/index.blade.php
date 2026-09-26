@@ -53,7 +53,7 @@
                     <h4>Station Labels</h4>
                     @include('layouts.partials.help', [
                         'label' => 'Explain station labels',
-                        'text' => 'These labels appear on the entrance and exit station screens and on RFID reader references.',
+                        'text' => 'These labels appear on the entrance and exit station screens.',
                     ])
                 </div>
 
@@ -68,14 +68,119 @@
                         <input id="exit_portal_label" type="text" name="exit_portal_label" value="{{ old('exit_portal_label', $settings['exit_portal_label']) }}" required>
                     </div>
 
+                </div>
+            </section>
+
+            {{-- Phase 4: Reader Configuration per station (replaces the "Reader Name (Simulated)" fields). --}}
+            <section class="subpanel">
+                <div class="panel-title-row">
+                    <h4>Reader Configuration</h4>
+                    @include('layouts.partials.help', [
+                        'label' => 'Explain reader configuration',
+                        'text' => 'NFC readers type the tag into the Station page. UHF Ethernet readers are configured here; the network listener is added in a later update. Simulated uses the RFID Desk.',
+                    ])
+                </div>
+
+                <div class="camera-grid">
+                    @foreach (['entrance' => 'Entrance', 'exit' => 'Exit'] as $station => $stationLabel)
+                        @php($readerType = old("{$station}_reader_type", $settings["{$station}_reader_type"] ?? 'nfc'))
+                        @php($readerIp = old("{$station}_reader_ip", $settings["{$station}_reader_ip"] ?? ''))
+                        <article class="camera-card">
+                            <div class="camera-card-head">
+                                <div>
+                                    <h4>{{ $stationLabel }} Reader</h4>
+                                    <p>{{ $settings["{$station}_rfid_reader_name"] ?? $stationLabel.' Reader' }}</p>
+                                </div>
+                                <span class="chip {{ $readerType === 'uhf_ethernet' ? 'chip-soft' : 'chip-brand' }}">
+                                    @switch($readerType)
+                                        @case('uhf_ethernet')
+                                            {{ $readerIp ? 'Not connected (listener pending)' : 'Set IP and port' }}
+                                            @break
+                                        @case('simulated')
+                                            RFID Desk simulation
+                                            @break
+                                        @default
+                                            Ready on Station page
+                                    @endswitch
+                                </span>
+                            </div>
+
+                            <div class="form-grid">
+                                <div class="field">
+                                    <label for="{{ $station }}_reader_type">Reader Type</label>
+                                    <select id="{{ $station }}_reader_type" name="{{ $station }}_reader_type">
+                                        <option value="nfc" @selected($readerType === 'nfc')>NFC (USB, Station page)</option>
+                                        <option value="uhf_ethernet" @selected($readerType === 'uhf_ethernet')>UHF Ethernet (TCP/IP)</option>
+                                        <option value="simulated" @selected($readerType === 'simulated')>Simulated (RFID Desk)</option>
+                                    </select>
+                                </div>
+
+                                <div class="field">
+                                    <label for="{{ $station }}_reader_ip">Reader IP</label>
+                                    <input id="{{ $station }}_reader_ip" type="text" name="{{ $station }}_reader_ip" value="{{ $readerIp }}" placeholder="192.168.100.50">
+                                    @error("{$station}_reader_ip")
+                                        <span class="field-error">{{ $message }}</span>
+                                    @enderror
+                                </div>
+
+                                <div class="field">
+                                    <label for="{{ $station }}_reader_port">Port</label>
+                                    <input id="{{ $station }}_reader_port" type="number" name="{{ $station }}_reader_port" value="{{ old("{$station}_reader_port", $settings["{$station}_reader_port"] ?? '') }}" min="1" max="65535" placeholder="6000">
+                                    @error("{$station}_reader_port")
+                                        <span class="field-error">{{ $message }}</span>
+                                    @enderror
+                                </div>
+                            </div>
+                        </article>
+                    @endforeach
+                </div>
+
+                <div class="form-grid">
                     <div class="field">
-                        <label for="entrance_rfid_reader_name">Entrance Reader Name</label>
-                        <input id="entrance_rfid_reader_name" type="text" name="entrance_rfid_reader_name" value="{{ old('entrance_rfid_reader_name', $settings['entrance_rfid_reader_name']) }}" required>
+                        <label for="rfid_cooldown_seconds">Same-tag Cooldown (seconds)</label>
+                        <input id="rfid_cooldown_seconds" type="number" name="rfid_cooldown_seconds" value="{{ old('rfid_cooldown_seconds', $settings['rfid_cooldown_seconds'] ?? 60) }}" min="0" max="3600">
+                        <span class="field-help">Repeat reads of the same tag at the same station are ignored for this long.</span>
+                        @error('rfid_cooldown_seconds')
+                            <span class="field-error">{{ $message }}</span>
+                        @enderror
+                    </div>
+                </div>
+            </section>
+
+            {{-- Phase 4: Guest Pass rules. --}}
+            <section class="subpanel">
+                <div class="panel-title-row">
+                    <h4>Guest Pass</h4>
+                    @include('layouts.partials.help', [
+                        'label' => 'Explain guest pass settings',
+                        'text' => 'Default validity is prefilled on the Issue Guest Pass form. A visit becomes Overstay once it passes its valid-until time plus the grace period.',
+                    ])
+                </div>
+
+                <div class="form-grid">
+                    <div class="field">
+                        <label for="guest_pass_validity_minutes">Default Validity (minutes)</label>
+                        <input id="guest_pass_validity_minutes" type="number" name="guest_pass_validity_minutes" value="{{ old('guest_pass_validity_minutes', $settings['guest_pass_validity_minutes'] ?? 240) }}" min="15" max="1440">
+                        @error('guest_pass_validity_minutes')
+                            <span class="field-error">{{ $message }}</span>
+                        @enderror
                     </div>
 
                     <div class="field">
-                        <label for="exit_rfid_reader_name">Exit Reader Name</label>
-                        <input id="exit_rfid_reader_name" type="text" name="exit_rfid_reader_name" value="{{ old('exit_rfid_reader_name', $settings['exit_rfid_reader_name']) }}" required>
+                        <label for="guest_pass_overstay_grace_minutes">Overstay Threshold (grace minutes)</label>
+                        <input id="guest_pass_overstay_grace_minutes" type="number" name="guest_pass_overstay_grace_minutes" value="{{ old('guest_pass_overstay_grace_minutes', $settings['guest_pass_overstay_grace_minutes'] ?? 0) }}" min="0" max="720">
+                        @error('guest_pass_overstay_grace_minutes')
+                            <span class="field-error">{{ $message }}</span>
+                        @enderror
+                    </div>
+
+                    <div class="field">
+                        <label for="guest_pass_require_id">Require ID Before Issuing</label>
+                        <input type="hidden" name="guest_pass_require_id" value="0">
+                        <label class="checkbox-row">
+                            <input id="guest_pass_require_id" type="checkbox" name="guest_pass_require_id" value="1" @checked(old('guest_pass_require_id', $settings['guest_pass_require_id'] ?? '1') === '1')>
+                            <span>Guard must record the ID left at the gate</span>
+                        </label>
                     </div>
                 </div>
             </section>

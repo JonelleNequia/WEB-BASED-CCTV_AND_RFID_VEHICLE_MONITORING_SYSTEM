@@ -44,7 +44,9 @@ class VehicleEventController extends Controller
                 'period',
                 'category',
                 'vehicle_owner_name',
+                'log_type',
             ]),
+            'logTypeOptions' => self::LOG_TYPES,
             'periodOptions' => $this->periodOptions(),
             'categoryOptions' => $this->categoryOptions(),
             'printReports' => $this->printReportPayload($request),
@@ -68,6 +70,8 @@ class VehicleEventController extends Controller
             $handle = fopen('php://output', 'w');
             fputcsv($handle, [
                 'Type',
+                'Log Type',
+                'Source',
                 'Plate',
                 'Owner',
                 'Vehicle',
@@ -82,6 +86,8 @@ class VehicleEventController extends Controller
             $rows->each(function (array $log) use ($handle): void {
                 fputcsv($handle, [
                     $log['event_type'],
+                    $log['log_type_label'] ?? '',
+                    $log['source_label'] ?? '',
                     $log['plate_number'],
                     $log['owner_name'],
                     $log['vehicle_type'],
@@ -116,7 +122,7 @@ class VehicleEventController extends Controller
 
         return match ($recordType) {
             'vehicle_event' => ($event = VehicleEvent::query()
-                ->with(['camera', 'matchedEntry', 'vehicle', 'rfidScanLog.vehicleRfidTag'])
+                ->with(['camera', 'matchedEntry', 'vehicle', 'rfidScanLog.vehicleRfidTag', 'guestVisit.rfidTag'])
                 ->find($recordId))
                     ? $this->vehicleEventLogPayload($event)
                     : abort(404),
@@ -305,6 +311,9 @@ class VehicleEventController extends Controller
     {
         return [
             'timestamp' => (string) ($log['event_time_export'] ?: $log['display_time'] ?: 'N/A'),
+            // Phase 4: guest pass rows show "Guest Pass #G-03" in printed reports.
+            'log_type' => (string) ($log['log_type_label'] ?? ''),
+            'source' => (string) ($log['source_label'] ?? ''),
             'plate_number' => (string) ($log['plate_number'] ?: 'GUEST'),
             'owner_name' => (string) ($log['owner_name'] ?: 'N/A'),
             'state' => (string) ($log['state_label'] ?: 'N/A'),
@@ -436,8 +445,46 @@ class VehicleEventController extends Controller
         return $eventLogs
             ->concat($guestLogs)
             ->concat($rfidOnlyLogs)
+            // Phase 4: Log Type filter (Registered, Guest Pass, Manual, No-pass Alert).
+            ->when(
+                array_key_exists((string) $request->query('log_type'), self::LOG_TYPES),
+                fn (Collection $logs) => $logs->where('log_type', (string) $request->query('log_type'))
+            )
             ->sortByDesc('sort_time')
             ->values();
+    }
+
+    /**
+     * Phase 4: Log Type filter options.
+     */
+    public const LOG_TYPES = [
+        'registered' => 'Registered',
+        'guest_pass' => 'Guest Pass',
+        'manual' => 'Manual',
+        'no_pass_alert' => 'No-pass Alert',
+    ];
+
+    /**
+     * @return array{log_type: string, log_type_label: string, is_guest: bool}
+     */
+    protected function logTypeFields(string $logType, bool $isGuest): array
+    {
+        return [
+            'log_type' => $logType,
+            'log_type_label' => self::LOG_TYPES[$logType] ?? ucfirst($logType),
+            'is_guest' => $isGuest,
+        ];
+    }
+
+    protected function vehicleEventLogType(VehicleEvent $event): string
+    {
+        return match (true) {
+            $event->event_origin === 'guest_pass' || $event->guest_visit_id !== null => 'guest_pass',
+            $event->event_origin === 'guest_cctv' => 'no_pass_alert',
+            in_array($event->event_origin, ['manual', 'guest_manual'], true) => 'manual',
+            $event->vehicle_id !== null => 'registered',
+            default => 'manual',
+        };
     }
 
     protected function filteredGuestLogs(Request $request, ?Carbon $dateFrom = null, ?Carbon $dateUntil = null)
@@ -549,7 +596,9 @@ class VehicleEventController extends Controller
             'total' => $logs->count(),
             'entries' => $logs->where('event_type', 'ENTRY')->count(),
             'exits' => $logs->where('event_type', 'EXIT')->count(),
-            'guests' => $logs->where('event_type', 'GUEST')->count(),
+            // Phase 4: count every guest row (guest pass, CCTV guest, manual guest),
+            // not only rows whose event type is literally "GUEST".
+            'guests' => $logs->where('is_guest', true)->count(),
             'rfid' => $logs->where('event_type', 'RFID')->count(),
         ];
     }
@@ -577,7 +626,8 @@ class VehicleEventController extends Controller
             'vehicle_type' => $event->display_vehicle_type,
             'vehicle_color' => $event->vehicle_color ?: 'N/A',
             'category_label' => $this->displayCategory($event->vehicle_category ?: $vehicle?->category),
-            'source_label' => $event->event_origin_label,
+            // Phase 4: "Guest Pass #G-03" instead of "Guest CCTV" for guest pass events.
+            'source_label' => $event->source_display_label,
             'station_label' => $event->camera?->camera_name ?: ($event->roi_name ?: 'No camera linked'),
             'state_label' => $event->resulting_state_label,
             'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
@@ -589,6 +639,12 @@ class VehicleEventController extends Controller
             'rfid_tag_uid' => $event->rfidScanLog?->tag_uid ?: 'N/A',
             'image_url' => $event->has_visual_evidence ? $event->vehicle_image_url : null,
             'sort_time' => $this->sortTimestamp($event->created_at, $time),
+            ...$this->logTypeFields(
+                $this->vehicleEventLogType($event),
+                $event->guest_visit_id !== null || strtolower((string) $event->vehicle_category) === 'guest'
+                    || in_array($event->event_origin, ['guest_pass', 'guest_cctv', 'guest_manual'], true)
+            ),
+            ...VehicleEvent::guestPassLogFields($event),
         ];
     }
 
@@ -625,6 +681,7 @@ class VehicleEventController extends Controller
             'rfid_tag_uid' => 'N/A',
             'image_url' => $observation->snapshot_path ? $observation->snapshot_url : null,
             'sort_time' => $this->sortTimestamp($observation->created_at, $time),
+            ...$this->logTypeFields($observation->observation_source === 'cctv' ? 'no_pass_alert' : 'manual', true),
         ];
     }
 
@@ -663,6 +720,14 @@ class VehicleEventController extends Controller
             'rfid_tag_uid' => $scanLog->tag_uid,
             'image_url' => null,
             'sort_time' => $this->sortTimestamp($scanLog->created_at, $time),
+            ...$this->logTypeFields(
+                match (true) {
+                    $scanLog->vehicle_category === 'guest_pass' => 'guest_pass',
+                    $scanLog->verification_status === 'guest' => 'no_pass_alert',
+                    default => 'registered',
+                },
+                in_array($scanLog->vehicle_category, ['guest_pass', 'guest'], true) || $scanLog->verification_status === 'guest'
+            ),
         ];
     }
 

@@ -40,6 +40,13 @@ class SettingsService
             'guest_pass_validity_minutes' => '240',
             'guest_pass_overstay_grace_minutes' => '0',
             'guest_pass_require_id' => '1',
+            // Phase 4: reader configuration per station (UHF is config only for now).
+            'entrance_reader_type' => 'nfc',
+            'entrance_reader_ip' => '',
+            'entrance_reader_port' => '',
+            'exit_reader_type' => 'nfc',
+            'exit_reader_ip' => '',
+            'exit_reader_port' => '',
         ];
     }
 

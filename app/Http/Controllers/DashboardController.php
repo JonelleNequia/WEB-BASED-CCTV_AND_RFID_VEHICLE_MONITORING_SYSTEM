@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\GuestVehicleObservation;
+use App\Models\GuestVisit;
 use App\Models\RfidScanLog;
 use App\Models\Vehicle;
 use App\Models\VehicleEvent;
@@ -48,6 +49,10 @@ class DashboardController extends Controller
                 'total_vehicles_entered_today' => $data['totalVehiclesEnteredToday'],
                 'total_vehicles_exited_today' => $data['totalVehiclesExitedToday'],
                 'guest_observations_today' => $data['guestObservationsToday'],
+                'active_guests' => $data['activeGuests'],
+                'overstay_guests' => $data['overstayGuests'],
+                'no_pass_alerts_today' => $data['noPassAlertsToday'],
+                'pass_alerts_today' => $data['passAlertsToday'],
                 'registered_scans_today' => $data['rfidStats']['registered_scans_today'] ?? 0,
                 'camera_connected' => $data['cameraSummary']['connected'],
                 'camera_total' => $data['cameraSummary']['total'],
@@ -96,6 +101,17 @@ class DashboardController extends Controller
             'totalVehiclesEnteredToday' => $totalTraffic['entries'],
             'totalVehiclesExitedToday' => $totalTraffic['exits'],
             'guestObservationsToday' => $guestObservationService->countToday(),
+            // Phase 4: guest pass and alert cards.
+            'activeGuests' => GuestVisit::query()->open()->count(),
+            'overstayGuests' => GuestVisit::query()->where('status', GuestVisit::STATUS_OVERSTAY)->count(),
+            'noPassAlertsToday' => GuestVehicleObservation::query()
+                ->where('observation_source', 'cctv')
+                ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['observed_at', 'created_at']))
+                ->count(),
+            'passAlertsToday' => RfidScanLog::query()
+                ->whereIn('verification_status', ['guest_pass_lost', 'guest_pass_disabled', 'inactive_tag'])
+                ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
+                ->count(),
             'trafficSummary' => $trafficSummary,
             'latestEvents' => $this->recentEventActivities(),
             'frequentEntryVehicles' => $this->frequentEntryVehicles(),

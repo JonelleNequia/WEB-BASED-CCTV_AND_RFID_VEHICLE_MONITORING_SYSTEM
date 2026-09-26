@@ -34,8 +34,20 @@ class SaveSettingsRequest extends FormRequest
             'retention_days' => ['nullable', 'integer', 'min:1', 'max:3650'],
             'entrance_portal_label' => ['required', 'string', 'max:100'],
             'exit_portal_label' => ['required', 'string', 'max:100'],
-            'entrance_rfid_reader_name' => ['required', 'string', 'max:100'],
-            'exit_rfid_reader_name' => ['required', 'string', 'max:100'],
+            // Phase 4: reader names are now derived from the reader type.
+            'entrance_rfid_reader_name' => ['nullable', 'string', 'max:100'],
+            'exit_rfid_reader_name' => ['nullable', 'string', 'max:100'],
+            // Phase 4: Reader Configuration and Guest Pass settings.
+            'entrance_reader_type' => ['sometimes', 'in:nfc,uhf_ethernet,simulated'],
+            'exit_reader_type' => ['sometimes', 'in:nfc,uhf_ethernet,simulated'],
+            'entrance_reader_ip' => ['nullable', 'required_if:entrance_reader_type,uhf_ethernet', 'ip'],
+            'exit_reader_ip' => ['nullable', 'required_if:exit_reader_type,uhf_ethernet', 'ip'],
+            'entrance_reader_port' => ['nullable', 'required_if:entrance_reader_type,uhf_ethernet', 'integer', 'between:1,65535'],
+            'exit_reader_port' => ['nullable', 'required_if:exit_reader_type,uhf_ethernet', 'integer', 'between:1,65535'],
+            'rfid_cooldown_seconds' => ['sometimes', 'integer', 'min:0', 'max:3600'],
+            'guest_pass_validity_minutes' => ['sometimes', 'integer', 'min:15', 'max:1440'],
+            'guest_pass_overstay_grace_minutes' => ['sometimes', 'integer', 'min:0', 'max:720'],
+            'guest_pass_require_id' => ['sometimes', 'in:0,1'],
             'camera_configs' => ['required', 'array'],
             'camera_configs.entrance.camera_name' => ['required', 'string', 'max:100'],
             'camera_configs.entrance.source_type' => ['required', 'in:webcam,rtsp,url'],
@@ -55,6 +67,25 @@ class SaveSettingsRequest extends FormRequest
      */
     protected function prepareForValidation(): void
     {
+        // Phase 4: derive the reader name shown in logs from the reader type.
+        foreach (['entrance' => 'Entrance', 'exit' => 'Exit'] as $station => $label) {
+            $type = (string) $this->input("{$station}_reader_type", '');
+
+            if ($type !== '' && ! $this->filled("{$station}_rfid_reader_name")) {
+                $this->merge([
+                    "{$station}_rfid_reader_name" => $label.' '.match ($type) {
+                        'uhf_ethernet' => 'UHF Reader',
+                        'simulated' => 'RFID Reader (Simulated)',
+                        default => 'NFC Reader',
+                    },
+                ]);
+            }
+        }
+
+        if ($this->has('guest_pass_require_id')) {
+            $this->merge(['guest_pass_require_id' => $this->boolean('guest_pass_require_id') ? '1' : '0']);
+        }
+
         $cameraConfigs = $this->input('camera_configs', []);
 
         if (! is_array($cameraConfigs)) {

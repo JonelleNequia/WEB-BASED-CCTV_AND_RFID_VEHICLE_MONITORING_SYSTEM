@@ -48,7 +48,7 @@
         <article class="stat-card stat-card-warning">
             <span class="stat-card-label">Guests</span>
             <strong>{{ $eventLogSummary['guests'] }}</strong>
-            <p>Guest observations in the current range.</p>
+            <p>Guest pass, CCTV and manual guest logs in the current range.</p>
         </article>
 
         <article class="stat-card">
@@ -102,8 +102,19 @@
                 </select>
             </div>
 
+            {{-- Phase 4: Log Type filter; the old ENTRY/EXIT select is now "Movement". --}}
             <div class="field">
-                <label for="event_type">Log Type</label>
+                <label for="log_type">Log Type</label>
+                <select id="log_type" name="log_type">
+                    <option value="">All</option>
+                    @foreach ($logTypeOptions as $value => $label)
+                        <option value="{{ $value }}" @selected(($filters['log_type'] ?? '') === $value)>{{ $label }}</option>
+                    @endforeach
+                </select>
+            </div>
+
+            <div class="field">
+                <label for="event_type">Movement</label>
                 <select id="event_type" name="event_type">
                     <option value="">All</option>
                     <option value="ENTRY" @selected(($filters['event_type'] ?? '') === 'ENTRY')>ENTRY</option>
@@ -500,6 +511,8 @@
                     const headerRow = document.createElement('tr');
                     const columns = [
                         ['timestamp', 'Timestamp'],
+                        ['log_type', 'Log Type'],
+                        ['source', 'Source'],
                         ['plate_number', 'Plate Number'],
                         ['owner_name', 'Owner Name'],
                         ['state', 'State'],

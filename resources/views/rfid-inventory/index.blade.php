@@ -134,9 +134,9 @@
             </div>
             {{-- Phase 4: filter by tag type. --}}
             <div class="inline-status-list">
-                @foreach ([null => 'All', 'vehicle' => 'Vehicle tags', 'guest_pass' => 'Guest passes'] as $value => $label)
+                @foreach (['' => 'All', 'vehicle' => 'Vehicle tags', 'guest_pass' => 'Guest passes'] as $value => $label)
                     <a href="{{ route('rfid-inventory.index', array_filter(['tag_type' => $value])) }}"
-                       class="chip {{ ($tagTypeFilter ?? null) === ($value ?: null) ? 'chip-brand' : 'chip-soft' }}">{{ $label }}</a>
+                       class="chip {{ (string) ($tagTypeFilter ?? '') === (string) $value ? 'chip-brand' : 'chip-soft' }}">{{ $label }}</a>
                 @endforeach
                 <span class="chip chip-soft">{{ $rfidTagInventory->count() }} records</span>
             </div>

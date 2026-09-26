@@ -69,8 +69,9 @@ class EventLogReportIntegrationTest extends TestCase
 
         $csv = $response->streamedContent();
 
-        $this->assertStringContainsString('Type,Plate,Owner,Vehicle,Color,Station,State,Time,Status,"RFID Tag"', $csv);
-        $this->assertStringContainsString('ENTRY,ONE-1001', $csv);
+        // Phase 4: CSV now includes Log Type and Source (e.g. "Guest Pass #G-03").
+        $this->assertStringContainsString('Type,"Log Type",Source,Plate,Owner,Vehicle,Color,Station,State,Time,Status,"RFID Tag"', $csv);
+        $this->assertMatchesRegularExpression('/ENTRY,[^,]+,[^,]*,ONE-1001/', $csv);
         $this->assertStringNotContainsString('Record Type,ID', $csv);
     }
 
