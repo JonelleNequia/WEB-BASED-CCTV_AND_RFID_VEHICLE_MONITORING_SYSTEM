@@ -110,6 +110,9 @@ class MultiWindowRouteTest extends TestCase
                         ],
                     ],
                 ]);
+            $mock->shouldReceive('withViewerStreamUrls')
+                ->once()
+                ->andReturnUsing(fn (array $status, ?string $viewerHost = null): array => $status);
         });
 
         $this->actingAs($admin)
@@ -156,6 +159,9 @@ class MultiWindowRouteTest extends TestCase
                         ],
                     ],
                 ]);
+            $mock->shouldReceive('withViewerStreamUrls')
+                ->once()
+                ->andReturnUsing(fn (array $status, ?string $viewerHost = null): array => $status);
         });
 
         $this->actingAs($admin)
@@ -238,6 +244,9 @@ class MultiWindowRouteTest extends TestCase
                         ],
                     ],
                 ]);
+            $mock->shouldReceive('withViewerStreamUrls')
+                ->once()
+                ->andReturnUsing(fn (array $status, ?string $viewerHost = null): array => $status);
         });
 
         $this->actingAs($admin)
@@ -355,6 +364,9 @@ class MultiWindowRouteTest extends TestCase
                             ],
                         ],
                     ]);
+                $mock->shouldReceive('withViewerStreamUrls')
+                    ->once()
+                    ->andReturnUsing(fn (array $status, ?string $viewerHost = null): array => $status);
             });
 
             $this->actingAs($admin)
@@ -447,6 +459,9 @@ class MultiWindowRouteTest extends TestCase
                         ],
                     ],
                 ]);
+            $mock->shouldReceive('withViewerStreamUrls')
+                ->once()
+                ->andReturnUsing(fn (array $status, ?string $viewerHost = null): array => $status);
         });
 
         $response = $this->actingAs($admin)

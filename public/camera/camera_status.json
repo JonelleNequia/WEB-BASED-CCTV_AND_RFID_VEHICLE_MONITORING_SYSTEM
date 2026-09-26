@@ -1,17 +1,18 @@
 {
   "service_running": true,
   "service_message": "Dual-camera detector running.",
-  "updated_at": "2026-05-15T10:16:17.261882+08:00",
+  "updated_at": "2026-09-26T08:46:06.714041+08:00",
   "detector_model_path": "yolov8n.pt",
   "station_activity": {
     "active": false,
-    "last_seen_at": "2026-05-13T19:20:39+08:00",
-    "active_until": "2026-05-13T19:20:49+08:00",
+    "last_seen_at": "2026-09-26T08:44:32+08:00",
+    "active_until": "2026-09-26T08:44:42+08:00",
     "seconds_until_idle": 0,
     "active_locations": []
   },
   "camera_power_mode": "standby",
   "stream_server": {
+    "bind_host": "0.0.0.0",
     "host": "127.0.0.1",
     "port": 8765
   },
@@ -21,9 +22,9 @@
       "camera_name": "PHILCST Entrance Camera",
       "camera_running": false,
       "detection_ready": false,
-      "calibration_ready": false,
-      "source_type": "webcam",
-      "source_value": 0,
+      "calibration_ready": true,
+      "source_type": "rtsp",
+      "source_value": "rtsp://192.168.8.2:554/stream1",
       "stream_url": "http://127.0.0.1:8765/stream/entrance",
       "supported_vehicle_classes": [
         "Car",
@@ -31,13 +32,13 @@
         "Bus",
         "Truck"
       ],
-      "last_capture_time": "2026-05-13T19:20:48.999904+08:00",
+      "last_capture_time": "2026-09-26T00:16:48.917832+08:00",
       "last_error": "Camera paused because no Station page is open.",
       "retry_count": 0,
-      "processed_frames": 18022,
-      "detections_seen": 473,
+      "processed_frames": 32305,
+      "detections_seen": 0,
       "active_detections": 0,
-      "crossings_logged": 12
+      "crossings_logged": 0
     },
     "exit": {
       "camera_role": "exit",
@@ -45,14 +46,14 @@
       "camera_running": false,
       "detection_ready": false,
       "calibration_ready": false,
-      "source_type": "webcam",
-      "source_value": 0,
+      "source_type": "rtsp",
+      "source_value": "rtsp://192.168.8.2:554/stream2",
       "stream_url": "http://127.0.0.1:8765/stream/exit",
       "supported_vehicle_classes": [],
-      "last_capture_time": "2026-05-13T19:20:49.000766+08:00",
+      "last_capture_time": "2026-09-25T23:59:43.994108+08:00",
       "last_error": "Camera paused because no Station page is open.",
       "retry_count": 0,
-      "processed_frames": 18063,
+      "processed_frames": 91,
       "detections_seen": 0,
       "active_detections": 0,
       "crossings_logged": 0

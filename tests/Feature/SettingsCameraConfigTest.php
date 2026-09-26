@@ -88,4 +88,48 @@ class SettingsCameraConfigTest extends TestCase
             }
         }
     }
+
+    /**
+     * RTSP cameras must use the actual network stream URL, not the old webcam index.
+     */
+    public function test_rtsp_camera_source_rejects_webcam_index_value(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+
+        $this->actingAs($user)->from(route('settings.index'))->put(route('settings.update'), [
+            'matching_threshold_matched' => 80,
+            'matching_threshold_manual_review' => 55,
+            'operating_mode' => 'manual',
+            'deployment_mode' => 'offline_local',
+            'cctv_simulation_mode' => 'enabled',
+            'rfid_simulation_mode' => 'enabled',
+            'python_api_key' => 'PHILCST-DEMO-KEY',
+            'camera_source_placeholder' => 'rtsp://future-camera-source',
+            'retention_days' => 30,
+            'entrance_portal_label' => 'Main Entrance Portal',
+            'exit_portal_label' => 'Main Exit Portal',
+            'entrance_rfid_reader_name' => 'Entrance Reader Sim',
+            'exit_rfid_reader_name' => 'Exit Reader Sim',
+            'camera_configs' => [
+                'entrance' => [
+                    'camera_name' => 'Entrance Camera',
+                    'source_type' => 'rtsp',
+                    'source_value' => '0',
+                    'source_username' => '',
+                    'source_password' => '',
+                ],
+                'exit' => [
+                    'camera_name' => 'Exit Camera',
+                    'source_type' => 'webcam',
+                    'source_value' => '0',
+                    'source_username' => '',
+                    'source_password' => '',
+                ],
+            ],
+        ])
+            ->assertRedirect(route('settings.index'))
+            ->assertSessionHasErrors('camera_configs.entrance.source_value');
+    }
 }

@@ -27,9 +27,21 @@ class VehicleRegistryController extends Controller
         return view('vehicle-registry.index', [
             'vehicles' => $vehicleRegistryService->registeredVehicles(),
             'availableTags' => $vehicleRegistryService->availableTags(),
-            'rfidTagInventory' => $vehicleRegistryService->rfidTagInventory(),
             'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
             'vehicleCategories' => $vehicleRegistryService->vehicleCategories(),
+            'rfidStats' => $rfidService->stats(),
+        ]);
+    }
+
+    /**
+     * Show the standalone RFID tag inventory workspace.
+     */
+    public function rfidInventory(
+        VehicleRegistryService $vehicleRegistryService,
+        RfidService $rfidService
+    ): View {
+        return view('rfid-inventory.index', [
+            'rfidTagInventory' => $vehicleRegistryService->rfidTagInventory(),
             'rfidStats' => $rfidService->stats(),
         ]);
     }
@@ -81,7 +93,9 @@ class VehicleRegistryController extends Controller
             ], 201);
         }
 
-        return back()->with('status', 'RFID #'.$tag->tag_number.' ('.$tag->uid.') was added to the RFID inventory.');
+        return redirect()
+            ->route('rfid-inventory.index')
+            ->with('status', 'RFID #'.$tag->tag_number.' ('.$tag->uid.') was added to the RFID inventory.');
     }
 
     /**

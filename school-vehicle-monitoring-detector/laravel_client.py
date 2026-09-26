@@ -24,6 +24,8 @@ class LaravelEventClient:
         self.guest_observation_url = str(system_settings.get("guest_observation_url", "")).strip()
         self.rfid_match_url = str(system_settings.get("rfid_match_url", "")).strip()
         self.api_key = str(system_settings.get("python_api_key", "")).strip()
+        # CCTV Detection: added endpoint for reporting discovered cameras.
+        self.discovery_ingest_url = str((runtime_config.get("discovery") or {}).get("ingest_url", "")).strip()
 
     def integration_headers(self, include_json=False):
         """
@@ -278,4 +280,50 @@ class LaravelEventClient:
             "message": body.get("message", response.text),
             "body": body,
             "overlay": body.get("overlay"),
+        }
+
+    def report_discovered_cameras(self, payload, ingest_url=None):
+        """
+        CCTV Detection: send one discovery scan result to Laravel.
+
+        The payload may include a verified camera password, so it is only sent
+        to the configured local Laravel endpoint and never printed.
+        """
+        url = str(ingest_url or self.discovery_ingest_url or "").strip()
+
+        if not url:
+            return {
+                "accepted": False,
+                "message": "Laravel discovery endpoint is not configured.",
+            }
+
+        try:
+            response = requests.post(
+                url,
+                json=payload,
+                headers=self.integration_headers(include_json=True),
+                timeout=API_TIMEOUT_SECONDS,
+            )
+        except requests.RequestException as error:
+            return {
+                "accepted": False,
+                "message": f"Could not reach Laravel discovery endpoint: {error}",
+            }
+
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+
+        if response.status_code == 200:
+            return {
+                "accepted": True,
+                "message": "Discovery scan accepted.",
+                "body": body,
+            }
+
+        return {
+            "accepted": False,
+            "message": body.get("message", f"Laravel returned HTTP {response.status_code}."),
+            "body": body,
         }

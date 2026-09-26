@@ -59,6 +59,8 @@ Route::middleware('auth')->group(function (): void {
         Route::get('/admin/live-state', [DashboardController::class, 'liveState'])->name('dashboard.live-state');
         Route::redirect('/dashboard', '/admin')->name('dashboard.legacy');
         Route::get('/vehicle-registry', [VehicleRegistryController::class, 'index'])->name('vehicle-registry.index');
+        Route::get('/rfid-inventory', [VehicleRegistryController::class, 'rfidInventory'])->name('rfid-inventory.index');
+        Route::post('/rfid-inventory', [VehicleRegistryController::class, 'storeRfidTag'])->name('rfid-inventory.store');
         Route::post('/vehicle-registry/rfid-tags', [VehicleRegistryController::class, 'storeRfidTag'])->name('vehicle-registry.rfid-tags.store');
         Route::post('/vehicle-registry', [VehicleRegistryController::class, 'store'])->name('vehicle-registry.store');
         Route::get('/vehicle-registry/{vehicle}/edit', [VehicleRegistryController::class, 'edit'])->name('vehicle-registry.edit');

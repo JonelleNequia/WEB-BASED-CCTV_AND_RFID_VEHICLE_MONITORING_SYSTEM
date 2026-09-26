@@ -139,6 +139,54 @@ class DetectorRuntimeService
         return storage_path('app/camera/station_activity.json');
     }
 
+    /**
+     * Rewrite loopback MJPEG URLs when the station page is viewed from another LAN device.
+     *
+     * @param  array<string, mixed>  $status
+     * @return array<string, mixed>
+     */
+    public function withViewerStreamUrls(array $status, ?string $viewerHost): array
+    {
+        foreach (['entrance', 'exit'] as $role) {
+            if (! isset($status['cameras'][$role]) || ! is_array($status['cameras'][$role])) {
+                continue;
+            }
+
+            $status['cameras'][$role]['stream_url'] = $this->streamUrlForRole($role, $status, $viewerHost);
+        }
+
+        return $status;
+    }
+
+    /**
+     * Resolve a stream URL that is reachable from the current browser.
+     *
+     * @param  array<string, mixed>  $status
+     */
+    public function streamUrlForRole(string $role, array $status = [], ?string $viewerHost = null): string
+    {
+        $defaultUrl = "http://127.0.0.1:8765/stream/{$role}";
+        $streamUrl = (string) data_get($status, "cameras.$role.stream_url", $defaultUrl);
+        $viewerHost = trim((string) $viewerHost);
+
+        if ($viewerHost === '' || $this->isLoopbackHost($viewerHost)) {
+            return $streamUrl ?: $defaultUrl;
+        }
+
+        $parts = parse_url($streamUrl ?: $defaultUrl);
+        $streamHost = (string) ($parts['host'] ?? '');
+
+        if ($streamHost !== '' && ! $this->isLoopbackHost($streamHost) && $streamHost !== '0.0.0.0') {
+            return $streamUrl;
+        }
+
+        $port = isset($parts['port']) ? ':'.$parts['port'] : ':8765';
+        $path = $parts['path'] ?? "/stream/{$role}";
+        $query = isset($parts['query']) ? '?'.$parts['query'] : '';
+
+        return 'http://'.$viewerHost.$port.$path.$query;
+    }
+
     public function markStationViewerActive(string $location): void
     {
         if (! in_array($location, ['entrance', 'exit'], true)) {
@@ -278,6 +326,13 @@ class DetectorRuntimeService
         $decoded = json_decode((string) File::get($path), true);
 
         return is_array($decoded) ? $decoded : [];
+    }
+
+    protected function isLoopbackHost(string $host): bool
+    {
+        $host = trim($host, '[]');
+
+        return in_array(strtolower($host), ['localhost', '127.0.0.1', '::1'], true);
     }
 
     /**

@@ -26,8 +26,8 @@ class VehicleRegistryTest extends TestCase
             ->get(route('vehicle-registry.index'))
             ->assertOk()
             ->assertSee('Vehicle Registry')
-            ->assertSee('RFID Tag Inventory')
-            ->assertSee('No RFID tags registered yet.')
+            ->assertDontSee('RFID Tag Inventory')
+            ->assertDontSee('Register RFID Tag')
             ->assertSee('No registered vehicles yet.')
             ->assertDontSee('RFID-ABC-1001');
 

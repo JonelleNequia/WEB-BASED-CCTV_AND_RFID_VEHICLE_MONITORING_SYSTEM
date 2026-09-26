@@ -23,12 +23,14 @@ class CalibrationController extends Controller
     ): View {
         $settingsService->ensureCameraRuntimeConfigExists();
         $detectorRuntimeService->markCalibrationViewerActive();
-        $detectorStatus = $detectorRuntimeService->ensureRunning();
+        $detectorStatus = $detectorRuntimeService->withViewerStreamUrls(
+            $detectorRuntimeService->ensureRunning(),
+            request()->getHost()
+        );
         $cameras = $calibrationService->cameraPayload();
 
         foreach (['entrance', 'exit'] as $role) {
-            $cameras[$role]['stream_url'] = $detectorStatus['cameras'][$role]['stream_url']
-                ?? "http://127.0.0.1:8765/stream/{$role}";
+            $cameras[$role]['stream_url'] = $detectorRuntimeService->streamUrlForRole($role, $detectorStatus, request()->getHost());
             $cameras[$role]['detector_status'] = $detectorStatus['cameras'][$role] ?? [];
         }
 
@@ -41,7 +43,10 @@ class CalibrationController extends Controller
     public function heartbeat(DetectorRuntimeService $detectorRuntimeService): JsonResponse
     {
         $detectorRuntimeService->markCalibrationViewerActive();
-        $detectorStatus = $detectorRuntimeService->ensureRunning();
+        $detectorStatus = $detectorRuntimeService->withViewerStreamUrls(
+            $detectorRuntimeService->ensureRunning(),
+            request()->getHost()
+        );
 
         return response()->json([
             'runtime' => $detectorStatus,

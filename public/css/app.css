@@ -575,6 +575,10 @@ body.app-body {
     grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.cards-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .cards-2 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -605,6 +609,47 @@ body.app-body {
     align-items: center;
     padding-bottom: 0.85rem;
     border-bottom: 1px solid rgba(111, 75, 174, 0.12);
+}
+
+.collapsible-panel {
+    display: block;
+}
+
+.collapsible-panel[open] .collapsible-summary {
+    padding-bottom: 1rem;
+    border-bottom: 1px solid rgba(111, 75, 174, 0.12);
+}
+
+.collapsible-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    cursor: pointer;
+    list-style: none;
+}
+
+.collapsible-summary::-webkit-details-marker {
+    display: none;
+}
+
+.collapsible-summary > span:first-child {
+    display: grid;
+    gap: 0.25rem;
+}
+
+.collapsible-summary strong {
+    color: #322451;
+    font-size: 1.1rem;
+}
+
+.collapsible-summary small {
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.collapsible-body {
+    padding-top: 1.1rem;
 }
 
 .panel-scroll-area {
@@ -1061,6 +1106,14 @@ textarea:focus-visible {
     color: #991b1b;
     font-size: 0.82rem;
     font-weight: 700;
+}
+
+.field-help {
+    display: block;
+    margin-top: 0.38rem;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    line-height: 1.35;
 }
 
 .alert-icon {
@@ -3067,6 +3120,7 @@ th {
 
 @media (max-width: 1180px) {
     .cards-2,
+    .cards-3,
     .cards-5,
     .cards-4,
     .two-column,
@@ -3210,6 +3264,7 @@ th {
     .cards-6,
     .cards-5,
     .cards-4,
+    .cards-3,
     .cards-2,
     .two-column,
     .form-grid,
@@ -3245,6 +3300,7 @@ th {
 
     .brand-mark-wrap,
     .hero-panel-actions,
+    .collapsible-summary,
     .button-row,
     .camera-toolbar,
     .pagination-links {

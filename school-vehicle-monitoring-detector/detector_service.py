@@ -15,12 +15,14 @@ from config import (
     ALLOWED_VEHICLE_CLASS_NAMES,
     CAPTURE_INTERVAL_SECONDS,
     CAPTURE_DRAIN_FRAMES,
+    CAPTURE_STALL_SECONDS,
     CAMERA_RETRY_DELAY_SECONDS,
     DETECTED_IMAGE_DIR,
     DETECTION_FRAME_INTERVAL,
     DETECTION_CONFIDENCE_THRESHOLD,
     DETECTION_IOU_THRESHOLD,
     JPEG_QUALITY,
+    MJPEG_STREAM_BIND_HOST,
     MJPEG_STREAM_HOST,
     MJPEG_STREAM_PORT,
     MODEL_PATH,
@@ -366,7 +368,7 @@ def start_stream_server(max_attempts=5):
     for attempt in range(1, max_attempts + 1):
         try:
             server = ReusableThreadingHTTPServer(
-                (MJPEG_STREAM_HOST, MJPEG_STREAM_PORT),
+                (MJPEG_STREAM_BIND_HOST, MJPEG_STREAM_PORT),
                 MjpegStreamHandler,
             )
             break
@@ -380,7 +382,11 @@ def start_stream_server(max_attempts=5):
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    print(f"MJPEG stream server running at http://{MJPEG_STREAM_HOST}:{MJPEG_STREAM_PORT}", flush=True)
+    print(
+        f"MJPEG stream server running at http://{MJPEG_STREAM_HOST}:{MJPEG_STREAM_PORT}"
+        f" (bound to {MJPEG_STREAM_BIND_HOST})",
+        flush=True,
+    )
 
     return server
 
@@ -461,6 +467,8 @@ def build_capture(source_type, capture_source):
     Use the most practical OpenCV backend for the configured source.
     """
     if source_type in {"rtsp", "url"}:
+        configure_network_capture_options(source_type)
+
         if hasattr(cv2, "CAP_FFMPEG"):
             return cv2.VideoCapture(capture_source, cv2.CAP_FFMPEG)
 
@@ -475,6 +483,65 @@ def build_capture(source_type, capture_source):
         return cv2.VideoCapture(capture_source, cv2.CAP_DSHOW)
 
     return cv2.VideoCapture(capture_source)
+
+
+def configure_network_capture_options(source_type):
+    """
+    Prefer TCP for RTSP cameras. Many LAN CCTV devices drop or delay UDP packets,
+    which can make OpenCV connect without delivering usable frames.
+    """
+    if source_type != "rtsp":
+        return
+
+    if os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS"):
+        return
+
+    # Low latency: nobuffer/low_delay stop FFmpeg from holding extra frames, and
+    # max_delay/reorder_queue_size 0 remove the RTSP jitter buffer. "timeout"
+    # is the newer FFmpeg name for "stimeout"; the unused one is ignored.
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+        "rtsp_transport;tcp"
+        "|fflags;nobuffer"
+        "|flags;low_delay"
+        "|max_delay;0"
+        "|reorder_queue_size;0"
+        "|stimeout;5000000"
+        "|timeout;5000000"
+    )
+
+
+def validate_camera_source(camera_config, capture_source):
+    """
+    Return a user-friendly setup error before OpenCV tries an impossible source.
+    """
+    source_type = camera_config["source_type"]
+
+    if source_type == "webcam":
+        return ""
+
+    source_text = str(capture_source or "").strip()
+    parsed = urlparse(source_text)
+
+    if source_type == "rtsp" and (parsed.scheme.lower() != "rtsp" or not parsed.netloc):
+        return (
+            "RTSP source must be a full rtsp:// URL. "
+            f"Current source is {source_text or 'blank'}."
+        )
+
+    if source_type == "url" and (not parsed.scheme or not parsed.netloc):
+        return (
+            "URL source must be a full camera stream URL. "
+            f"Current source is {source_text or 'blank'}."
+        )
+
+    return ""
+
+
+def camera_open_error(camera_config, capture_source, state):
+    """
+    Build the status message shown in the station stream and Laravel status JSON.
+    """
+    return state.get("source_validation_error") or f"Could not open camera source: {capture_source}"
 
 
 def build_connection_source(camera_config, capture_source):
@@ -503,6 +570,83 @@ def build_connection_source(camera_config, capture_source):
     return urlunparse(parsed._replace(netloc=f"{credentials}@{parsed.netloc}"))
 
 
+class LatestFrameReader:
+    """
+    Low latency: read the camera continuously on its own thread and keep only
+    the newest frame.
+
+    Before this, the stream loop read one frame, then drew overlays, encoded a
+    JPEG and slept. Whenever that loop was slower than the camera's FPS, frames
+    queued inside FFmpeg and the station view fell further and further behind
+    real time. Reading non-stop here means old frames are simply overwritten.
+    """
+
+    def __init__(self, capture):
+        self.capture = capture
+        self.condition = threading.Condition()
+        self.frame = None
+        self.sequence = 0
+        self.consumed_sequence = 0
+        self.failed = False
+        self.last_frame_at = time.monotonic()
+        self.stop_event = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        while not self.stop_event.is_set():
+            try:
+                has_frame, frame = self.capture.read()
+            except Exception:
+                has_frame, frame = False, None
+
+            if not has_frame or frame is None:
+                with self.condition:
+                    self.failed = True
+                    self.condition.notify_all()
+                return
+
+            with self.condition:
+                self.frame = frame
+                self.sequence += 1
+                self.last_frame_at = time.monotonic()
+                self.condition.notify_all()
+
+    def isOpened(self):
+        return not self.failed and self.capture.isOpened()
+
+    def read_latest(self, timeout=CAPTURE_STALL_SECONDS):
+        """
+        Wait for a frame newer than the last one handed out, then return it.
+        Frames that arrived in between are skipped on purpose.
+        """
+        deadline = time.monotonic() + timeout
+
+        with self.condition:
+            while self.sequence == self.consumed_sequence and not self.failed:
+                remaining = deadline - time.monotonic()
+
+                if remaining <= 0:
+                    return False, None
+
+                self.condition.wait(remaining)
+
+            if self.sequence == self.consumed_sequence:
+                return False, None
+
+            self.consumed_sequence = self.sequence
+
+            return True, self.frame
+
+    def read(self):
+        return self.read_latest()
+
+    def release(self):
+        self.stop_event.set()
+        self.thread.join(timeout=2.0)
+        self.capture.release()
+
+
 def open_capture(camera_config):
     """
     Open one configured camera source.
@@ -515,6 +659,11 @@ def open_capture(camera_config):
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     except Exception:
         pass
+
+    # Low latency: wrap the opened capture so a background thread always holds
+    # the newest frame.
+    if capture.isOpened():
+        capture = LatestFrameReader(capture)
 
     return capture, capture_source
 
@@ -542,6 +691,7 @@ def initial_camera_state():
         "detection_ready": False,
         "last_capture_time": None,
         "last_error": "Detector service is starting.",
+        "source_validation_error": "",
         "retry_count": 0,
         "processed_frames": 0,
         "latest_frame": None,
@@ -584,12 +734,23 @@ def ensure_capture(camera_config, state):
     """
     signature = camera_signature(camera_config)
     now_monotonic = time.monotonic()
+    capture_source = resolve_capture_source(camera_config)
+    validation_error = validate_camera_source(camera_config, capture_source)
+
+    if validation_error:
+        release_capture(state)
+        state["source_validation_error"] = validation_error
+        state["retry_after"] = now_monotonic + CAMERA_RETRY_DELAY_SECONDS
+
+        return None, capture_source
+
+    state["source_validation_error"] = ""
 
     if state["capture"] is None and now_monotonic < state.get("retry_after", 0.0):
-        return None, resolve_capture_source(camera_config)
+        return None, capture_source
 
     if state["capture"] is not None and state["signature"] == signature and state["capture"].isOpened():
-        return state["capture"], resolve_capture_source(camera_config)
+        return state["capture"], capture_source
 
     release_capture(state)
     capture, capture_source = open_capture(camera_config)
@@ -606,6 +767,10 @@ def read_fresh_frame(capture):
     """
     Drop queued camera frames before retrieving, reducing visible stream latency.
     """
+    # Low latency: the background reader already discards old frames.
+    if isinstance(capture, LatestFrameReader):
+        return capture.read_latest()
+
     if CAPTURE_DRAIN_FRAMES <= 0:
         return capture.read()
 
@@ -639,6 +804,7 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
         "station_activity": station_activity,
         "camera_power_mode": "active" if station_activity["active"] else "standby",
         "stream_server": {
+            "bind_host": MJPEG_STREAM_BIND_HOST,
             "host": MJPEG_STREAM_HOST,
             "port": MJPEG_STREAM_PORT,
         },
@@ -1795,7 +1961,7 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
         state["detection_ready"] = False
         if time.monotonic() >= state.get("retry_after", 0.0):
             state["retry_count"] += 1
-        state["last_error"] = f"Could not open camera source: {capture_source}"
+        state["last_error"] = camera_open_error(camera_config, capture_source, state)
         publish_status_frame(role, "Camera source unavailable", state["last_error"])
         return False
 
@@ -1894,6 +2060,24 @@ def build_models():
     return detector_models
 
 
+def limit_inference_threads():
+    """
+    Low latency: leave CPU cores free for video decoding.
+
+    PyTorch uses every core by default. On a laptop that starves the camera
+    reader threads, decoding falls behind the camera, and the live view drifts
+    seconds behind again. YOLO detection may get slightly slower; the live
+    stream stays real-time.
+    """
+    try:
+        import torch
+
+        cores = os.cpu_count() or 4
+        torch.set_num_threads(max(1, min(4, cores // 2)))
+    except Exception:
+        pass
+
+
 def ensure_detector_model_loaded(role, state, model_info):
     """
     Load YOLO only when a station viewer actually needs live detection.
@@ -1904,6 +2088,7 @@ def ensure_detector_model_loaded(role, state, model_info):
     try:
         from ultralytics import YOLO
 
+        limit_inference_threads()
         model = YOLO(MODEL_PATH)
         vehicle_labels = resolve_allowed_vehicle_classes(model)
     except Exception as error:
@@ -1946,7 +2131,7 @@ def camera_stream_worker(role, state, model_info, stop_event):
                 state["detection_ready"] = False
                 if time.monotonic() >= state.get("retry_after", 0.0):
                     state["retry_count"] += 1
-                state["last_error"] = f"Could not open camera source: {capture_source}"
+                state["last_error"] = camera_open_error(camera_config, capture_source, state)
                 publish_status_frame(role, "Camera source unavailable", state["last_error"])
                 success = False
             else:
@@ -2002,7 +2187,12 @@ def camera_stream_worker(role, state, model_info, stop_event):
             publish_status_frame(role, "Stream worker error", state["last_error"])
             success = False
 
-        delay = CAPTURE_INTERVAL_SECONDS if success else RECONNECT_DELAY_SECONDS
+        # Low latency: read_latest() already waits for the next camera frame, so
+        # the old fixed 0.04s sleep would only add delay after every frame.
+        if success and isinstance(state.get("capture"), LatestFrameReader):
+            delay = 0
+        else:
+            delay = CAPTURE_INTERVAL_SECONDS if success else RECONNECT_DELAY_SECONDS
         stop_event.wait(delay)
 
     release_capture(state)
@@ -2090,6 +2280,13 @@ def run_detector_loop():
     """
     ensure_output_directories()
     stream_server = start_stream_server()
+
+    # Low latency: if the stream port is taken, another detector is already
+    # running. Previously this copy kept running headless, reading the same
+    # cameras and running YOLO again, which slowed the live view down.
+    if stream_server is None:
+        print("Another detector already owns the stream port. Exiting this duplicate.", flush=True)
+        return
 
     runtime_config = load_runtime_config()
     camera_states = {role: initial_camera_state() for role in CAMERA_ROLES}

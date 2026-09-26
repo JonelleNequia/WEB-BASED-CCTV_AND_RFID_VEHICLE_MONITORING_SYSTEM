@@ -32,7 +32,10 @@ class StationController extends Controller
         $detectorRuntimeService->markStationViewerActive($location);
 
         $camera = $calibrationService->cameraPayload()[$location];
-        $detectorStatus = $detectorRuntimeService->ensureRunning();
+        $detectorStatus = $detectorRuntimeService->withViewerStreamUrls(
+            $detectorRuntimeService->ensureRunning(),
+            request()->getHost()
+        );
         $eventType = $this->eventTypeForLocation($location);
         $cameraStatus = $detectorStatus['cameras'][$location] ?? [];
 
@@ -51,12 +54,15 @@ class StationController extends Controller
     /**
      * Poll one station window with only the data that belongs on that screen.
      */
-    public function state(string $location, DetectorRuntimeService $detectorRuntimeService): JsonResponse
+    public function state(string $location, Request $request, DetectorRuntimeService $detectorRuntimeService): JsonResponse
     {
         $location = $this->validateLocation($location);
         $eventType = $this->eventTypeForLocation($location);
         $detectorRuntimeService->markStationViewerActive($location);
-        $runtime = $detectorRuntimeService->ensureRunning();
+        $runtime = $detectorRuntimeService->withViewerStreamUrls(
+            $detectorRuntimeService->ensureRunning(),
+            $request->getHost()
+        );
 
         return response()->json([
             'location' => $location,

@@ -13,15 +13,18 @@ class DirectRfidRegistryTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_rfid_inventory_page_is_removed(): void
+    public function test_rfid_inventory_page_renders_standalone_workspace(): void
     {
         $this->seed(DatabaseSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->actingAs($user)
-            ->get('/rfid-inventory')
-            ->assertNotFound();
+            ->get(route('rfid-inventory.index'))
+            ->assertOk()
+            ->assertSee('RFID Tags')
+            ->assertSee('Register RFID Tag')
+            ->assertSee('No RFID tags registered yet.');
     }
 
     public function test_vehicle_registration_assigns_pre_registered_inventory_tag(): void
@@ -31,11 +34,11 @@ class DirectRfidRegistryTest extends TestCase
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->actingAs($user)
-            ->post(route('vehicle-registry.rfid-tags.store'), [
+            ->post(route('rfid-inventory.store'), [
                 'tag_number' => 1,
                 'uid' => ' direct-3003 ',
             ])
-            ->assertRedirect();
+            ->assertRedirect(route('rfid-inventory.index'));
 
         $tag = RfidTag::query()->where('uid', 'DIRECT-3003')->firstOrFail();
 
@@ -105,15 +108,15 @@ class DirectRfidRegistryTest extends TestCase
         ]);
 
         $response = $this->actingAs($user)
-            ->get(route('vehicle-registry.index'))
+            ->get(route('rfid-inventory.index'))
             ->assertOk()
             ->assertSee('RFID Tag No.')
-            ->assertSee('RFID #2 - RFID-TWO')
-            ->assertSee('RFID #10 - RFID-TEN');
+            ->assertSee('#2')
+            ->assertSee('#10');
 
         $this->assertLessThan(
-            strpos($response->getContent(), 'RFID #10 - RFID-TEN'),
-            strpos($response->getContent(), 'RFID #2 - RFID-TWO')
+            strpos($response->getContent(), '#10'),
+            strpos($response->getContent(), '#2')
         );
     }
 }
