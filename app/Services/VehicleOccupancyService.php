@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\ActiveSession;
+use App\Models\GuestVisit;
 use App\Models\Vehicle;
 
 /**
@@ -35,21 +35,11 @@ class VehicleOccupancyService
     }
 
     /**
-     * Guest vehicles with an open session.
-     *
-     * Phase 2 adds a cleanup command for stale CCTV guest sessions, and Phase 3
-     * switches this to active guest pass visits.
+     * Phase 3: guests inside = guest pass visits that are still open
+     * (active or overstay). CCTV guest sessions no longer count.
      */
     protected function guestsInside(): int
     {
-        return ActiveSession::query()
-            ->where('status', 'open')
-            ->whereHas('entryEvent', function ($query): void {
-                $query->where(function ($guestQuery): void {
-                    $guestQuery->where('vehicle_category', 'guest')
-                        ->orWhereIn('event_origin', ['guest_cctv', 'guest_manual']);
-                });
-            })
-            ->count();
+        return GuestVisit::query()->open()->count();
     }
 }

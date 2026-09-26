@@ -8,6 +8,7 @@ use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Services\CalibrationService;
 use App\Services\GuestObservationService;
+use App\Services\GuestPassService;
 use App\Services\RfidService;
 use App\Support\PhilippineTime;
 use Illuminate\Http\JsonResponse;
@@ -78,6 +79,9 @@ class DashboardController extends Controller
         GuestObservationService $guestObservationService
     ): array
     {
+        // Phase 3: overstay check on page load (also scheduled every minute).
+        app(GuestPassService::class)->markOverstays();
+
         $rfidStats = $rfidService->stats();
         $cameraStatuses = collect($calibrationService->cameraPayload());
         $connectedCameras = $cameraStatuses->where('last_connection_status', 'connected')->count();

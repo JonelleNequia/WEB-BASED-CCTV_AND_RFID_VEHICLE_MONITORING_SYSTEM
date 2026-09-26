@@ -44,7 +44,9 @@ class RfidScanController extends Controller
         RfidService $rfidService
     ): RedirectResponse|JsonResponse {
         try {
-            $scanLog = $rfidService->simulate($request->validated());
+            // Phase 3: simulate() returns the shared ingest result.
+            $result = $rfidService->simulate($request->validated());
+            $scanLog = $result->scanLog;
         } catch (ValidationException $exception) {
             throw $exception;
         } catch (Throwable $exception) {
@@ -64,26 +66,13 @@ class RfidScanController extends Controller
                 ->withErrors(['rfid_scan' => 'RFID scan could not be recorded. Check laravel.log for details.']);
         }
 
-        $statusMessage = match ($scanLog->verification_status) {
-            'verified' => 'RFID scan recorded. '
-                .$scanLog->resolvedEventTypeLabel
-                .' applied for '
-                .($scanLog->vehicle?->plate_number ?? 'registered vehicle')
-                .' and current state is '
-                .$scanLog->resultingStateLabel.'.',
-            'non_recurring_category' => 'RFID scan recorded as guest/manual monitoring. A guest observation was created.',
-            'inactive_tag' => 'RFID scan recorded, but the assigned tag is inactive.',
-            'unassigned_tag' => 'RFID scan recorded, but this tag is still available in inventory and is not assigned to a vehicle.',
-            'inactive_vehicle' => 'RFID scan recorded, but the vehicle record is inactive.',
-            'guest' => 'RFID scan recorded as GUEST. A guest observation was created.',
-            default => 'RFID scan recorded.',
-        };
+        $statusMessage = $result->message;
 
         if ($request->expectsJson()) {
             return response()->json([
-                'message' => $statusMessage,
                 ...$this->rfidScanResponsePayload($scanLog),
-            ], 201);
+                ...$result->toArray(),
+            ], $result->isDuplicate() ? 200 : 201);
         }
 
         return back()->with(

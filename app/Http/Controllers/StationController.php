@@ -7,7 +7,7 @@ use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
 use App\Services\CalibrationService;
 use App\Services\DetectorRuntimeService;
-use App\Services\RfidService;
+use App\Services\RfidIngestService;
 use App\Services\SettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -78,7 +78,7 @@ class StationController extends Controller
     /**
      * Record one RFID scan typed by the USB reader while a station window is focused.
      */
-    public function rfidScan(string $location, Request $request, RfidService $rfidService): JsonResponse
+    public function rfidScan(string $location, Request $request, RfidIngestService $rfidIngestService): JsonResponse
     {
         $location = $this->validateLocation($location);
 
@@ -93,43 +93,19 @@ class StationController extends Controller
             $readerName = $validated['reader_name']
                 ?? ($location === 'exit' ? 'Exit Station RFID Reader' : 'Entrance Station RFID Reader');
 
-            $duplicateScan = $rfidService->recentDuplicateScan($validated['tag_uid'], $location, 8, 'station_reader');
-
-            if ($duplicateScan) {
-                return response()->json([
-                    'message' => 'Duplicate RFID scan ignored for '.$duplicateScan->tag_uid.'.',
-                    ...$this->stationScanPayload($duplicateScan, true),
-                ]);
-            }
-
-            $scanLog = $rfidService->ingest([
+            // Phase 3: the shared ingest service applies the station direction
+            // (Entrance = ENTRY, Exit = EXIT), the per-tag cooldown (replaces
+            // the old 8-second duplicate check) and the guest pass rules.
+            $result = $rfidIngestService->ingest([
                 ...$validated,
                 'scan_location' => $location,
                 'reader_name' => $readerName,
-            ], 'station_reader');
-
-            $scanLog->loadMissing([
-                'vehicle.rfidTag',
-                'correlatedVehicleEvent',
-                'guestVehicleObservation',
-            ]);
-
-            $vehicle = $scanLog->vehicle;
-
-            $message = match ($scanLog->verification_status) {
-                'verified' => 'RFID scan recorded for '.($vehicle?->plate_number ?? 'registered vehicle').'.',
-                'inactive_tag' => 'RFID scan recorded, but the assigned tag is inactive.',
-                'unassigned_tag' => 'RFID scan recorded, but this tag is not assigned to a vehicle.',
-                'inactive_vehicle' => 'RFID scan recorded, but the vehicle record is inactive.',
-                'non_recurring_category' => 'RFID scan recorded as guest/manual monitoring. A guest observation was created.',
-                'guest' => 'RFID scan recorded as GUEST. A guest observation was created.',
-                default => 'RFID scan recorded.',
-            };
+            ], 'station_reader', RfidIngestService::DIRECTION_STATION);
 
             return response()->json([
-                'message' => $message,
-                ...$this->stationScanPayload($scanLog),
-            ], 201);
+                ...$this->stationScanPayload($result->scanLog, $result->isDuplicate()),
+                ...$result->toArray(),
+            ], $result->isDuplicate() ? 200 : 201);
         } catch (ValidationException $exception) {
             throw $exception;
         } catch (Throwable $exception) {

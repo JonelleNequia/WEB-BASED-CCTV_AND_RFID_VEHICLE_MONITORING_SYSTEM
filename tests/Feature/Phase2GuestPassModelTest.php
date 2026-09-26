@@ -8,7 +8,6 @@ use App\Models\RfidTag;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Models\VehicleEvent;
-use App\Services\VehicleOccupancyService;
 use App\Services\VehicleRegistryService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Database\QueryException;
@@ -156,7 +155,7 @@ class Phase2GuestPassModelTest extends TestCase
             ]);
         }
 
-        $this->assertSame(3, app(VehicleOccupancyService::class)->counts()['guests']);
+        $this->assertSame(4, ActiveSession::query()->where('status', 'open')->count());
 
         $this->artisan('guests:close-stale-sessions', ['--dry-run' => true])
             ->expectsOutputToContain('Dry run: 3 session(s) would be archived')
@@ -169,7 +168,6 @@ class Phase2GuestPassModelTest extends TestCase
 
         $this->assertSame(1, ActiveSession::query()->where('status', 'open')->count());
         $this->assertSame(3, ActiveSession::query()->where('status', 'archived')->whereNotNull('archived_at')->count());
-        $this->assertSame(0, app(VehicleOccupancyService::class)->counts()['guests']);
         $this->assertSame('archived', VehicleEvent::query()->where('event_origin', 'guest_cctv')->value('match_status'));
     }
 }

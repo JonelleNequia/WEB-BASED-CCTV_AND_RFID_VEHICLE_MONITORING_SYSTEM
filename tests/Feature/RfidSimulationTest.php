@@ -94,9 +94,10 @@ class RfidSimulationTest extends TestCase
     }
 
     /**
-     * The API endpoint should return the monitor-ready toggle payload.
+     * Phase 3: the Exit reader records EXIT for an inside vehicle (the station
+     * decides the direction; only the RFID Desk toggles).
      */
-    public function test_api_rfid_scan_toggles_inside_vehicle_to_exit(): void
+    public function test_api_rfid_scan_at_exit_records_exit_for_inside_vehicle(): void
     {
         SystemSetting::query()->create([
             'setting_key' => 'python_api_key',
@@ -110,8 +111,8 @@ class RfidSimulationTest extends TestCase
             'X-Source-Name' => 'phpunit-rfid-reader',
         ])->postJson(route('api.integration.rfid-scans'), [
             'tag_uid' => 'RFID-TOGGLE-2002',
-            'scan_location' => 'entrance',
-            'reader_name' => 'Entrance RFID Reader',
+            'scan_location' => 'exit',
+            'reader_name' => 'Exit RFID Reader',
         ])
             ->assertCreated()
             ->assertJsonPath('vehicle.id', $vehicle->id)

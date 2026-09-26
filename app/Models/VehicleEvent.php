@@ -55,6 +55,8 @@ class VehicleEvent extends Model
         'daily_exits_count',
         // Phase 2: link to a guest pass visit.
         'guest_visit_id',
+        // Phase 3: why this event needs review.
+        'anomaly_reason',
     ];
 
     /**
@@ -231,6 +233,7 @@ class VehicleEvent extends Model
             'guest_cctv' => 'Guest CCTV',
             'rfid_simulated' => 'RFID Scan',
             'rfid_hardware' => 'RFID Reader',
+            'guest_pass' => 'Guest Pass',
             default => 'Manual Log',
         };
     }

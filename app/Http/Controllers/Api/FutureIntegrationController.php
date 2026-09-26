@@ -11,7 +11,7 @@ use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
 use Carbon\Carbon;
 use App\Services\DetectorRuntimeService;
-use App\Services\RfidService;
+use App\Services\RfidIngestService;
 use App\Services\SettingsService;
 use App\Support\PlateNumber;
 use Illuminate\Http\JsonResponse;
@@ -539,7 +539,7 @@ class FutureIntegrationController extends Controller
     public function receiveRfidScan(
         Request $request,
         SettingsService $settingsService,
-        RfidService $rfidService
+        RfidIngestService $rfidIngestService
     ): JsonResponse {
         $sourceName = $request->header('X-Source-Name', 'philcst-rfid-adapter');
 
@@ -567,7 +567,10 @@ class FutureIntegrationController extends Controller
                 'payload_json' => ['nullable', 'array'],
             ]);
 
-            $scanLog = $rfidService->ingest($validated, 'hardware_placeholder');
+            // Phase 3: same rules as the Station page (fixed direction,
+            // cooldown, guest passes). Ready for the UHF TCP listener.
+            $result = $rfidIngestService->ingest($validated, 'hardware_placeholder', RfidIngestService::DIRECTION_STATION);
+            $scanLog = $result->scanLog;
 
             EventReceiveLog::query()->create([
                 'source_name' => $sourceName,
@@ -577,9 +580,9 @@ class FutureIntegrationController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'RFID scan ingested and saved to the local log.',
                 ...$this->rfidScanResponsePayload($scanLog),
-            ], 201);
+                ...$result->toArray(),
+            ], $result->isDuplicate() ? 200 : 201);
         } catch (ValidationException $exception) {
             throw $exception;
         } catch (Throwable $exception) {

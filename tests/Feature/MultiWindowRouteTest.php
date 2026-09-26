@@ -434,7 +434,8 @@ class MultiWindowRouteTest extends TestCase
             ->postJson(route('stations.rfid-scan', 'exit'), ['tag_uid' => $tag->uid])
             ->assertCreated();
 
-        $this->travel(10)->seconds();
+        // Phase 3: wait past the 60-second per-station cooldown.
+        $this->travel(61)->seconds();
 
         $this->actingAs($admin)
             ->postJson(route('stations.rfid-scan', 'entrance'), ['tag_uid' => $tag->uid])

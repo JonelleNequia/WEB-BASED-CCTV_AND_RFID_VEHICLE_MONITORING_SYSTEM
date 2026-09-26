@@ -5,6 +5,7 @@ use App\Http\Controllers\CalibrationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EvidenceController;
 use App\Http\Controllers\GuestObservationController;
+use App\Http\Controllers\GuestPassController;
 use App\Http\Controllers\MonitoringController;
 use App\Http\Controllers\RfidScanController;
 use App\Http\Controllers\SettingsController;
@@ -46,6 +47,10 @@ Route::middleware(['auth', 'detector'])->group(function (): void {
     Route::post('/station/{location}/rfid-scan', [StationController::class, 'rfidScan'])
         ->whereIn('location', ['entrance', 'exit'])
         ->name('stations.rfid-scan');
+    // Phase 3: issue an available guest pass (used by the Entrance Station pop-up in Phase 4).
+    Route::post('/guest-passes/{rfidTag}/issue', [GuestPassController::class, 'issue'])
+        ->whereNumber('rfidTag')
+        ->name('guest-passes.issue');
 
     Route::get('/monitoring', fn () => redirect()->route('stations.entrance'))->name('monitoring.index');
     Route::get('/monitoring/live-state', [MonitoringController::class, 'liveState'])->name('monitoring.live-state');

@@ -199,6 +199,8 @@ class EventService
                 'resulting_state' => $resultingState,
                 'daily_entries_count' => $transition['daily_entries_count'] ?? null,
                 'daily_exits_count' => $transition['daily_exits_count'] ?? null,
+                // Phase 3: direction mismatch flagged for review.
+                'anomaly_reason' => $transition['anomaly_reason'] ?? null,
                 'details_completed_at' => now(),
             ]);
 
@@ -232,6 +234,18 @@ class EventService
     protected function applyRfidSessionState(VehicleEvent $event): VehicleEvent
     {
         if ($event->event_type === 'ENTRY') {
+            // Phase 3: a new ENTRY for a vehicle that is still "inside" means
+            // its exit was missed. Close the old session so it is not counted twice.
+            ActiveSession::query()
+                ->where('status', 'open')
+                ->whereHas('entryEvent', fn ($query) => $query->where('vehicle_id', $event->vehicle_id))
+                ->update([
+                    'status' => 'closed',
+                    'archived_at' => now(),
+                    'archive_reason' => 'Superseded by a new entry scan (missed exit).',
+                    'updated_at' => now(),
+                ]);
+
             ActiveSession::query()->firstOrCreate(
                 ['entry_event_id' => $event->id],
                 [

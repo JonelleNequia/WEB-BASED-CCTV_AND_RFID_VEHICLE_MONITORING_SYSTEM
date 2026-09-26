@@ -35,6 +35,11 @@ class RfidScanLog extends Model
         'payload_json',
         'payload_file_path',
         'notes',
+        // Phase 3: review flags and guest pass link.
+        'is_anomaly',
+        'anomaly_reason',
+        'outcome',
+        'guest_visit_id',
     ];
 
     /**
@@ -47,6 +52,7 @@ class RfidScanLog extends Model
         return [
             'scan_time' => 'datetime',
             'payload_json' => 'array',
+            'is_anomaly' => 'boolean',
         ];
     }
 
@@ -83,6 +89,14 @@ class RfidScanLog extends Model
     }
 
     /**
+     * Phase 3: the guest pass visit this scan belongs to.
+     */
+    public function guestVisit(): BelongsTo
+    {
+        return $this->belongsTo(GuestVisit::class);
+    }
+
+    /**
      * Show a readable verification label for the UI.
      */
     public function getVerificationLabelAttribute(): string
@@ -95,6 +109,22 @@ class RfidScanLog extends Model
             return 'Guest';
         }
 
+        // Phase 3: guest pass outcomes.
+        $guestPassLabel = match ($this->verification_status) {
+            'guest_pass_available' => 'Guest Pass (issue)',
+            'guest_pass_entry' => 'Guest Pass Entry',
+            'guest_pass_exit' => 'Guest Pass Exit',
+            'guest_pass_duplicate' => 'Guest Pass (ignored)',
+            'guest_pass_not_issued' => 'Guest Pass not issued',
+            'guest_pass_lost' => 'Lost Guest Pass',
+            'guest_pass_disabled' => 'Disabled Guest Pass',
+            default => null,
+        };
+
+        if ($guestPassLabel !== null) {
+            return $guestPassLabel;
+        }
+
         return str_replace('_', ' ', ucfirst($this->verification_status));
     }
 
@@ -104,8 +134,9 @@ class RfidScanLog extends Model
     public function getVerificationBadgeClassAttribute(): string
     {
         return match ($this->verification_status) {
-            'verified' => 'matched',
-            'guest', 'inactive_tag', 'inactive_vehicle', 'non_recurring_category', 'unassigned_tag' => 'manual-review',
+            'verified', 'guest_pass_entry', 'guest_pass_exit' => 'matched',
+            'guest', 'inactive_tag', 'inactive_vehicle', 'non_recurring_category', 'unassigned_tag',
+            'guest_pass_available', 'guest_pass_duplicate' => 'manual-review',
             default => 'unmatched',
         };
     }

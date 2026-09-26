@@ -448,9 +448,11 @@ class DetectedEventIngestionTest extends TestCase
             ->firstOrFail();
 
         $this->assertSame('open', ActiveSession::query()->where('entry_event_id', $entryEvent->id)->value('status'));
+        // Phase 3: only guest pass visits count as guests inside; CCTV guest
+        // sessions are still recorded but no longer change the count.
         $this->actingAs($admin)
             ->getJson(route('dashboard.live-state'))
-            ->assertJsonPath('metrics.vehicles_inside', $baselineInside + 1);
+            ->assertJsonPath('metrics.vehicles_inside', $baselineInside);
 
         $this->travel(4)->minutes();
 

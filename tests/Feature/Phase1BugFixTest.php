@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Models\ActiveSession;
+use App\Models\GuestVisit;
 use App\Models\RfidTag;
 use App\Models\User;
 use App\Models\Vehicle;
@@ -155,20 +155,22 @@ class Phase1BugFixTest extends TestCase
         return $vehicle;
     }
 
+    /**
+     * Phase 3: guests inside are open guest pass visits.
+     */
     protected function openGuestSession(): void
     {
-        $event = VehicleEvent::query()->create([
-            'event_type' => 'ENTRY',
-            'event_status' => VehicleEvent::STATUS_COMPLETED,
-            'event_origin' => 'guest_cctv',
-            'vehicle_category' => 'guest',
-            'event_time' => now(),
+        $pass = RfidTag::query()->create([
+            'uid' => 'GP-INSIDE-1',
+            'tag_type' => RfidTag::TYPE_GUEST_PASS,
+            'status' => RfidTag::STATUS_ISSUED,
         ]);
 
-        ActiveSession::query()->create([
-            'entry_event_id' => $event->id,
-            'entry_time' => now(),
-            'status' => 'open',
+        GuestVisit::query()->create([
+            'rfid_tag_id' => $pass->id,
+            'active_rfid_tag_id' => $pass->id,
+            'entry_at' => now(),
+            'status' => GuestVisit::STATUS_ACTIVE,
         ]);
     }
 }
