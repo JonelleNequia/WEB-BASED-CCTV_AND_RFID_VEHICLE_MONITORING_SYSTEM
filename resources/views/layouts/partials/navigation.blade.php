@@ -65,7 +65,7 @@
     <div class="sidebar-nav-sections">
         <div class="nav-section">
             @foreach ($mainItems as $item)
-                <a href="{{ $item['route'] }}" class="nav-link {{ $item['active'] ? 'is-active' : '' }}" @if ($item['active']) aria-current="page" @endif>
+                <a href="{{ $item['route'] }}" class="nav-link {{ $item['active'] ? 'is-active' : '' }}" title="{{ $item['label'] }}{{ ($item['badge'] ?? 0) > 0 ? ' · '.$item['badge'].' alert(s)' : '' }}" @if ($item['active']) aria-current="page" @endif>
                     <span class="nav-icon">{!! $navIcon($item['icon']) !!}</span>
                     <span class="nav-label">{{ $item['label'] }}</span>
                     @if (($item['badge'] ?? 0) > 0)
@@ -95,7 +95,7 @@
 
         <form method="POST" action="{{ route('logout') }}">
             @csrf
-            <button type="submit" class="sidebar-logout-button button-full">
+            <button type="submit" class="sidebar-logout-button button-full" title="Logout">
                 <span class="nav-icon">{!! $navIcon('logout') !!}</span>
                 <span class="nav-label">Logout</span>
             </button>

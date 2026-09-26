@@ -79,7 +79,7 @@
 
                 <div class="form-grid">
                     <div class="field span-full">
-                        <label for="vehicle_rfid_tag_id">Registered Tag or Guest Pass</label>
+                        <label for="registered_tag_search">Registered Tag or Guest Pass</label>
                         <input id="vehicle_rfid_tag_id" type="hidden" name="vehicle_rfid_tag_id" value="{{ $selectedRegisteredTagId }}" data-rfid-combobox-value>
                         <div class="combobox" data-rfid-combobox>
                             <input

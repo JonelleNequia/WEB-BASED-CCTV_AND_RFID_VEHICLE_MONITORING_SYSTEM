@@ -85,7 +85,9 @@
         const type = el('td');
         type.append(el('span', log.is_alert ? 'log-type log-type-alert' : 'log-type', log.log_type_label || ''));
         if (log.is_alert && log.alert_reason) {
-            type.append(el('div', 'table-subtext', log.alert_reason.length > 60 ? log.alert_reason.slice(0, 57) + '...' : log.alert_reason));
+            const reason = el('div', 'table-subtext one-line', log.alert_reason);
+            reason.title = log.alert_reason;
+            type.append(reason);
         }
         tr.append(type);
 
@@ -294,7 +296,7 @@
 
         inFlight = true;
         try {
-            const response = await fetch(realtime.refreshUrl, { headers: { Accept: 'application/json' } });
+            const response = await window.ui.liveFetch(realtime.refreshUrl, { headers: { Accept: 'application/json' } });
             if (!response.ok) {
                 return;
             }
@@ -313,5 +315,6 @@
         }
     }
 
+    refresh();
     window.setInterval(refresh, 4000);
 })();

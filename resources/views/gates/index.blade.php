@@ -9,6 +9,7 @@
             <span data-gate-detector>
                 <x-badge :status="$detectorRunning ? 'online' : 'standby'" :label="$detectorRunning ? 'Detector running' : 'Detector standby'" />
             </span>
+            <x-live-indicator />
         </x-slot:meta>
     </x-page-header>
 

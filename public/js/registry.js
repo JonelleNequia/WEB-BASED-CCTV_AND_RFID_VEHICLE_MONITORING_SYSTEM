@@ -281,6 +281,11 @@
             if (event.target.closest('button, a, form, input, select')) {
                 return;
             }
+            const panel = document.querySelector('[data-vehicle-panel]');
+            const loading = document.createElement('p');
+            loading.className = 'text-muted skeleton-line';
+            loading.textContent = 'Loading…';
+            panel.replaceChildren(loading);
             window.ui.openDrawer('vehicle-panel');
             withVehicle(row.dataset.vehicleUrl, renderPanel);
         }
@@ -295,8 +300,13 @@
     });
 
     document.querySelectorAll('[data-vehicle-action]').forEach(function (button) {
-        button.addEventListener('click', function () {
-            withVehicle(button.dataset.vehicleUrl, button.dataset.vehicleAction === 'edit' ? openEdit : openReplace);
+        button.addEventListener('click', async function () {
+            // UI Phase 5: show that the drawer is loading.
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            await withVehicle(button.dataset.vehicleUrl, button.dataset.vehicleAction === 'edit' ? openEdit : openReplace);
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
         });
     });
 

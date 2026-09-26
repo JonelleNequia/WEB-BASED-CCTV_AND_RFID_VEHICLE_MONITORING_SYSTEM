@@ -21,7 +21,7 @@
     <td>
         <span @class(['log-type', 'log-type-alert' => $log['is_alert'] ?? false])>{{ $log['log_type_label'] ?? '' }}</span>
         @if (($log['is_alert'] ?? false) && ($log['alert_reason'] ?? null))
-            <div class="table-subtext">{{ \Illuminate\Support\Str::limit($log['alert_reason'], 60) }}</div>
+            <div class="table-subtext one-line" title="{{ $log['alert_reason'] }}">{{ $log['alert_reason'] }}</div>
         @endif
     </td>
     <td>{{ $log['station_label'] }}</td>

@@ -222,7 +222,121 @@
         });
     });
 
+    /* ---------- UI Phase 5: collapsible sidebar ---------- */
+
+    function syncSidebarToggle() {
+        const collapsed = document.documentElement.classList.contains('sidebar-collapsed');
+        document.querySelectorAll('[data-sidebar-toggle]').forEach(function (button) {
+            button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            button.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+            button.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+        });
+    }
+
+    document.addEventListener('click', function (event) {
+        if (!event.target.closest('[data-sidebar-toggle]')) {
+            return;
+        }
+
+        const collapsed = document.documentElement.classList.toggle('sidebar-collapsed');
+        try {
+            localStorage.setItem('ui.sidebar', collapsed ? 'collapsed' : 'expanded');
+        } catch (error) {
+            // Private mode: the choice just is not remembered.
+        }
+        syncSidebarToggle();
+    });
+
+    /* ---------- UI Phase 5: loading states ---------- */
+
+    function startNavigation(table) {
+        document.body.classList.add('is-navigating');
+        table?.classList.add('is-loading');
+        table?.setAttribute('aria-busy', 'true');
+    }
+
+    // Page links (sidebar, tabs, chips, pagination): thin progress bar at the top.
+    document.addEventListener('click', function (event) {
+        const link = event.target.closest('a[href]');
+        if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+            return;
+        }
+        const href = link.getAttribute('href');
+        if (!href || href.startsWith('#') || link.target === '_blank' || link.hasAttribute('download') || link.origin !== window.location.origin || link.pathname.includes('/export/')) {
+            return;
+        }
+        startNavigation(link.closest('.data-table'));
+    });
+
+    // Forms: filters dim their table; saves disable the button so it is not pressed twice.
+    document.addEventListener('submit', function (event) {
+        const form = event.target;
+        if (event.defaultPrevented || !(form instanceof HTMLFormElement) || form.hasAttribute('data-no-busy')) {
+            return;
+        }
+
+        if ((form.method || 'get').toLowerCase() === 'get') {
+            startNavigation(form.closest('.data-table'));
+            return;
+        }
+
+        document.body.classList.add('is-navigating');
+        window.setTimeout(function () {
+            form.setAttribute('aria-busy', 'true');
+            form.querySelectorAll('button[type="submit"], button:not([type])').forEach(function (button) {
+                button.disabled = true;
+                button.dataset.idleLabel = button.textContent;
+                button.textContent = button.dataset.busyLabel || 'Saving…';
+            });
+        }, 0);
+    });
+
+    // Back/forward cache: undo loading states.
+    window.addEventListener('pageshow', function () {
+        document.body.classList.remove('is-navigating');
+        document.querySelectorAll('.is-loading').forEach((node) => node.classList.remove('is-loading'));
+        document.querySelectorAll('[aria-busy="true"]').forEach(function (node) {
+            node.removeAttribute('aria-busy');
+            node.querySelectorAll('button[data-idle-label]').forEach(function (button) {
+                button.disabled = false;
+                button.textContent = button.dataset.idleLabel;
+            });
+        });
+    });
+
+    /* Live data indicator: <span data-live-indicator> shows Live / Updating / Offline. */
+    function setLive(state) {
+        document.querySelectorAll('[data-live-indicator]').forEach(function (node) {
+            node.dataset.state = state;
+            const label = node.querySelector('[data-live-label]');
+            if (label) {
+                label.textContent = state === 'offline'
+                    ? 'Offline · retrying'
+                    : state === 'updating'
+                        ? 'Updating…'
+                        : `Live · ${formatTime(new Date(), '', true)}`;
+            }
+        });
+    }
+
+    /* Wrap a polling fetch so the indicator follows it. */
+    async function liveFetch(url, options) {
+        setLive('updating');
+        try {
+            const response = await fetch(url, options);
+            setLive(response.ok ? 'live' : 'offline');
+            return response;
+        } catch (error) {
+            setLive('offline');
+            throw error;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', syncSidebarToggle);
+
     window.ui = {
+        setLive: setLive,
+        liveFetch: liveFetch,
         toast: toast,
         openDrawer: function (id) { openDrawer(document.getElementById(id)); },
         closeDrawer: function (id) { closeDrawer(document.getElementById(id)); },

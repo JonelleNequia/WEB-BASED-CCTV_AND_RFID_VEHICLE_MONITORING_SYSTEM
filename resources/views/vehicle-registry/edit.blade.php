@@ -73,6 +73,7 @@
                     </select>
                     <input
                         id="category_other"
+                        aria-label="Custom category"
                         type="text"
                         name="category_other"
                         value="{{ $categoryOtherValue }}"
@@ -98,6 +99,7 @@
                     </select>
                     <input
                         id="vehicle_type_other"
+                        aria-label="Custom vehicle type"
                         type="text"
                         name="vehicle_type_other"
                         value="{{ $vehicleTypeOtherValue }}"

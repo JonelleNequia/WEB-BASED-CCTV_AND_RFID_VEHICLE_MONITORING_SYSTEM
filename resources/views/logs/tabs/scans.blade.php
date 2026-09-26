@@ -46,10 +46,8 @@
                         <th>Time</th>
                         <th>Tag UID</th>
                         <th>Vehicle</th>
-                        <th>Category</th>
                         <th>Station</th>
-                        <th>Event Type</th>
-                        <th>Current State</th>
+                        <th>Event</th>
                         <th>Result</th>
                         <th>Vehicle Log</th>
                     </tr>
@@ -61,18 +59,19 @@
                             <td><strong>{{ $scan->tag_uid }}</strong></td>
                             <td>
                                 <strong>{{ $scan->vehicle?->plate_number ?? 'GUEST' }}</strong>
-                                <div class="table-subtext">{{ $scan->vehicle?->vehicle_type ?: 'Guest record' }}</div>
+                                <div class="table-subtext">{{ $scan->vehicle ? $scan->vehicle->vehicle_type.' · '.ucfirst(str_replace('_', ' ', (string) $scan->vehicle->category)) : 'Guest record' }}</div>
                                 @if ($scan->guestVehicleObservation)
                                     <div class="table-subtext">Guest observation #{{ $scan->guestVehicleObservation->id }}</div>
                                 @endif
                             </td>
-                            <td>{{ $scan->vehicle?->category ? ucfirst(str_replace('_', ' ', $scan->vehicle->category)) : 'N/A' }}</td>
                             <td>
                                 <strong>{{ $scan->scanLocationLabel }}</strong>
                                 <div class="table-subtext">{{ $scan->scanDirectionLabel }}</div>
                             </td>
-                            <td>{{ $scan->resolvedEventTypeLabel }}</td>
-                            <td>{{ $scan->resultingStateLabel }}</td>
+                            <td>
+                                {{ $scan->resolvedEventTypeLabel }}
+                                <div class="table-subtext">{{ $scan->resultingStateLabel }}</div>
+                            </td>
                             <td>
                                 <span class="badge badge-{{ $scan->verificationBadgeClass }}">{{ $scan->verificationLabel }}</span>
                             </td>

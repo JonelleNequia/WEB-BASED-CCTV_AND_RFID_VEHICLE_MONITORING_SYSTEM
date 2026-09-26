@@ -10,6 +10,9 @@
 
 @section('content')
     <x-page-header title="Activity Logs">
+        @if ($tab === 'events' && (int) request('page', 1) === 1)
+            <x-slot:meta><x-live-indicator /></x-slot:meta>
+        @endif
         <x-slot:actions>
             @if ($tab === 'events')
                 <a href="{{ route('vehicle-events.create') }}" class="button button-primary">Quick Manual Log</a>

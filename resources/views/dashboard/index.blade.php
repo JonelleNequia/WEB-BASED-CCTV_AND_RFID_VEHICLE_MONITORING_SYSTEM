@@ -9,7 +9,7 @@
 
 @section('content')
     <x-page-header title="Dashboard">
-        <x-slot:meta><x-datetime :value="now()" format="date" /></x-slot:meta>
+        <x-slot:meta><x-datetime :value="now()" format="date" /> <x-live-indicator /></x-slot:meta>
     </x-page-header>
 
     <x-stat-row data-dashboard-metrics>
@@ -83,7 +83,7 @@
                 <h2 class="panel-title">Frequent Entry Ranking</h2>
                 <a href="{{ route('logs.index', ['event_type' => 'ENTRY']) }}" class="button button-secondary button-sm">Entry logs</a>
             </div>
-            <div class="table-responsive" data-dashboard-ranking-table>
+            <div class="table-responsive dashboard-ranking" data-dashboard-ranking-table>
                 <table>
                     <thead>
                         <tr><th>Rank</th><th>Plate</th><th>Owner</th><th>Category</th><th>Total Entries</th><th>Today</th></tr>

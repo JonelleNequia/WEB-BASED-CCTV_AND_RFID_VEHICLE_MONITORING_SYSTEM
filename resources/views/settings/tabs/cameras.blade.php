@@ -75,8 +75,8 @@
                                 </div>
 
                                 <div class="field span-full">
-                                    <label>Saved Browser Device</label>
-                                    <input type="text" value="{{ $camera['browser_label'] ?: 'No saved browser device yet.' }}" readonly>
+                                    <label for="{{ $role }}_browser_device">Saved Browser Device</label>
+                                    <input id="{{ $role }}_browser_device" type="text" value="{{ $camera['browser_label'] ?: 'No saved browser device yet.' }}" readonly>
                                 </div>
                             </div>
                         </article>

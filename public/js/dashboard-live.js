@@ -346,7 +346,7 @@
         }
 
         try {
-            const response = await fetch(payload.routes.liveState, {
+            const response = await window.ui.liveFetch(payload.routes.liveState, {
                 headers: {
                     Accept: 'application/json',
                 },

@@ -83,7 +83,7 @@
         }
 
         try {
-            const response = await fetch(config.stateUrl, { headers: { Accept: 'application/json' } });
+            const response = await window.ui.liveFetch(config.stateUrl, { headers: { Accept: 'application/json' } });
             if (!response.ok) {
                 return;
             }
@@ -125,5 +125,6 @@
         });
     });
 
+    refresh();
     window.setInterval(refresh, POLL_MS);
 })();

@@ -5432,3 +5432,344 @@ tr.is-alert-row td:first-child {
     padding-left: 0.5rem;
     border-left: 1px solid var(--border);
 }
+
+/* ==========================================================================
+   UI Phase 5: collapsible sidebar, loading states, keyboard focus
+   ========================================================================== */
+
+.skip-link {
+    position: absolute;
+    left: 1rem;
+    top: -3rem;
+    z-index: 1100;
+    padding: 0.6rem 1rem;
+    border-radius: 8px;
+    background: #ffffff;
+    color: var(--purple-deep);
+    font-weight: 700;
+    box-shadow: var(--shadow-lg);
+}
+
+.skip-link:focus {
+    top: 1rem;
+}
+
+#main-content:focus {
+    outline: none;
+}
+
+/* Sidebar focus rings must show on purple. */
+.sidebar a:focus-visible,
+.sidebar button:focus-visible {
+    outline: 2px solid #ffffff;
+    outline-offset: 2px;
+    box-shadow: none;
+}
+
+.app-body .app-shell {
+    transition: grid-template-columns 0.18s ease;
+}
+
+.app-body .brand-block {
+    position: relative;
+}
+
+.sidebar-toggle {
+    margin-left: auto;
+    width: 1.9rem;
+    height: 1.9rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+    cursor: pointer;
+}
+
+.sidebar-toggle:hover {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+.sidebar-toggle svg {
+    width: 1.1rem;
+    height: 1.1rem;
+    fill: currentColor;
+    transition: transform 0.18s ease;
+}
+
+.nav-link {
+    position: relative;
+}
+
+/* Collapsed: an icon rail. Labels stay readable to screen readers. */
+html.sidebar-collapsed .app-body .app-shell {
+    grid-template-columns: 72px minmax(0, 1fr);
+}
+
+html.sidebar-collapsed .app-body .sidebar {
+    padding-inline: 10px;
+}
+
+html.sidebar-collapsed .brand-block {
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0;
+}
+
+html.sidebar-collapsed .brand-block .brand-mark,
+html.sidebar-collapsed .brand-name {
+    display: none;
+}
+
+html.sidebar-collapsed .sidebar-toggle {
+    margin: 0 auto;
+}
+
+html.sidebar-collapsed .sidebar-toggle svg {
+    transform: rotate(180deg);
+}
+
+html.sidebar-collapsed .nav-link {
+    justify-content: center;
+    padding: 0.55rem;
+}
+
+html.sidebar-collapsed .nav-label,
+html.sidebar-collapsed .sidebar-health li > span:not(.health-dot),
+html.sidebar-collapsed .sidebar-health small,
+html.sidebar-collapsed .sidebar-account {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+
+html.sidebar-collapsed .nav-badge {
+    position: absolute;
+    top: 0.1rem;
+    right: 0.1rem;
+    min-width: 1.1rem;
+    font-size: 0.64rem;
+}
+
+html.sidebar-collapsed .sidebar-health {
+    justify-items: center;
+    padding: 0.6rem 0;
+}
+
+html.sidebar-collapsed .sidebar-logout-button {
+    padding: 0.5rem;
+    min-height: 40px;
+}
+
+/* Laptops narrower than 1100px get the rail automatically. */
+@media (max-width: 1100px) {
+    .app-body .app-shell {
+        grid-template-columns: 72px minmax(0, 1fr);
+    }
+
+    .app-body .sidebar {
+        padding-inline: 10px;
+    }
+
+    .brand-block .brand-mark,
+    .brand-name,
+    .sidebar-toggle {
+        display: none;
+    }
+
+    .nav-link {
+        justify-content: center;
+        padding: 0.55rem;
+    }
+
+    .nav-label,
+    .sidebar-health li > span:not(.health-dot),
+    .sidebar-health small,
+    .sidebar-account {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+    }
+
+    .nav-badge {
+        position: absolute;
+        top: 0.1rem;
+        right: 0.1rem;
+    }
+
+    .sidebar-health {
+        justify-items: center;
+    }
+}
+
+/* Top progress bar while the next page loads. */
+.nav-progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1200;
+    width: 0;
+    height: 3px;
+    background: var(--purple);
+    opacity: 0;
+}
+
+body.is-navigating .nav-progress {
+    opacity: 1;
+    animation: nav-progress 2.5s ease-out forwards;
+}
+
+@keyframes nav-progress {
+    from { width: 0; }
+    to { width: 85%; }
+}
+
+/* Tables being filtered or paged. */
+.data-table {
+    position: relative;
+}
+
+.data-table.is-loading table,
+.data-table.is-loading .empty-block {
+    opacity: 0.45;
+    transition: opacity 0.15s ease;
+}
+
+.data-table.is-loading::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, var(--purple), transparent);
+    background-size: 50% 100%;
+    background-repeat: no-repeat;
+    animation: table-loading 1s linear infinite;
+}
+
+@keyframes table-loading {
+    from { background-position: -50% 0; }
+    to { background-position: 150% 0; }
+}
+
+button[aria-busy="true"] {
+    cursor: progress;
+    opacity: 0.7;
+}
+
+.skeleton-line {
+    animation: skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes skeleton-pulse {
+    50% { opacity: 0.45; }
+}
+
+/* Live / Updating / Offline indicator. */
+.live-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-left: 0.5rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.live-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: #22c55e;
+}
+
+.live-indicator[data-state="updating"] .live-dot {
+    background: #a78bfa;
+    animation: skeleton-pulse 0.8s ease-in-out infinite;
+}
+
+.live-indicator[data-state="offline"] {
+    color: #b91c1c;
+    font-weight: 600;
+}
+
+.live-indicator[data-state="offline"] .live-dot {
+    background: #dc2626;
+    box-shadow: 0 0 0 2px #fecaca;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-body .app-shell,
+    .sidebar-toggle svg,
+    .data-table.is-loading::after,
+    .skeleton-line,
+    body.is-navigating .nav-progress,
+    .live-indicator[data-state="updating"] .live-dot {
+        transition: none;
+        animation: none;
+    }
+
+    body.is-navigating .nav-progress {
+        width: 85%;
+    }
+}
+
+/* Fit 1366px: hide the ranking Category column and tighten the logs table. */
+.dashboard-ranking th:nth-child(4),
+.dashboard-ranking td:nth-child(4) {
+    display: none;
+}
+
+.event-log-list-view th,
+.event-log-list-view td {
+    padding-inline: 0.6rem;
+}
+
+.skip-link {
+    top: 0;
+    transform: translateY(-150%);
+}
+
+.skip-link:focus {
+    top: 0;
+    transform: translateY(1rem);
+}
+
+/* Shorter Activity Logs rows. */
+.event-log-list-view td strong {
+    white-space: nowrap;
+}
+
+.one-line {
+    max-width: 16rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.event-log-list-view td:nth-child(7) {
+    max-width: 10rem;
+}
+
+.more-filters-grid {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.data-table-toolbar,
+.data-table-tools {
+    min-width: 0;
+}
+
+.data-table .table-responsive {
+    overflow-x: auto;
+}
