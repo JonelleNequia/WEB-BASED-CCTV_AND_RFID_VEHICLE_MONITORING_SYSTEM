@@ -5,7 +5,6 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Camera extends Model
@@ -32,9 +31,6 @@ class Camera extends Model
         'last_connection_message',
         'last_connected_at',
         'status',
-        // CCTV Detection: added — link to the detected camera assigned to this station.
-        'discovered_camera_id',
-        'calibration_device_id',
     ];
 
     /**
@@ -57,14 +53,6 @@ class Camera extends Model
     public function scopeForRole(Builder $query, string $role): Builder
     {
         return $query->where('camera_role', $role);
-    }
-
-    /**
-     * CCTV Detection: added — the detected camera assigned to this station.
-     */
-    public function discoveredCamera(): BelongsTo
-    {
-        return $this->belongsTo(DiscoveredCamera::class, 'discovered_camera_id');
     }
 
     /**

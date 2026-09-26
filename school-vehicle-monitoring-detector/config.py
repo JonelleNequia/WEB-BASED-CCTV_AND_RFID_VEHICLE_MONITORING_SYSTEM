@@ -12,15 +12,6 @@ STATION_ACTIVITY_PATH = PROJECT_ROOT / "storage" / "app" / "camera" / "station_a
 PUBLIC_STORAGE_DIR = PROJECT_ROOT / "storage" / "app" / "public"
 DETECTED_IMAGE_DIR = PUBLIC_STORAGE_DIR / "detected-vehicle-images"
 
-# CCTV Detection: added shared state paths for discovery, thumbnails, and the
-# single-instance detector lock. All of them live beside the runtime config.
-CAMERA_STATE_DIR = PROJECT_ROOT / "storage" / "app" / "camera"
-DISCOVERY_THUMBNAILS_DIR = CAMERA_STATE_DIR / "thumbnails"
-DISCOVERY_ATTEMPTS_PATH = CAMERA_STATE_DIR / "discovery_attempts.json"
-DISCOVERY_RESCAN_FLAG_PATH = CAMERA_STATE_DIR / "discovery_rescan.flag"
-DETECTOR_LOCK_PATH = CAMERA_STATE_DIR / "detector.lock"
-DETECTOR_PID_PATH = CAMERA_STATE_DIR / "detector.pid"
-
 CAPTURE_INTERVAL_SECONDS = 0.04
 # Low latency: reconnect when a camera stops delivering new frames for this long.
 CAPTURE_STALL_SECONDS = 5.0
@@ -107,19 +98,6 @@ DEFAULT_RUNTIME_CONFIG = {
         "entrance": default_camera_config("entrance"),
         "exit": default_camera_config("exit"),
     },
-    # CCTV Detection: added defaults so discovery still runs before Laravel
-    # exports its first "discovery" block.
-    "discovery": {
-        "enabled": True,
-        "probe_interval_seconds": 8,
-        "ip_scan_interval_seconds": 60,
-        "offline_after_seconds": 30,
-        "ingest_url": "http://127.0.0.1:8000/api/v1/integration/discovered-cameras",
-        "rescan_flag_path": str(DISCOVERY_RESCAN_FLAG_PATH),
-        "device_credentials": [],
-        "site_credentials": [],
-        "assigned_device_keys": [],
-    },
 }
 
 
@@ -147,9 +125,7 @@ def normalize_camera_config(role, loaded_config):
         config.update(loaded_config)
 
     source_type = str(config.get("source_type", "webcam")).strip().lower()
-    # CCTV Detection: "none" means the station has no assigned camera yet, so
-    # it must not silently fall back to the laptop webcam.
-    if source_type not in {"webcam", "rtsp", "url", "none"}:
+    if source_type not in {"webcam", "rtsp", "url"}:
         source_type = "webcam"
 
     config["camera_role"] = role
@@ -168,55 +144,23 @@ def normalize_camera_config(role, loaded_config):
             config["source_value"] = int(config.get("source_value", config["source_value"]))
         except (TypeError, ValueError):
             config["source_value"] = default_camera_config(role)["source_value"]
-    elif source_type == "none":
-        config["source_value"] = ""
     else:
         config["source_value"] = str(config.get("source_value", "")).strip()
 
     return config
 
 
-def normalize_discovery_config(loaded_discovery):
-    """
-    CCTV Detection: merge Laravel's discovery block onto safe defaults.
-    """
-    discovery = json.loads(json.dumps(DEFAULT_RUNTIME_CONFIG["discovery"]))
-
-    if not isinstance(loaded_discovery, dict):
-        return discovery
-
-    discovery.update({key: value for key, value in loaded_discovery.items() if value is not None})
-
-    for key in ("probe_interval_seconds", "ip_scan_interval_seconds", "offline_after_seconds"):
-        try:
-            discovery[key] = max(1, int(discovery[key]))
-        except (TypeError, ValueError):
-            discovery[key] = DEFAULT_RUNTIME_CONFIG["discovery"][key]
-
-    for key in ("device_credentials", "site_credentials", "assigned_device_keys"):
-        if not isinstance(discovery.get(key), list):
-            discovery[key] = []
-
-    discovery["enabled"] = bool(discovery.get("enabled", True))
-
-    return discovery
-
-
-def load_runtime_config(path=None):
+def load_runtime_config():
     """
     Load the dual-camera config exported by Laravel.
-
-    CCTV Detection: accepts an optional path so discovery tests can use an
-    isolated copy, and keeps the new "discovery" block.
     """
     config = json.loads(json.dumps(DEFAULT_RUNTIME_CONFIG))
-    runtime_config_path = Path(path) if path else RUNTIME_CONFIG_PATH
 
-    if not runtime_config_path.exists():
+    if not RUNTIME_CONFIG_PATH.exists():
         return config
 
     try:
-        loaded = json.loads(runtime_config_path.read_text(encoding="utf-8"))
+        loaded = json.loads(RUNTIME_CONFIG_PATH.read_text(encoding="utf-8"))
     except Exception:
         return config
 
@@ -233,9 +177,6 @@ def load_runtime_config(path=None):
         for role in ("entrance", "exit"):
             config["cameras"][role] = normalize_camera_config(role, loaded_cameras.get(role))
 
-    # CCTV Detection: added — previously any extra top-level block was dropped.
-    config["discovery"] = normalize_discovery_config(loaded.get("discovery"))
-
     return config
 
 
@@ -246,8 +187,5 @@ def resolve_capture_source(camera_config):
     if camera_config["source_type"] == "webcam":
         return int(camera_config["source_value"])
 
-    # CCTV Detection: an unassigned station has nothing to open.
-    if camera_config["source_type"] == "none":
-        return ""
 
     return str(camera_config["source_value"])
