@@ -195,6 +195,8 @@ class RealtimeLogController extends Controller
             'sort_time' => $this->sortTimestamp($event->created_at, $event->event_time),
             // Phase 4: guest pass events show the pass number.
             ...VehicleEvent::guestPassLogFields($event),
+            // Phase 5: detector no-pass alerts.
+            ...VehicleEvent::noPassLogFields($event),
         ];
     }
 

@@ -127,6 +127,8 @@ class GuestPassController extends Controller
             'valid_minutes' => ['nullable', 'integer', 'min:15', 'max:1440'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'rfid_scan_log_id' => ['nullable', 'integer', 'exists:rfid_scan_logs,id'],
+            // Phase 5: the no-pass alert the pop-up was prefilled from.
+            'guest_observation_id' => ['nullable', 'integer', 'exists:guest_vehicle_observations,id'],
         ]);
 
         $scanLog = isset($validated['rfid_scan_log_id'])

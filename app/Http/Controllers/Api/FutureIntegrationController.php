@@ -10,6 +10,7 @@ use App\Models\GuestVehicleObservation;
 use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
 use Carbon\Carbon;
+use App\Services\DetectorRfidMatchService;
 use App\Services\DetectorRuntimeService;
 use App\Services\RfidIngestService;
 use App\Services\SettingsService;
@@ -360,8 +361,11 @@ class FutureIntegrationController extends Controller
     /**
      * Let the detector poll for a verified RFID scan during its local detection window.
      */
-    public function rfidMatch(Request $request, SettingsService $settingsService): JsonResponse
-    {
+    public function rfidMatch(
+        Request $request,
+        SettingsService $settingsService,
+        DetectorRfidMatchService $matchService
+    ): JsonResponse {
         $authorized = $this->authorizeIntegrationRequest($request, $settingsService);
 
         if ($authorized !== null) {
@@ -373,25 +377,32 @@ class FutureIntegrationController extends Controller
                 'camera_role' => ['required', 'string', 'in:entrance,exit'],
                 'event_time' => ['required', 'date'],
                 'window_seconds' => ['nullable', 'numeric', 'min:1', 'max:10'],
-                'lookback_seconds' => ['nullable', 'numeric', 'min:0', 'max:10'],
+                'lookback_seconds' => ['nullable', 'numeric', 'min:0', 'max:'.DetectorRfidMatchService::MAX_LOOKBACK_SECONDS],
+                'event_key' => ['nullable', 'string', 'max:120'],
             ]);
 
+            // Phase 5: registered tags AND guest passes count; scans from ~10s
+            // before the crossing are accepted (UHF reads on approach).
             $eventTime = Carbon::parse($validated['event_time']);
             $windowSeconds = (int) ($validated['window_seconds'] ?? 4);
-            $lookbackSeconds = (int) ($validated['lookback_seconds'] ?? 3);
-            $rfidScan = $this->findRecentVerifiedRfidScanWithinWindow(
+            $lookbackSeconds = (int) ($validated['lookback_seconds'] ?? DetectorRfidMatchService::DEFAULT_LOOKBACK_SECONDS);
+            $rfidScan = $matchService->find(
                 $validated['camera_role'],
                 $eventTime,
                 $windowSeconds,
-                $lookbackSeconds
+                $lookbackSeconds,
+                $validated['event_key'] ?? null
             );
+            $isGuestPass = $matchService->isGuestPassScan($rfidScan);
 
             return response()->json([
                 'matched' => $rfidScan !== null,
-                'message' => $rfidScan
-                    ? 'Verified RFID scan found for this detector window.'
-                    : 'No verified RFID scan found for this detector window yet.',
-                'overlay' => $this->overlayPayload(null, $rfidScan),
+                'message' => match (true) {
+                    $isGuestPass => 'Guest pass scan found for this detector window.',
+                    $rfidScan !== null => 'Verified RFID scan found for this detector window.',
+                    default => 'No RFID tag or guest pass found for this detector window yet.',
+                },
+                'overlay' => $matchService->overlay($rfidScan),
                 'vehicle' => $rfidScan?->vehicle ? [
                     'id' => $rfidScan->vehicle->id,
                     'plate_number' => $rfidScan->vehicle->plate_number,
@@ -402,7 +413,15 @@ class FutureIntegrationController extends Controller
                 ] : null,
                 'action_taken' => $rfidScan?->resolved_event_type,
                 'new_state' => $rfidScan?->resulting_state,
-                'status' => $rfidScan ? 'registered' : 'guest',
+                'status' => match (true) {
+                    $isGuestPass => 'guest_pass',
+                    $rfidScan !== null => 'registered',
+                    default => 'no_pass',
+                },
+                'guest_pass' => $isGuestPass ? [
+                    'label' => $rfidScan->vehicleRfidTag?->label,
+                    'guest_visit_id' => $rfidScan->guest_visit_id,
+                ] : null,
                 'scan' => $rfidScan ? [
                     'id' => $rfidScan->id,
                     'verification_status' => $rfidScan->verification_status,
@@ -754,41 +773,6 @@ class FutureIntegrationController extends Controller
             ->first();
     }
 
-    protected function findRecentVerifiedRfidScanWithinWindow(
-        string $cameraRole,
-        Carbon $eventTime,
-        int $windowSeconds = 4,
-        int $lookbackSeconds = 2
-    ): ?RfidScanLog {
-        $eventTime = $this->normalizeDetectorEventTime($eventTime);
-        $windowEnd = $eventTime->copy()->addSeconds($windowSeconds);
-        $to = now()->lessThan($windowEnd) ? now() : $windowEnd;
-        $from = $eventTime->copy()->subSeconds($lookbackSeconds);
-
-        $query = RfidScanLog::query()
-            ->with('vehicle.rfidTag')
-            ->where('verification_status', 'verified')
-            ->where(function ($query) use ($from, $to): void {
-                $query->whereBetween('scan_time', [$from, $to])
-                    ->orWhereBetween('created_at', [$from, $to]);
-            });
-
-        $sameStationScan = (clone $query)
-            ->where('scan_location', $cameraRole)
-            ->latest('scan_time')
-            ->latest('created_at')
-            ->first();
-
-        if ($sameStationScan) {
-            return $sameStationScan;
-        }
-
-        return $query
-            ->latest('scan_time')
-            ->latest('created_at')
-            ->first();
-    }
-
     protected function normalizeDetectorEventTime(Carbon $eventTime): Carbon
     {
         return $eventTime->copy()->setTimezone(config('app.timezone', 'UTC'));
@@ -837,36 +821,7 @@ class FutureIntegrationController extends Controller
      */
     protected function overlayPayload(?VehicleEvent $vehicleEvent, ?RfidScanLog $rfidScan): array
     {
-        if (! $rfidScan || ! $rfidScan->vehicle) {
-            return [
-                'verification' => 'guest',
-                'label' => 'GUEST',
-                'color' => 'red',
-                'event_id' => $vehicleEvent?->id,
-                'rfid_scan_id' => null,
-                'vehicle' => null,
-            ];
-        }
-
-        $vehicle = $rfidScan->vehicle;
-
-        return [
-            'verification' => 'registered',
-            'label' => 'REGISTERED - '.$vehicle->plate_number,
-            'color' => 'green',
-            'event_id' => $vehicleEvent?->id ?? $rfidScan->correlated_vehicle_event_id,
-            'rfid_scan_id' => $rfidScan->id,
-            'action_taken' => $rfidScan->resolved_event_type,
-            'new_state' => $rfidScan->resulting_state,
-            'vehicle' => [
-                'id' => $vehicle->id,
-                'plate_number' => $vehicle->plate_number,
-                'owner_name' => $vehicle->owner_name,
-                'category' => $vehicle->category,
-                'vehicle_type' => $vehicle->vehicle_type,
-                'rfid_tag_uid' => $vehicle->rfidTag?->uid ?? $vehicle->rfid_tag_uid,
-            ],
-        ];
+        return app(DetectorRfidMatchService::class)->overlay($rfidScan, $vehicleEvent?->id);
     }
 
     /**
@@ -874,13 +829,10 @@ class FutureIntegrationController extends Controller
      */
     protected function guestOverlayPayload(GuestVehicleObservation $observation): array
     {
-        return [
-            'verification' => 'guest',
-            'label' => 'GUEST',
-            'color' => 'red',
+        // Phase 5: a detector capture without any RFID read is a no-pass alert.
+        return DetectorRfidMatchService::noPassOverlay([
             'guest_observation_id' => $observation->id,
             'status' => $observation->status,
-            'vehicle' => null,
-        ];
+        ]);
     }
 }

@@ -152,6 +152,7 @@ class StationController extends Controller
         $recentCapture = GuestVehicleObservation::query()
             ->where('location', 'entrance')
             ->where('observation_source', 'cctv')
+            ->where('status', '!=', GuestVehicleObservation::STATUS_RESOLVED)
             ->where('created_at', '>=', now()->subMinutes(2))
             ->latest('created_at')
             ->first();
@@ -163,6 +164,8 @@ class StationController extends Controller
             'requires_id' => $guestPassService->requiresId(),
             'valid_minutes' => $guestPassService->validityMinutes(),
             'prefill' => [
+                // Phase 5: issuing the pass resolves this no-pass alert.
+                'observation_id' => $recentCapture?->id,
                 'plate' => $recentCapture?->plate_number ?: $recentCapture?->plate_text,
                 'color' => $recentCapture?->vehicle_color,
                 'vehicle_type' => $recentCapture?->vehicle_type,
@@ -216,6 +219,8 @@ class StationController extends Controller
                     'sort_time' => $this->sortTimestamp($event->created_at, $event->event_time),
                     // Phase 4: guest pass events show the pass number, not "GUEST / Owner N/A".
                     ...VehicleEvent::guestPassLogFields($event),
+            // Phase 5: detector no-pass alerts.
+            ...VehicleEvent::noPassLogFields($event),
                 ];
             });
 

@@ -330,12 +330,36 @@
         item.replaceChildren(...replacement.childNodes);
     }
 
+    // Phase 5: red banner when the camera reports a vehicle with no pass.
+    let logsInitialized = false;
+    const announcedAlerts = new Set();
+
+    function announceNoPassAlert(log) {
+        if (!log.no_pass_alert || announcedAlerts.has(log.id)) {
+            return;
+        }
+
+        announcedAlerts.add(log.id);
+
+        if (!logsInitialized || log.alert_location !== payload.location) {
+            return;
+        }
+
+        const plate = log.plate_number || 'Unknown plate';
+        const hint = payload.location === 'entrance'
+            ? 'Tap a guest pass to issue it, or check the vehicle.'
+            : 'No tag or guest pass was read. Check the vehicle.';
+
+        showAlert('Vehicle with no pass', `${plate}: ${hint}`);
+    }
+
     function renderLogs(logs) {
         if (!logList) {
             return;
         }
 
         if (!Array.isArray(logs) || logs.length === 0) {
+            logsInitialized = true;
             stationLogNodes.clear();
             const empty = document.createElement('div');
             empty.className = 'station-log-empty';
@@ -364,6 +388,7 @@
                 item = buildLogItem(log);
                 item.dataset.stationLogKey = key;
                 stationLogNodes.set(key, item);
+                announceNoPassAlert(log);
             } else {
                 updateLogItem(item, log);
             }
@@ -384,6 +409,8 @@
             item.remove();
             stationLogNodes.delete(key);
         });
+
+        logsInitialized = true;
     }
 
     function updateStatus(body) {

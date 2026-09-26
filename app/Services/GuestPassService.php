@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Camera;
+use App\Models\GuestVehicleObservation;
 use App\Models\GuestVisit;
 use App\Models\RfidScanLog;
 use App\Models\RfidTag;
@@ -117,8 +118,47 @@ class GuestPassService
                 'outcome' => 'guest_pass_issued',
             ])->save();
 
+            if (! empty($data['guest_observation_id'])) {
+                $this->resolveNoPassAlert((int) $data['guest_observation_id'], $pass);
+            }
+
             return $visit->fresh(['rfidTag', 'vehicleEvents']);
         });
+    }
+
+    /**
+     * Phase 5: the camera flagged this vehicle as "no pass" before the guard
+     * issued a guest pass to it, so the alert is resolved, not open.
+     */
+    protected function resolveNoPassAlert(int $observationId, RfidTag $pass): void
+    {
+        $observation = GuestVehicleObservation::query()
+            ->whereKey($observationId)
+            ->where('observation_source', 'cctv')
+            ->where('location', 'entrance')
+            ->where('status', '!=', GuestVehicleObservation::STATUS_RESOLVED)
+            ->first();
+
+        if (! $observation) {
+            return;
+        }
+
+        $note = 'Resolved: '.$pass->label.' issued.';
+
+        $observation->forceFill([
+            'status' => GuestVehicleObservation::STATUS_RESOLVED,
+            'notes' => $this->appendNote($observation->notes, $note),
+        ])->save();
+
+        if (filled($observation->external_event_key)) {
+            VehicleEvent::query()
+                ->where('external_event_key', $observation->external_event_key)
+                ->where('event_origin', 'guest_cctv')
+                ->update([
+                    'match_status' => VehicleEvent::MATCH_NO_PASS_RESOLVED,
+                    'anomaly_reason' => $note,
+                ]);
+        }
     }
 
     /**

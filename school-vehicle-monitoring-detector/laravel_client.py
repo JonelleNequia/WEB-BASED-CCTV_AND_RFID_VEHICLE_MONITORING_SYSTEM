@@ -166,9 +166,10 @@ class LaravelEventClient:
             "requires_capture": bool(body.get("requires_capture", False)),
         }
 
-    def check_rfid_match(self, camera_role, event_time, window_seconds=4, lookback_seconds=3):
+    def check_rfid_match(self, camera_role, event_time, window_seconds=4, lookback_seconds=10, event_key=None):
         """
-        Poll Laravel for a verified RFID scan at one gate during the detector window.
+        Poll Laravel for a registered tag or guest pass read at one gate, from
+        lookback_seconds before the crossing until the detector window ends.
         """
         if not self.rfid_match_url:
             return {
@@ -176,15 +177,21 @@ class LaravelEventClient:
                 "message": "Laravel RFID match endpoint is not configured.",
             }
 
+        params = {
+            "camera_role": camera_role,
+            "event_time": event_time,
+            "window_seconds": window_seconds,
+            "lookback_seconds": lookback_seconds,
+        }
+
+        # Lets Laravel give one RFID read to one vehicle only.
+        if event_key:
+            params["event_key"] = event_key
+
         try:
             response = requests.get(
                 self.rfid_match_url,
-                params={
-                    "camera_role": camera_role,
-                    "event_time": event_time,
-                    "window_seconds": window_seconds,
-                    "lookback_seconds": lookback_seconds,
-                },
+                params=params,
                 headers=self.integration_headers(),
                 timeout=RFID_MATCH_TIMEOUT_SECONDS,
             )
@@ -202,6 +209,7 @@ class LaravelEventClient:
         if response.status_code == 200:
             return {
                 "matched": bool(body.get("matched", False)),
+                "status": body.get("status"),
                 "message": body.get("message", "RFID match checked."),
                 "body": body,
                 "overlay": body.get("overlay"),
@@ -216,7 +224,7 @@ class LaravelEventClient:
 
     def submit_guest_observation(self, payload, image_bytes=None, filename=None):
         """
-        Submit an unregistered/guest detector capture after the RFID window expires.
+        Submit a "Vehicle with no pass" alert after the RFID window expires.
         """
         if not self.guest_observation_url:
             return {

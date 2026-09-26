@@ -53,7 +53,7 @@ class GuestObservationReviewTest extends TestCase
         $this->assertSame('verified', $observation->status);
     }
 
-    public function test_verifying_detector_guest_observation_syncs_event_and_session_details(): void
+    public function test_verifying_detector_no_pass_alert_syncs_event_details(): void
     {
         Storage::fake('public');
         $this->seed(DatabaseSeeder::class);
@@ -97,12 +97,7 @@ class GuestObservationReviewTest extends TestCase
         $this->assertSame('SYNC 123', $event->plate_text);
         $this->assertSame('SYNC 123', $event->plate_number);
         $this->assertSame('Black', $event->vehicle_color);
-        $this->assertDatabaseHas('active_sessions', [
-            'entry_event_id' => $event->id,
-            'plate_text' => 'SYNC 123',
-            'plate_number' => 'SYNC 123',
-            'vehicle_color' => 'Black',
-            'status' => 'open',
-        ]);
+        // Phase 5: a no-pass alert never opens a guest session.
+        $this->assertSame(0, ActiveSession::query()->count());
     }
 }

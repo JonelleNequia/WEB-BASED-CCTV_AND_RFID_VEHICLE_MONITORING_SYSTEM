@@ -3,12 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\UpdateGuestObservationRequest;
-use App\Models\ActiveSession;
 use App\Models\Camera;
 use App\Models\EventReceiveLog;
 use App\Models\GuestVehicleObservation;
-use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
+use App\Services\DetectorRfidMatchService;
 use App\Services\GuestObservationService;
 use App\Services\SettingsService;
 use App\Support\PlateNumber;
@@ -36,6 +35,11 @@ class GuestObservationController extends Controller
     protected const DETECTOR_SHARED_SCENE_DUPLICATE_WINDOW_SECONDS = 45;
 
     protected const DETECTOR_SHARED_SOURCE_MIN_IOU = 0.30;
+
+    /** Phase 5: a pass read this long after the crossing still cancels the alert. */
+    protected const DETECTOR_LATE_SCAN_SECONDS = 8;
+
+    public const NO_PASS_NOTE = 'Vehicle with no pass: no RFID tag or guest pass was read within the detector window.';
 
     /**
      * Show guest monitoring form and log history.
@@ -264,25 +268,33 @@ class GuestObservationController extends Controller
                 ]);
             }
 
-            $recentVerifiedScan = $this->findRecentVerifiedRfidScanForGuestPayload(
+            // Phase 5: a registered tag or guest pass read (from ~10s before the
+            // crossing up to a late read after the window) means no alert.
+            $matchService = app(DetectorRfidMatchService::class);
+            $recentVerifiedScan = $matchService->find(
                 $validated['camera_role'],
-                Carbon::parse($validated['event_time'])
+                Carbon::parse($validated['event_time']),
+                self::DETECTOR_LATE_SCAN_SECONDS,
+                DetectorRfidMatchService::DEFAULT_LOOKBACK_SECONDS,
+                $validated['external_event_key']
             );
 
             if ($recentVerifiedScan) {
+                $passType = $matchService->isGuestPassScan($recentVerifiedScan) ? 'a guest pass' : 'a registered vehicle';
+
                 EventReceiveLog::query()->create([
                     'source_name' => $sourceName,
                     'payload_json' => $this->safeGuestObservationLogPayload($request),
                     'status' => 'guest_observation_suppressed_registered',
-                    'notes' => "Guest observation suppressed because RFID scan {$recentVerifiedScan->id} already verified a registered vehicle.",
+                    'notes' => "No-pass alert suppressed because RFID scan {$recentVerifiedScan->id} verified {$passType}.",
                 ]);
 
                 return response()->json([
-                    'message' => 'Guest observation suppressed because a verified RFID scan matched this detector window.',
+                    'message' => 'No-pass alert suppressed because an RFID scan matched this detector window.',
                     'duplicate' => true,
                     'suppressed' => true,
                     'rfid_scan_id' => $recentVerifiedScan->id,
-                    'overlay' => $this->registeredOverlayPayload($recentVerifiedScan),
+                    'overlay' => $matchService->overlay($recentVerifiedScan),
                 ]);
             }
 
@@ -353,7 +365,7 @@ class GuestObservationController extends Controller
                     'external_event_key' => $validated['external_event_key'],
                     'detection_metadata_json' => $validated['detection_metadata'] ?? null,
                     'snapshot_path' => $snapshotPath,
-                    'notes' => 'No successful RFID scan was recorded within the detector confirmation window.',
+                    'notes' => self::NO_PASS_NOTE,
                     'created_by' => null,
                 ]);
 
@@ -420,8 +432,12 @@ class GuestObservationController extends Controller
     }
 
     /**
-     * Mirror one detector guest observation into vehicle_events for station,
+     * Mirror one detector no-pass alert into vehicle_events for station,
      * dashboard, and report screens that read the primary event stream.
+     *
+     * Phase 5: the alert is a log entry only. It no longer opens a guest
+     * ActiveSession or changes INSIDE/OUTSIDE; guests are tracked by
+     * guest pass visits.
      *
      * @param  array<string, mixed>  $validated
      */
@@ -452,9 +468,7 @@ class GuestObservationController extends Controller
         $vehicleType = $observation->vehicle_type
             ?: ($validated['detected_vehicle_type'] ?? 'Vehicle');
 
-        $existingEvent = VehicleEvent::query()
-            ->where('external_event_key', (string) $externalEventKey)
-            ->first();
+        $resolved = $observation->status === GuestVehicleObservation::STATUS_RESOLVED;
 
         $event = VehicleEvent::query()->updateOrCreate(
             ['external_event_key' => (string) $externalEventKey],
@@ -471,180 +485,27 @@ class GuestObservationController extends Controller
                 'vehicle_type' => $vehicleType,
                 'detected_vehicle_type' => $vehicleType,
                 'vehicle_color' => $vehicleColor,
-                'vehicle_category' => 'guest',
+                'vehicle_category' => null,
                 'camera_id' => $observation->camera_id,
                 'detection_metadata_json' => $observation->detection_metadata_json,
                 'details_completed_at' => now(),
                 'roi_name' => $observation->location === 'exit'
-                    ? 'Exit Guest Detector'
-                    : 'Entrance Guest Detector',
+                    ? 'Exit Camera'
+                    : 'Entrance Camera',
                 'event_time' => $observation->observed_at,
                 'vehicle_image_path' => $observation->snapshot_path,
                 'plate_image_path' => null,
                 'matched_entry_id' => null,
                 'match_score' => null,
-                'match_status' => $eventType === 'ENTRY' ? 'open' : 'unmatched',
-                'resulting_state' => $eventType === 'ENTRY' ? 'INSIDE' : 'OUTSIDE',
+                'match_status' => $resolved ? VehicleEvent::MATCH_NO_PASS_RESOLVED : VehicleEvent::MATCH_NO_PASS_ALERT,
+                'resulting_state' => null,
+                'anomaly_reason' => $resolved ? $observation->notes : 'Vehicle with no pass',
                 'daily_entries_count' => null,
                 'daily_exits_count' => null,
             ]
         );
 
-        if ($existingEvent && $eventType === 'EXIT' && $existingEvent->matched_entry_id) {
-            $event->forceFill([
-                'matched_entry_id' => $existingEvent->matched_entry_id,
-            ])->save();
-        }
-
-        $this->applyGuestVehicleSessionState($event);
-
-        return $event->fresh(['camera', 'matchedEntry.camera', 'activeSession']);
-    }
-
-    /**
-     * Keep guest vehicles persistent: ENTRY opens a session, EXIT closes it.
-     */
-    protected function applyGuestVehicleSessionState(VehicleEvent $event): void
-    {
-        if (! $this->isGuestVehicleEvent($event)) {
-            return;
-        }
-
-        if ($event->event_type === 'ENTRY') {
-            $session = ActiveSession::query()->firstOrCreate(
-                ['entry_event_id' => $event->id],
-                [
-                    'plate_text' => $event->plate_text,
-                    'plate_number' => $event->plate_number ?: ($event->plate_text !== null ? substr($event->plate_text, 0, 20) : null),
-                    'vehicle_type' => $event->vehicle_type,
-                    'vehicle_color' => $event->vehicle_color,
-                    'entry_time' => $event->event_time,
-                    'status' => 'open',
-                ]
-            );
-
-            $this->syncGuestSessionDetails($session, $event);
-
-            $event->forceFill([
-                'match_status' => $session->status === 'closed' ? 'closed' : 'open',
-                'resulting_state' => 'INSIDE',
-            ])->save();
-
-            return;
-        }
-
-        if ($event->event_type !== 'EXIT') {
-            return;
-        }
-
-        ActiveSession::query()
-            ->where('entry_event_id', $event->id)
-            ->delete();
-
-        $session = $event->matched_entry_id
-            ? ActiveSession::query()->where('entry_event_id', $event->matched_entry_id)->first()
-            : $this->findOpenGuestSessionForExit($event);
-
-        if (! $session) {
-            $event->forceFill([
-                'matched_entry_id' => null,
-                'match_score' => null,
-                'match_status' => 'unmatched',
-                'resulting_state' => 'OUTSIDE',
-            ])->save();
-
-            return;
-        }
-
-        $session->forceFill([
-            'status' => 'closed',
-            'time_out' => $event->event_time,
-        ])->save();
-
-        $event->forceFill([
-            'matched_entry_id' => $session->entry_event_id,
-            'match_score' => null,
-            'match_status' => 'closed',
-            'resulting_state' => 'OUTSIDE',
-        ])->save();
-
-        $session->entryEvent?->forceFill([
-            'match_status' => 'closed',
-            'resulting_state' => 'INSIDE',
-        ])->save();
-    }
-
-    protected function findOpenGuestSessionForExit(VehicleEvent $event): ?ActiveSession
-    {
-        $plate = $this->normalizePlate($event->plate_text ?: $event->plate_number);
-
-        $query = ActiveSession::query()
-            ->with('entryEvent')
-            ->where('status', 'open')
-            ->where('entry_event_id', '!=', $event->id)
-            ->where('entry_time', '<=', $event->event_time)
-            ->whereHas('entryEvent', function ($entryQuery): void {
-                $entryQuery->where(function ($guestQuery): void {
-                    $guestQuery->where('vehicle_category', 'guest')
-                        ->orWhereIn('event_origin', ['guest_cctv', 'guest_manual']);
-                });
-            });
-
-        if ($plate !== null) {
-            $fingerprint = $this->plateFingerprint($plate);
-
-            return $query
-                ->orderByDesc('entry_time')
-                ->limit(50)
-                ->get()
-                ->first(function (ActiveSession $session) use ($fingerprint): bool {
-                    return $fingerprint !== ''
-                        && in_array($fingerprint, [
-                            $this->plateFingerprint($session->plate_text),
-                            $this->plateFingerprint($session->plate_number),
-                        ], true);
-                });
-        }
-
-        if ($plate === null) {
-            if (filled($event->vehicle_type)) {
-                $query->where('vehicle_type', $event->vehicle_type);
-            }
-
-            if (filled($event->vehicle_color)) {
-                $query->where('vehicle_color', $event->vehicle_color);
-            }
-        }
-
-        return $query->orderByDesc('entry_time')->first();
-    }
-
-    protected function isGuestVehicleEvent(VehicleEvent $event): bool
-    {
-        return $event->vehicle_category === 'guest'
-            || in_array($event->event_origin, ['guest_cctv', 'guest_manual'], true);
-    }
-
-    protected function syncGuestSessionDetails(ActiveSession $session, VehicleEvent $event): void
-    {
-        $updates = [];
-
-        if (filled($event->plate_text)) {
-            $updates['plate_text'] = $event->plate_text;
-            $updates['plate_number'] = $event->plate_number ?: substr($event->plate_text, 0, 20);
-        }
-
-        if (filled($event->vehicle_type)) {
-            $updates['vehicle_type'] = $event->vehicle_type;
-        }
-
-        if (filled($event->vehicle_color)) {
-            $updates['vehicle_color'] = $event->vehicle_color;
-        }
-
-        if ($updates !== []) {
-            $session->forceFill($updates)->save();
-        }
+        return $event->fresh(['camera']);
     }
 
     /**
@@ -784,36 +645,6 @@ class GuestObservationController extends Controller
         return filled($validated['external_event_key'] ?? null)
             && filled($observation->external_event_key)
             && (string) $observation->external_event_key !== (string) $validated['external_event_key'];
-    }
-
-    protected function findRecentVerifiedRfidScanForGuestPayload(string $cameraRole, Carbon $eventTime): ?RfidScanLog
-    {
-        $eventTime = $eventTime->copy()->setTimezone(config('app.timezone', 'UTC'));
-        $from = $eventTime->copy()->subSeconds(3);
-        $to = $eventTime->copy()->addSeconds(8);
-
-        $query = RfidScanLog::query()
-            ->with('vehicle.rfidTag')
-            ->where('verification_status', 'verified')
-            ->where(function ($query) use ($from, $to): void {
-                $query->whereBetween('scan_time', [$from, $to])
-                    ->orWhereBetween('created_at', [$from, $to]);
-            });
-
-        $sameStationScan = (clone $query)
-            ->where('scan_location', $cameraRole)
-            ->latest('scan_time')
-            ->latest('created_at')
-            ->first();
-
-        if ($sameStationScan) {
-            return $sameStationScan;
-        }
-
-        return $query
-            ->latest('scan_time')
-            ->latest('created_at')
-            ->first();
     }
 
     protected function findRecentGuestObservationForDetectorPayload(
@@ -1292,40 +1123,11 @@ class GuestObservationController extends Controller
     /**
      * @return array<string, mixed>
      */
-    protected function registeredOverlayPayload(RfidScanLog $scanLog): array
-    {
-        $vehicle = $scanLog->vehicle;
-
-        return [
-            'verification' => 'registered',
-            'label' => 'REGISTERED - '.$vehicle?->plate_number,
-            'color' => 'green',
-            'rfid_scan_id' => $scanLog->id,
-            'action_taken' => $scanLog->resolved_event_type,
-            'new_state' => $scanLog->resulting_state,
-            'vehicle' => $vehicle ? [
-                'id' => $vehicle->id,
-                'plate_number' => $vehicle->plate_number,
-                'owner_name' => $vehicle->owner_name,
-                'category' => $vehicle->category,
-                'vehicle_type' => $vehicle->vehicle_type,
-                'rfid_tag_uid' => $vehicle->rfidTag?->uid ?? $vehicle->rfid_tag_uid,
-            ] : null,
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
     protected function guestOverlayPayload(GuestVehicleObservation $observation): array
     {
-        return [
-            'verification' => 'guest',
-            'label' => 'GUEST',
-            'color' => 'red',
+        return DetectorRfidMatchService::noPassOverlay([
             'guest_observation_id' => $observation->id,
             'status' => $observation->status,
-            'vehicle' => null,
-        ];
+        ]);
     }
 }

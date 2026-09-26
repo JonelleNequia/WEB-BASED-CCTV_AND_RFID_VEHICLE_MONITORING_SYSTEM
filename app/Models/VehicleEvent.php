@@ -20,6 +20,11 @@ class VehicleEvent extends Model
 
     public const STATUS_REQUIRES_MANUAL_REVIEW = 'requires_manual_review';
 
+    /** Phase 5: match_status of a detector "Vehicle with no pass" alert. */
+    public const MATCH_NO_PASS_ALERT = 'no_pass_alert';
+
+    public const MATCH_NO_PASS_RESOLVED = 'no_pass_resolved';
+
     /**
      * The attributes that are mass assignable.
      *
@@ -133,6 +138,31 @@ class VehicleEvent extends Model
     }
 
     /**
+     * Phase 5: station log fields for a detector "Vehicle with no pass" alert.
+     *
+     * @return array<string, mixed>
+     */
+    public static function noPassLogFields(self $event): array
+    {
+        if ($event->event_origin !== 'guest_cctv') {
+            return [];
+        }
+
+        return [
+            'plate_number' => $event->plate_text ?: 'NO PLATE READ',
+            'owner_name' => 'Unknown',
+            'verification_label' => 'NO PASS',
+            'resulting_state' => 'N/A',
+            // Older CCTV guest rows (before Phase 5) keep their old status and do not alert.
+            'no_pass_alert' => $event->match_status === self::MATCH_NO_PASS_ALERT,
+            'alert_location' => $event->event_type === 'EXIT' ? 'exit' : 'entrance',
+            'snapshot_url' => $event->vehicle_image_path
+                ? Storage::disk('public')->url($event->vehicle_image_path)
+                : null,
+        ];
+    }
+
+    /**
      * Phase 4: "Guest Pass #G-03" instead of the generic origin label.
      */
     public function getSourceDisplayLabelAttribute(): string
@@ -204,6 +234,8 @@ class VehicleEvent extends Model
         return match ($this->display_status) {
             'open' => 'Entry',
             'closed' => 'Exit',
+            self::MATCH_NO_PASS_ALERT => 'No-pass Alert',
+            self::MATCH_NO_PASS_RESOLVED => 'Resolved (pass issued)',
             default => str($this->display_status)->replace('_', ' ')->title()->value(),
         };
     }
@@ -242,7 +274,11 @@ class VehicleEvent extends Model
             return 'Pending';
         }
 
-        if ($this->vehicle_category === 'guest' || in_array($this->event_origin, ['guest_cctv', 'guest_manual'], true)) {
+        if ($this->event_origin === 'guest_cctv') {
+            return 'No pass';
+        }
+
+        if ($this->vehicle_category === 'guest' || $this->event_origin === 'guest_manual') {
             return 'Guest';
         }
 
@@ -265,7 +301,7 @@ class VehicleEvent extends Model
         return match ($this->event_origin) {
             'cctv_detected' => 'CCTV Observation',
             'guest_manual' => 'Guest Manual',
-            'guest_cctv' => 'Guest CCTV',
+            'guest_cctv' => 'No-pass Alert',
             'rfid_simulated' => 'RFID Scan',
             'rfid_hardware' => 'RFID Reader',
             'guest_pass' => 'Guest Pass',
@@ -308,6 +344,8 @@ class VehicleEvent extends Model
             self::STATUS_PENDING_DETAILS => 'pending-details',
             'manual_review' => 'manual-review',
             'guest' => 'manual-review',
+            self::MATCH_NO_PASS_ALERT => 'unmatched',
+            self::MATCH_NO_PASS_RESOLVED => 'closed',
             'matched' => 'matched',
             'unmatched' => 'unmatched',
             'closed' => 'closed',

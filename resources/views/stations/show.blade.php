@@ -99,6 +99,7 @@
         {{-- Phase 4: Issue Guest Pass pop-up (opens when an available pass is tapped). --}}
         <div class="station-modal" data-issue-modal hidden>
             <form class="station-modal-card" data-issue-form novalidate>
+                <input type="hidden" name="guest_observation_id" data-issue-field="observation_id">
                 <div class="station-modal-head">
                     <div>
                         <span class="station-kicker">Issue Guest Pass</span>

@@ -29,6 +29,9 @@ CAPTURE_DRAIN_FRAMES = 1
 STREAM_FRAME_MAX_WIDTH = 1280
 YOLO_IMAGE_SIZE = 640
 RFID_DETECTION_WINDOW_SECONDS = 4.0
+# Phase 5: accept RFID reads from this many seconds BEFORE the vehicle crosses
+# the trigger line (a UHF reader reads the tag while the car is approaching).
+RFID_LOOKBACK_SECONDS = 10.0
 RFID_POLL_INTERVAL_SECONDS = 0.5
 CAMERA_RETRY_DELAY_SECONDS = 2.0
 STATION_VIEWER_IDLE_AFTER_SECONDS = 10.0

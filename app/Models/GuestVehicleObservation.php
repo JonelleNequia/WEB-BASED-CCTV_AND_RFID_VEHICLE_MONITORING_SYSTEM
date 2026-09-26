@@ -13,6 +13,9 @@ class GuestVehicleObservation extends Model
     use HasFactory;
     use StoresLocalTime;
 
+    /** Phase 5: a no-pass alert closed because a guest pass was issued. */
+    public const STATUS_RESOLVED = 'resolved';
+
     /**
      * The attributes that are mass assignable.
      *

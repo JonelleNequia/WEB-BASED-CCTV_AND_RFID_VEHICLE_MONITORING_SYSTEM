@@ -106,6 +106,8 @@ class DashboardController extends Controller
             'overstayGuests' => GuestVisit::query()->where('status', GuestVisit::STATUS_OVERSTAY)->count(),
             'noPassAlertsToday' => GuestVehicleObservation::query()
                 ->where('observation_source', 'cctv')
+                // Phase 5: alerts resolved by issuing a guest pass are not counted.
+                ->where('status', '!=', GuestVehicleObservation::STATUS_RESOLVED)
                 ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['observed_at', 'created_at']))
                 ->count(),
             'passAlertsToday' => RfidScanLog::query()

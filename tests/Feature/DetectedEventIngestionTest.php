@@ -52,7 +52,7 @@ class DetectedEventIngestionTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('event_status', 'pending_review')
             ->assertJsonPath('event_type', 'GUEST')
-            ->assertJsonPath('overlay.verification', 'guest');
+            ->assertJsonPath('overlay.verification', 'no_pass');
 
         $observation = GuestVehicleObservation::query()
             ->where('external_event_key', 'test-crossing-entrance-001')
@@ -158,7 +158,7 @@ class DetectedEventIngestionTest extends TestCase
         ])->postJson(route('api.integration.events'), $payload)
             ->assertAccepted()
             ->assertJsonPath('requires_capture', true)
-            ->assertJsonPath('overlay.verification', 'guest');
+            ->assertJsonPath('overlay.verification', 'no_pass');
 
         $this->assertDatabaseMissing('guest_vehicle_observations', [
             'external_event_key' => 'test-crossing-no-rfid-probe',
@@ -307,7 +307,7 @@ class DetectedEventIngestionTest extends TestCase
         ])
             ->assertCreated()
             ->assertJsonPath('status', 'pending_review')
-            ->assertJsonPath('overlay.verification', 'guest');
+            ->assertJsonPath('overlay.verification', 'no_pass');
 
         $observation = GuestVehicleObservation::query()
             ->where('external_event_key', 'guest-window-timeout-001')
@@ -342,7 +342,7 @@ class DetectedEventIngestionTest extends TestCase
         ])
             ->assertCreated()
             ->assertJsonPath('status', 'pending_review')
-            ->assertJsonPath('overlay.verification', 'guest');
+            ->assertJsonPath('overlay.verification', 'no_pass');
 
         $observation = GuestVehicleObservation::query()
             ->where('external_event_key', 'guest-window-timeout-upload-001')
@@ -361,17 +361,14 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->assertSame('ENTRY', $event->event_type);
         $this->assertSame('guest_cctv', $event->event_origin);
-        $this->assertSame('guest', $event->vehicle_category);
+        $this->assertNull($event->vehicle_category);
         $this->assertSame('ABC1234', $event->plate_number);
-        $this->assertSame('open', $event->match_status);
-        $this->assertSame('INSIDE', $event->resulting_state);
+        // Phase 5: a "Vehicle with no pass" alert, not a guest INSIDE session.
+        $this->assertSame(VehicleEvent::MATCH_NO_PASS_ALERT, $event->match_status);
+        $this->assertNull($event->resulting_state);
+        $this->assertSame('Vehicle with no pass', $event->anomaly_reason);
         $this->assertSame($observation->snapshot_path, $event->vehicle_image_path);
-
-        $this->assertDatabaseHas('active_sessions', [
-            'entry_event_id' => $event->id,
-            'plate_number' => 'ABC1234',
-            'status' => 'open',
-        ]);
+        $this->assertSame(0, ActiveSession::query()->count());
     }
 
     public function test_detector_guest_observation_saves_number_first_ocr_as_letter_first_plate(): void
@@ -409,15 +406,10 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->assertSame('DPF-233', $event->plate_number);
         $this->assertSame('DPF-233', $event->plate_text);
-        $this->assertDatabaseHas('active_sessions', [
-            'entry_event_id' => $event->id,
-            'plate_number' => 'DPF-233',
-            'plate_text' => 'DPF-233',
-            'status' => 'open',
-        ]);
+        $this->assertSame(0, ActiveSession::query()->count());
     }
 
-    public function test_detector_guest_exit_closes_the_open_guest_session(): void
+    public function test_detector_no_pass_exit_is_not_matched_to_an_entry_by_type_or_color(): void
     {
         Storage::fake('public');
         $this->seed(DatabaseSeeder::class);
@@ -447,9 +439,8 @@ class DetectedEventIngestionTest extends TestCase
             ->where('external_event_key', 'guest-persistent-entry-001')
             ->firstOrFail();
 
-        $this->assertSame('open', ActiveSession::query()->where('entry_event_id', $entryEvent->id)->value('status'));
-        // Phase 3: only guest pass visits count as guests inside; CCTV guest
-        // sessions are still recorded but no longer change the count.
+        // Phase 5: no guest ActiveSession and no change to the inside count.
+        $this->assertSame(0, ActiveSession::query()->count());
         $this->actingAs($admin)
             ->getJson(route('dashboard.live-state'))
             ->assertJsonPath('metrics.vehicles_inside', $baselineInside);
@@ -471,12 +462,11 @@ class DetectedEventIngestionTest extends TestCase
             ->where('external_event_key', 'guest-persistent-exit-001')
             ->firstOrFail();
 
+        // Same type and color, but no guest exit matching any more.
         $this->assertSame('EXIT', $exitEvent->event_type);
-        $this->assertSame('closed', $exitEvent->match_status);
-        $this->assertSame('OUTSIDE', $exitEvent->resulting_state);
-        $this->assertSame($entryEvent->id, $exitEvent->matched_entry_id);
-        $this->assertSame('closed', ActiveSession::query()->where('entry_event_id', $entryEvent->id)->value('status'));
-        $this->assertNotNull(ActiveSession::query()->where('entry_event_id', $entryEvent->id)->value('time_out'));
+        $this->assertSame(VehicleEvent::MATCH_NO_PASS_ALERT, $exitEvent->match_status);
+        $this->assertNull($exitEvent->matched_entry_id);
+        $this->assertSame(VehicleEvent::MATCH_NO_PASS_ALERT, $entryEvent->fresh()->match_status);
         $this->actingAs($admin)
             ->getJson(route('dashboard.live-state'))
             ->assertJsonPath('metrics.vehicles_inside', $baselineInside);
@@ -881,7 +871,7 @@ class DetectedEventIngestionTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('duplicate', true)
-            ->assertJsonPath('overlay.verification', 'guest');
+            ->assertJsonPath('overlay.verification', 'no_pass');
 
         $observation = GuestVehicleObservation::query()
             ->where('external_event_key', 'guest-window-two-step-001')
@@ -900,13 +890,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertSame('ABC 123', $event->plate_number);
         $this->assertSame('White', $event->vehicle_color);
         $this->assertSame($observation->snapshot_path, $event->vehicle_image_path);
-        $this->assertDatabaseHas('active_sessions', [
-            'entry_event_id' => $event->id,
-            'plate_text' => 'ABC 123',
-            'plate_number' => 'ABC 123',
-            'vehicle_color' => 'White',
-            'status' => 'open',
-        ]);
+        $this->assertSame(0, ActiveSession::query()->count());
 
         $this->assertTrue(EventReceiveLog::query()
             ->where('status', 'guest_observation_duplicate_updated')

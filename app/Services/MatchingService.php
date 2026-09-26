@@ -129,12 +129,16 @@ class MatchingService
             }
         }
 
-        if ($this->sameText($session->vehicle_type, $exitEvent->vehicle_type)) {
-            $score += 15;
-        }
+        // Phase 5: guests are no longer matched by vehicle type + color; a
+        // guest exit needs the plate (guest passes close by RFID instead).
+        if (! $this->isGuestVehicleEvent($exitEvent)) {
+            if ($this->sameText($session->vehicle_type, $exitEvent->vehicle_type)) {
+                $score += 15;
+            }
 
-        if ($this->sameText($session->vehicle_color, $exitEvent->vehicle_color)) {
-            $score += 10;
+            if ($this->sameText($session->vehicle_color, $exitEvent->vehicle_color)) {
+                $score += 10;
+            }
         }
 
         if ($this->hasPlausibleTimeGap($session->entry_time, $exitEvent->event_time)) {

@@ -29,6 +29,7 @@ from config import (
     PUBLIC_CAMERA_DIR,
     RECONNECT_DELAY_SECONDS,
     RFID_DETECTION_WINDOW_SECONDS,
+    RFID_LOOKBACK_SECONDS,
     RFID_MATCH_TIMEOUT_SECONDS,
     RFID_POLL_INTERVAL_SECONDS,
     SNAPSHOTS_DIR,
@@ -1162,13 +1163,17 @@ def overlay_color(overlay):
 
 def default_overlay():
     """
-    Fallback label before a detection is matched with a verified RFID scan.
+    Label when no registered tag or guest pass was read in the window.
     """
     return {
-        "label": "GUEST",
+        "label": "NO PASS",
         "color": "red",
-        "verification": "guest",
+        "verification": "no_pass",
     }
+
+
+# Overlays that are a final decision and stay on screen briefly after the box is lost.
+RESOLVED_VERIFICATIONS = {"registered", "guest_pass", "pass_alert", "no_pass"}
 
 
 def waiting_overlay():
@@ -1301,7 +1306,7 @@ def render_annotated_frame(role, frame, results, camera_config, state, vehicle_l
 
         hold_seconds = (
             RESOLVED_OVERLAY_HOLD_SECONDS
-            if overlay.get("verification") in {"registered", "guest"}
+            if overlay.get("verification") in RESOLVED_VERIFICATIONS
             else 0.75
         )
 
@@ -1392,7 +1397,7 @@ def start_detection_window(
     with state["lock"]:
         tracked = ensure_tracked_vehicle_locked(state, track_id, now_monotonic)
 
-        if tracked.get("status") in {"registered", "guest", "processed"}:
+        if tracked.get("status") in {"registered", "guest_pass", "no_pass", "processed"}:
             return
 
         tracked.update({
@@ -1431,7 +1436,8 @@ def start_detection_window(
 
 def apply_rfid_match_result(state, track_id, match):
     """
-    Promote a pending detection to REGISTERED as soon as Laravel finds a scan.
+    Resolve a pending detection as soon as Laravel finds a registered tag or
+    guest pass read.
     """
     now_monotonic = time.monotonic()
 
@@ -1449,6 +1455,7 @@ def apply_rfid_match_result(state, track_id, match):
         vehicle = (match.get("body") or {}).get("vehicle") or {}
         plate_number = vehicle.get("plate_number")
         overlay = match.get("overlay") or registered_overlay(plate_number)
+        status = "guest_pass" if match.get("status") == "guest_pass" else "registered"
         state["track_overlays"][track_id] = overlay
         state["crossed_track_ids"][track_id] = now_monotonic
         state.setdefault("tracked_vehicles", {}).setdefault(track_id, {
@@ -1456,7 +1463,7 @@ def apply_rfid_match_result(state, track_id, match):
             "first_seen_monotonic": now_monotonic,
         })
         state["tracked_vehicles"][track_id].update({
-            "status": "registered",
+            "status": status,
             "registered_at": time.time(),
             "registered_at_monotonic": now_monotonic,
         })
@@ -1470,7 +1477,8 @@ def apply_rfid_match_result(state, track_id, match):
 
 def rfid_detection_window_worker(role, state, track_id, laravel_client):
     """
-    Poll Laravel and upload the guest snapshot outside the frame capture loop.
+    Poll Laravel for a pass read; on timeout send a no-pass alert, all outside
+    the frame capture loop.
     """
     while True:
         with state["lock"]:
@@ -1480,6 +1488,7 @@ def rfid_detection_window_worker(role, state, track_id, laravel_client):
                 return
 
             event_time = window["event_time"]
+            event_key = window["event_key"]
             deadline_at = window["deadline_at"]
 
         remaining = deadline_at - time.monotonic()
@@ -1494,6 +1503,8 @@ def rfid_detection_window_worker(role, state, track_id, laravel_client):
             role,
             event_time,
             RFID_DETECTION_WINDOW_SECONDS,
+            RFID_LOOKBACK_SECONDS,
+            event_key,
         )
 
         if apply_rfid_match_result(state, track_id, match):
@@ -1654,7 +1665,9 @@ def analyze_guest_vehicle_details(analysis_frames):
 
 def submit_guest_observation_for_window(role, state, track_id, laravel_client):
     """
-    Save one guest capture after the RFID window expires without blocking video.
+    Send one "Vehicle with no pass" alert (snapshot, then color/plate) after
+    the RFID window expires without blocking video. Laravel no longer turns
+    this into a guest record or an INSIDE guest session.
     """
     now_monotonic = time.monotonic()
 
@@ -1689,9 +1702,9 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             return
 
         tracked.update({
-            "status": "guest",
-            "guest_declared_at": time.time(),
-            "guest_declared_at_monotonic": now_monotonic,
+            "status": "no_pass",
+            "no_pass_declared_at": time.time(),
+            "no_pass_declared_at_monotonic": now_monotonic,
         })
         mark_processed_as_guest_locked(
             state,
@@ -1704,7 +1717,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
 
     if snapshot_frame is None:
         with state["lock"]:
-            state["last_error"] = f"{role.capitalize()} vehicle had no RFID match, but no snapshot frame was available."
+            state["last_error"] = f"{role.capitalize()} vehicle had no pass read, but no snapshot frame was available."
         return
 
     snapshot = encode_frame_snapshot(
@@ -1715,7 +1728,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
 
     if not snapshot:
         with state["lock"]:
-            state["last_error"] = f"{role.capitalize()} vehicle had no RFID match, but snapshot encoding failed."
+            state["last_error"] = f"{role.capitalize()} vehicle had no pass read, but snapshot encoding failed."
         return
 
     base_metadata = {
@@ -1724,6 +1737,8 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
         "direction": window_payload["direction"],
         "bbox_xyxy": list(window_payload["xyxy"]),
         "rfid_window_seconds": RFID_DETECTION_WINDOW_SECONDS,
+        "rfid_lookback_seconds": RFID_LOOKBACK_SECONDS,
+        "alert_type": "no_pass",
         "analysis_status": "pending",
     }
     base_payload = {
@@ -1749,7 +1764,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
                 state["crossings_logged"] += 1
             state["last_error"] = ""
         else:
-            state["last_error"] = initial_result.get("message", "Guest observation could not be saved.")
+            state["last_error"] = initial_result.get("message", "No-pass alert could not be saved.")
             return
 
     if not analysis_frames:
@@ -1782,7 +1797,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
     vehicle_color = reconcile_guest_vehicle_color(vehicle_color, detailed_vehicle_color)
 
     print(
-        f"{role.capitalize()} guest analysis {window_payload['event_key']}: "
+        f"{role.capitalize()} no-pass alert analysis {window_payload['event_key']}: "
         f"plate={plate_number or 'None'} color={vehicle_color or 'None'} "
         f"ocr_frames={analysis_details['frames_checked']} "
         f"ocr_elapsed={analysis_details['elapsed_seconds']}s",
@@ -1811,7 +1826,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
         remember_recent_resolution_locked(state, track_id, window_payload["xyxy"], state["track_overlays"][track_id], time.monotonic())
 
         if not result.get("accepted"):
-            state["last_error"] = result.get("message", "Guest observation could not be saved.")
+            state["last_error"] = result.get("message", "No-pass alert could not be saved.")
 
 
 def update_detection_windows(role, frame, results, state, laravel_client):
