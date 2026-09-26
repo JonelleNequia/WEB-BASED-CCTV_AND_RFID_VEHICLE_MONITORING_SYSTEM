@@ -290,7 +290,7 @@ class Phase5DetectorAlertTest extends TestCase
     protected function detectorHeaders(): array
     {
         return [
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
             'Accept' => 'application/json',
         ];

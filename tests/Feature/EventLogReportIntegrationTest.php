@@ -175,6 +175,9 @@ class EventLogReportIntegrationTest extends TestCase
             'snapshot_path' => 'guest_snapshots/realtime-guest.jpg',
         ]);
 
+        // Phase 6: the log feeds need a signed-in admin.
+        $this->actingAs(User::query()->where('email', 'admin@philcst.local')->firstOrFail());
+
         $this->getJson(route('api.recent-guest-logs'))
             ->assertOk()
             ->assertJsonPath('logs.0.plate_number', 'GST-RT-01')
@@ -197,7 +200,7 @@ class EventLogReportIntegrationTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
-        $sourcePath = public_path('camera/exit_latest_frame.jpg');
+        $sourcePath = \App\Support\CameraFiles::framePath('exit');
         File::ensureDirectoryExists(dirname($sourcePath));
         File::put($sourcePath, 'guest-event-log-frame');
 

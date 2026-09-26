@@ -22,3 +22,5 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+# Phase 6: old public camera output (now storage/app/camera)
+/public/camera

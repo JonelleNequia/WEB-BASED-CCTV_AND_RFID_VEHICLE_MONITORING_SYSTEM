@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\CameraFiles;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\File;
 
@@ -122,7 +123,8 @@ class DetectorRuntimeService
 
     public function statusPath(): string
     {
-        return public_path('camera/camera_status.json');
+        // Phase 6: moved out of public/ (served by camera.status for admins).
+        return CameraFiles::statusPath();
     }
 
     public function runtimeLogPath(): string

@@ -50,4 +50,16 @@ return [
         'rfid_exports' => env('MONITORING_RFID_EXPORTS_DIR', 'rfid-scan-exports'),
         'backups' => env('MONITORING_BACKUP_DIR', 'backups'),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Camera Runtime Files (Phase 6)
+    |--------------------------------------------------------------------------
+    |
+    | camera_status.json and the latest/annotated frames the detector writes.
+    | They live outside public/ and are served only through signed-in routes.
+    |
+    */
+
+    'camera_files_path' => env('CAMERA_FILES_PATH', storage_path('app/camera')),
 ];

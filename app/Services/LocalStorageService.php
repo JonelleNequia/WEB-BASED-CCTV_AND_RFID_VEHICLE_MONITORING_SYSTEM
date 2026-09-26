@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\CameraFiles;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
@@ -60,15 +61,16 @@ class LocalStorageService
     }
 
     /**
-     * Copy the latest public camera frame into public evidence storage.
+     * Copy the latest camera frame into evidence storage.
      */
     public function storeLatestCameraSnapshot(string $cameraRole): ?string
     {
         $sourcePath = null;
 
         foreach ([
-            public_path('camera/'.$cameraRole.'_latest_frame.jpg'),
-            public_path('camera/'.$cameraRole.'_annotated_frame.jpg'),
+            // Phase 6: frames are private runtime files, not public/camera.
+            CameraFiles::framePath($cameraRole, 'latest'),
+            CameraFiles::framePath($cameraRole, 'annotated'),
         ] as $candidatePath) {
             if (File::isFile($candidatePath) && File::size($candidatePath) > 0) {
                 $sourcePath = $candidatePath;

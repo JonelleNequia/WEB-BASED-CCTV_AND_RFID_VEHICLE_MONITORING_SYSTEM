@@ -31,5 +31,7 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="DETECTOR_API_KEY" value="test-detector-key"/>
+        <env name="CAMERA_FILES_PATH" value="storage/framework/testing/camera"/>
     </php>
 </phpunit>

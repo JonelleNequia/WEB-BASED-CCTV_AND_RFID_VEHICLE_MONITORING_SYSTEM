@@ -59,10 +59,10 @@
 
                             <div class="monitor-frame-stage">
                                 <img
-                                    src="{{ asset('camera/'.$role.'_annotated_frame.jpg') }}?v={{ now()->timestamp }}"
+                                    src="{{ route('camera.frame', ['role' => $role, 'kind' => 'annotated']) }}?v={{ now()->timestamp }}"
                                     alt="{{ $camera['role_label'] }} AI overlay feed"
                                     data-live-frame
-                                    data-frame-base="{{ asset('camera/'.$role.'_annotated_frame.jpg') }}"
+                                    data-frame-base="{{ route('camera.frame', ['role' => $role, 'kind' => 'annotated']) }}"
                                 >
                                 <div class="monitor-frame-fallback" data-frame-fallback>
                                     Waiting for detector frame

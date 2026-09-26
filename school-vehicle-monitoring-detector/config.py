@@ -4,9 +4,12 @@ from pathlib import Path
 
 MODULE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = MODULE_ROOT.parent
-PUBLIC_CAMERA_DIR = PROJECT_ROOT / "public" / "camera"
-SNAPSHOTS_DIR = PUBLIC_CAMERA_DIR / "snapshots"
-STATUS_FILE_PATH = PUBLIC_CAMERA_DIR / "camera_status.json"
+# Phase 6: runtime camera files stay out of public/. Laravel serves them only
+# to signed-in users (see app/Support/CameraFiles.php for the same layout).
+CAMERA_FILES_DIR = PROJECT_ROOT / "storage" / "app" / "camera"
+FRAMES_DIR = CAMERA_FILES_DIR / "frames"
+SNAPSHOTS_DIR = CAMERA_FILES_DIR / "snapshots"
+STATUS_FILE_PATH = CAMERA_FILES_DIR / "camera_status.json"
 RUNTIME_CONFIG_PATH = PROJECT_ROOT / "storage" / "app" / "camera" / "camera_runtime_config.json"
 STATION_ACTIVITY_PATH = PROJECT_ROOT / "storage" / "app" / "camera" / "station_activity.json"
 PUBLIC_STORAGE_DIR = PROJECT_ROOT / "storage" / "app" / "public"
@@ -108,14 +111,14 @@ def latest_frame_path(role):
     """
     Build the per-camera latest-frame output path.
     """
-    return PUBLIC_CAMERA_DIR / f"{role}_latest_frame.jpg"
+    return FRAMES_DIR / f"{role}_latest_frame.jpg"
 
 
 def annotated_frame_path(role):
     """
     Build the per-camera annotated-frame output path for the guard monitor.
     """
-    return PUBLIC_CAMERA_DIR / f"{role}_annotated_frame.jpg"
+    return FRAMES_DIR / f"{role}_annotated_frame.jpg"
 
 
 def normalize_camera_config(role, loaded_config):

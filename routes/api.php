@@ -12,12 +12,20 @@ Route::middleware('throttle:1200,1')->group(function (): void {
         ->name('api.check-latest-scan');
     Route::post('/guest-observation', [GuestObservationController::class, 'store'])
         ->name('api.guest-observation');
+});
+
+// Phase 6: log feeds need a signed-in session (they were open to anyone on
+// the network). 'web' adds the session cookie the pages already send.
+Route::middleware(['web', 'auth', 'throttle:1200,1'])->group(function (): void {
     Route::get('/recent-station-logs', [RealtimeLogController::class, 'stationLogs'])
         ->name('api.recent-station-logs');
-    Route::get('/recent-guest-logs', [RealtimeLogController::class, 'guestLogs'])
-        ->name('api.recent-guest-logs');
-    Route::get('/recent-event-logs', [RealtimeLogController::class, 'eventLogs'])
-        ->name('api.recent-event-logs');
+
+    Route::middleware('admin')->group(function (): void {
+        Route::get('/recent-guest-logs', [RealtimeLogController::class, 'guestLogs'])
+            ->name('api.recent-guest-logs');
+        Route::get('/recent-event-logs', [RealtimeLogController::class, 'eventLogs'])
+            ->name('api.recent-event-logs');
+    });
 });
 
 Route::prefix('v1/integration')

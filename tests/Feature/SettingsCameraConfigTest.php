@@ -35,7 +35,6 @@ class SettingsCameraConfigTest extends TestCase
                 'deployment_mode' => 'offline_local',
                 'cctv_simulation_mode' => 'enabled',
                 'rfid_simulation_mode' => 'enabled',
-                'python_api_key' => 'PHILCST-DEMO-KEY',
                 'camera_source_placeholder' => 'rtsp://future-camera-source',
                 'retention_days' => 30,
                 'entrance_portal_label' => 'Main Entrance Portal',
@@ -69,6 +68,9 @@ class SettingsCameraConfigTest extends TestCase
             $this->assertSame('offline_local', $config['system_settings']['deployment_mode']);
             $this->assertSame('enabled', $config['system_settings']['rfid_simulation_mode']);
             $this->assertSame('Main Entrance Portal', $config['system_settings']['entrance_portal_label']);
+            // Phase 6: the detector key is exported from .env, not saved in the database.
+            $this->assertSame('test-detector-key', $config['system_settings']['python_api_key']);
+            $this->assertDatabaseMissing('system_settings', ['setting_key' => 'python_api_key']);
             $this->assertSame('Entrance Camera', $config['cameras']['entrance']['camera_name']);
             $this->assertSame('webcam', $config['cameras']['entrance']['source_type']);
             $this->assertSame(0, $config['cameras']['entrance']['source_value']);
@@ -105,7 +107,6 @@ class SettingsCameraConfigTest extends TestCase
             'deployment_mode' => 'offline_local',
             'cctv_simulation_mode' => 'enabled',
             'rfid_simulation_mode' => 'enabled',
-            'python_api_key' => 'PHILCST-DEMO-KEY',
             'camera_source_placeholder' => 'rtsp://future-camera-source',
             'retention_days' => 30,
             'entrance_portal_label' => 'Main Entrance Portal',

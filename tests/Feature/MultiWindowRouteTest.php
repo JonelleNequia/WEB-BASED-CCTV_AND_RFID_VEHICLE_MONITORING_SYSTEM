@@ -302,7 +302,7 @@ class MultiWindowRouteTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
-        $sourcePath = public_path('camera/entrance_latest_frame.jpg');
+        $sourcePath = \App\Support\CameraFiles::framePath('entrance');
         File::ensureDirectoryExists(dirname($sourcePath));
         File::put($sourcePath, 'guest-category-frame');
 

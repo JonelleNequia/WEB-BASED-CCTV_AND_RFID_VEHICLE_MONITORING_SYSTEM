@@ -19,6 +19,7 @@ class SettingsController extends Controller
         return view('settings.index', [
             'settings' => $settingsService->all(),
             'cameraConfigs' => $settingsService->cameraConfigurations(),
+            'detectorKeySet' => $settingsService->detectorApiKey() !== '',
         ]);
     }
 

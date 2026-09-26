@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\RfidScanLog;
 use App\Models\RfidTag;
-use App\Models\SystemSetting;
 use App\Models\User;
 use App\Models\Vehicle;
 use Database\Seeders\DatabaseSeeder;
@@ -99,15 +98,10 @@ class RfidSimulationTest extends TestCase
      */
     public function test_api_rfid_scan_at_exit_records_exit_for_inside_vehicle(): void
     {
-        SystemSetting::query()->create([
-            'setting_key' => 'python_api_key',
-            'setting_value' => 'PHILCST-DEMO-KEY',
-        ]);
-
         [$vehicle] = $this->createAssignedVehicleWithTag('TOG-2002', 'RFID-TOGGLE-2002', Vehicle::STATE_INSIDE);
 
         $this->withHeaders([
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-rfid-reader',
         ])->postJson(route('api.integration.rfid-scans'), [
             'tag_uid' => 'RFID-TOGGLE-2002',
@@ -138,7 +132,7 @@ class RfidSimulationTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
-        $sourcePath = public_path('camera/entrance_latest_frame.jpg');
+        $sourcePath = \App\Support\CameraFiles::framePath('entrance');
 
         File::ensureDirectoryExists(dirname($sourcePath));
         File::put($sourcePath, 'guest-frame');

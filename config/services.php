@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+    /*
+    | Phase 6: shared key the Python detector and RFID/UHF adapters send as
+    | X-Api-Key. Set it in .env, never in the database or the source code.
+    */
+    'detector' => [
+        'api_key' => env('DETECTOR_API_KEY', ''),
+    ],
+
 ];

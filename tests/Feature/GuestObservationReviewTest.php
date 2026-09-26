@@ -61,7 +61,7 @@ class GuestObservationReviewTest extends TestCase
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->withHeaders([
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ])->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-review-sync-001',

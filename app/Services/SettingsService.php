@@ -28,7 +28,6 @@ class SettingsService
             'deployment_mode' => 'offline_local',
             'cctv_simulation_mode' => 'enabled',
             'rfid_simulation_mode' => 'enabled',
-            'python_api_key' => '',
             'camera_source_placeholder' => 'rtsp://future-camera-source',
             'retention_days' => '30',
             'entrance_portal_label' => 'PHILCST Entrance Portal',
@@ -71,6 +70,24 @@ class SettingsService
     public function get(string $key, ?string $default = null): ?string
     {
         return $this->all()[$key] ?? $default;
+    }
+
+    /**
+     * Phase 6: the detector / RFID adapter key comes from .env (DETECTOR_API_KEY).
+     */
+    public function detectorApiKey(): string
+    {
+        return trim((string) config('services.detector.api_key', ''));
+    }
+
+    /**
+     * Without a key, only this PC may call the integration API, and never in production.
+     */
+    public function allowsKeylessLocalIntegration(): bool
+    {
+        return $this->detectorApiKey() === ''
+            && ! app()->isProduction()
+            && $this->get('deployment_mode', 'offline_local') === 'offline_local';
     }
 
     /**
@@ -148,7 +165,7 @@ class SettingsService
                 'deployment_mode' => $settings['deployment_mode'] ?? 'offline_local',
                 'cctv_simulation_mode' => $settings['cctv_simulation_mode'] ?? 'enabled',
                 'rfid_simulation_mode' => $settings['rfid_simulation_mode'] ?? 'enabled',
-                'python_api_key' => $settings['python_api_key'] ?? '',
+                'python_api_key' => $this->detectorApiKey(),
                 'app_url' => $integrationBaseUrl,
                 'event_ingest_url' => $integrationBaseUrl.'/api/v1/integration/events',
                 'guest_observation_url' => $integrationBaseUrl.'/api/guest-observation',

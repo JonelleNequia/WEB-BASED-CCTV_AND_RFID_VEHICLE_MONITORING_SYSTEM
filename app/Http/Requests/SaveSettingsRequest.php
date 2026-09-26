@@ -29,7 +29,6 @@ class SaveSettingsRequest extends FormRequest
             'deployment_mode' => ['required', 'in:offline_local'],
             'cctv_simulation_mode' => ['required', 'in:enabled,disabled'],
             'rfid_simulation_mode' => ['required', 'in:enabled,disabled'],
-            'python_api_key' => ['nullable', 'string', 'max:255'],
             'camera_source_placeholder' => ['nullable', 'string', 'max:255'],
             'retention_days' => ['nullable', 'integer', 'min:1', 'max:3650'],
             'entrance_portal_label' => ['required', 'string', 'max:100'],

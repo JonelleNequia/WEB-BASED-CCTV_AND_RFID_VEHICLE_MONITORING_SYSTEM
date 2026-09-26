@@ -13,6 +13,7 @@ import numpy as np
 
 from config import (
     ALLOWED_VEHICLE_CLASS_NAMES,
+    CAMERA_FILES_DIR,
     CAPTURE_INTERVAL_SECONDS,
     CAPTURE_DRAIN_FRAMES,
     CAPTURE_STALL_SECONDS,
@@ -21,12 +22,12 @@ from config import (
     DETECTION_FRAME_INTERVAL,
     DETECTION_CONFIDENCE_THRESHOLD,
     DETECTION_IOU_THRESHOLD,
+    FRAMES_DIR,
     JPEG_QUALITY,
     MJPEG_STREAM_BIND_HOST,
     MJPEG_STREAM_HOST,
     MJPEG_STREAM_PORT,
     MODEL_PATH,
-    PUBLIC_CAMERA_DIR,
     RECONNECT_DELAY_SECONDS,
     RFID_DETECTION_WINDOW_SECONDS,
     RFID_LOOKBACK_SECONDS,
@@ -143,7 +144,8 @@ def ensure_output_directories():
     """
     Create the folders that Laravel and the detector both read from.
     """
-    PUBLIC_CAMERA_DIR.mkdir(parents=True, exist_ok=True)
+    CAMERA_FILES_DIR.mkdir(parents=True, exist_ok=True)
+    FRAMES_DIR.mkdir(parents=True, exist_ok=True)
     SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
     DETECTED_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 

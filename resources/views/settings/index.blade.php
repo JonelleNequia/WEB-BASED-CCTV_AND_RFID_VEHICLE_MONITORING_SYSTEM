@@ -277,8 +277,10 @@
                 <div class="details-card-body">
                     <div class="form-grid">
                         <div class="field">
+                            {{-- Phase 6: the key lives in .env, never shown or edited here. --}}
                             <label for="python_api_key">Shared Integration Key</label>
-                            <input id="python_api_key" type="text" name="python_api_key" value="{{ old('python_api_key', $settings['python_api_key']) }}" placeholder="Optional">
+                            <input id="python_api_key" type="text" value="{{ $detectorKeySet ? 'Set in .env (DETECTOR_API_KEY)' : 'Not set: add DETECTOR_API_KEY to .env' }}" readonly>
+                            <span class="field-help">Used by the Python detector and RFID readers. Change it in .env, then restart the server.</span>
                         </div>
 
                         <div class="field">

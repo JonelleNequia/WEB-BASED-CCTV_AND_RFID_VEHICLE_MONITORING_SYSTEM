@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\CalibrationController;
+use App\Http\Controllers\CameraFileController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EvidenceController;
 use App\Http\Controllers\GuestObservationController;
@@ -13,6 +14,7 @@ use App\Http\Controllers\StationController;
 use App\Http\Controllers\SystemStatusController;
 use App\Http\Controllers\VehicleRegistryController;
 use App\Http\Controllers\VehicleEventController;
+use App\Support\CameraFiles;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
@@ -29,6 +31,17 @@ Route::middleware('guest')->group(function (): void {
     Route::post('/login', [LoginController::class, 'store'])
         ->middleware('throttle:5,1')
         ->name('login.store');
+});
+
+// Phase 6: camera frames and detector status are no longer public files.
+Route::middleware('auth')->group(function (): void {
+    Route::get('/camera/{role}/frame/{kind?}', [CameraFileController::class, 'frame'])
+        ->whereIn('role', CameraFiles::ROLES)
+        ->whereIn('kind', CameraFiles::KINDS)
+        ->name('camera.frame');
+    Route::get('/camera/status', [CameraFileController::class, 'status'])
+        ->middleware('admin')
+        ->name('camera.status');
 });
 
 // Phase 1: 'detector' keeps vehicle detection running on every signed-in page.

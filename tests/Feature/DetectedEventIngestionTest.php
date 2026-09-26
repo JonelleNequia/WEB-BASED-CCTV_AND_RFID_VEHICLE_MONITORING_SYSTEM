@@ -6,7 +6,6 @@ use App\Models\ActiveSession;
 use App\Models\EventReceiveLog;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidTag;
-use App\Models\SystemSetting;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Models\VehicleEvent;
@@ -46,7 +45,7 @@ class DetectedEventIngestionTest extends TestCase
         ];
 
         $this->withHeaders([
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ])->postJson(route('api.integration.events'), $payload)
             ->assertCreated()
@@ -81,7 +80,7 @@ class DetectedEventIngestionTest extends TestCase
         ];
 
         $headers = [
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ];
 
@@ -122,7 +121,7 @@ class DetectedEventIngestionTest extends TestCase
         ];
 
         $this->withHeaders([
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ])->postJson(route('api.integration.events'), $payload)
             ->assertOk()
@@ -153,7 +152,7 @@ class DetectedEventIngestionTest extends TestCase
         ];
 
         $this->withHeaders([
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ])->postJson(route('api.integration.events'), $payload)
             ->assertAccepted()
@@ -179,7 +178,7 @@ class DetectedEventIngestionTest extends TestCase
         ]);
 
         $this->withHeaders([
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ])->getJson(route('api.integration.rfid-match', [
             'camera_role' => 'entrance',
@@ -206,7 +205,7 @@ class DetectedEventIngestionTest extends TestCase
         ]);
 
         $this->withHeaders([
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ])->getJson(route('api.integration.rfid-match', [
             'camera_role' => 'exit',
@@ -223,10 +222,7 @@ class DetectedEventIngestionTest extends TestCase
     {
         $this->seed(DatabaseSeeder::class);
 
-        SystemSetting::query()->updateOrCreate(
-            ['setting_key' => 'python_api_key'],
-            ['setting_value' => '']
-        );
+        config(['services.detector.api_key' => '']);
 
         $tag = $this->createAssignedVehicleWithTag('RFID-DETECT-3003', 'DET-3003');
         $scanTime = now();
@@ -270,7 +266,7 @@ class DetectedEventIngestionTest extends TestCase
         ], 'station_reader');
 
         $headers = [
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ];
 
@@ -291,7 +287,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $this->withHeaders([
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ])->postJson(route('api.integration.guest-observations'), [
             'external_event_key' => 'guest-window-timeout-001',
@@ -325,7 +321,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $this->withHeaders([
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ])->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-timeout-upload-001',
@@ -377,7 +373,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $this->withHeaders([
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ])->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-number-first-ocr-001',
@@ -415,7 +411,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $headers = [
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ];
         $eventTime = now();
@@ -489,7 +485,7 @@ class DetectedEventIngestionTest extends TestCase
         ], 'station_reader');
 
         $this->withHeaders([
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ])->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-registered-suppressed-001',
@@ -531,7 +527,7 @@ class DetectedEventIngestionTest extends TestCase
         ], 'station_reader');
 
         $this->withHeaders([
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ])->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-registered-suppressed-cross-001',
@@ -560,7 +556,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $headers = [
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ];
         $eventTime = now();
@@ -632,7 +628,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $headers = [
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ];
         $eventTime = now();
@@ -725,7 +721,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $headers = [
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ];
         $staleDetectorTime = now()->subMinutes(2);
@@ -789,7 +785,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $headers = [
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ];
         $eventTime = now();
@@ -841,7 +837,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $headers = [
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ];
 
@@ -904,7 +900,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $headers = [
-            'X-Api-Key' => 'PHILCST-DEMO-KEY',
+            'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ];
 

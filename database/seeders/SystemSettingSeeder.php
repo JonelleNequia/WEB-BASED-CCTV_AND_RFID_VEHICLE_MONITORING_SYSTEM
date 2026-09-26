@@ -19,7 +19,6 @@ class SystemSettingSeeder extends Seeder
             'deployment_mode' => 'offline_local',
             'cctv_simulation_mode' => 'enabled',
             'rfid_simulation_mode' => 'enabled',
-            'python_api_key' => 'PHILCST-DEMO-KEY',
             'camera_source_placeholder' => 'rtsp://philcst-green-metrics-demo',
             'retention_days' => '30',
             'entrance_portal_label' => 'PHILCST Entrance Portal',

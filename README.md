@@ -183,6 +183,63 @@ Open:
 http://127.0.0.1:8000
 ```
 
+## Deployment (school PC / production)
+
+Do these before the system is used at the gate. The demo settings above are
+for development only.
+
+1. **Turn off debug mode.** In `.env`:
+
+   ```env
+   APP_ENV=production
+   APP_DEBUG=false
+   APP_URL=http://<this-pc-lan-ip>:8000
+   ```
+
+   With `APP_DEBUG=true`, any error page shows code, file paths and `.env`
+   values (database password, keys) to whoever opens it.
+
+2. **Set the detector key.** Generate a key and put it in `.env`:
+
+   ```bash
+   php -r "echo bin2hex(random_bytes(24)), PHP_EOL;"
+   ```
+
+   ```env
+   DETECTOR_API_KEY=<the generated key>
+   ```
+
+   The Python detector gets it automatically through
+   `storage/app/camera/camera_runtime_config.json`. A UHF/RFID adapter on the
+   network must send it as the `X-Api-Key` header. Without a key, the API
+   only answers this PC and only when `APP_ENV` is not `production`.
+
+3. **Change the admin password** (`admin@philcst.local` / `password` is public).
+
+4. **Apply migrations and cache the config:**
+
+   ```bash
+   php artisan migrate --force
+   php artisan storage:link
+   php artisan config:cache
+   php artisan route:cache
+   php artisan view:cache
+   ```
+
+   Run `php artisan config:clear` after every `.env` change (then cache again).
+
+5. **Restart the detector** after changing `.env` so it uses the new key:
+   stop `camera_service.py` and open any signed-in page.
+
+6. **Keep private files private.** Camera frames and `camera_status.json` are
+   written to `storage/app/camera/` and served only to signed-in users
+   (`/camera/{role}/frame`, admin-only `/camera/status`). Serve only the
+   `public/` folder from the web server; never the project root.
+
+7. **Know the remaining open port.** The live MJPEG stream on port `8765` has
+   no login. Block it in the PC firewall for other devices if guard stations
+   are not on this PC.
+
 ## Demo Login
 
 - Email: `admin@philcst.local`

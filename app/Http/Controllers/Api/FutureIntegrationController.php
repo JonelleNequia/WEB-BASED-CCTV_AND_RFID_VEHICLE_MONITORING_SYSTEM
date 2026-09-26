@@ -789,16 +789,15 @@ class FutureIntegrationController extends Controller
 
     protected function authorizeIntegrationRequest(Request $request, SettingsService $settingsService): ?JsonResponse
     {
-        $configuredKey = trim((string) $settingsService->get('python_api_key', ''));
+        // Phase 6: key from .env (DETECTOR_API_KEY), not the database.
+        $configuredKey = $settingsService->detectorApiKey();
         $providedKey = trim((string) $request->header('X-Api-Key', ''));
 
         if ($configuredKey !== '' && hash_equals($configuredKey, $providedKey)) {
             return null;
         }
 
-        if ($configuredKey === ''
-            && $settingsService->get('deployment_mode', 'offline_local') === 'offline_local'
-            && $this->isLoopbackRequest($request)) {
+        if ($settingsService->allowsKeylessLocalIntegration() && $this->isLoopbackRequest($request)) {
             return null;
         }
 

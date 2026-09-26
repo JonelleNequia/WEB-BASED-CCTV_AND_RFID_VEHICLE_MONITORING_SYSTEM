@@ -171,7 +171,7 @@ class StationController extends Controller
                 'vehicle_type' => $recentCapture?->vehicle_type,
                 'snapshot_url' => $recentCapture?->snapshot_path
                     ? $recentCapture->snapshot_url
-                    : asset('camera/entrance_latest_frame.jpg').'?t='.now()->timestamp,
+                    : route('camera.frame', ['role' => 'entrance']).'?t='.now()->timestamp,
             ],
         ];
     }
