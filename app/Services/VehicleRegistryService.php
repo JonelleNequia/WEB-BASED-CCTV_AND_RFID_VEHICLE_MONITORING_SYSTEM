@@ -106,6 +106,7 @@ class VehicleRegistryService
     {
         $query = RfidTag::query()
             ->with('vehicle')
+            ->vehicleTags() // Phase 2: guest passes are never assigned to a vehicle
             ->assigned()
             ->when(filled($search), function ($query) use ($search): void {
                 $term = '%'.trim((string) $search).'%';
@@ -133,6 +134,7 @@ class VehicleRegistryService
     {
         $query = RfidTag::query()
             ->with('vehicle')
+            ->vehicleTags() // Phase 2: vehicle tags only
             ->available();
 
         return $this->orderTagsByNumberThenUid($query)->get();
@@ -234,6 +236,7 @@ class VehicleRegistryService
     {
         $query = RfidTag::query()
             ->with('vehicle')
+            ->vehicleTags() // Phase 2: vehicle tags only
             ->where(function ($query) use ($vehicle): void {
                 $query->where('status', RfidTag::STATUS_AVAILABLE);
 
@@ -262,6 +265,10 @@ class VehicleRegistryService
         return DB::transaction(function () use ($data): RfidTag {
             $uid = $this->normalizeTagUid((string) ($data['uid'] ?? $data['rfid_uid'] ?? $data['tag_uid'] ?? ''));
             $tagNumber = $this->normalizeTagNumber($data['tag_number'] ?? null);
+            // Phase 2: a tag is either a vehicle tag or a reusable guest pass.
+            $tagType = in_array($data['tag_type'] ?? null, RfidTag::TYPES, true)
+                ? $data['tag_type']
+                : RfidTag::TYPE_VEHICLE;
 
             if ($uid === '') {
                 throw ValidationException::withMessages([
@@ -300,6 +307,11 @@ class VehicleRegistryService
                 'tag_number' => $tagNumber,
                 'uid' => $uid,
                 'status' => RfidTag::STATUS_AVAILABLE,
+                'tag_type' => $tagType,
+                // Guest passes get the next G-xx label automatically.
+                'display_number' => $tagType === RfidTag::TYPE_GUEST_PASS
+                    ? RfidTag::nextGuestPassNumber()
+                    : null,
             ]);
         });
     }
@@ -334,6 +346,13 @@ class VehicleRegistryService
         if (! $tag) {
             throw ValidationException::withMessages([
                 'rfid_tag_id' => 'Choose an available RFID tag from the inventory.',
+            ]);
+        }
+
+        // Phase 2: guest passes are issued per visit, never assigned to a vehicle.
+        if ($tag->isGuestPass()) {
+            throw ValidationException::withMessages([
+                'rfid_uid' => 'Guest passes cannot be assigned to a registered vehicle. Choose a vehicle tag.',
             ]);
         }
 

@@ -411,7 +411,9 @@ class RfidService
             return 'guest';
         }
 
-        if ($tag->status === RfidTag::STATUS_INACTIVE) {
+        // Phase 2: "inactive" is now "disabled"; a lost tag is treated the same
+        // until Phase 3 adds dashboard alerts.
+        if (in_array($tag->status, [RfidTag::STATUS_DISABLED, RfidTag::STATUS_LOST], true)) {
             return 'inactive_tag';
         }
 

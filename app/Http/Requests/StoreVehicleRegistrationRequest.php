@@ -53,7 +53,17 @@ class StoreVehicleRegistrationRequest extends FormRequest
                 Rule::unique('vehicles', 'plate_number')->ignore($vehicleId),
             ],
             'vehicle_owner_name' => ['nullable', 'string', 'max:100'],
-            'category' => ['required', 'string', 'max:50'],
+            'category' => [
+                'required',
+                'string',
+                'max:50',
+                // Phase 2: guests use guest passes, not the vehicle registry.
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (in_array(strtolower(trim((string) $value)), ['guest', 'guests'], true)) {
+                        $fail('Guests use a Guest Pass instead of the vehicle registry.');
+                    }
+                },
+            ],
             'category_other' => ['nullable', 'required_if:category,others', 'string', 'max:50'],
             'vehicle_type' => ['required', 'string', 'max:50'],
             'vehicle_type_other' => ['nullable', 'required_if:vehicle_type,Others', 'string', 'max:50'],

@@ -26,6 +26,9 @@ class ActiveSession extends Model
         'entry_time',
         'time_out',
         'status',
+        // Phase 2: stale-session cleanup audit.
+        'archived_at',
+        'archive_reason',
     ];
 
     /**
@@ -38,6 +41,7 @@ class ActiveSession extends Model
         return [
             'entry_time' => 'datetime',
             'time_out' => 'datetime',
+            'archived_at' => 'datetime',
         ];
     }
 

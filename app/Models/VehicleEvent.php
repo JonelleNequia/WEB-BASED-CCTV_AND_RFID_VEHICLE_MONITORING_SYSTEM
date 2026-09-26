@@ -53,6 +53,8 @@ class VehicleEvent extends Model
         'resulting_state',
         'daily_entries_count',
         'daily_exits_count',
+        // Phase 2: link to a guest pass visit.
+        'guest_visit_id',
     ];
 
     /**
@@ -95,6 +97,14 @@ class VehicleEvent extends Model
     public function rfidScanLog(): BelongsTo
     {
         return $this->belongsTo(RfidScanLog::class);
+    }
+
+    /**
+     * Phase 2: the guest pass visit this event belongs to.
+     */
+    public function guestVisit(): BelongsTo
+    {
+        return $this->belongsTo(GuestVisit::class);
     }
 
     /**
