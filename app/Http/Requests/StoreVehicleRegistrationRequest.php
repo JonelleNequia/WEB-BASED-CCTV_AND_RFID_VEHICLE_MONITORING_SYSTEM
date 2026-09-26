@@ -67,6 +67,19 @@ class StoreVehicleRegistrationRequest extends FormRequest
             'category_other' => ['nullable', 'required_if:category,others', 'string', 'max:50'],
             'vehicle_type' => ['required', 'string', 'max:50'],
             'vehicle_type_other' => ['nullable', 'required_if:vehicle_type,Others', 'string', 'max:50'],
+            // UI Phase 3: Add Vehicle drawer registers a new scanned tag automatically.
+            'auto_register_tag' => ['sometimes', 'boolean'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            // UI Phase 3: clear message for the Add Vehicle / Edit drawers.
+            'rfid_tag_uid.unique' => 'This RFID tag is already assigned to another vehicle. Use Replace Tag on that vehicle first.',
         ];
     }
 

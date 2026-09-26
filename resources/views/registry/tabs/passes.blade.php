@@ -1,4 +1,4 @@
-{{-- UI Phase 2: Registry › Guest Passes (the physical G-xx cards). Visits are on the Guests page. --}}
+{{-- UI Phase 2/3: Registry › Guest Passes (the physical G-xx cards). Visits are on the Guests page. --}}
 <x-stat-row>
     <x-stat label="Available" :value="$passStats['available']" tone="success" :hint="$passStats['total'].' in total'" />
     <x-stat label="Issued" :value="$passStats['issued']" tone="brand" :href="route('guests.index')" hint="With a guest inside" />
@@ -19,6 +19,7 @@
             <th>Current Holder</th>
             <th>Last Used</th>
             <th>RFID UID</th>
+            <th><span class="sr-only">Actions</span></th>
         </tr>
     </thead>
     <tbody>
@@ -37,6 +38,14 @@
                 </td>
                 <td><x-datetime :value="$pass->last_scanned_at" fallback="Never" /></td>
                 <td class="text-muted">{{ $pass->uid }}</td>
+                <td class="row-actions">
+                    @if ($visit)
+                        {{-- A pass with a guest is marked lost from the visit (keeps the visit record right). --}}
+                        <a href="{{ route('guest-passes.visits.show', $visit) }}" class="button button-secondary button-sm">Open visit</a>
+                    @else
+                        @include('registry.partials.tag-actions', ['tag' => $pass])
+                    @endif
+                </td>
             </tr>
         @endforeach
     </tbody>

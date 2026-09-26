@@ -189,8 +189,8 @@ class Phase4UiTest extends TestCase
         $this->actingAs($this->admin)
             ->get(route('registry.index', ['tab' => 'tags', 'tag_type' => 'guest_pass']))
             ->assertOk()
-            ->assertSee('Guest Passes Available')
-            ->assertSee('Vehicle Tags Assigned')
+            ->assertSee(' vehicle · 1 pass')
+            ->assertSee('Assigned')
             ->assertSee('NEWPASS01')
             ->assertDontSee('NEWVEH01');
     }

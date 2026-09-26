@@ -23,7 +23,7 @@ class DirectRfidRegistryTest extends TestCase
             ->get(route('registry.index', ['tab' => 'tags']))
             ->assertOk()
             ->assertSee('RFID Tags')
-            ->assertSee('Register RFID Tag')
+            ->assertSee('Register Tags')
             ->assertSee('No RFID tags registered yet.');
     }
 
@@ -110,7 +110,7 @@ class DirectRfidRegistryTest extends TestCase
         $response = $this->actingAs($user)
             ->get(route('registry.index', ['tab' => 'tags']))
             ->assertOk()
-            ->assertSee('RFID Tag No.')
+            ->assertSee('Tag No.')
             ->assertSee('#2')
             ->assertSee('#10');
 

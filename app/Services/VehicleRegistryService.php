@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\RfidTag;
 use App\Models\Vehicle;
+use App\Support\DisplayTime;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -19,6 +20,11 @@ class VehicleRegistryService
     public function register(array $data): Vehicle
     {
         return DB::transaction(function () use ($data): Vehicle {
+            // UI Phase 3: the Add Vehicle drawer registers a brand-new scanned tag on the spot.
+            if (! empty($data['auto_register_tag'])) {
+                $this->ensureInventoryTag($data);
+            }
+
             $tag = $this->resolveAssignableTag($data);
 
             $vehicle = Vehicle::query()->create([
@@ -66,10 +72,26 @@ class VehicleRegistryService
      *
      * @return Collection<int, Vehicle>
      */
-    public function registeredVehicles(): Collection
+    public function registeredVehicles(array $filters = []): Collection
     {
+        $search = trim((string) ($filters['q'] ?? ''));
+
         return Vehicle::query()
             ->with(['rfidTag', 'rfidTags'])
+            // UI Phase 3: Registry › Vehicles toolbar (search + filters).
+            ->when($search !== '', function ($query) use ($search): void {
+                $term = '%'.$search.'%';
+                $query->where(function ($query) use ($term): void {
+                    $query->where('plate_number', 'like', $term)
+                        ->orWhere('vehicle_owner_name', 'like', $term)
+                        ->orWhere('owner_name', 'like', $term)
+                        ->orWhere('rfid_tag_uid', 'like', $term)
+                        ->orWhereHas('rfidTags', fn ($tagQuery) => $tagQuery->where('uid', 'like', $term)->orWhere('tag_number', 'like', $term));
+                });
+            })
+            ->when(filled($filters['category'] ?? null), fn ($query) => $query->where('category', $filters['category']))
+            ->when(filled($filters['state'] ?? null), fn ($query) => $query->where('current_state', strtoupper((string) $filters['state'])))
+            ->when(filled($filters['status'] ?? null), fn ($query) => $query->where('status', $filters['status']))
             ->withCount([
                 'rfidScanLogs',
                 'vehicleEvents as total_entries_count' => fn ($query) => $query->where('event_type', 'ENTRY'),
@@ -276,6 +298,11 @@ class VehicleRegistryService
                 ]);
             }
 
+            // UI Phase 3: bulk scanning and Add Vehicle number new tags automatically.
+            if ($tagNumber === null && ! empty($data['auto_number'])) {
+                $tagNumber = $this->nextTagNumber();
+            }
+
             if ($tagNumber === null) {
                 throw ValidationException::withMessages([
                     'tag_number' => 'Enter the RFID tag number before registering the scanned UID.',
@@ -393,6 +420,221 @@ class VehicleRegistryService
                 'rfid_tag_uid' => $tag->uid,
             ])->save();
         }
+    }
+
+    /**
+     * UI Phase 3: next free inventory number for auto-registered tags.
+     */
+    public function nextTagNumber(): int
+    {
+        return ((int) RfidTag::query()->max('tag_number')) + 1;
+    }
+
+    /**
+     * UI Phase 3: what happens if this UID is used in the Add Vehicle /
+     * Replace Tag drawers.
+     *
+     * @return array{state: string, ok: bool, message: string, tag: array<string, mixed>|null}
+     */
+    public function lookupTagForVehicle(string $uid, ?Vehicle $vehicle = null): array
+    {
+        $uid = $this->normalizeTagUid($uid);
+
+        if ($uid === '') {
+            return ['state' => 'empty', 'ok' => false, 'message' => 'Scan a tag first.', 'tag' => null];
+        }
+
+        $tag = RfidTag::query()->with('vehicle')->where('uid', $uid)->orWhere('tag_uid', $uid)->first();
+
+        if (! $tag) {
+            return [
+                'state' => 'new',
+                'ok' => true,
+                'message' => 'New tag. It will be added to the inventory as #'.$this->nextTagNumber().' and assigned.',
+                'tag' => ['uid' => $uid],
+            ];
+        }
+
+        $summary = ['id' => $tag->id, 'uid' => $tag->uid, 'tag_number' => $tag->tag_number, 'label' => $tag->label];
+
+        [$state, $ok, $message] = match (true) {
+            $tag->isGuestPass() => ['guest_pass', false, $tag->label.' is a guest pass. Guest passes cannot be assigned to a vehicle; scan a vehicle tag.'],
+            $vehicle && (int) $tag->vehicle_id === (int) $vehicle->id && $tag->status === RfidTag::STATUS_ASSIGNED
+                => ['current', false, 'This is already the current tag of '.$vehicle->plate_number.'.'],
+            $tag->status === RfidTag::STATUS_ASSIGNED => ['assigned', false, $tag->label.' is already assigned to '.($tag->vehicle?->plate_number ?? 'another vehicle').'. Use Replace Tag on that vehicle first.'],
+            in_array($tag->status, [RfidTag::STATUS_LOST, RfidTag::STATUS_DISABLED], true)
+                => [$tag->status, false, $tag->label.' is marked '.strtoupper($tag->status).'. Enable it in Registry › RFID Tags before reusing it.'],
+            default => ['available', true, $tag->label.' is available and will be assigned.'],
+        };
+
+        return ['state' => $state, 'ok' => $ok, 'message' => $message, 'tag' => $summary];
+    }
+
+    /**
+     * UI Phase 3: Replace Tag. The old tag becomes lost or disabled (scans of it
+     * then raise an alert); the new tag (scanned or picked) is assigned.
+     *
+     * @param  array<string, mixed>  $data  rfid_tag_id | rfid_uid, old_tag_status
+     */
+    public function replaceTag(Vehicle $vehicle, array $data): Vehicle
+    {
+        return DB::transaction(function () use ($vehicle, $data): Vehicle {
+            $vehicle = Vehicle::query()->whereKey($vehicle->id)->lockForUpdate()->firstOrFail();
+            $oldTag = $vehicle->rfidTag;
+            $oldStatus = in_array($data['old_tag_status'] ?? null, [RfidTag::STATUS_LOST, RfidTag::STATUS_DISABLED], true)
+                ? $data['old_tag_status']
+                : RfidTag::STATUS_LOST;
+
+            $this->ensureInventoryTag($data);
+            $newTag = $this->resolveAssignableTag($data, $vehicle);
+
+            if ($oldTag && (int) $oldTag->id === (int) $newTag->id) {
+                throw ValidationException::withMessages([
+                    'rfid_uid' => 'Scan or choose a different tag than the current one.',
+                ]);
+            }
+
+            // Keep vehicle_id on the old tag so its scans show whose tag it was.
+            $oldTag?->forceFill(['status' => $oldStatus])->save();
+
+            $newTag->forceFill([
+                'vehicle_id' => $vehicle->id,
+                'status' => RfidTag::STATUS_ASSIGNED,
+                'assigned_at' => now(),
+            ])->save();
+
+            $vehicle->forceFill([
+                'rfid_tag_id' => $newTag->id,
+                'rfid_tag_uid' => $newTag->uid,
+            ])->save();
+
+            return $vehicle->fresh(['rfidTag', 'rfidTags']);
+        });
+    }
+
+    /**
+     * UI Phase 3: Deactivate / Activate. An inactive vehicle keeps its tag;
+     * scans of it are flagged (inactive_vehicle).
+     */
+    public function setVehicleStatus(Vehicle $vehicle, string $status): Vehicle
+    {
+        if (! in_array($status, ['active', 'inactive'], true)) {
+            throw ValidationException::withMessages(['status' => 'Unknown vehicle status.']);
+        }
+
+        $vehicle->forceFill(['status' => $status])->save();
+
+        return $vehicle->fresh();
+    }
+
+    /**
+     * UI Phase 3: mark a tag or guest pass lost / disabled, or enable it again.
+     */
+    public function setTagStatus(RfidTag $tag, string $status): RfidTag
+    {
+        return DB::transaction(function () use ($tag, $status): RfidTag {
+            $tag = RfidTag::query()->with(['vehicle', 'activeGuestVisit'])->whereKey($tag->id)->lockForUpdate()->firstOrFail();
+
+            if (! in_array($status, [RfidTag::STATUS_LOST, RfidTag::STATUS_DISABLED, RfidTag::STATUS_AVAILABLE], true)) {
+                throw ValidationException::withMessages(['status' => 'Unknown tag status.']);
+            }
+
+            if ($tag->isGuestPass() && $tag->activeGuestVisit) {
+                throw ValidationException::withMessages([
+                    'status' => $tag->label.' is with a guest right now. Use Guests › Lost (or close the visit) instead.',
+                ]);
+            }
+
+            if ($status === RfidTag::STATUS_AVAILABLE) {
+                // Enabling the vehicle's current tag puts it back as assigned; otherwise it returns to the pool.
+                $isCurrentVehicleTag = $tag->vehicle && (int) $tag->vehicle->rfid_tag_id === (int) $tag->id;
+
+                $tag->forceFill($isCurrentVehicleTag
+                    ? ['status' => RfidTag::STATUS_ASSIGNED]
+                    : ['status' => RfidTag::STATUS_AVAILABLE, 'vehicle_id' => null, 'assigned_at' => null])->save();
+
+                return $tag->fresh();
+            }
+
+            $tag->forceFill(['status' => $status])->save();
+
+            return $tag->fresh();
+        });
+    }
+
+    /**
+     * UI Phase 3: vehicle side panel (details + last 10 movements).
+     *
+     * @return array<string, mixed>
+     */
+    public function vehicleDetails(Vehicle $vehicle): array
+    {
+        $vehicle->loadMissing(['rfidTag', 'rfidTags']);
+
+        $movements = $vehicle->vehicleEvents()
+            ->latest('event_time')
+            ->latest('id')
+            ->limit(10)
+            ->get()
+            ->map(fn ($event): array => [
+                'id' => $event->id,
+                'event_type' => $event->event_type,
+                'time' => DisplayTime::datetime($event->event_time),
+                'source' => $event->source_display_label,
+                'note' => $event->anomaly_reason,
+                'url' => route('vehicle-events.show', $event),
+            ])
+            ->values();
+
+        return [
+            'id' => $vehicle->id,
+            'plate_number' => $vehicle->plate_number,
+            'vehicle_owner_name' => $vehicle->vehicle_owner_name,
+            'category' => $vehicle->category,
+            'category_label' => Str::of((string) $vehicle->category)->replace('_', ' ')->ucfirst()->value(),
+            'vehicle_type' => $vehicle->vehicle_type,
+            'status' => $vehicle->status,
+            'current_state' => strtolower((string) ($vehicle->current_state ?: 'outside')),
+            'last_seen' => DisplayTime::datetime($vehicle->last_seen_at, 'Never'),
+            'entries_today' => (int) $vehicle->entries_today_count,
+            'exits_today' => (int) $vehicle->exits_today_count,
+            'tag' => $vehicle->rfidTag ? [
+                'id' => $vehicle->rfidTag->id,
+                'uid' => $vehicle->rfidTag->uid,
+                'tag_number' => $vehicle->rfidTag->tag_number,
+                'status' => $vehicle->rfidTag->status,
+            ] : null,
+            'previous_tags' => $vehicle->rfidTags
+                ->reject(fn (RfidTag $tag): bool => (int) $tag->id === (int) $vehicle->rfid_tag_id)
+                ->map(fn (RfidTag $tag): array => ['uid' => $tag->uid, 'tag_number' => $tag->tag_number, 'status' => $tag->status])
+                ->values(),
+            'movements' => $movements,
+            'urls' => [
+                'update' => route('vehicle-registry.update', $vehicle),
+                'replace_tag' => route('registry.vehicles.replace-tag', $vehicle),
+                'status' => route('registry.vehicles.status', $vehicle),
+            ],
+        ];
+    }
+
+    /**
+     * UI Phase 3: register an unknown scanned UID so it can be assigned.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function ensureInventoryTag(array $data): void
+    {
+        if (! empty($data['rfid_tag_id'])) {
+            return;
+        }
+
+        $uid = $this->normalizeTagUid((string) ($data['rfid_uid'] ?? $data['rfid_tag_uid'] ?? $data['tag_uid'] ?? ''));
+
+        if ($uid === '' || RfidTag::query()->where('uid', $uid)->orWhere('tag_uid', $uid)->exists()) {
+            return;
+        }
+
+        $this->registerRfidTag(['uid' => $uid, 'tag_type' => RfidTag::TYPE_VEHICLE, 'auto_number' => true]);
     }
 
     protected function normalizeTagNumber(mixed $value): ?int

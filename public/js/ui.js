@@ -158,6 +158,14 @@
         }
     });
 
+    // UI Phase 3: <form data-confirm="Are you sure?"> asks before submitting.
+    document.addEventListener('submit', function (event) {
+        const form = event.target.closest('form[data-confirm]');
+        if (form && !window.confirm(form.dataset.confirm)) {
+            event.preventDefault();
+        }
+    }, true);
+
     document.addEventListener('keydown', function (event) {
         const open = Array.from(document.querySelectorAll('[data-drawer].is-open')).pop();
         if (!open) {

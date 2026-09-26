@@ -8,10 +8,10 @@
         <x-slot:actions>
             @switch($tab)
                 @case('tags')
-                    <button type="button" class="button button-primary" data-drawer-open="register-tag-drawer">Register RFID Tag</button>
+                    <button type="button" class="button button-primary" data-drawer-open="register-tag-drawer">Register Tags</button>
                     @break
                 @case('passes')
-                    <button type="button" class="button button-primary" data-drawer-open="register-tag-drawer">Register Guest Pass</button>
+                    <button type="button" class="button button-primary" data-drawer-open="register-tag-drawer">Register Guest Passes</button>
                     @break
                 @default
                     <button type="button" class="button button-primary" data-drawer-open="add-vehicle-drawer">Add Vehicle</button>

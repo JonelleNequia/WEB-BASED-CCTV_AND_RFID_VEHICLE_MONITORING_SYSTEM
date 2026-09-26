@@ -111,6 +111,20 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         Route::get('/system-status', $legacyRedirect('settings.index', ['tab' => 'status']))->name('system-status.index');
         Route::get('/guest-passes', $legacyRedirect('guests.index'))->name('guest-passes.index');
 
+        // UI Phase 3: Registry actions (side panel, tag lookup, replace tag, status).
+        Route::get('/registry/vehicles/{vehicle}', [VehicleRegistryController::class, 'show'])
+            ->whereNumber('vehicle')
+            ->name('registry.vehicles.show');
+        Route::post('/registry/vehicles/{vehicle}/replace-tag', [VehicleRegistryController::class, 'replaceTag'])
+            ->whereNumber('vehicle')
+            ->name('registry.vehicles.replace-tag');
+        Route::post('/registry/vehicles/{vehicle}/status', [VehicleRegistryController::class, 'updateStatus'])
+            ->whereNumber('vehicle')
+            ->name('registry.vehicles.status');
+        Route::post('/registry/tags/lookup', [VehicleRegistryController::class, 'lookupTag'])->name('registry.tags.lookup');
+        Route::post('/registry/tags/{rfidTag}/status', [VehicleRegistryController::class, 'updateTagStatus'])
+            ->whereNumber('rfidTag')
+            ->name('registry.tags.status');
         Route::post('/rfid-inventory', [VehicleRegistryController::class, 'storeRfidTag'])->name('rfid-inventory.store');
         Route::post('/vehicle-registry/rfid-tags', [VehicleRegistryController::class, 'storeRfidTag'])->name('vehicle-registry.rfid-tags.store');
         Route::post('/vehicle-registry', [VehicleRegistryController::class, 'store'])->name('vehicle-registry.store');

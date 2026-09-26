@@ -22,13 +22,17 @@ class VehicleRegistryController extends Controller
      * Show the registered vehicles and RFID tags page.
      */
     public function index(
+        Request $request,
         VehicleRegistryService $vehicleRegistryService,
         RfidService $rfidService
     ): View {
-        // UI Phase 2: Registry › Vehicles tab.
+        $filters = $request->only(['q', 'category', 'state', 'status']);
+
+        // UI Phase 2: Registry › Vehicles tab (UI Phase 3: search + filters).
         return view('registry.index', [
             'tab' => 'vehicles',
-            'vehicles' => $vehicleRegistryService->registeredVehicles(),
+            'filters' => $filters,
+            'vehicles' => $vehicleRegistryService->registeredVehicles($filters),
             'availableTags' => $vehicleRegistryService->availableTags(),
             'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
             'vehicleCategories' => $vehicleRegistryService->vehicleCategories(),
@@ -46,6 +50,8 @@ class VehicleRegistryController extends Controller
     ): View {
         // Phase 4: filter by tag type and show separate vehicle / guest pass stats.
         $tagType = in_array($request->query('tag_type'), RfidTag::TYPES, true) ? $request->query('tag_type') : null;
+        // UI Phase 3: status filter.
+        $tagStatus = in_array($request->query('status'), RfidTag::STATUSES, true) ? $request->query('status') : null;
         $allTags = $vehicleRegistryService->rfidTagInventory();
         $vehicleTags = $allTags->where('tag_type', RfidTag::TYPE_VEHICLE);
         $guestPasses = $allTags->where('tag_type', RfidTag::TYPE_GUEST_PASS);
@@ -53,7 +59,12 @@ class VehicleRegistryController extends Controller
         // UI Phase 2: Registry › RFID Tags tab.
         return view('registry.index', [
             'tab' => 'tags',
-            'rfidTagInventory' => $tagType ? $allTags->where('tag_type', $tagType)->values() : $allTags,
+            'rfidTagInventory' => $allTags
+                ->when($tagType, fn ($tags) => $tags->where('tag_type', $tagType))
+                ->when($tagStatus, fn ($tags) => $tags->where('status', $tagStatus))
+                ->values(),
+            'tagStatusFilter' => $tagStatus,
+            'nextTagNumber' => $vehicleRegistryService->nextTagNumber(),
             'rfidStats' => $rfidService->stats(),
             'tagTypeFilter' => $tagType,
             'tagStats' => [
@@ -64,6 +75,12 @@ class VehicleRegistryController extends Controller
                 'pass_issued' => $guestPasses->where('status', RfidTag::STATUS_ISSUED)->count(),
                 'pass_lost' => $guestPasses->where('status', RfidTag::STATUS_LOST)->count(),
                 'pass_total' => $guestPasses->count(),
+                // UI Phase 3: inventory counts across both types.
+                'available' => $allTags->where('status', RfidTag::STATUS_AVAILABLE)->count(),
+                'assigned' => $allTags->where('status', RfidTag::STATUS_ASSIGNED)->count(),
+                'issued' => $allTags->where('status', RfidTag::STATUS_ISSUED)->count(),
+                'lost' => $allTags->where('status', RfidTag::STATUS_LOST)->count(),
+                'disabled' => $allTags->where('status', RfidTag::STATUS_DISABLED)->count(),
             ],
         ]);
     }
@@ -82,6 +99,7 @@ class VehicleRegistryController extends Controller
         return view('registry.index', [
             'tab' => 'passes',
             'passes' => $passes,
+            'nextTagNumber' => app(VehicleRegistryService::class)->nextTagNumber(),
             'passStats' => [
                 'available' => $passes->where('status', RfidTag::STATUS_AVAILABLE)->count(),
                 'issued' => $passes->where('status', RfidTag::STATUS_ISSUED)->count(),
@@ -100,8 +118,10 @@ class VehicleRegistryController extends Controller
         VehicleRegistryService $vehicleRegistryService
     ): RedirectResponse|JsonResponse {
         $validated = $request->validate([
+            // UI Phase 3: bulk scanning sends auto_number instead of a number.
             'tag_number' => [
-                'required',
+                'required_unless:auto_number,1',
+                'nullable',
                 'integer',
                 'min:1',
                 'max:999999',
@@ -110,6 +130,7 @@ class VehicleRegistryController extends Controller
             'uid' => ['required', 'string', 'max:100'],
             // Phase 4: Vehicle tag or Guest Pass.
             'tag_type' => ['nullable', Rule::in(RfidTag::TYPES)],
+            'auto_number' => ['sometimes', 'boolean'],
         ]);
 
         try {
@@ -138,6 +159,9 @@ class VehicleRegistryController extends Controller
                 'message' => 'RFID #'.$tag->tag_number.' ('.$tag->uid.') was added to the RFID inventory.',
                 'rfid_tag_id' => $tag->id,
                 'tag_number' => $tag->tag_number,
+                'uid' => $tag->uid,
+                'label' => $tag->label,
+                'display_number' => $tag->display_number,
             ], 201);
         }
 
@@ -182,6 +206,74 @@ class VehicleRegistryController extends Controller
         }
 
         return back()->with('status', $vehicle->plate_number.' was saved to the local vehicle registry.');
+    }
+
+    /**
+     * UI Phase 3: data for the vehicle side panel, Edit and Replace Tag drawers.
+     */
+    public function show(Vehicle $vehicle, VehicleRegistryService $vehicleRegistryService): JsonResponse
+    {
+        return response()->json($vehicleRegistryService->vehicleDetails($vehicle));
+    }
+
+    /**
+     * UI Phase 3: check a scanned UID before assigning it (Add Vehicle / Replace Tag).
+     */
+    public function lookupTag(Request $request, VehicleRegistryService $vehicleRegistryService): JsonResponse
+    {
+        $validated = $request->validate([
+            'uid' => ['required', 'string', 'max:100'],
+            'vehicle_id' => ['nullable', 'integer', 'exists:vehicles,id'],
+        ]);
+
+        $vehicle = isset($validated['vehicle_id']) ? Vehicle::query()->find($validated['vehicle_id']) : null;
+
+        return response()->json($vehicleRegistryService->lookupTagForVehicle($validated['uid'], $vehicle));
+    }
+
+    /**
+     * UI Phase 3: Replace Tag (damaged or lost sticker).
+     */
+    public function replaceTag(Request $request, Vehicle $vehicle, VehicleRegistryService $vehicleRegistryService): RedirectResponse
+    {
+        $validated = $request->validate([
+            'rfid_tag_id' => ['nullable', 'required_without:rfid_uid', 'integer', 'exists:vehicle_rfid_tags,id'],
+            'rfid_uid' => ['nullable', 'string', 'max:100'],
+            'old_tag_status' => ['required', Rule::in([RfidTag::STATUS_LOST, RfidTag::STATUS_DISABLED])],
+        ]);
+
+        $oldTag = $vehicle->rfidTag;
+        $vehicle = $vehicleRegistryService->replaceTag($vehicle, $validated);
+
+        return back()->with('status', $vehicle->plate_number.' now uses '.$vehicle->rfidTag->label
+            .($oldTag ? '. '.$oldTag->label.' was marked '.strtoupper($validated['old_tag_status']).'.' : '.'));
+    }
+
+    /**
+     * UI Phase 3: Deactivate / Activate a vehicle.
+     */
+    public function updateStatus(Request $request, Vehicle $vehicle, VehicleRegistryService $vehicleRegistryService): RedirectResponse
+    {
+        $validated = $request->validate(['status' => ['required', Rule::in(['active', 'inactive'])]]);
+        $vehicle = $vehicleRegistryService->setVehicleStatus($vehicle, $validated['status']);
+
+        return back()->with('status', $vehicle->plate_number.($vehicle->status === 'active'
+            ? ' is active again.'
+            : ' was deactivated. Scans of its tag will be flagged.'));
+    }
+
+    /**
+     * UI Phase 3: mark a tag / guest pass lost or disabled, or enable it again.
+     */
+    public function updateTagStatus(Request $request, RfidTag $rfidTag, VehicleRegistryService $vehicleRegistryService): RedirectResponse
+    {
+        $validated = $request->validate([
+            'status' => ['required', Rule::in([RfidTag::STATUS_LOST, RfidTag::STATUS_DISABLED, RfidTag::STATUS_AVAILABLE])],
+        ]);
+
+        $tag = $vehicleRegistryService->setTagStatus($rfidTag, $validated['status']);
+
+        return back()->with('status', $tag->label.' is now '.strtoupper($tag->status).'.');
     }
 
     /**

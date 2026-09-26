@@ -1,207 +1,202 @@
-    @php($shouldOpenVehicleForm = $errors->any() || old('plate_number') || old('rfid_tag_id'))
+{{--
+    UI Phase 3: Registry › Vehicles. Search/filter toolbar, one-flow Add Vehicle
+    (scan tag → details → save), row side panel with the last 10 movements,
+    Edit, Replace Tag and Deactivate.
+--}}
+@php
+    $failedForm = old('_form');
+    $failedVehicleId = old('_vehicle_id');
+    $categoryLabel = fn (?string $category): string => ucfirst(str_replace('_', ' ', (string) $category));
+@endphp
 
-    <x-stat-row>
-        <x-stat label="Registered Vehicles" :value="$rfidStats['registered_vehicles'] ?? 0" />
-        {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
-        <x-stat label="Inside Campus" :value="$rfidStats['vehicles_inside'] ?? 0"
-                :hint="($rfidStats['registered_inside'] ?? 0).' registered · '.($rfidStats['guests_inside'] ?? 0).' guests'" />
-        <x-stat label="Available RFID Tags" :value="$rfidStats['available_tags'] ?? 0" :href="route('registry.index', ['tab' => 'tags'])" />
-    </x-stat-row>
+<x-stat-row>
+    <x-stat label="Registered Vehicles" :value="$rfidStats['registered_vehicles'] ?? 0" />
+    {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
+    <x-stat label="Inside Campus" :value="$rfidStats['vehicles_inside'] ?? 0"
+            :hint="($rfidStats['registered_inside'] ?? 0).' registered · '.($rfidStats['guests_inside'] ?? 0).' guests'" />
+    <x-stat label="Available RFID Tags" :value="$rfidStats['available_tags'] ?? 0" :href="route('registry.index', ['tab' => 'tags', 'status' => 'available'])" />
+</x-stat-row>
 
-    <x-drawer id="add-vehicle-drawer" title="Add Vehicle" :open="$shouldOpenVehicleForm">
-            @php($selectedCategory = old('category', 'faculty_staff'))
-            @php($categoryOtherValue = old('category_other', ! in_array($selectedCategory, $vehicleCategories, true) && $selectedCategory !== 'others' ? $selectedCategory : ''))
-            @php($categorySelectValue = $categoryOtherValue !== '' ? 'others' : $selectedCategory)
-            @php($selectedVehicleType = old('vehicle_type', 'Car'))
-            @php($vehicleTypeOtherValue = old('vehicle_type_other', ! in_array($selectedVehicleType, $vehicleTypes, true) && $selectedVehicleType !== 'Others' ? $selectedVehicleType : ''))
-            @php($vehicleTypeSelectValue = $vehicleTypeOtherValue !== '' ? 'Others' : $selectedVehicleType)
+<x-table :empty="$vehicles->isEmpty()"
+         :empty-title="array_filter($filters ?? []) ? 'No vehicles match these filters.' : 'No registered vehicles yet.'"
+         empty-text="Add a vehicle by scanning its RFID tag.">
+    <x-slot:toolbar>
+        <form method="GET" action="{{ route('registry.index') }}" class="toolbar-search" role="search">
+            <input type="hidden" name="tab" value="vehicles">
+            <label class="sr-only" for="vehicle_q">Search vehicles</label>
+            <input id="vehicle_q" type="search" name="q" value="{{ $filters['q'] ?? '' }}" placeholder="Plate, owner or tag">
+            <label class="sr-only" for="vehicle_category_filter">Category</label>
+            <select id="vehicle_category_filter" name="category">
+                <option value="">All categories</option>
+                @foreach ($vehicleCategories as $category)
+                    <option value="{{ $category }}" @selected(($filters['category'] ?? '') === $category)>{{ $categoryLabel($category) }}</option>
+                @endforeach
+            </select>
+            <label class="sr-only" for="vehicle_state_filter">State</label>
+            <select id="vehicle_state_filter" name="state">
+                <option value="">Inside + outside</option>
+                <option value="inside" @selected(($filters['state'] ?? '') === 'inside')>Inside</option>
+                <option value="outside" @selected(($filters['state'] ?? '') === 'outside')>Outside</option>
+            </select>
+            <label class="sr-only" for="vehicle_status_filter">Status</label>
+            <select id="vehicle_status_filter" name="status">
+                <option value="">Active + inactive</option>
+                <option value="active" @selected(($filters['status'] ?? '') === 'active')>Active</option>
+                <option value="inactive" @selected(($filters['status'] ?? '') === 'inactive')>Inactive</option>
+            </select>
+            <button type="submit" class="button button-secondary button-sm">Filter</button>
+            @if (array_filter($filters ?? []))
+                <a href="{{ route('registry.index') }}" class="button button-secondary button-sm">Reset</a>
+            @endif
+        </form>
+    </x-slot:toolbar>
+    <x-slot:emptyAction>
+        <button type="button" class="button button-primary button-sm" data-drawer-open="add-vehicle-drawer">Add Vehicle</button>
+    </x-slot:emptyAction>
 
-            <form method="POST" action="{{ route('vehicle-registry.store') }}" class="stack-form" data-rfid-registration-form>
-                @csrf
+    <thead>
+        <tr>
+            <th>Plate</th>
+            <th>Owner</th>
+            <th>Category</th>
+            <th>Type</th>
+            <th>Tag No.</th>
+            <th>State</th>
+            <th>Last Seen</th>
+            <th><span class="sr-only">Actions</span></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach ($vehicles as $vehicle)
+            <tr class="is-clickable" tabindex="0" data-vehicle-row data-vehicle-url="{{ route('registry.vehicles.show', $vehicle) }}" aria-label="Open details for {{ $vehicle->plate_number }}">
+                <td><strong>{{ $vehicle->plate_number }}</strong></td>
+                <td>{{ $vehicle->vehicle_owner_name ?: '—' }}</td>
+                <td>{{ $categoryLabel($vehicle->category) }}</td>
+                <td>{{ $vehicle->vehicle_type }}</td>
+                <td>
+                    @if ($vehicle->rfidTag)
+                        #{{ $vehicle->rfidTag->tag_number ?: '—' }}
+                        @if ($vehicle->rfidTag->status !== 'assigned')
+                            <x-badge :status="$vehicle->rfidTag->status" />
+                        @endif
+                    @else
+                        <x-badge status="no_tag" />
+                    @endif
+                </td>
+                <td>
+                    <x-badge :status="strtolower($vehicle->current_state ?? 'outside')" />
+                    @if ($vehicle->status !== 'active')
+                        <x-badge :status="$vehicle->status" />
+                    @endif
+                </td>
+                <td><x-datetime :value="$vehicle->last_seen_at" fallback="Never" /></td>
+                <td class="row-actions">
+                    <button type="button" class="button button-secondary button-sm" data-vehicle-action="edit" data-vehicle-url="{{ route('registry.vehicles.show', $vehicle) }}">Edit</button>
+                    <button type="button" class="button button-secondary button-sm" data-vehicle-action="replace" data-vehicle-url="{{ route('registry.vehicles.show', $vehicle) }}">{{ $vehicle->rfidTag ? 'Replace Tag' : 'Assign Tag' }}</button>
+                    <form method="POST" action="{{ route('registry.vehicles.status', $vehicle) }}"
+                          data-confirm="{{ $vehicle->status === 'active' ? 'Deactivate '.$vehicle->plate_number.'? Scans of its tag will be flagged.' : 'Activate '.$vehicle->plate_number.' again?' }}">
+                        @csrf
+                        <input type="hidden" name="status" value="{{ $vehicle->status === 'active' ? 'inactive' : 'active' }}">
+                        <button type="submit" class="button {{ $vehicle->status === 'active' ? 'button-subtle-danger' : 'button-secondary' }} button-sm">
+                            {{ $vehicle->status === 'active' ? 'Deactivate' : 'Activate' }}
+                        </button>
+                    </form>
+                </td>
+            </tr>
+        @endforeach
+    </tbody>
+</x-table>
 
-                @error('vehicle')
-                    <div class="alert alert-danger">{{ $message }}</div>
-                @enderror
+{{-- Add Vehicle: 1. scan tag, 2. details, 3. save. --}}
+<x-drawer id="add-vehicle-drawer" title="Add Vehicle" :open="$failedForm === 'add'">
+    <form method="POST" action="{{ route('vehicle-registry.store') }}" class="stack-form" data-vehicle-form="add">
+        @csrf
+        <input type="hidden" name="_form" value="add">
+        <input type="hidden" name="auto_register_tag" value="1">
 
-                <div class="form-grid">
-                    <div class="field">
-                        <label for="rfid_tag_id">RFID Tag</label>
-                        <select id="rfid_tag_id" name="rfid_tag_id" required @disabled($availableTags->isEmpty())>
-                            <option value="">{{ $availableTags->isEmpty() ? 'Register RFID tag first' : 'Choose RFID tag number' }}</option>
-                            @foreach ($availableTags as $tag)
-                                <option value="{{ $tag->id }}" @selected((string) old('rfid_tag_id') === (string) $tag->id)>
-                                    RFID #{{ $tag->tag_number ?: 'N/A' }} - {{ $tag->uid }}
-                                </option>
-                            @endforeach
-                        </select>
-                        <div class="table-subtext">
-                            @if ($availableTags->isEmpty())
-                                Add a tag in <a href="{{ route('registry.index', ['tab' => 'tags']) }}">Registry › RFID Tags</a> before saving a vehicle.
-                            @else
-                                Available tags are sorted by RFID tag number.
-                            @endif
-                        </div>
-                        @error('rfid_tag_id')
-                            <span class="field-error">{{ $message }}</span>
-                        @enderror
-                        @error('rfid_uid')
-                            <span class="field-error">{{ $message }}</span>
-                        @enderror
-                    </div>
+        @error('vehicle')
+            <p class="field-error">{{ $message }}</p>
+        @enderror
 
-                    <div class="field">
-                        <label for="plate_number">Plate Number</label>
-                        <input id="plate_number" type="text" name="plate_number" value="{{ old('plate_number') }}" placeholder="ABC-1234" required>
-                        @error('plate_number')
-                            <span class="field-error">{{ $message }}</span>
-                        @enderror
-                    </div>
+        <span class="step-label">1 · Tag</span>
+        @include('registry.partials.tag-picker', ['prefix' => 'add', 'useOld' => $failedForm === 'add', 'legend' => 'RFID Tag'])
 
-                    <div class="field">
-                        <label for="vehicle_owner_name">Vehicle Owner Name</label>
-                        <input id="vehicle_owner_name" type="text" name="vehicle_owner_name" value="{{ old('vehicle_owner_name') }}" placeholder="Vehicle owner name">
-                        @error('vehicle_owner_name')
-                            <span class="field-error">{{ $message }}</span>
-                        @enderror
-                    </div>
+        <span class="step-label">2 · Vehicle details</span>
+        @include('registry.partials.vehicle-fields', ['prefix' => 'add', 'useOld' => $failedForm === 'add'])
 
-                    <div class="field">
-                        <label for="category">Category</label>
-                        <select id="category" name="category" required data-other-select data-other-target="category_other">
-                            @foreach ($vehicleCategories as $category)
-                                <option value="{{ $category }}" @selected($categorySelectValue === $category)>
-                                    {{ ucfirst(str_replace('_', ' ', $category)) }}
-                                </option>
-                            @endforeach
-                            <option value="others" @selected($categorySelectValue === 'others')>Others</option>
-                        </select>
-                        <input
-                            id="category_other"
-                            type="text"
-                            name="category_other"
-                            value="{{ $categoryOtherValue }}"
-                            placeholder="Enter custom category"
-                            data-other-field
-                            @if ($categorySelectValue !== 'others') hidden @endif
-                        >
-                        @error('category')
-                            <span class="field-error">{{ $message }}</span>
-                        @enderror
-                        @error('category_other')
-                            <span class="field-error">{{ $message }}</span>
-                        @enderror
-                    </div>
+        <div class="button-row">
+            <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
+            <button type="submit" class="button button-primary">Save Vehicle</button>
+        </div>
+    </form>
+</x-drawer>
 
-                    <div class="field">
-                        <label for="vehicle_type">Vehicle Type</label>
-                        <select id="vehicle_type" name="vehicle_type" required data-other-select data-other-target="vehicle_type_other">
-                            @foreach ($vehicleTypes as $vehicleType)
-                                <option value="{{ $vehicleType }}" @selected($vehicleTypeSelectValue === $vehicleType)>{{ $vehicleType }}</option>
-                            @endforeach
-                            <option value="Others" @selected($vehicleTypeSelectValue === 'Others')>Others</option>
-                        </select>
-                        <input
-                            id="vehicle_type_other"
-                            type="text"
-                            name="vehicle_type_other"
-                            value="{{ $vehicleTypeOtherValue }}"
-                            placeholder="Enter custom vehicle type"
-                            data-other-field
-                            @if ($vehicleTypeSelectValue !== 'Others') hidden @endif
-                        >
-                        @error('vehicle_type')
-                            <span class="field-error">{{ $message }}</span>
-                        @enderror
-                        @error('vehicle_type_other')
-                            <span class="field-error">{{ $message }}</span>
-                        @enderror
-                    </div>
-                </div>
+{{-- Side panel: filled from registry.vehicles.show. --}}
+<x-drawer id="vehicle-panel" title="Vehicle" size="lg">
+    <div class="vehicle-panel" data-vehicle-panel>
+        <p class="text-muted" data-panel-loading>Loading…</p>
+    </div>
+</x-drawer>
 
-                <div class="button-row">
-                    <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
-                    <button type="submit" class="button button-primary" @disabled($availableTags->isEmpty())>Save Vehicle</button>
-                </div>
-            </form>
-    </x-drawer>
+{{-- Edit Vehicle (tag changes go through Replace Tag). --}}
+@php($editVehicle = $failedForm === 'edit' ? $vehicles->firstWhere('id', (int) $failedVehicleId) : null)
+<x-drawer id="edit-vehicle-drawer" title="Edit Vehicle" :open="(bool) $editVehicle">
+    <form method="POST" action="{{ $editVehicle ? route('vehicle-registry.update', $editVehicle) : '#' }}" class="stack-form" data-vehicle-form="edit">
+        @csrf
+        @method('PUT')
+        <input type="hidden" name="_form" value="edit">
+        <input type="hidden" name="_vehicle_id" value="{{ $editVehicle?->id }}" data-field="id">
+        <input type="hidden" name="rfid_tag_id" value="{{ $editVehicle ? old('rfid_tag_id') : '' }}" data-field="tag_id">
 
-    <x-table title="Registered Vehicles" :empty="$vehicles->isEmpty()" empty-title="No registered vehicles yet." empty-text="Add a vehicle and assign it an RFID tag.">
-        <x-slot:emptyAction>
-            <button type="button" class="button button-primary button-sm" data-drawer-open="add-vehicle-drawer">Add Vehicle</button>
-        </x-slot:emptyAction>
-                <thead>
-                    <tr>
-                        <th>Plate</th>
-                        <th>Owner</th>
-                        <th>Category</th>
-                        <th>Vehicle</th>
-                        <th>RFID Tag</th>
-                        <th>State</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach ($vehicles as $vehicle)
-                        <tr>
-                            <td><strong>{{ $vehicle->plate_number }}</strong></td>
-                            <td>{{ $vehicle->vehicle_owner_name ?: 'N/A' }}</td>
-                            <td>{{ ucfirst(str_replace('_', ' ', $vehicle->category)) }}</td>
-                            <td>{{ $vehicle->vehicle_type }}</td>
-                            <td>
-                                @if (! $vehicle->rfidTag && $vehicle->rfidTags->isEmpty())
-                                    <x-badge status="no_tag" />
-                                @elseif ($vehicle->rfidTag)
-                                    <span class="badge {{ $vehicle->rfidTag->status === 'assigned' ? 'badge-matched' : 'badge-unmatched' }}">
-                                        #{{ $vehicle->rfidTag->tag_number ?: 'N/A' }} - {{ $vehicle->rfidTag->uid }}
-                                    </span>
-                                @else
-                                    <div class="badge-row">
-                                        @foreach ($vehicle->rfidTags as $tag)
-                                            <span class="badge {{ $tag->status === 'assigned' ? 'badge-matched' : 'badge-unmatched' }}">
-                                                #{{ $tag->tag_number ?: 'N/A' }} - {{ $tag->uid }}
-                                            </span>
-                                        @endforeach
-                                    </div>
-                                @endif
-                            </td>
-                            <td>
-                                <x-badge :status="strtolower($vehicle->current_state ?? 'outside')" />
-                                @if ($vehicle->status !== 'active')
-                                    <x-badge :status="$vehicle->status" />
-                                @endif
-                            </td>
-                            <td>
-                                <a href="{{ route('vehicle-registry.edit', $vehicle) }}" class="button button-secondary button-sm">Edit</a>
-                            </td>
-                        </tr>
-                    @endforeach
-                </tbody>
-    </x-table>
+        <p class="field-help" data-edit-tag-note>The RFID tag is changed with Replace Tag.</p>
+        @error('rfid_tag_id')
+            <p class="field-error">{{ $message }}</p>
+        @enderror
+
+        @include('registry.partials.vehicle-fields', ['prefix' => 'edit', 'useOld' => (bool) $editVehicle])
+
+        <div class="button-row">
+            <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
+            <button type="submit" class="button button-primary">Save Changes</button>
+        </div>
+    </form>
+</x-drawer>
+
+{{-- Replace Tag: old tag → lost/disabled, new tag assigned. --}}
+@php($replaceVehicle = $failedForm === 'replace' ? $vehicles->firstWhere('id', (int) $failedVehicleId) : null)
+<x-drawer id="replace-tag-drawer" title="Replace Tag" :open="(bool) $replaceVehicle">
+    <form method="POST" action="{{ $replaceVehicle ? route('registry.vehicles.replace-tag', $replaceVehicle) : '#' }}" class="stack-form" data-vehicle-form="replace">
+        @csrf
+        <input type="hidden" name="_form" value="replace">
+        <input type="hidden" name="_vehicle_id" value="{{ $replaceVehicle?->id }}" data-field="id">
+
+        <p class="replace-current" data-replace-current>
+            @if ($replaceVehicle)
+                {{ $replaceVehicle->plate_number }} · current tag {{ $replaceVehicle->rfidTag ? '#'.$replaceVehicle->rfidTag->tag_number.' · '.$replaceVehicle->rfidTag->uid : 'none' }}
+            @endif
+        </p>
+
+        @include('registry.partials.tag-picker', ['prefix' => 'replace', 'useOld' => (bool) $replaceVehicle, 'legend' => 'New tag', 'vehicleId' => $replaceVehicle?->id])
+
+        <fieldset class="field" data-old-tag-fieldset>
+            <legend>What happened to the old tag?</legend>
+            <label class="checkbox-row"><input type="radio" name="old_tag_status" value="lost" @checked(old('old_tag_status', 'lost') === 'lost')> Lost (scans of it raise an alert)</label>
+            <label class="checkbox-row"><input type="radio" name="old_tag_status" value="disabled" @checked(old('old_tag_status') === 'disabled')> Damaged / disabled</label>
+            @error('old_tag_status')<span class="field-error">{{ $message }}</span>@enderror
+        </fieldset>
+
+        <div class="button-row">
+            <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
+            <button type="submit" class="button button-primary">Replace Tag</button>
+        </div>
+    </form>
+</x-drawer>
+
+<script id="registry-vehicle-data" type="application/json">{!! json_encode([
+    'categories' => $vehicleCategories,
+    'vehicleTypes' => $vehicleTypes,
+], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 
 @push('scripts')
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            document.querySelectorAll('[data-other-select]').forEach((select) => {
-                const field = document.getElementById(select.dataset.otherTarget);
-                const otherValues = ['others', 'Others'];
-
-                if (!field) {
-                    return;
-                }
-
-                const syncOtherField = () => {
-                    const show = otherValues.includes(select.value);
-                    field.hidden = !show;
-                    field.toggleAttribute('required', show);
-
-                    if (show) {
-                        field.focus({ preventScroll: true });
-                    }
-                };
-
-                select.addEventListener('change', syncOtherField);
-                syncOtherField();
-            });
-        });
-    </script>
+    <script src="{{ asset('js/registry.js') }}"></script>
 @endpush
