@@ -25,7 +25,9 @@ class VehicleRegistryController extends Controller
         VehicleRegistryService $vehicleRegistryService,
         RfidService $rfidService
     ): View {
-        return view('vehicle-registry.index', [
+        // UI Phase 2: Registry › Vehicles tab.
+        return view('registry.index', [
+            'tab' => 'vehicles',
             'vehicles' => $vehicleRegistryService->registeredVehicles(),
             'availableTags' => $vehicleRegistryService->availableTags(),
             'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
@@ -48,7 +50,9 @@ class VehicleRegistryController extends Controller
         $vehicleTags = $allTags->where('tag_type', RfidTag::TYPE_VEHICLE);
         $guestPasses = $allTags->where('tag_type', RfidTag::TYPE_GUEST_PASS);
 
-        return view('rfid-inventory.index', [
+        // UI Phase 2: Registry › RFID Tags tab.
+        return view('registry.index', [
+            'tab' => 'tags',
             'rfidTagInventory' => $tagType ? $allTags->where('tag_type', $tagType)->values() : $allTags,
             'rfidStats' => $rfidService->stats(),
             'tagTypeFilter' => $tagType,
@@ -60,6 +64,30 @@ class VehicleRegistryController extends Controller
                 'pass_issued' => $guestPasses->where('status', RfidTag::STATUS_ISSUED)->count(),
                 'pass_lost' => $guestPasses->where('status', RfidTag::STATUS_LOST)->count(),
                 'pass_total' => $guestPasses->count(),
+            ],
+        ]);
+    }
+
+    /**
+     * UI Phase 2: Registry › Guest Passes tab (G-01, G-02 ...).
+     */
+    public function guestPasses(): View
+    {
+        $passes = RfidTag::query()
+            ->guestPasses()
+            ->with('activeGuestVisit')
+            ->orderBy('display_number')
+            ->get();
+
+        return view('registry.index', [
+            'tab' => 'passes',
+            'passes' => $passes,
+            'passStats' => [
+                'available' => $passes->where('status', RfidTag::STATUS_AVAILABLE)->count(),
+                'issued' => $passes->where('status', RfidTag::STATUS_ISSUED)->count(),
+                'lost' => $passes->where('status', RfidTag::STATUS_LOST)->count(),
+                'disabled' => $passes->where('status', RfidTag::STATUS_DISABLED)->count(),
+                'total' => $passes->count(),
             ],
         ]);
     }
@@ -114,7 +142,7 @@ class VehicleRegistryController extends Controller
         }
 
         return redirect()
-            ->route('rfid-inventory.index')
+            ->route('registry.index', ['tab' => $tag->isGuestPass() ? 'passes' : 'tags'])
             ->with('status', ($tag->isGuestPass() ? $tag->label.' · ' : '').'RFID #'.$tag->tag_number.' ('.$tag->uid.') was added to the RFID inventory.');
     }
 
@@ -207,7 +235,7 @@ class VehicleRegistryController extends Controller
         }
 
         return redirect()
-            ->route('vehicle-registry.index')
+            ->route('registry.index', ['tab' => 'vehicles'])
             ->with('status', $updatedVehicle->plate_number.' was updated.');
     }
 }

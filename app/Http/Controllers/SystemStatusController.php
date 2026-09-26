@@ -17,7 +17,9 @@ class SystemStatusController extends Controller
     ): View {
         $runtime = $detectorRuntimeService->ensureRunning();
 
-        return view('system-status.index', [
+        // UI Phase 2: Settings › System Status tab.
+        return view('settings.index', [
+            'tab' => 'status',
             'runtime' => $runtime,
             'settings' => $settingsService->all(),
         ]);

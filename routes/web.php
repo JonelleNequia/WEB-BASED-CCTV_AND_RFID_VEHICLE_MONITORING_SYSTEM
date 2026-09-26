@@ -1,29 +1,40 @@
 <?php
 
+use App\Http\Controllers\ActivityLogController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\CalibrationController;
 use App\Http\Controllers\CameraFileController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EvidenceController;
 use App\Http\Controllers\GuestObservationController;
+use App\Http\Controllers\GateMonitorController;
 use App\Http\Controllers\GuestPassController;
-use App\Http\Controllers\MonitoringController;
+use App\Http\Controllers\RegistryController;
 use App\Http\Controllers\RfidScanController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\StationController;
-use App\Http\Controllers\SystemStatusController;
 use App\Http\Controllers\VehicleRegistryController;
 use App\Http\Controllers\VehicleEventController;
 use App\Support\CameraFiles;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
+
+/**
+ * UI Phase 2: old page URLs redirect to the new page + tab, keeping filters.
+ */
+$legacyRedirect = static fn (string $route, array $params = []) => static fn (Request $request) => redirect()->route(
+    $route,
+    $params + $request->query()
+);
 
 Route::get('/', function () {
     if (! Auth::check()) {
         return redirect()->route('login');
     }
 
-    return redirect()->route('dashboard.index');
+    // UI Phase 2: guards (non-admin) start on the Gate Monitor.
+    return redirect()->route(Auth::user()?->isAdmin() ? 'dashboard.index' : 'gates.index');
 })->name('home');
 
 Route::middleware('guest')->group(function (): void {
@@ -45,7 +56,7 @@ Route::middleware('auth')->group(function (): void {
 });
 
 // Phase 1: 'detector' keeps vehicle detection running on every signed-in page.
-Route::middleware(['auth', 'detector'])->group(function (): void {
+Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect): void {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
 
     Route::get('/station/entrance', [StationController::class, 'show'])
@@ -69,29 +80,44 @@ Route::middleware(['auth', 'detector'])->group(function (): void {
         ->whereNumber('guestVisit')
         ->name('guest-passes.visits.card-returned');
 
-    Route::get('/monitoring', fn () => redirect()->route('stations.entrance'))->name('monitoring.index');
-    Route::get('/monitoring/live-state', [MonitoringController::class, 'liveState'])->name('monitoring.live-state');
-    Route::get('/portals/{location}', function (string $location) {
-        abort_unless(in_array($location, ['entrance', 'exit'], true), 404);
+    // UI Phase 2: Gate Monitor shows Entrance and Exit side by side (all signed-in users).
+    Route::get('/gates', [GateMonitorController::class, 'index'])->name('gates.index');
+    Route::get('/gates/state', [GateMonitorController::class, 'state'])->name('gates.state');
+    Route::get('/monitoring', fn () => redirect()->route('gates.index'))->name('monitoring.index');
+    Route::get('/portals/{location}', fn () => redirect()->route('gates.index'))
+        ->whereIn('location', ['entrance', 'exit'])
+        ->name('portals.show');
 
-        return redirect()->route($location === 'exit' ? 'stations.exit' : 'stations.entrance');
-    })->name('portals.show');
-
-    Route::middleware('admin')->group(function (): void {
+    Route::middleware('admin')->group(function () use ($legacyRedirect): void {
         Route::get('/admin', [DashboardController::class, 'index'])->name('dashboard.index');
         Route::get('/admin/live-state', [DashboardController::class, 'liveState'])->name('dashboard.live-state');
         Route::redirect('/dashboard', '/admin')->name('dashboard.legacy');
-        Route::get('/vehicle-registry', [VehicleRegistryController::class, 'index'])->name('vehicle-registry.index');
-        Route::get('/rfid-inventory', [VehicleRegistryController::class, 'rfidInventory'])->name('rfid-inventory.index');
+        // UI Phase 2: the six sidebar pages.
+        Route::get('/registry', [RegistryController::class, 'index'])->name('registry.index');
+        Route::get('/guests', [GuestPassController::class, 'index'])->name('guests.index');
+        Route::get('/logs', [ActivityLogController::class, 'index'])->name('logs.index');
+
+        // UI Phase 2: old page URLs (names kept so old links keep working).
+        Route::get('/vehicle-registry', $legacyRedirect('registry.index', ['tab' => 'vehicles']))->name('vehicle-registry.index');
+        Route::get('/rfid-inventory', function (Request $request) {
+            $tab = $request->query('tag_type') === 'guest_pass' ? 'passes' : 'tags';
+
+            return redirect()->route('registry.index', ['tab' => $tab] + $request->except('tag_type'));
+        })->name('rfid-inventory.index');
+        Route::get('/rfid-scans', $legacyRedirect('logs.index', ['tab' => 'scans']))->name('rfid-scans.index');
+        Route::get('/guest-observations', $legacyRedirect('logs.index', ['tab' => 'alerts']))->name('guest-observations.index');
+        Route::get('/vehicle-events', $legacyRedirect('logs.index', ['tab' => 'events']))->name('vehicle-events.index');
+        Route::get('/camera-calibration', $legacyRedirect('settings.index', ['tab' => 'calibration']))->name('calibration.index');
+        Route::get('/system-status', $legacyRedirect('settings.index', ['tab' => 'status']))->name('system-status.index');
+        Route::get('/guest-passes', $legacyRedirect('guests.index'))->name('guest-passes.index');
+
         Route::post('/rfid-inventory', [VehicleRegistryController::class, 'storeRfidTag'])->name('rfid-inventory.store');
         Route::post('/vehicle-registry/rfid-tags', [VehicleRegistryController::class, 'storeRfidTag'])->name('vehicle-registry.rfid-tags.store');
         Route::post('/vehicle-registry', [VehicleRegistryController::class, 'store'])->name('vehicle-registry.store');
         Route::get('/vehicle-registry/{vehicle}/edit', [VehicleRegistryController::class, 'edit'])->name('vehicle-registry.edit');
         Route::put('/vehicle-registry/{vehicle}', [VehicleRegistryController::class, 'update'])->name('vehicle-registry.update');
-        Route::get('/rfid-scans', [RfidScanController::class, 'index'])->name('rfid-scans.index');
         Route::post('/rfid-scans/simulate', [RfidScanController::class, 'store'])->name('rfid-scans.store');
-        // Phase 4: Guest Passes page and visit actions.
-        Route::get('/guest-passes', [GuestPassController::class, 'index'])->name('guest-passes.index');
+        // Phase 4: guest visit page and actions.
         Route::get('/guest-passes/visits/{guestVisit}', [GuestPassController::class, 'show'])
             ->whereNumber('guestVisit')
             ->name('guest-passes.visits.show');
@@ -101,7 +127,6 @@ Route::middleware(['auth', 'detector'])->group(function (): void {
         Route::post('/guest-passes/visits/{guestVisit}/lost', [GuestPassController::class, 'markLost'])
             ->whereNumber('guestVisit')
             ->name('guest-passes.visits.lost');
-        Route::get('/guest-observations', [GuestObservationController::class, 'index'])->name('guest-observations.index');
         Route::post('/guest-observations', [GuestObservationController::class, 'store'])->name('guest-observations.store');
         Route::patch('/guest-observations/{guestVehicleObservation}', [GuestObservationController::class, 'update'])
             ->whereNumber('guestVehicleObservation')
@@ -109,19 +134,17 @@ Route::middleware(['auth', 'detector'])->group(function (): void {
         Route::patch('/guest-observations/{guestVehicleObservation}/verify', [GuestObservationController::class, 'verify'])
             ->whereNumber('guestVehicleObservation')
             ->name('guest-observations.verify');
-        Route::get('/vehicle-events', [VehicleEventController::class, 'index'])->name('vehicle-events.index');
         Route::get('/vehicle-events/create', [VehicleEventController::class, 'create'])->name('vehicle-events.create');
         Route::post('/vehicle-events', [VehicleEventController::class, 'store'])->name('vehicle-events.store');
         Route::get('/vehicle-events/export/csv', [VehicleEventController::class, 'exportCsv'])->name('vehicle-events.export.csv');
         Route::get('/vehicle-events/{vehicleEvent}', [VehicleEventController::class, 'show'])
             ->whereNumber('vehicleEvent')
             ->name('vehicle-events.show');
-        Route::redirect('/reports', '/vehicle-events')->name('reports.index');
+        Route::redirect('/reports', '/logs')->name('reports.index');
         Route::get('/reports/export/csv', fn () => redirect()->route('vehicle-events.export.csv', request()->query()))
             ->name('reports.export.csv');
         Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('settings.update');
-        Route::get('/camera-calibration', [CalibrationController::class, 'index'])->name('calibration.index');
         Route::get('/camera-calibration/heartbeat', [CalibrationController::class, 'heartbeat'])->name('calibration.heartbeat');
         Route::put('/calibration', [CalibrationController::class, 'update'])->name('calibration.update');
         Route::put('/camera-browser/state', [CalibrationController::class, 'syncState'])->name('camera-browser.state');
@@ -132,9 +155,8 @@ Route::middleware(['auth', 'detector'])->group(function (): void {
             ->whereNumber('vehicleEvent')
             ->name('vehicle-events.complete');
 
-        Route::redirect('/manual-review', '/vehicle-events')->name('manual-review.index');
+        Route::redirect('/manual-review', '/logs')->name('manual-review.index');
 
-        Route::redirect('/incomplete-records', '/guest-observations')->name('incomplete-records.index');
-        Route::get('/system-status', [SystemStatusController::class, 'index'])->name('system-status.index');
+        Route::get('/incomplete-records', $legacyRedirect('logs.index', ['tab' => 'alerts']))->name('incomplete-records.index');
     });
 });

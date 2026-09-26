@@ -26,9 +26,9 @@ class RfidSimulationTest extends TestCase
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->actingAs($user)
-            ->get(route('rfid-scans.index'))
+            ->get(route('settings.index', ['tab' => 'test-scan']))
             ->assertOk()
-            ->assertSee('RFID Desk')
+            ->assertSee('Test Scan')
             ->assertSee('Simulate RFID Scan');
     }
 

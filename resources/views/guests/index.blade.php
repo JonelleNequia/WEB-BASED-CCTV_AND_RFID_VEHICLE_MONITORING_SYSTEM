@@ -1,8 +1,8 @@
-{{-- Phase 4: Guest Passes page. Replaces Guest Monitoring as the main guest flow. --}}
+{{-- UI Phase 2: Guests page (was Guest Passes). Visits here; the pass cards are in Registry › Guest Passes. --}}
 @extends('layouts.app')
 
-@section('title', 'Guest Passes | PHILCST Vehicle Monitoring')
-@section('page-title', 'Guest Passes')
+@section('title', 'Guests | PHILCST Vehicle Monitoring')
+@section('page-title', 'Guests')
 
 @php
     $statusLabel = fn (string $status): string => match ($status) {
@@ -21,7 +21,7 @@
 @endphp
 
 @section('content')
-    <x-page-header title="Guest Passes">
+    <x-page-header title="Guests">
         <x-slot:meta>Default validity {{ intdiv($validityMinutes, 60) }}h {{ $validityMinutes % 60 }}m</x-slot:meta>
         <x-slot:actions>
             <button type="button" class="button button-secondary" data-drawer-open="manual-guest-drawer">Manual guest entry</button>
@@ -31,8 +31,8 @@
 
     <x-stat-row>
         <x-stat label="Active Guests" :value="$stats['active_guests']" tone="brand" hint="Inside with a pass (incl. overstay)" data-guest-pass-stat="active_guests" />
-        <x-stat label="Passes Available" :value="$stats['passes_available'].' / '.$stats['passes_total']" :hint="$stats['passes_lost'].' lost pass(es)'" :href="route('rfid-inventory.index', ['tag_type' => 'guest_pass'])" />
-        <x-stat label="Overstay" :value="$stats['overstay']" tone="warning" hint="Past their valid-until time" :href="route('guest-passes.index', ['status' => 'overstay'])" />
+        <x-stat label="Passes Available" :value="$stats['passes_available'].' / '.$stats['passes_total']" :hint="$stats['passes_lost'].' lost pass(es)'" :href="route('registry.index', ['tab' => 'passes'])" />
+        <x-stat label="Overstay" :value="$stats['overstay']" tone="warning" hint="Past their valid-until time" :href="route('guests.index', ['status' => 'overstay'])" />
     </x-stat-row>
 
     <x-drawer id="issue-pass-drawer" title="Issue Guest Pass" :open="$errors->hasAny(['id_presented', 'rfid_tag_id', 'plate'])">
@@ -101,7 +101,7 @@
     <x-table title="Guest Visits" :paginator="$visits" :empty="$visits->isEmpty()" empty-title="No guest visits for this filter.">
         <x-slot:toolbar><span class="text-muted">{{ $visits->total() }} visit(s)</span></x-slot:toolbar>
         <x-slot:filters>
-        <form method="GET" action="{{ route('guest-passes.index') }}" class="form-grid filter-grid">
+        <form method="GET" action="{{ route('guests.index') }}" class="form-grid filter-grid">
             <div class="field">
                 <label for="filter_status">Status</label>
                 <select id="filter_status" name="status">
@@ -121,7 +121,7 @@
             <div class="field field-actions">
                 <div class="button-row">
                     <button type="submit" class="button button-secondary">Apply</button>
-                    <a href="{{ route('guest-passes.index') }}" class="button button-secondary">Reset</a>
+                    <a href="{{ route('guests.index') }}" class="button button-secondary">Reset</a>
                 </div>
             </div>
         </form>

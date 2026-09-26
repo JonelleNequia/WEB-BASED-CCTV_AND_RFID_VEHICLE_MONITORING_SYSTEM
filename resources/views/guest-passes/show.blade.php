@@ -13,7 +13,7 @@
 @endphp
 
 @section('content')
-    <x-page-header :title="($visit->rfidTag?->label ?? 'Guest Pass').' · '.($visit->plate ?: 'No plate')" :back="route('guest-passes.index')" back-label="Back to Guest Passes">
+    <x-page-header :title="($visit->rfidTag?->label ?? 'Guest Pass').' · '.($visit->plate ?: 'No plate')" :back="route('guests.index')" back-label="Back to Guests">
         <x-slot:meta>
             <x-badge :status="$visit->status === 'lost_tag' ? 'lost' : $visit->status" :label="$visit->status === 'lost_tag' ? 'Lost pass' : ucfirst($visit->status)" />
             @if ($visit->valid_until)

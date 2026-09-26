@@ -1,18 +1,40 @@
-@extends('layouts.app')
-
-@section('title', 'Guest Monitoring | PHILCST Vehicle Monitoring')
-@section('page-title', 'Guest Monitoring')
-
-@section('content')
-    <x-page-header title="Guest Monitoring">
-        <x-slot:actions>
-            <button type="button" class="button button-primary" data-drawer-open="add-observation-drawer">Add Guest Observation</button>
-        </x-slot:actions>
-    </x-page-header>
-
+{{-- UI Phase 2: Activity Logs › Alerts (no-pass alerts, flagged scans, overstay). Was Guest Monitoring. --}}
     <x-stat-row>
-        <x-stat label="Guest Observations Today" :value="$guestCountToday" tone="warning" />
+        <x-stat label="No-pass Alerts Today" :value="$alertCounts['no_pass'] ?? 0" tone="danger" hint="Camera saw a vehicle with no tag or pass" />
+        <x-stat label="Anomalies Today" :value="$alertCounts['anomalies'] ?? 0" tone="danger" :href="route('logs.index', ['tab' => 'scans', 'verification_status' => 'anomaly'])" />
+        <x-stat label="Lost / Disabled Pass Scans" :value="$alertCounts['lost_pass'] ?? 0" tone="danger" />
+        <x-stat label="Overstay" :value="$alertCounts['overstay'] ?? 0" tone="warning" :href="route('guests.index', ['status' => 'overstay'])" />
+        <x-stat label="Guest Captures Today" :value="$guestCountToday" />
     </x-stat-row>
+
+    <x-table title="Flagged RFID Scans" :empty="$flaggedScans->isEmpty()" empty-title="No flagged scans." empty-text="Anomalies and lost or disabled pass scans appear here.">
+        <x-slot:toolbar>
+            <a href="{{ route('logs.index', ['tab' => 'scans', 'verification_status' => 'anomaly']) }}" class="button button-secondary button-sm">All flagged scans</a>
+        </x-slot:toolbar>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Tag / Vehicle</th>
+                <th>Station</th>
+                <th>Result</th>
+                <th>Reason</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach ($flaggedScans as $scan)
+                <tr>
+                    <td><x-datetime :value="$scan->scan_time" /></td>
+                    <td>
+                        <strong>{{ $scan->vehicle?->plate_number ?? $scan->vehicleRfidTag?->label ?? $scan->tag_uid }}</strong>
+                        <div class="table-subtext">{{ $scan->tag_uid }}</div>
+                    </td>
+                    <td>{{ ucfirst($scan->scan_location) }}</td>
+                    <td><x-badge :status="in_array($scan->verification_status, ['guest_pass_lost', 'guest_pass_disabled'], true) ? $scan->verification_status : 'anomaly'" :label="$scan->verificationLabel" /></td>
+                    <td>{{ $scan->anomaly_reason ?: '—' }}</td>
+                </tr>
+            @endforeach
+        </tbody>
+    </x-table>
 
     <x-drawer id="add-observation-drawer" title="Add Guest Observation" :open="$errors->any()">
             <form method="POST" action="{{ route('guest-observations.store') }}" enctype="multipart/form-data" class="stack-form guest-observation-form">
@@ -113,7 +135,8 @@
         <x-slot:toolbar><span class="text-muted" data-guest-total-count>{{ $observations->total() }} total</span></x-slot:toolbar>
         <x-slot:filters>
 
-            <form method="GET" action="{{ route('guest-observations.index') }}" class="form-grid filter-grid guest-filter-grid">
+            <form method="GET" action="{{ route('logs.index') }}" class="form-grid filter-grid guest-filter-grid">
+                <input type="hidden" name="tab" value="alerts">
                 <div class="field">
                     <label for="filter_plate_text">Plate</label>
                     <input id="filter_plate_text" type="text" name="plate_text" value="{{ $filters['plate_text'] ?? '' }}">
@@ -142,7 +165,7 @@
                 <div class="field field-actions">
                     <div class="button-row">
                         <button type="submit" class="button button-secondary">Apply</button>
-                        <a href="{{ route('guest-observations.index') }}" class="button button-secondary">Reset</a>
+                        <a href="{{ route('logs.index', ['tab' => 'alerts']) }}" class="button button-secondary">Reset</a>
                     </div>
                 </div>
             </form>
@@ -296,7 +319,6 @@
     <script id="guest-observations-realtime" type="application/json">{!! json_encode([
         'recentLogsUrl' => route('api.recent-guest-logs', ['limit' => 10]),
     ], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
-@endsection
 
 @push('scripts')
     <script>

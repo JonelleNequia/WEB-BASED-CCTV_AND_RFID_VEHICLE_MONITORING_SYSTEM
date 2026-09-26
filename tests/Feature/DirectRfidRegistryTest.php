@@ -20,7 +20,7 @@ class DirectRfidRegistryTest extends TestCase
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->actingAs($user)
-            ->get(route('rfid-inventory.index'))
+            ->get(route('registry.index', ['tab' => 'tags']))
             ->assertOk()
             ->assertSee('RFID Tags')
             ->assertSee('Register RFID Tag')
@@ -38,7 +38,7 @@ class DirectRfidRegistryTest extends TestCase
                 'tag_number' => 1,
                 'uid' => ' direct-3003 ',
             ])
-            ->assertRedirect(route('rfid-inventory.index'));
+            ->assertRedirect(route('registry.index', ['tab' => 'tags']));
 
         $tag = RfidTag::query()->where('uid', 'DIRECT-3003')->firstOrFail();
 
@@ -71,7 +71,7 @@ class DirectRfidRegistryTest extends TestCase
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->actingAs($user)
-            ->from(route('vehicle-registry.index'))
+            ->from(route('registry.index'))
             ->post(route('vehicle-registry.store'), [
                 'rfid_uid' => ' direct-4004 ',
                 'plate_number' => ' dir-4004 ',
@@ -79,7 +79,7 @@ class DirectRfidRegistryTest extends TestCase
                 'category' => 'faculty_staff',
                 'vehicle_type' => 'Car',
             ])
-            ->assertRedirect(route('vehicle-registry.index'))
+            ->assertRedirect(route('registry.index'))
             ->assertSessionHasErrors('rfid_uid');
 
         $this->assertDatabaseMissing('vehicles', [
@@ -108,7 +108,7 @@ class DirectRfidRegistryTest extends TestCase
         ]);
 
         $response = $this->actingAs($user)
-            ->get(route('rfid-inventory.index'))
+            ->get(route('registry.index', ['tab' => 'tags']))
             ->assertOk()
             ->assertSee('RFID Tag No.')
             ->assertSee('#2')

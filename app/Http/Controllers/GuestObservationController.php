@@ -6,6 +6,7 @@ use App\Http\Requests\UpdateGuestObservationRequest;
 use App\Models\Camera;
 use App\Models\EventReceiveLog;
 use App\Models\GuestVehicleObservation;
+use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
 use App\Services\DetectorRfidMatchService;
 use App\Services\GuestObservationService;
@@ -46,7 +47,16 @@ class GuestObservationController extends Controller
      */
     public function index(Request $request, GuestObservationService $guestObservationService): View
     {
-        return view('guest-observations.index', [
+        // UI Phase 2: Activity Logs › Alerts tab (no-pass alerts and flagged scans).
+        return view('logs.index', [
+            'tab' => 'alerts',
+            'flaggedScans' => RfidScanLog::query()
+                ->with(['vehicle', 'vehicleRfidTag'])
+                ->where(fn ($query) => $query->where('is_anomaly', true)
+                    ->orWhereIn('verification_status', ['guest_pass_lost', 'guest_pass_disabled']))
+                ->latest('scan_time')
+                ->limit(10)
+                ->get(),
             'filters' => $request->only(['plate_text', 'location', 'date_from', 'date_to']),
             'observations' => $guestObservationService->paginated($request->all(), 10),
             'guestCountToday' => $guestObservationService->countToday(),

@@ -1,80 +1,46 @@
 @php
     $isAdmin = auth()->user()?->isAdmin() === true;
 
-    $mainItems = [
-        [
+    // UI Phase 2: six items. Station kiosks open from the Gate Monitor.
+    $mainItems = array_values(array_filter([
+        $isAdmin ? [
             'label' => 'Dashboard',
             'route' => route('dashboard.index'),
             'active' => request()->routeIs('dashboard.*'),
             'icon' => 'dashboard',
-        ],
+        ] : null,
         [
-            'label' => 'Entrance Station',
-            'route' => route('stations.entrance'),
-            'active' => request()->routeIs('stations.entrance'),
+            'label' => 'Gate Monitor',
+            'route' => route('gates.index'),
+            'active' => request()->routeIs('gates.*'),
             'icon' => 'monitor',
         ],
-        [
-            'label' => 'Exit Station',
-            'route' => route('stations.exit'),
-            'active' => request()->routeIs('stations.exit'),
-            'icon' => 'monitor',
-        ],
-        [
-            'label' => 'Vehicle Registry',
-            'route' => route('vehicle-registry.index'),
-            'active' => request()->routeIs('vehicle-registry.*'),
+        $isAdmin ? [
+            'label' => 'Registry',
+            'route' => route('registry.index'),
+            'active' => request()->routeIs('registry.*', 'vehicle-registry.*'),
             'icon' => 'vehicle',
-        ],
-        [
-            'label' => 'RFID Tags',
-            'route' => route('rfid-inventory.index'),
-            'active' => request()->routeIs('rfid-inventory.*'),
-            'icon' => 'rfid',
-        ],
-        [
-            'label' => 'RFID Desk',
-            'route' => route('rfid-scans.index'),
-            'active' => request()->routeIs('rfid-scans.*'),
-            'icon' => 'rfid',
-        ],
-        [
-            // Phase 4: Guest Monitoring became Guest Passes.
-            'label' => 'Guest Passes',
-            'route' => route('guest-passes.index'),
-            'active' => request()->routeIs('guest-passes.*', 'guest-observations.*'),
+        ] : null,
+        $isAdmin ? [
+            'label' => 'Guests',
+            'route' => route('guests.index'),
+            'active' => request()->routeIs('guests.*', 'guest-passes.*'),
             'icon' => 'guest',
-        ],
-        [
-            'label' => 'Event Logs',
-            'route' => route('vehicle-events.index'),
-            'active' => request()->routeIs('vehicle-events.*'),
+        ] : null,
+        $isAdmin ? [
+            'label' => 'Activity Logs',
+            'route' => route('logs.index'),
+            'active' => request()->routeIs('logs.*', 'vehicle-events.*'),
             'icon' => 'logs',
-        ],
-        [
+            'badge' => $navAlertCount ?? 0,
+        ] : null,
+        $isAdmin ? [
             'label' => 'Settings',
             'route' => route('settings.index'),
             'active' => request()->routeIs('settings.*'),
             'icon' => 'settings',
-        ],
-    ];
-
-    $advancedItems = $isAdmin
-        ? [
-            [
-                'label' => 'Camera Calibration',
-                'route' => route('calibration.index'),
-                'active' => request()->routeIs('calibration.*'),
-                'icon' => 'calibration',
-            ],
-            [
-                'label' => 'System Status',
-                'route' => route('system-status.index'),
-                'active' => request()->routeIs('system-status.*'),
-                'icon' => 'status',
-            ],
-        ]
-        : [];
+        ] : null,
+    ]));
 
     $navIcon = static function (string $icon): string {
         return match ($icon) {
@@ -95,36 +61,34 @@
     };
 @endphp
 
-<nav class="sidebar-nav">
+<nav class="sidebar-nav" aria-label="Main">
     <div class="sidebar-nav-sections">
         <div class="nav-section">
-            <p class="nav-section-title">Main Menu</p>
-
             @foreach ($mainItems as $item)
-                <a href="{{ $item['route'] }}" class="nav-link {{ $item['active'] ? 'is-active' : '' }}">
+                <a href="{{ $item['route'] }}" class="nav-link {{ $item['active'] ? 'is-active' : '' }}" @if ($item['active']) aria-current="page" @endif>
                     <span class="nav-icon">{!! $navIcon($item['icon']) !!}</span>
                     <span class="nav-label">{{ $item['label'] }}</span>
+                    @if (($item['badge'] ?? 0) > 0)
+                        <span class="nav-badge" title="{{ $item['badge'] }} alert(s) need attention">{{ $item['badge'] > 99 ? '99+' : $item['badge'] }}</span>
+                    @endif
                 </a>
             @endforeach
         </div>
-
-        @if ($isAdmin)
-            <div class="nav-section">
-                <p class="nav-section-title">Advanced</p>
-
-                @foreach ($advancedItems as $item)
-                    <a href="{{ $item['route'] }}" class="nav-link {{ $item['active'] ? 'is-active' : '' }}">
-                        <span class="nav-icon">{!! $navIcon($item['icon']) !!}</span>
-                        <span class="nav-label">{{ $item['label'] }}</span>
-                    </a>
-                @endforeach
-            </div>
-        @endif
     </div>
 
     <div class="sidebar-footer">
+        {{-- UI Phase 2: small system status (green = OK, red = needs attention). --}}
+        <ul class="sidebar-health" aria-label="System status">
+            @foreach ($navHealth ?? [] as $health)
+                <li title="{{ $health['label'] }}: {{ $health['detail'] }}">
+                    <span class="health-dot {{ $health['ok'] ? 'is-ok' : 'is-down' }}" aria-hidden="true"></span>
+                    <span>{{ $health['label'] }}</span>
+                    <small>{{ $health['detail'] }}</small>
+                </li>
+            @endforeach
+        </ul>
+
         <div class="sidebar-account">
-            <span class="sidebar-account-label">Logged in as</span>
             <strong>{{ auth()->user()->name ?? 'System User' }}</strong>
             <span class="sidebar-account-email">{{ auth()->user()->email }}</span>
         </div>

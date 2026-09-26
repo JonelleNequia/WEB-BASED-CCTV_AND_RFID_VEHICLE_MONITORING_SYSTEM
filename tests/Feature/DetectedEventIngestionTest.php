@@ -700,12 +700,12 @@ class DetectedEventIngestionTest extends TestCase
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->actingAs($admin)
-            ->get(route('guest-observations.index'))
+            ->get(route('logs.index', ['tab' => 'alerts']))
             ->assertOk()
             ->assertSee($observation->snapshot_url, false);
 
         $this->actingAs($admin)
-            ->get(route('vehicle-events.index'))
+            ->get(route('logs.index'))
             ->assertOk()
             ->assertSee($observation->snapshot_url, false);
 

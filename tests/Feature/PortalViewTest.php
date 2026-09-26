@@ -22,6 +22,6 @@ class PortalViewTest extends TestCase
 
         $this->actingAs($user)
             ->get(route('portals.show', 'entrance'))
-            ->assertRedirect(route('stations.entrance'));
+            ->assertRedirect(route('gates.index'));
     }
 }

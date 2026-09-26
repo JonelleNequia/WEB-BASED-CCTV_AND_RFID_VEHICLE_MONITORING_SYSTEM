@@ -1,9 +1,4 @@
-@extends('layouts.app')
-
-@section('title', 'RFID Desk | PHILCST Vehicle Access Monitoring')
-@section('page-title', 'RFID Desk')
-
-@section('content')
+{{-- UI Phase 2: Settings › Test Scan (the old RFID Desk simulation). History is in Activity Logs › RFID Scans. --}}
     @php($simulationEnabled = ($settings['rfid_simulation_mode'] ?? 'enabled') === 'enabled')
     @php($registeredTagOptions = $registeredTags->map(function ($tag) {
         $owner = $tag->vehicle?->vehicle_owner_name ?: $tag->vehicle?->owner_name ?: 'No owner linked';
@@ -46,10 +41,6 @@
     @php($selectedRegisteredTagId = (string) old('vehicle_rfid_tag_id', ''))
     @php($selectedRegisteredTag = $registeredTagOptions->first(fn ($option) => (string) $option['id'] === $selectedRegisteredTagId))
 
-    <x-page-header title="RFID Desk">
-        <x-slot:meta>{{ $simulationEnabled ? 'Simulation mode' : 'Simulation off' }}</x-slot:meta>
-    </x-page-header>
-
     <x-stat-row>
         <x-stat label="Registered Vehicles" :value="$rfidStats['registered_vehicles'] ?? 0" />
         {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
@@ -57,7 +48,7 @@
                 :hint="($rfidStats['registered_inside'] ?? 0).' registered · '.($rfidStats['guests_inside'] ?? 0).' guests'" />
         <x-stat label="Registered Scans Today" :value="$rfidStats['registered_scans_today'] ?? 0" tone="success" />
         <x-stat label="Needs Attention" :value="$rfidStats['attention_today'] ?? 0" tone="danger"
-                :href="($rfidStats['attention_today'] ?? 0) > 0 ? route('rfid-scans.index', ['verification_status' => 'anomaly']) : null"
+                :href="($rfidStats['attention_today'] ?? 0) > 0 ? route('logs.index', ['tab' => 'scans', 'verification_status' => 'anomaly']) : null"
                 hint="Anomalies and lost-pass alerts today" />
     </x-stat-row>
 
@@ -133,8 +124,8 @@
                     <strong>Station readers decide the direction.</strong>
                     <p>
                         At the stations, Entrance always records ENTRY and Exit always records EXIT; a mismatch is flagged for review.
-                        This desk keeps the inside/outside toggle for registered vehicles. Guest passes follow the station rules:
-                        an available pass at Entrance must be issued (Entrance Station or Guest Passes page), and an issued pass at Exit closes the visit.
+                        Test Scan keeps the inside/outside toggle for registered vehicles. Guest passes follow the station rules:
+                        an available pass at Entrance must be issued (Entrance Station or the Guests page), and an issued pass at Exit closes the visit.
                         The same tag at the same station is ignored for {{ $settings['rfid_cooldown_seconds'] ?? 60 }} seconds.
                     </p>
                 </div>
@@ -189,97 +180,8 @@
         </section>
     </div>
 
-    <x-table title="RFID Scan History" :paginator="$scanLogs" :empty="$scanLogs->isEmpty()" empty-title="No RFID scan history yet.">
-        <x-slot:filters>
-        <form method="GET" action="{{ route('rfid-scans.index') }}" class="form-grid filter-grid">
-            <div class="field span-2">
-                <label for="history_q">Search RFID Scan History</label>
-                <div class="search-input-shell">
-                    <span class="search-input-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24"><path d="M10.5 4a6.5 6.5 0 0 1 5.1 10.5l4 4a1 1 0 0 1-1.4 1.4l-4-4A6.5 6.5 0 1 1 10.5 4m0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9"/></svg>
-                    </span>
-                    <input id="history_q" type="search" name="history_q" value="{{ $filters['history_q'] ?? '' }}" placeholder="Owner name, plate number, or RFID UID">
-                </div>
-            </div>
-
-            <div class="field">
-                <label for="history_scan_location">Station</label>
-                <select id="history_scan_location" name="scan_location">
-                    <option value="">All</option>
-                    <option value="entrance" @selected(($filters['scan_location'] ?? '') === 'entrance')>Entrance</option>
-                    <option value="exit" @selected(($filters['scan_location'] ?? '') === 'exit')>Exit</option>
-                </select>
-            </div>
-
-            <div class="field">
-                <label for="verification_status">Result</label>
-                <select id="verification_status" name="verification_status">
-                    <option value="">All</option>
-                    @foreach (['anomaly' => 'Needs attention (flagged)', 'verified' => 'Registered', 'guest_pass_entry' => 'Guest Pass Entry', 'guest_pass_exit' => 'Guest Pass Exit', 'guest_pass_available' => 'Guest Pass (to issue)', 'guest_pass_not_issued' => 'Guest Pass not issued', 'guest_pass_lost' => 'Lost Guest Pass', 'guest' => 'Guest', 'inactive_tag' => 'Inactive Tag', 'unassigned_tag' => 'Unassigned Tag', 'inactive_vehicle' => 'Inactive Vehicle', 'non_recurring_category' => 'Manual Review'] as $value => $label)
-                        <option value="{{ $value }}" @selected(($filters['verification_status'] ?? '') === $value)>{{ $label }}</option>
-                    @endforeach
-                </select>
-            </div>
-
-            <div class="field field-actions">
-                <div class="button-row">
-                    <button type="submit" class="button button-secondary">Filter History</button>
-                    <a href="{{ route('rfid-scans.index') }}" class="button button-secondary">Reset History</a>
-                </div>
-            </div>
-        </form>
-        </x-slot:filters>
-
-                <thead>
-                    <tr>
-                        <th>Time</th>
-                        <th>Tag UID</th>
-                        <th>Vehicle</th>
-                        <th>Category</th>
-                        <th>Station</th>
-                        <th>Event Type</th>
-                        <th>Current State</th>
-                        <th>Result</th>
-                        <th>Vehicle Log</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach ($scanLogs as $scan)
-                        <tr>
-                            <td><x-datetime :value="$scan->scan_time" /></td>
-                            <td><strong>{{ $scan->tag_uid }}</strong></td>
-                            <td>
-                                <strong>{{ $scan->vehicle?->plate_number ?? 'GUEST' }}</strong>
-                                <div class="table-subtext">{{ $scan->vehicle?->vehicle_type ?: 'Guest record' }}</div>
-                                @if ($scan->guestVehicleObservation)
-                                    <div class="table-subtext">Guest observation #{{ $scan->guestVehicleObservation->id }}</div>
-                                @endif
-                            </td>
-                            <td>{{ $scan->vehicle?->category ? ucfirst(str_replace('_', ' ', $scan->vehicle->category)) : 'N/A' }}</td>
-                            <td>
-                                <strong>{{ $scan->scanLocationLabel }}</strong>
-                                <div class="table-subtext">{{ $scan->scanDirectionLabel }}</div>
-                            </td>
-                            <td>{{ $scan->resolvedEventTypeLabel }}</td>
-                            <td>{{ $scan->resultingStateLabel }}</td>
-                            <td>
-                                <span class="badge badge-{{ $scan->verificationBadgeClass }}">{{ $scan->verificationLabel }}</span>
-                            </td>
-                            <td>
-                                @if ($scan->correlatedVehicleEvent)
-                                    <strong>#{{ $scan->correlatedVehicleEvent->id }}</strong>
-                                    <div class="table-subtext">{{ $scan->correlatedVehicleEvent->event_type }} • {{ $scan->correlatedVehicleEvent->plate_text ?: $scan->vehicle?->plate_number ?: 'GUEST' }}</div>
-                                @else
-                                    <span class="table-subtext">No linked vehicle log</span>
-                                @endif
-                            </td>
-                        </tr>
-                    @endforeach
-                </tbody>
-    </x-table>
 
     <script id="registered-rfid-tag-options" type="application/json">{!! json_encode($registeredTagOptions, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
-@endsection
 
 @push('scripts')
     <script>
@@ -508,7 +410,7 @@
                     const scan = payload.scan || {};
                     resultBox.textContent = `${payload.message} ${scan.guest_observation_id ? 'Guest observation #' + scan.guest_observation_id + ' was created.' : ''} Refreshing latest result...`;
                     window.setTimeout(() => {
-                        window.location.href = '{{ route('rfid-scans.index') }}';
+                        window.location.href = '{{ route('settings.index', ['tab' => 'test-scan']) }}';
                     }, 500);
                 } catch (error) {
                     resultBox.textContent = 'RFID scan could not reach the server.';

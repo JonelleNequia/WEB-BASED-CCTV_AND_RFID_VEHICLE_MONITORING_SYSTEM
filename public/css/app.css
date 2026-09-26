@@ -4576,3 +4576,218 @@ a:focus-visible {
     outline-offset: 2px;
     border-radius: 4px;
 }
+
+/* UI Phase 2: sidebar alert badge and system status. */
+.nav-badge {
+    min-width: 1.35rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #b91c1c;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-align: center;
+    line-height: 1.4;
+}
+
+.sidebar-health {
+    list-style: none;
+    margin: 0;
+    padding: 0.6rem 0.7rem;
+    display: grid;
+    gap: 0.35rem;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-health li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.82rem;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.sidebar-health small {
+    margin-left: auto;
+    color: rgba(255, 255, 255, 0.66);
+    font-size: 0.74rem;
+    text-align: right;
+}
+
+.health-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 999px;
+    flex-shrink: 0;
+}
+
+/* Green = OK; red with a ring = needs attention (not color alone). */
+.health-dot.is-ok {
+    background: #4ade80;
+}
+
+.health-dot.is-down {
+    background: #f87171;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+}
+
+.sidebar-account {
+    gap: 0.1rem;
+}
+
+/* UI Phase 2: Gate Monitor. */
+.gate-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.gate-card {
+    display: grid;
+    align-content: start;
+    gap: 0.9rem;
+    padding: 1rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: #ffffff;
+    min-width: 0;
+}
+
+.gate-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.gate-card-head h2 {
+    margin: 0;
+    font-size: 1.15rem;
+    color: #2f2250;
+}
+
+.gate-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.gate-feed {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: #111827;
+}
+
+.gate-feed img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.gate-feed-fallback {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    color: #d1d5db;
+    font-size: 0.9rem;
+}
+
+.gate-feed.is-offline img {
+    visibility: hidden;
+}
+
+.gate-feed.is-offline .gate-feed-fallback {
+    display: flex;
+}
+
+.gate-section-label {
+    display: block;
+    margin-bottom: 0.35rem;
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.gate-latest {
+    padding: 0.75rem;
+    border-radius: var(--radius-md);
+    background: #fafafb;
+    border: 1px solid var(--border);
+}
+
+.gate-latest-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.gate-latest-row > div {
+    display: grid;
+    min-width: 0;
+}
+
+.gate-latest-row strong {
+    font-size: 1.15rem;
+}
+
+.gate-latest p {
+    margin: 0;
+}
+
+.gate-logs ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+}
+
+.gate-logs li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid #f1f2f4;
+    font-size: 0.9rem;
+}
+
+.gate-logs li:last-child {
+    border-bottom: 0;
+}
+
+.gate-logs time {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1100px) {
+    .gate-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* Camera cards (Settings › Cameras / Calibration): keep the stage inside the card. */
+.camera-card {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.camera-stage img,
+.camera-stage canvas {
+    max-width: 100%;
+}
+
+/* 16:9 stage + a min-height made the stage wider than a half-width card. */
+.camera-card-calibration .camera-stage {
+    min-height: 0;
+    width: 100%;
+}

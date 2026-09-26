@@ -95,6 +95,47 @@ class RealtimeLogController extends Controller
     }
 
     /**
+     * UI Phase 2: recent logs for one gate on the Gate Monitor
+     * (Entrance = ENTRY events, Exit = EXIT events, plus that gate's captures).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function gateLogRows(string $location, int $limit = 8): array
+    {
+        $eventType = $location === 'exit' ? 'EXIT' : 'ENTRY';
+
+        $eventLogs = VehicleEvent::query()
+            ->with(['camera', 'vehicle', 'rfidScanLog', 'guestVisit.rfidTag'])
+            ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
+            ->where('event_type', $eventType)
+            ->latest('created_at')
+            ->latest('event_time')
+            ->limit($limit)
+            ->get()
+            ->map(fn (VehicleEvent $event): array => $this->stationVehicleEventPayload($event));
+
+        $guestLogs = $this->unmirroredGuestObservationsQuery()
+            ->with('camera')
+            ->where('location', $location)
+            ->latest('created_at')
+            ->limit($limit)
+            ->get()
+            ->map(fn (GuestVehicleObservation $observation): array => $this->stationGuestObservationPayload($observation));
+
+        return $eventLogs
+            ->concat($guestLogs)
+            ->sortByDesc('sort_time')
+            ->take($limit)
+            ->map(function (array $log): array {
+                unset($log['sort_time']);
+
+                return $log;
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
      * @return Collection<int, array<string, mixed>>
      */
     protected function eventLogRows(int $limit): Collection
@@ -275,7 +316,7 @@ class RealtimeLogController extends Controller
             'record_type' => 'guest_observation',
             'record_type_label' => 'Guest Observation',
             'id' => $observation->id,
-            'detail_url' => route('guest-observations.index', ['plate_text' => $observation->plate_number ?: $observation->plate_text]),
+            'detail_url' => route('logs.index', ['tab' => 'alerts', 'plate_text' => $observation->plate_number ?: $observation->plate_text]),
             'export_url' => route('vehicle-events.export.csv', [
                 'record_type' => 'guest_observation',
                 'record_id' => $observation->id,

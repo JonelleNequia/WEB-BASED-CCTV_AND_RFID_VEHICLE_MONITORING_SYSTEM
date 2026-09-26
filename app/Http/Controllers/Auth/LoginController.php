@@ -57,6 +57,7 @@ class LoginController extends Controller
 
     protected function homeRouteName(): string
     {
-        return 'dashboard.index';
+        // UI Phase 2: guards (non-admin) land on the Gate Monitor.
+        return auth()->user()?->isAdmin() === false ? 'gates.index' : 'dashboard.index';
     }
 }

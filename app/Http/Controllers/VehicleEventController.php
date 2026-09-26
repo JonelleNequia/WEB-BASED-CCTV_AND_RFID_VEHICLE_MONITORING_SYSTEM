@@ -31,7 +31,9 @@ class VehicleEventController extends Controller
         $filteredLogs = $this->filteredUnifiedLogs($request);
         $logs = $this->paginatedUnifiedLogCollection($request, $filteredLogs, 10);
 
-        return view('vehicle-events.index', [
+        // UI Phase 2: Activity Logs › All Events tab.
+        return view('logs.index', [
+            'tab' => 'events',
             'logs' => $logs,
             'events' => $logs,
             'eventLogSummary' => $this->eventLogSummary($filteredLogs),
@@ -659,7 +661,7 @@ class VehicleEventController extends Controller
             'record_type' => 'guest_observation',
             'record_type_label' => 'Guest Observation',
             'id' => $observation->id,
-            'detail_url' => route('guest-observations.index', ['plate_text' => $observation->plate_number ?: $observation->plate_text]),
+            'detail_url' => route('logs.index', ['tab' => 'alerts', 'plate_text' => $observation->plate_number ?: $observation->plate_text]),
             'export_url' => route('vehicle-events.export.csv', [
                 'record_type' => 'guest_observation',
                 'record_id' => $observation->id,
@@ -698,7 +700,7 @@ class VehicleEventController extends Controller
             'record_type' => 'rfid_scan',
             'record_type_label' => 'RFID Scan',
             'id' => $scanLog->id,
-            'detail_url' => route('rfid-scans.index', ['history_q' => $scanLog->tag_uid]),
+            'detail_url' => route('logs.index', ['tab' => 'scans', 'history_q' => $scanLog->tag_uid]),
             'export_url' => route('vehicle-events.export.csv', [
                 'record_type' => 'rfid_scan',
                 'record_id' => $scanLog->id,
@@ -709,7 +711,7 @@ class VehicleEventController extends Controller
             'vehicle_type' => $vehicle?->vehicle_type ?: 'N/A',
             'vehicle_color' => 'N/A',
             'category_label' => $this->displayCategory($scanLog->vehicle_category ?: $vehicle?->category),
-            'source_label' => 'RFID Desk',
+            'source_label' => 'RFID Scan',
             'station_label' => ucfirst($scanLog->scan_location).' Station',
             'state_label' => $scanLog->resultingStateLabel,
             'display_time' => DisplayTime::datetime($time, 'No time'),

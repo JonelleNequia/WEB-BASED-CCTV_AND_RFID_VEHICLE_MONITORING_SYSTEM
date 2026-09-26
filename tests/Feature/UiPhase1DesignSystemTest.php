@@ -32,12 +32,15 @@ class UiPhase1DesignSystemTest extends TestCase
     public function test_admin_pages_use_the_compact_header_without_hero_or_info_icons(): void
     {
         foreach ([
-            'dashboard.index', 'vehicle-registry.index', 'rfid-inventory.index', 'rfid-scans.index',
-            'guest-passes.index', 'guest-observations.index', 'vehicle-events.index', 'vehicle-events.create',
-            'settings.index', 'calibration.index', 'system-status.index',
-        ] as $route) {
+            route('dashboard.index'), route('gates.index'),
+            route('registry.index'), route('registry.index', ['tab' => 'tags']), route('registry.index', ['tab' => 'passes']),
+            route('guests.index'),
+            route('logs.index'), route('logs.index', ['tab' => 'scans']), route('logs.index', ['tab' => 'alerts']),
+            route('vehicle-events.create'),
+            ...array_map(fn ($tab) => route('settings.index', ['tab' => $tab]), array_keys(\App\Http\Controllers\SettingsController::TABS)),
+        ] as $url) {
             $this->actingAs($this->admin)
-                ->get(route($route))
+                ->get($url)
                 ->assertOk()
                 ->assertSee('class="page-header"', false)
                 ->assertDontSee('hero-panel', false)
@@ -103,7 +106,7 @@ class UiPhase1DesignSystemTest extends TestCase
     {
         $this->actingAs($this->admin)
             ->withSession(['status' => 'Vehicle saved.'])
-            ->get(route('vehicle-registry.index'))
+            ->get(route('registry.index'))
             ->assertSee('data-initial-toasts', false)
             ->assertSee('Vehicle saved.')
             ->assertDontSee('alert alert-success', false);

@@ -34,7 +34,9 @@ class CalibrationController extends Controller
             $cameras[$role]['detector_status'] = $detectorStatus['cameras'][$role] ?? [];
         }
 
-        return view('calibration.index', [
+        // UI Phase 2: Settings › Calibration tab.
+        return view('settings.index', [
+            'tab' => 'calibration',
             'cameras' => $cameras,
             'detectorStatus' => $detectorStatus,
         ]);

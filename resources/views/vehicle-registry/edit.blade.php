@@ -4,7 +4,7 @@
 @section('page-title', 'Edit Vehicle')
 
 @section('content')
-    <x-page-header :title="'Edit '.$vehicle->plate_number" :back="route('vehicle-registry.index')" back-label="Back to Registry" />
+    <x-page-header :title="'Edit '.$vehicle->plate_number" :back="route('registry.index')" back-label="Back to Registry" />
 
     <section class="panel">
         @php($selectedCategory = old('category', $vehicle->category))
@@ -116,7 +116,7 @@
 
             <div class="button-row">
                 <button type="submit" class="button button-primary">Update Vehicle</button>
-                <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Cancel</a>
+                <a href="{{ route('registry.index') }}" class="button button-secondary">Cancel</a>
             </div>
         </form>
     </section>

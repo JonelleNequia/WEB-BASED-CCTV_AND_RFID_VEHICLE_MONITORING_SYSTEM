@@ -1,23 +1,11 @@
-@extends('layouts.app')
-
-@section('title', 'Vehicle Registry | PHILCST Vehicle Access Monitoring')
-@section('page-title', 'Vehicle Registry')
-
-@section('content')
     @php($shouldOpenVehicleForm = $errors->any() || old('plate_number') || old('rfid_tag_id'))
-
-    <x-page-header title="Vehicle Registry">
-        <x-slot:actions>
-            <button type="button" class="button button-primary" data-drawer-open="add-vehicle-drawer">Add Vehicle</button>
-        </x-slot:actions>
-    </x-page-header>
 
     <x-stat-row>
         <x-stat label="Registered Vehicles" :value="$rfidStats['registered_vehicles'] ?? 0" />
         {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
         <x-stat label="Inside Campus" :value="$rfidStats['vehicles_inside'] ?? 0"
                 :hint="($rfidStats['registered_inside'] ?? 0).' registered · '.($rfidStats['guests_inside'] ?? 0).' guests'" />
-        <x-stat label="Available RFID Tags" :value="$rfidStats['available_tags'] ?? 0" :href="route('rfid-inventory.index')" />
+        <x-stat label="Available RFID Tags" :value="$rfidStats['available_tags'] ?? 0" :href="route('registry.index', ['tab' => 'tags'])" />
     </x-stat-row>
 
     <x-drawer id="add-vehicle-drawer" title="Add Vehicle" :open="$shouldOpenVehicleForm">
@@ -48,7 +36,7 @@
                         </select>
                         <div class="table-subtext">
                             @if ($availableTags->isEmpty())
-                                Add a tag in <a href="{{ route('rfid-inventory.index') }}">RFID Tags</a> before saving a vehicle.
+                                Add a tag in <a href="{{ route('registry.index', ['tab' => 'tags']) }}">Registry › RFID Tags</a> before saving a vehicle.
                             @else
                                 Available tags are sorted by RFID tag number.
                             @endif
@@ -189,7 +177,6 @@
                     @endforeach
                 </tbody>
     </x-table>
-@endsection
 
 @push('scripts')
     <script>

@@ -25,7 +25,7 @@ class EventLogReportIntegrationTest extends TestCase
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->actingAs($admin)
-            ->get(route('vehicle-events.index'))
+            ->get(route('logs.index'))
             ->assertOk()
             ->assertSee('class="page-header"', false)
             ->assertSee('Event Logs')
@@ -84,7 +84,7 @@ class EventLogReportIntegrationTest extends TestCase
 
         $this->actingAs($admin)
             ->get('/reports')
-            ->assertRedirect('/vehicle-events');
+            ->assertRedirect('/logs');
     }
 
     public function test_event_logs_include_guest_observation_records(): void
@@ -107,7 +107,7 @@ class EventLogReportIntegrationTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->get(route('vehicle-events.index'))
+            ->get(route('logs.index'))
             ->assertOk()
             ->assertSee('GUEST')
             ->assertSee('GST-LOG-01')
@@ -148,7 +148,7 @@ class EventLogReportIntegrationTest extends TestCase
             ]);
 
             $this->actingAs($admin)
-                ->get(route('vehicle-events.index', ['period' => 'month']))
+                ->get(route('logs.index', ['period' => 'month']))
                 ->assertOk()
                 ->assertSee('This Month Logs')
                 ->assertSee('MON-2026')
@@ -239,7 +239,7 @@ class EventLogReportIntegrationTest extends TestCase
             Storage::disk('public')->assertExists($observation->snapshot_path);
 
             $this->actingAs($admin)
-                ->get(route('vehicle-events.index'))
+                ->get(route('logs.index'))
                 ->assertOk()
                 ->assertSee('GUEST')
                 ->assertSee('GST-EVT-01')

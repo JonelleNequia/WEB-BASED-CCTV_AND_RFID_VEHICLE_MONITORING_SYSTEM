@@ -115,7 +115,7 @@ class Phase2GuestPassModelTest extends TestCase
         $tag = app(VehicleRegistryService::class)->registerRfidTag(['uid' => 'VT-UID-7', 'tag_number' => 7]);
 
         $this->actingAs($admin)
-            ->from(route('vehicle-registry.index'))
+            ->from(route('registry.index'))
             ->post(route('vehicle-registry.store'), [
                 'rfid_tag_id' => $tag->id,
                 'plate_number' => 'GST 777',

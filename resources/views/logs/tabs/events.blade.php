@@ -1,17 +1,3 @@
-@extends('layouts.app')
-
-@section('title', 'Event Logs | PHILCST Vehicle Access Monitoring')
-@section('page-title', 'Event Logs')
-
-@section('content')
-    <x-page-header title="Event Logs">
-        <x-slot:actions>
-            @if (auth()->user()?->isAdmin())
-                <a href="{{ route('vehicle-events.create') }}" class="button button-primary">Quick Manual Log</a>
-            @endif
-        </x-slot:actions>
-    </x-page-header>
-
     <x-stat-row>
         <x-stat :label="$selectedPeriodLabel.' Logs'" :value="$eventLogSummary['total']" />
         <x-stat label="Entries" :value="$eventLogSummary['entries']" />
@@ -22,7 +8,8 @@
 
     <section class="panel printable-report-panel">
 
-        <form method="GET" action="{{ route('vehicle-events.index') }}" class="form-grid filter-grid">
+        <form method="GET" action="{{ route('logs.index') }}" class="form-grid filter-grid">
+            <input type="hidden" name="tab" value="events">
             <div class="field">
                 <label for="plate_text">Plate</label>
                 <input id="plate_text" type="text" name="plate_text" value="{{ $filters['plate_text'] ?? '' }}" placeholder="ABC-1234">
@@ -100,7 +87,7 @@
             <div class="field field-actions">
                 <div class="button-row">
                     <button type="submit" class="button button-primary">Apply Filters</button>
-                    <a href="{{ route('vehicle-events.index') }}" class="button button-secondary">Reset</a>
+                    <a href="{{ route('logs.index') }}" class="button button-secondary">Reset</a>
                 </div>
             </div>
         </form>
@@ -112,7 +99,7 @@
             </div>
             <div class="button-row">
                 @foreach ($periodOptions as $period => $label)
-                    <a href="{{ route('vehicle-events.index', ['period' => $period]) }}" class="button button-secondary button-sm">{{ $label }}</a>
+                    <a href="{{ route('logs.index', ['tab' => 'events', 'period' => $period]) }}" class="button button-secondary button-sm">{{ $label }}</a>
                 @endforeach
             </div>
         </div>
@@ -225,7 +212,6 @@
     <script id="event-log-realtime-data" type="application/json">{!! json_encode([
         'recentLogsUrl' => request()->except('page') === [] ? route('api.recent-event-logs', ['limit' => 10]) : null,
     ], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
-@endsection
 
 @push('scripts')
     <script>

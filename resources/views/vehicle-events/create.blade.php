@@ -4,7 +4,7 @@
 @section('page-title', 'Quick Manual Log')
 
 @section('content')
-    <x-page-header title="Quick Manual Log" :back="route('vehicle-events.index')" back-label="Back to logs">
+    <x-page-header title="Quick Manual Log" :back="route('logs.index')" back-label="Back to logs">
         <x-slot:meta>Use only when the normal RFID flow cannot be completed</x-slot:meta>
     </x-page-header>
 
@@ -100,7 +100,7 @@
             <div class="field field-actions span-full">
                 <div class="button-row">
                     <button type="submit" class="button button-primary">Save Manual Log</button>
-                    <a href="{{ route('vehicle-events.index') }}" class="button button-secondary">Back to Logs</a>
+                    <a href="{{ route('logs.index') }}" class="button button-secondary">Back to Logs</a>
                 </div>
             </div>
         </form>

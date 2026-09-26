@@ -22,6 +22,43 @@ class SaveSettingsRequest extends FormRequest
      */
     public function rules(): array
     {
+        $rules = $this->allRules();
+        $section = (string) $this->input('section', '');
+
+        // UI Phase 2: each Settings tab posts only its own fields.
+        if (! array_key_exists($section, self::SECTIONS)) {
+            return $rules;
+        }
+
+        return array_filter(
+            $rules,
+            fn (string $field): bool => collect(self::SECTIONS[$section])
+                ->contains(fn (string $prefix): bool => $field === $prefix || str_starts_with($field, $prefix.'.')),
+            ARRAY_FILTER_USE_KEY
+        ) + ['section' => ['required', 'string']];
+    }
+
+    /** UI Phase 2: which fields each Settings tab saves. */
+    public const SECTIONS = [
+        'stations' => [
+            'entrance_portal_label', 'exit_portal_label',
+            'entrance_rfid_reader_name', 'exit_rfid_reader_name',
+            'entrance_reader_type', 'exit_reader_type',
+            'entrance_reader_ip', 'exit_reader_ip',
+            'entrance_reader_port', 'exit_reader_port',
+            'rfid_cooldown_seconds',
+        ],
+        'cameras' => ['camera_configs', 'camera_source_placeholder'],
+        'guest-pass' => [
+            'guest_pass_validity_minutes', 'guest_pass_overstay_grace_minutes', 'guest_pass_require_id',
+        ],
+    ];
+
+    /**
+     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     */
+    protected function allRules(): array
+    {
         return [
             'matching_threshold_matched' => ['required', 'integer', 'min:1', 'max:200'],
             'matching_threshold_manual_review' => ['required', 'integer', 'min:0', 'max:199', 'lt:matching_threshold_matched'],

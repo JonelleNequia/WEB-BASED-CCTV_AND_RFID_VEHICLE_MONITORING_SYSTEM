@@ -23,10 +23,11 @@ class VehicleRegistryTest extends TestCase
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->actingAs($user)
-            ->get(route('vehicle-registry.index'))
+            ->get(route('registry.index'))
             ->assertOk()
-            ->assertSee('Vehicle Registry')
-            ->assertDontSee('RFID Tag Inventory')
+            ->assertSee('Registry')
+            ->assertSee('Add Vehicle')
+            ->assertDontSee('Tag Inventory')
             ->assertDontSee('Register RFID Tag')
             ->assertSee('No registered vehicles yet.')
             ->assertDontSee('RFID-ABC-1001');
@@ -125,7 +126,7 @@ class VehicleRegistryTest extends TestCase
         ]);
 
         $this->actingAs($user)
-            ->from(route('vehicle-registry.index'))
+            ->from(route('registry.index'))
             ->post(route('vehicle-registry.store'), [
                 'rfid_tag_id' => $newTag->id,
                 'plate_number' => 'dup 1001',
@@ -133,7 +134,7 @@ class VehicleRegistryTest extends TestCase
                 'category' => 'student',
                 'vehicle_type' => 'Car',
             ])
-            ->assertRedirect(route('vehicle-registry.index'))
+            ->assertRedirect(route('registry.index'))
             ->assertSessionHasErrors('plate_number');
 
         $this->assertDatabaseMissing('vehicles', [
@@ -205,7 +206,7 @@ class VehicleRegistryTest extends TestCase
                 'category' => 'faculty_staff',
                 'vehicle_type' => 'Truck',
             ])
-            ->assertRedirect(route('vehicle-registry.index'));
+            ->assertRedirect(route('registry.index', ['tab' => 'vehicles']));
 
         $this->assertDatabaseHas('vehicles', [
             'id' => $vehicle->id,

@@ -50,7 +50,8 @@ class GuestPassController extends Controller
 
         $passes = RfidTag::query()->guestPasses()->get();
 
-        return view('guest-passes.index', [
+        // UI Phase 2: Guests page.
+        return view('guests.index', [
             'visits' => $visits,
             'filters' => ['status' => $status] + $filters,
             'stats' => [

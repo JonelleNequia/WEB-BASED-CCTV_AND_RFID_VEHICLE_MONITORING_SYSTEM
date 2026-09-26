@@ -13,9 +13,9 @@
         <x-stat label="Entered Today" :value="$totalVehiclesEnteredToday" metric="total_vehicles_entered_today" />
         <x-stat label="Exited Today" :value="$totalVehiclesExitedToday" metric="total_vehicles_exited_today" />
         <x-stat label="Registered Scans" :value="$rfidStats['registered_scans_today'] ?? 0" metric="registered_scans_today" hint="Verified RFID today" />
-        <x-stat label="Active Guests" :value="$activeGuests" metric="active_guests" :href="route('guest-passes.index')" />
-        <x-stat label="Overstay" :value="$overstayGuests" metric="overstay_guests" tone="warning" :href="route('guest-passes.index', ['status' => 'overstay'])" />
-        <x-stat label="No-pass Alerts" :value="$noPassAlertsToday" metric="no_pass_alerts_today" tone="danger" :href="route('vehicle-events.index', ['log_type' => 'no_pass_alert'])">
+        <x-stat label="Active Guests" :value="$activeGuests" metric="active_guests" :href="route('guests.index')" />
+        <x-stat label="Overstay" :value="$overstayGuests" metric="overstay_guests" tone="warning" :href="route('guests.index', ['status' => 'overstay'])" />
+        <x-stat label="No-pass Alerts" :value="$noPassAlertsToday" metric="no_pass_alerts_today" tone="danger" :href="route('logs.index', ['tab' => 'alerts'])">
             <x-slot:detail><span data-dashboard-metric="pass_alerts_today">{{ $passAlertsToday }}</span> lost/disabled pass scans</x-slot:detail>
         </x-stat>
         <div class="stat">
@@ -30,7 +30,7 @@
             <div>
                 <h3>Traffic Summary</h3>
             </div>
-            <a href="{{ route('vehicle-events.index', ['period' => 'month']) }}" class="button button-secondary button-sm">Open Monthly Logs</a>
+            <a href="{{ route('logs.index', ['period' => 'month']) }}" class="button button-secondary button-sm">Open Monthly Logs</a>
         </div>
 
         <div class="table-responsive">
@@ -64,7 +64,7 @@
             <div>
                 <h3>Frequent Entry Ranking</h3>
             </div>
-            <a href="{{ route('vehicle-events.index', ['event_type' => 'ENTRY']) }}" class="button button-secondary button-sm">Open Entry Logs</a>
+            <a href="{{ route('logs.index', ['event_type' => 'ENTRY']) }}" class="button button-secondary button-sm">Open Entry Logs</a>
         </div>
 
         <div class="table-responsive" data-dashboard-ranking-table>
@@ -101,7 +101,7 @@
                 <div>
                     <h3>Recent RFID Scans</h3>
                 </div>
-                <a href="{{ route('rfid-scans.index') }}" class="button button-secondary button-sm">Open RFID Desk</a>
+                <a href="{{ route('logs.index', ['tab' => 'scans']) }}" class="button button-secondary button-sm">Open RFID Scans</a>
             </div>
 
             <div class="panel-scroll-area" data-dashboard-stream="rfid">
@@ -117,7 +117,7 @@
                 @empty
                     <div class="empty-state">
                         <h4>No RFID scans yet</h4>
-                        <p>Start scanning from the RFID Desk.</p>
+                        <p>Scans from the Station pages and Settings › Test Scan appear here.</p>
                     </div>
                 @endforelse
             </div>
@@ -128,7 +128,7 @@
                 <div>
                     <h3>Recent Event Logs</h3>
                 </div>
-                <a href="{{ route('vehicle-events.index') }}" class="button button-secondary button-sm">Open Event Logs</a>
+                <a href="{{ route('logs.index') }}" class="button button-secondary button-sm">Open Activity Logs</a>
             </div>
 
             <div class="panel-scroll-area" data-dashboard-stream="events">

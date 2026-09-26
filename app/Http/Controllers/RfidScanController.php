@@ -20,16 +20,29 @@ use Throwable;
 class RfidScanController extends Controller
 {
     /**
-     * Show recent RFID scans and the simulation form.
+     * UI Phase 2: Activity Logs › RFID Scans tab (the old RFID Desk history).
      */
-    public function index(
-        Request $request,
+    public function history(Request $request, RfidService $rfidService): View
+    {
+        $filters = $request->only(['history_q', 'scan_location', 'verification_status']);
+
+        return view('logs.index', [
+            'tab' => 'scans',
+            'scanLogs' => $rfidService->scanHistory($filters, 12),
+            'filters' => $filters,
+        ]);
+    }
+
+    /**
+     * UI Phase 2: Settings › Test Scan tab (the old RFID Desk simulation).
+     */
+    public function testScan(
         RfidService $rfidService,
         SettingsService $settingsService,
         VehicleRegistryService $vehicleRegistryService
     ): View {
-        return view('rfid-scans.index', [
-            'scanLogs' => $rfidService->scanHistory($request->only(['history_q', 'scan_location', 'verification_status']), 12),
+        return view('settings.index', [
+            'tab' => 'test-scan',
             'latestScan' => $rfidService->recentScans(1)->first(),
             'rfidStats' => $rfidService->stats(),
             'registeredTags' => $vehicleRegistryService->registeredTags(),
@@ -43,7 +56,6 @@ class RfidScanController extends Controller
                 ->latest('scan_time')
                 ->limit(5)
                 ->get(),
-            'filters' => $request->only(['history_q', 'scan_location', 'verification_status']),
             'settings' => $settingsService->all(),
         ]);
     }
@@ -79,7 +91,7 @@ class RfidScanController extends Controller
         }
 
         $statusMessage = $result->requiresIssue()
-            ? $result->message.' The RFID Desk cannot issue passes: use the Entrance Station or the Guest Passes page.'
+            ? $result->message.' Test Scan cannot issue passes: use the Entrance Station or the Guests page.'
             : $result->message;
 
         if ($request->expectsJson()) {

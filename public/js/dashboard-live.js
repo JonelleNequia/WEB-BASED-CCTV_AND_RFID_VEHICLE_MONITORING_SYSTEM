@@ -200,7 +200,7 @@
             'rfid',
             body.recent_rfid_scans || [],
             'No RFID scans yet',
-            'Start scanning from the RFID Desk.'
+            'Scans from the Station pages and Settings › Test Scan appear here.'
         );
         renderStream(
             'events',

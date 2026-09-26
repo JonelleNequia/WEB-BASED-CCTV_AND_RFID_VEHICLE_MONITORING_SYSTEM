@@ -39,7 +39,7 @@ class Phase4UiTest extends TestCase
         $this->guestPass('GP-PAGE-2');
 
         $this->actingAs($this->admin)
-            ->get(route('guest-passes.index'))
+            ->get(route('guests.index'))
             ->assertOk()
             ->assertSee('Active Guests')
             ->assertSee('Passes Available')
@@ -57,9 +57,11 @@ class Phase4UiTest extends TestCase
 
     public function test_navigation_shows_guest_passes(): void
     {
+        // UI Phase 2: Guests page + Registry › Guest Passes; no Guest Monitoring.
         $this->actingAs($this->admin)
             ->get(route('dashboard.index'))
-            ->assertSee('Guest Passes')
+            ->assertSee('Guests')
+            ->assertSee(route('guests.index'), false)
             ->assertDontSee('Guest Monitoring');
     }
 
@@ -182,10 +184,10 @@ class Phase4UiTest extends TestCase
             ->assertRedirect();
 
         $this->assertSame('G-01', RfidTag::query()->where('uid', 'NEWPASS01')->value('display_number'));
-        $this->actingAs($this->admin)->get(route('rfid-inventory.index')); // consume the flash message
+        $this->actingAs($this->admin)->get(route('registry.index', ['tab' => 'tags'])); // consume the flash message
 
         $this->actingAs($this->admin)
-            ->get(route('rfid-inventory.index', ['tag_type' => 'guest_pass']))
+            ->get(route('registry.index', ['tab' => 'tags', 'tag_type' => 'guest_pass']))
             ->assertOk()
             ->assertSee('Guest Passes Available')
             ->assertSee('Vehicle Tags Assigned')
@@ -199,7 +201,7 @@ class Phase4UiTest extends TestCase
         app(RfidIngestService::class)->ingest(['tag_uid' => 'GP-DESK-1', 'scan_location' => 'exit']);
 
         $this->actingAs($this->admin)
-            ->get(route('rfid-scans.index'))
+            ->get(route('settings.index', ['tab' => 'test-scan']))
             ->assertOk()
             ->assertDontSee('Same station scan can become ENTRY or EXIT')
             ->assertSee('Station readers decide the direction')
@@ -207,7 +209,7 @@ class Phase4UiTest extends TestCase
             ->assertSee('GP-DESK-1');
 
         $this->actingAs($this->admin)
-            ->get(route('rfid-scans.index', ['verification_status' => 'anomaly']))
+            ->get(route('logs.index', ['tab' => 'scans', 'verification_status' => 'anomaly']))
             ->assertOk()
             ->assertSee('GP-DESK-1');
     }
@@ -257,19 +259,19 @@ class Phase4UiTest extends TestCase
         app(RfidIngestService::class)->ingest(['tag_uid' => 'REG-TAG-404', 'scan_location' => 'entrance']);
 
         $this->actingAs($this->admin)
-            ->get(route('vehicle-events.index'))
+            ->get(route('logs.index'))
             ->assertOk()
             ->assertSee('Guest Pass #G-01')
             ->assertSee('No-pass Alert');
 
         $this->actingAs($this->admin)
-            ->get(route('vehicle-events.index', ['log_type' => 'guest_pass']))
+            ->get(route('logs.index', ['log_type' => 'guest_pass']))
             ->assertOk()
             ->assertSee('EVT 303')
             ->assertDontSee('REG 404');
 
         $this->actingAs($this->admin)
-            ->get(route('vehicle-events.index', ['log_type' => 'guest_pass']))
+            ->get(route('logs.index', ['log_type' => 'guest_pass']))
             ->assertViewHas('eventLogSummary', fn (array $summary): bool => $summary['guests'] === 1);
 
         $csv = $this->actingAs($this->admin)
@@ -285,13 +287,15 @@ class Phase4UiTest extends TestCase
     public function test_settings_has_reader_configuration_and_guest_pass_sections(): void
     {
         $this->actingAs($this->admin)
-            ->get(route('settings.index'))
+            ->get(route('settings.index', ['tab' => 'stations']))
             ->assertOk()
             ->assertSee('Reader Configuration')
             ->assertSee('UHF Ethernet (TCP/IP)')
-            ->assertSee('Default Validity (minutes)')
-            ->assertSee('Camera Sources')
             ->assertDontSee('Entrance Reader Name');
+
+        // UI Phase 2: each section is its own Settings tab.
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'guest-pass']))->assertSee('Default Validity (minutes)');
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'cameras']))->assertSee('Camera Sources');
 
         $payload = $this->settingsPayload([
             'entrance_reader_type' => 'uhf_ethernet',

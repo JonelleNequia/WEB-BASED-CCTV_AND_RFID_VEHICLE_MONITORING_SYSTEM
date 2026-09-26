@@ -23,7 +23,7 @@ class MonitoringCameraStatusTest extends TestCase
 
         $this->actingAs($user)
             ->get(route('monitoring.index'))
-            ->assertRedirect(route('stations.entrance'));
+            ->assertRedirect(route('gates.index'));
     }
 
     /**

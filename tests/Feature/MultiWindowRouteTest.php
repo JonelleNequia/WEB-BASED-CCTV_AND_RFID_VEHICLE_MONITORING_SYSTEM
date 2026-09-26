@@ -30,8 +30,7 @@ class MultiWindowRouteTest extends TestCase
             ->assertOk()
             ->assertSee('class="page-header"', false)
             ->assertSee('Dashboard')
-            ->assertSee('Entrance Station')
-            ->assertSee('Exit Station');
+            ->assertSee('Gate Monitor');
     }
 
     public function test_station_kiosk_windows_render_dedicated_camera_and_log_views(): void

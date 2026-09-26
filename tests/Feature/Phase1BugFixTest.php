@@ -117,9 +117,9 @@ class Phase1BugFixTest extends TestCase
         $this->assertSame(1, $stats['guests_inside']);
         $this->assertSame(3, $stats['vehicles_inside']);
 
-        foreach (['dashboard.index', 'vehicle-registry.index', 'rfid-scans.index'] as $route) {
+        foreach ([route('dashboard.index'), route('registry.index'), route('settings.index', ['tab' => 'test-scan'])] as $url) {
             $this->actingAs($admin)
-                ->get(route($route))
+                ->get($url)
                 ->assertOk()
                 ->assertSee('2 registered · 1 guests');
         }

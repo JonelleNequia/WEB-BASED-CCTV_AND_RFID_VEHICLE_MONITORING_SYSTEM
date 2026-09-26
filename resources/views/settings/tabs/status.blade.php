@@ -1,10 +1,4 @@
-@extends('layouts.app')
 
-@section('title', 'System Status | PHILCST Vehicle Monitoring')
-@section('page-title', 'System Status')
-
-@section('content')
-    <x-page-header title="System Status" />
 
     <x-stat-row>
         <x-stat label="Detector Service" :value="($runtime['service_running'] ?? false) ? 'Running' : 'Standby'"
@@ -60,4 +54,3 @@
             </article>
         @endforeach
     </div>
-@endsection

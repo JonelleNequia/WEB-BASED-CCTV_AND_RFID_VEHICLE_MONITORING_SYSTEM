@@ -4,7 +4,7 @@
 @section('page-title', 'Vehicle Log Details')
 
 @section('content')
-    <x-page-header :title="'Vehicle Log #'.$vehicleEvent->id" :back="route('vehicle-events.index')" back-label="Back to logs">
+    <x-page-header :title="'Vehicle Log #'.$vehicleEvent->id" :back="route('logs.index')" back-label="Back to logs">
         <x-slot:meta>
             <span class="badge badge-{{ $vehicleEvent->status_badge_class }}">{{ $vehicleEvent->display_status_label }}</span>
         </x-slot:meta>
@@ -190,7 +190,7 @@
 
                 <div class="button-row">
                     <button type="submit" class="button button-primary">Complete Record</button>
-                    <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Vehicle Registry</a>
+                    <a href="{{ route('registry.index') }}" class="button button-secondary">Registry</a>
                 </div>
             </form>
         </section>

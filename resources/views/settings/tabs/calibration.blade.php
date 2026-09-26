@@ -1,10 +1,4 @@
-@extends('layouts.app')
 
-@section('title', 'Camera Calibration | PHILCST Vehicle Monitoring')
-@section('page-title', 'Camera Calibration')
-
-@section('content')
-    <x-page-header title="Camera Calibration" />
 
     <p class="field-help">Pick a camera, click point by point to draw the detection zone, then draw the trigger line, then save. The detector logs a vehicle when it crosses the line inside the zone.</p>
 
@@ -94,7 +88,6 @@
         ],
     ])
     <script id="camera-calibration-data" type="application/json">{!! json_encode($calibrationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
-@endsection
 
 @push('scripts')
     <script src="{{ asset('js/browser-camera-common.js') }}"></script>

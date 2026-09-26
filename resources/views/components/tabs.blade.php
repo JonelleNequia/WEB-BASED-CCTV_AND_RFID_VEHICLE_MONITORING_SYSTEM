@@ -17,7 +17,7 @@
                 ? $tab['href']
                 : request()->url().'?'.http_build_query([$param => $key]);
         @endphp
-        <a href="{{ $href }}" class="tab {{ $key === $active ? 'is-active' : '' }}" @if ($key === $active) aria-current="page" @endif>
+        <a href="{{ $href }}" @class(['tab', 'is-active' => $key === $active]) @if ($key === $active) aria-current="page" @endif>
             {{ $label }}
             @if ($count !== null)
                 <span class="tab-count">{{ $count }}</span>
