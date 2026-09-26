@@ -2,73 +2,26 @@
 
 @section('title', 'RFID Tags | PHILCST Vehicle Access Monitoring')
 @section('page-title', 'RFID Tags')
-@section('page-description', 'Register RFID tag UIDs and keep the tag inventory separate from vehicle records.')
 
 @section('content')
 
-    <section class="hero-panel hero-panel-compact">
-        <div class="hero-panel-copy">
-            <span class="panel-kicker">RFID Inventory</span>
-            <h3>Tag registration workspace</h3>
-            <div class="inline-status-list">
-                <span class="chip chip-brand">{{ $rfidStats['registered_tags'] ?? 0 }} total tags</span>
-                <span class="chip chip-soft">{{ $rfidStats['available_tags'] ?? 0 }} available</span>
-            </div>
-        </div>
-
-        <div class="hero-panel-actions">
-            <a href="{{ route('vehicle-registry.index') }}" class="button button-primary">Vehicle Registry</a>
-            <a href="{{ route('rfid-scans.index') }}" class="button button-secondary">RFID Desk</a>
-        </div>
-    </section>
+    <x-page-header title="RFID Tags">
+        <x-slot:actions>
+            <button type="button" class="button button-primary" data-drawer-open="register-tag-drawer">Register RFID Tag</button>
+        </x-slot:actions>
+    </x-page-header>
 
     {{-- Phase 4: separate stats for vehicle tags and guest passes. --}}
-    <div class="page-grid cards-5">
-        <article class="stat-card stat-card-success">
-            <span class="stat-card-label">Vehicle Tags Available</span>
-            <strong>{{ $tagStats['vehicle_available'] }}</strong>
-            <p>Ready to assign in Vehicle Registry.</p>
-        </article>
+    <x-stat-row>
+        <x-stat label="Vehicle Tags Available" :value="$tagStats['vehicle_available']" tone="success" />
+        <x-stat label="Vehicle Tags Assigned" :value="$tagStats['vehicle_assigned']" :hint="$tagStats['vehicle_total'].' in total'" />
+        <x-stat label="Guest Passes Available" :value="$tagStats['pass_available']" :hint="$tagStats['pass_total'].' in total'" />
+        <x-stat label="Guest Passes Issued" :value="$tagStats['pass_issued']" tone="brand" />
+        <x-stat label="Guest Passes Lost" :value="$tagStats['pass_lost']" tone="danger" />
+    </x-stat-row>
 
-        <article class="stat-card stat-card-brand-soft">
-            <span class="stat-card-label">Vehicle Tags Assigned</span>
-            <strong>{{ $tagStats['vehicle_assigned'] }}</strong>
-            <p>{{ $tagStats['vehicle_total'] }} vehicle tags in total.</p>
-        </article>
-
-        <article class="stat-card stat-card-brand">
-            <span class="stat-card-label">Guest Passes Available</span>
-            <strong>{{ $tagStats['pass_available'] }}</strong>
-            <p>{{ $tagStats['pass_total'] }} guest passes in total.</p>
-        </article>
-
-        <article class="stat-card stat-card-brand-soft">
-            <span class="stat-card-label">Guest Passes Issued</span>
-            <strong>{{ $tagStats['pass_issued'] }}</strong>
-            <p>Currently with a guest inside.</p>
-        </article>
-
-        <article class="stat-card stat-card-warning">
-            <span class="stat-card-label">Guest Passes Lost</span>
-            <strong>{{ $tagStats['pass_lost'] }}</strong>
-            <p>Scans of lost passes raise an alert.</p>
-        </article>
-    </div>
-
-    <section class="panel">
-        <div class="panel-header">
-            <div>
-                <div class="panel-title-row">
-                    <h3>Register RFID Tag</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain RFID inventory',
-                        'text' => 'Register tag UIDs here first. Vehicle Registry only assigns available tags to vehicle records.',
-                    ])
-                </div>
-            </div>
-        </div>
-
-        <form method="POST" action="{{ route('rfid-inventory.store') }}" class="form-grid filter-grid" data-rfid-inventory-form>
+    <x-drawer id="register-tag-drawer" title="Register RFID Tag" :open="$errors->any()">
+        <form method="POST" action="{{ route('rfid-inventory.store') }}" class="stack-form" data-rfid-inventory-form>
             @csrf
 
             {{-- Phase 4: Vehicle tag or reusable Guest Pass (gets the next G-xx number). --}}
@@ -101,7 +54,7 @@
                 @enderror
             </div>
 
-            <div class="field span-2">
+            <div class="field">
                 <label for="inventory_uid">RFID UID</label>
                 <input
                     id="inventory_uid"
@@ -121,29 +74,25 @@
                 @enderror
             </div>
 
-            <div class="field field-actions">
+            <div class="button-row">
+                <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
                 <button type="submit" class="button button-primary">Register RFID Tag</button>
             </div>
         </form>
-    </section>
+    </x-drawer>
 
-    <section class="panel">
-        <div class="panel-header">
-            <div>
-                <h3>Tag Inventory</h3>
-            </div>
+    <x-table title="Tag Inventory" :empty="$rfidTagInventory->isEmpty()" empty-title="No RFID tags registered yet." empty-text="Register a tag by tapping it on the reader.">
+        <x-slot:toolbar>
             {{-- Phase 4: filter by tag type. --}}
-            <div class="inline-status-list">
-                @foreach (['' => 'All', 'vehicle' => 'Vehicle tags', 'guest_pass' => 'Guest passes'] as $value => $label)
-                    <a href="{{ route('rfid-inventory.index', array_filter(['tag_type' => $value])) }}"
-                       class="chip {{ (string) ($tagTypeFilter ?? '') === (string) $value ? 'chip-brand' : 'chip-soft' }}">{{ $label }}</a>
-                @endforeach
-                <span class="chip chip-soft">{{ $rfidTagInventory->count() }} records</span>
-            </div>
-        </div>
-
-        <div class="table-responsive">
-            <table>
+            @foreach (['' => 'All', 'vehicle' => 'Vehicle tags', 'guest_pass' => 'Guest passes'] as $value => $label)
+                <a href="{{ route('rfid-inventory.index', array_filter(['tag_type' => $value])) }}"
+                   class="chip {{ (string) ($tagTypeFilter ?? '') === (string) $value ? 'chip-brand' : 'chip-soft' }}">{{ $label }}</a>
+            @endforeach
+            <span class="text-muted">{{ $rfidTagInventory->count() }} records</span>
+        </x-slot:toolbar>
+        <x-slot:emptyAction>
+            <button type="button" class="button button-primary button-sm" data-drawer-open="register-tag-drawer">Register RFID Tag</button>
+        </x-slot:emptyAction>
                 <thead>
                     <tr>
                         <th>RFID No.</th>
@@ -156,26 +105,19 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @forelse ($rfidTagInventory as $tag)
+                    @foreach ($rfidTagInventory as $tag)
                         <tr>
                             <td><strong>#{{ $tag->tag_number ?: 'N/A' }}</strong></td>
                             <td>
                                 @if ($tag->isGuestPass())
-                                    <span class="badge badge-open">Guest Pass {{ $tag->display_number }}</span>
+                                    <x-badge tone="brand">Guest Pass {{ $tag->display_number }}</x-badge>
                                 @else
-                                    <span class="badge badge-secondary">Vehicle</span>
+                                    <x-badge tone="neutral">Vehicle</x-badge>
                                 @endif
                             </td>
                             <td><strong>{{ $tag->uid }}</strong></td>
                             <td>
-                                <span class="badge {{ match ($tag->status) {
-                                    'available' => 'badge-secondary',
-                                    'assigned', 'issued' => 'badge-matched',
-                                    'lost' => 'badge-manual-review',
-                                    default => 'badge-unmatched',
-                                } }}">
-                                    {{ ucfirst($tag->status) }}
-                                </span>
+                                <x-badge :status="$tag->status" />
                             </td>
                             <td>
                                 @if ($tag->isGuestPass())
@@ -187,18 +129,12 @@
                                     <span class="table-subtext">Available for assignment</span>
                                 @endif
                             </td>
-                            <td>{{ $tag->last_scanned_at?->format('M d, Y h:i A') ?: 'No scan yet' }}</td>
+                            <td><x-datetime :value="$tag->last_scanned_at" fallback="No scan yet" /></td>
                             <td>{{ $tag->scan_logs_count }}</td>
                         </tr>
-                    @empty
-                        <tr>
-                            <td colspan="7" class="table-empty">No RFID tags registered yet.</td>
-                        </tr>
-                    @endforelse
+                    @endforeach
                 </tbody>
-            </table>
-        </div>
-    </section>
+    </x-table>
 @endsection
 
 @push('scripts')
@@ -272,7 +208,8 @@
             });
 
             document.addEventListener('keydown', (event) => {
-                if (!inventoryInput || inventoryInput.disabled || event.ctrlKey || event.metaKey || event.altKey) {
+                // UI Phase 1: only capture scans while the Register drawer is open.
+                if (!inventoryInput || inventoryInput.disabled || inventoryInput.offsetParent === null || event.ctrlKey || event.metaKey || event.altKey) {
                     return;
                 }
 
@@ -309,9 +246,9 @@
                 idleTimer = window.setTimeout(maybeCommitScan, 140);
             });
 
-            if (inventoryInput && document.activeElement === document.body) {
-                inventoryInput.focus({ preventScroll: true });
-            }
+            document.getElementById('register-tag-drawer')?.addEventListener('drawer:open', () => {
+                (tagNumberInput?.value ? inventoryInput : tagNumberInput)?.focus({ preventScroll: true });
+            });
         });
     </script>
 @endpush

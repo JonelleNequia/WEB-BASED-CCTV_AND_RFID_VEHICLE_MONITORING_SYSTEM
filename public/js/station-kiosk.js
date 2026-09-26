@@ -27,13 +27,8 @@
             return fallbackText;
         }
 
-        const date = new Date(value);
-
-        if (Number.isNaN(date.getTime())) {
-            return value;
-        }
-
-        return date.toLocaleString();
+        // UI Phase 1: same format as the rest of the system (public/js/ui.js).
+        return window.ui ? window.ui.formatDateTime(value, value) : value;
     }
 
     function updateClock() {
@@ -41,14 +36,7 @@
             return;
         }
 
-        clock.textContent = new Date().toLocaleString(undefined, {
-            month: 'short',
-            day: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-        });
+        clock.textContent = window.ui ? window.ui.formatDateTime(new Date(), '', true) : new Date().toLocaleString();
     }
 
     function setStatusChip(node, online, onlineText, standbyText) {

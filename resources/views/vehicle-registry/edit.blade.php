@@ -2,9 +2,10 @@
 
 @section('title', 'Edit Vehicle | PHILCST Vehicle Access Monitoring')
 @section('page-title', 'Edit Vehicle')
-@section('page-description', 'Update registered vehicle details and assign an RFID tag from the inventory.')
 
 @section('content')
+    <x-page-header :title="'Edit '.$vehicle->plate_number" :back="route('vehicle-registry.index')" back-label="Back to Registry" />
+
     <section class="panel">
         @php($selectedCategory = old('category', $vehicle->category))
         @php($categoryOtherValue = old('category_other', ! in_array($selectedCategory, $vehicleCategories, true) && $selectedCategory !== 'others' ? $selectedCategory : ''))
@@ -13,13 +14,6 @@
         @php($vehicleTypeOtherValue = old('vehicle_type_other', ! in_array($selectedVehicleType, $vehicleTypes, true) && $selectedVehicleType !== 'Others' ? $selectedVehicleType : ''))
         @php($vehicleTypeSelectValue = $vehicleTypeOtherValue !== '' ? 'Others' : $selectedVehicleType)
         @php($selectedRfidTagId = (string) old('rfid_tag_id', $vehicle->rfid_tag_id))
-        <div class="panel-header">
-            <div>
-                <h3>{{ $vehicle->plate_number }}</h3>
-            </div>
-            <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Back to Registry</a>
-        </div>
-
         <form method="POST" action="{{ route('vehicle-registry.update', ['vehicle' => $vehicle->getKey()]) }}" class="stack-form" data-rfid-registration-form>
             @csrf
             @method('PUT')

@@ -2,78 +2,28 @@
 
 @section('title', 'Dashboard | PHILCST Vehicle Monitoring')
 @section('page-title', 'Dashboard')
-@section('page-description', 'Operational overview of campus vehicle access and monitoring.')
 
 @section('content')
-    <section class="hero-panel hero-panel-compact">
-        <div class="hero-panel-copy">
-            <span class="panel-kicker">Operations</span>
-            <h3>Campus vehicle monitoring dashboard</h3>
+    {{-- UI Phase 1: compact header and one row of small KPIs. --}}
+    <x-page-header title="Dashboard" />
+
+    <x-stat-row data-dashboard-metrics>
+        <x-stat label="Inside Campus" :value="$vehiclesInside" metric="vehicles_inside" tone="brand"
+                :hint="($rfidStats['registered_inside'] ?? 0).' registered · '.($rfidStats['guests_inside'] ?? 0).' guests'" />
+        <x-stat label="Entered Today" :value="$totalVehiclesEnteredToday" metric="total_vehicles_entered_today" />
+        <x-stat label="Exited Today" :value="$totalVehiclesExitedToday" metric="total_vehicles_exited_today" />
+        <x-stat label="Registered Scans" :value="$rfidStats['registered_scans_today'] ?? 0" metric="registered_scans_today" hint="Verified RFID today" />
+        <x-stat label="Active Guests" :value="$activeGuests" metric="active_guests" :href="route('guest-passes.index')" />
+        <x-stat label="Overstay" :value="$overstayGuests" metric="overstay_guests" tone="warning" :href="route('guest-passes.index', ['status' => 'overstay'])" />
+        <x-stat label="No-pass Alerts" :value="$noPassAlertsToday" metric="no_pass_alerts_today" tone="danger" :href="route('vehicle-events.index', ['log_type' => 'no_pass_alert'])">
+            <x-slot:detail><span data-dashboard-metric="pass_alerts_today">{{ $passAlertsToday }}</span> lost/disabled pass scans</x-slot:detail>
+        </x-stat>
+        <div class="stat">
+            <span class="stat-label">Cameras</span>
+            <strong class="stat-value"><span data-dashboard-metric="camera_connected">{{ $cameraSummary['connected'] }}</span>/<span data-dashboard-metric="camera_total">{{ $cameraSummary['total'] }}</span></strong>
+            <span class="stat-hint">Connected feeds</span>
         </div>
-
-        <div class="hero-panel-actions">
-            <a href="{{ route('stations.entrance') }}" class="button button-primary">Entrance Station</a>
-            <a href="{{ route('stations.exit') }}" class="button button-primary">Exit Station</a>
-            <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Vehicle Registry</a>
-            <a href="{{ route('settings.index') }}" class="button button-secondary">Settings</a>
-        </div>
-    </section>
-
-    <div class="page-grid cards-4" data-dashboard-metrics>
-        <article class="stat-card stat-card-brand">
-            <span class="stat-card-label">Total Vehicles Entered</span>
-            <strong data-dashboard-metric="total_vehicles_entered_today">{{ $totalVehiclesEnteredToday }}</strong>
-            <p>Registered ENTRY logs plus guest entrance observations today.</p>
-        </article>
-
-        <article class="stat-card stat-card-success">
-            <span class="stat-card-label">Total Vehicles Exited</span>
-            <strong data-dashboard-metric="total_vehicles_exited_today">{{ $totalVehiclesExitedToday }}</strong>
-            <p>Registered EXIT logs plus guest exit observations today.</p>
-        </article>
-
-        <article class="stat-card stat-card-brand-soft">
-            <span class="stat-card-label">Vehicles Inside Campus</span>
-            <strong data-dashboard-metric="vehicles_inside">{{ $vehiclesInside }}</strong>
-            {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
-            <p>{{ $rfidStats['registered_inside'] ?? 0 }} registered · {{ $rfidStats['guests_inside'] ?? 0 }} guests</p>
-        </article>
-
-        <article class="stat-card stat-card-brand">
-            <span class="stat-card-label">Registered Scans Today</span>
-            <strong data-dashboard-metric="registered_scans_today">{{ $rfidStats['registered_scans_today'] ?? 0 }}</strong>
-            <p>Verified RFID scans from recurring vehicles today.</p>
-        </article>
-
-        {{-- Phase 4: replaced "Guest Observations Today" with guest pass cards and alerts. --}}
-        <article class="stat-card stat-card-brand-soft">
-            <span class="stat-card-label">Active Guests</span>
-            <strong data-dashboard-metric="active_guests">{{ $activeGuests }}</strong>
-            <p><a href="{{ route('guest-passes.index') }}">Guests inside with a pass</a></p>
-        </article>
-
-        <article class="stat-card stat-card-warning">
-            <span class="stat-card-label">Overstay</span>
-            <strong data-dashboard-metric="overstay_guests">{{ $overstayGuests }}</strong>
-            <p><a href="{{ route('guest-passes.index', ['status' => 'overstay']) }}">Past their valid-until time</a></p>
-        </article>
-
-        <article class="stat-card stat-card-warning">
-            <span class="stat-card-label">No-pass Alerts</span>
-            <strong data-dashboard-metric="no_pass_alerts_today">{{ $noPassAlertsToday }}</strong>
-            <p>
-                Vehicles the camera saw without an RFID scan today ·
-                <span data-dashboard-metric="pass_alerts_today">{{ $passAlertsToday }}</span> lost/disabled pass scan(s).
-                <a href="{{ route('vehicle-events.index', ['log_type' => 'no_pass_alert']) }}">Review</a>
-            </p>
-        </article>
-
-        <article class="stat-card stat-card-success">
-            <span class="stat-card-label">Camera Status</span>
-            <strong><span data-dashboard-metric="camera_connected">{{ $cameraSummary['connected'] }}</span>/<span data-dashboard-metric="camera_total">{{ $cameraSummary['total'] }}</span></strong>
-            <p>Connected camera feeds.</p>
-        </article>
-    </div>
+    </x-stat-row>
 
     <section class="panel">
         <div class="panel-header">

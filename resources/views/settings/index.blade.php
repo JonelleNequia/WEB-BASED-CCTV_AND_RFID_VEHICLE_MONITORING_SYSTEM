@@ -2,41 +2,24 @@
 
 @section('title', 'Settings | PHILCST Vehicle Monitoring')
 @section('page-title', 'Settings')
-@section('page-description', 'Adjust local vehicle workflow, station labels, camera sources, and optional advanced settings.')
 
 @section('content')
-    <section class="hero-panel hero-panel-compact">
-        <div class="hero-panel-copy">
-            <span class="panel-kicker">System Settings</span>
-            <h3>Local deployment configuration</h3>
-            <div class="inline-status-list">
-                <span class="chip chip-brand">Offline Local</span>
-                <span class="chip chip-soft">Vehicle-focused RFID workflow</span>
-            </div>
-        </div>
-
-        <div class="hero-panel-actions">
-            <a href="{{ route('rfid-scans.index') }}" class="button button-secondary">RFID Desk</a>
-            <a href="{{ route('guest-observations.index') }}" class="button button-secondary">Guest Monitoring</a>
-            <a href="{{ route('stations.entrance') }}" class="button button-secondary">Entrance Station</a>
-            <a href="{{ route('stations.exit') }}" class="button button-secondary">Exit Station</a>
-        </div>
-    </section>
+    <x-page-header title="Settings">
+        <x-slot:actions>
+            <button type="submit" form="settings-form" class="button button-primary">Save Settings</button>
+        </x-slot:actions>
+    </x-page-header>
 
     <section class="panel">
         <div class="panel-header">
             <div>
                 <div class="panel-title-row">
                     <h3>Camera and Integration Settings</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain operational settings',
-                        'text' => 'Camera sources and station labels stay editable while operational controls are temporarily hidden.',
-                    ])
                 </div>
             </div>
         </div>
 
-        <form method="POST" action="{{ route('settings.update') }}" class="stack-form">
+        <form method="POST" action="{{ route('settings.update') }}" class="stack-form" id="settings-form">
             @csrf
             @method('PUT')
 
@@ -51,10 +34,6 @@
             <section class="subpanel">
                 <div class="panel-title-row">
                     <h4>Station Labels</h4>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain station labels',
-                        'text' => 'These labels appear on the entrance and exit station screens.',
-                    ])
                 </div>
 
                 <div class="form-grid">
@@ -75,11 +54,7 @@
             <section class="subpanel">
                 <div class="panel-title-row">
                     <h4>Reader Configuration</h4>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain reader configuration',
-                        'text' => 'NFC readers type the tag into the Station page. UHF Ethernet readers are configured here; the network listener is added in a later update. Simulated uses the RFID Desk.',
-                    ])
-                </div>
+<p class="field-help">NFC readers type the tag into the Station page. UHF Ethernet readers are configured here; the network listener is added in a later update. Simulated uses the RFID Desk.</p>                </div>
 
                 <div class="camera-grid">
                     @foreach (['entrance' => 'Entrance', 'exit' => 'Exit'] as $station => $stationLabel)
@@ -151,11 +126,7 @@
             <section class="subpanel">
                 <div class="panel-title-row">
                     <h4>Guest Pass</h4>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain guest pass settings',
-                        'text' => 'Default validity is prefilled on the Issue Guest Pass form. A visit becomes Overstay once it passes its valid-until time plus the grace period.',
-                    ])
-                </div>
+<p class="field-help">Default validity is prefilled on the Issue Guest Pass form. A visit becomes Overstay once it passes its valid-until time plus the grace period.</p>                </div>
 
                 <div class="form-grid">
                     <div class="field">
@@ -188,10 +159,6 @@
             <section class="subpanel">
                 <div class="panel-title-row">
                     <h4>Camera Sources</h4>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain camera sources',
-                        'text' => 'These sources support vehicle observation and guest monitoring. They do not replace RFID as the main identifier for recurring vehicles.',
-                    ])
                 </div>
 
                 <div class="camera-grid">

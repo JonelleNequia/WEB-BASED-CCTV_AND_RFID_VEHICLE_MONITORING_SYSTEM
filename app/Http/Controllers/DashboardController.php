@@ -11,6 +11,7 @@ use App\Services\CalibrationService;
 use App\Services\GuestObservationService;
 use App\Services\GuestPassService;
 use App\Services\RfidService;
+use App\Support\DisplayTime;
 use App\Support\PhilippineTime;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -291,7 +292,7 @@ class DashboardController extends Controller
                         ? 'GUEST'
                         : $scan->tag_uid.' • '.$scan->resolvedEventTypeLabel,
                     'summary' => $plate.' • '.$scan->scanLocationLabel.' • State: '.$scan->resultingStateLabel,
-                    'display_time' => $time?->format('M d, Y h:i A') ?: 'No time',
+                    'display_time' => DisplayTime::datetime($time, 'No time'),
                     'badge_label' => $scan->verification_status === 'guest' ? 'GUEST' : $scan->verificationLabel,
                     'badge_class' => $scan->verificationBadgeClass,
                     'sort_time' => $scan->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,
@@ -310,7 +311,7 @@ class DashboardController extends Controller
                 return [
                     'title' => $plate,
                     'summary' => 'Guest Observation #'.$observation->id.' • '.ucfirst((string) $observation->location).' Station',
-                    'display_time' => $time?->format('M d, Y h:i A') ?: 'No time',
+                    'display_time' => DisplayTime::datetime($time, 'No time'),
                     'badge_label' => 'GUEST',
                     'badge_class' => 'secondary',
                     'sort_time' => $observation->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,
@@ -345,7 +346,7 @@ class DashboardController extends Controller
                 return [
                     'title' => $event->event_type.' • '.$plate,
                     'summary' => $event->event_origin_label.' • '.$event->display_vehicle_type,
-                    'display_time' => $time?->format('M d, Y h:i A') ?: 'No time',
+                    'display_time' => DisplayTime::datetime($time, 'No time'),
                     'badge_label' => $event->display_status_label,
                     'badge_class' => $event->status_badge_class,
                     'sort_time' => $event->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,
@@ -364,7 +365,7 @@ class DashboardController extends Controller
                 return [
                     'title' => $eventType.' • '.$this->guestDisplayPlate($observation),
                     'summary' => 'Guest Observation #'.$observation->id.' • '.ucfirst((string) $observation->location).' Station',
-                    'display_time' => $time?->format('M d, Y h:i A') ?: 'No time',
+                    'display_time' => DisplayTime::datetime($time, 'No time'),
                     'badge_label' => $eventType === 'EXIT' ? 'Exit' : 'Entry',
                     'badge_class' => 'secondary',
                     'sort_time' => $observation->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,

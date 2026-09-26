@@ -2,34 +2,18 @@
 
 @section('title', 'Quick Manual Log | PHILCST Vehicle Access Monitoring')
 @section('page-title', 'Quick Manual Log')
-@section('page-description', 'Fallback logging page for cases where RFID or camera support cannot complete the record automatically.')
 
 @section('content')
-    <section class="hero-panel hero-panel-compact">
-        <div class="hero-panel-copy">
-            <span class="panel-kicker">Support Only</span>
-            <h3>Create a manual vehicle log</h3>
-            <div class="inline-status-list">
-                <span class="chip chip-soft">Use only when the normal RFID flow cannot be completed</span>
-            </div>
-        </div>
-
-        <div class="hero-panel-actions">
-            <a href="{{ route('vehicle-events.index') }}" class="button button-secondary">Back to Logs</a>
-            <a href="{{ route('rfid-scans.index') }}" class="button button-primary">Open RFID Desk</a>
-        </div>
-    </section>
+    <x-page-header title="Quick Manual Log" :back="route('vehicle-events.index')" back-label="Back to logs">
+        <x-slot:meta>Use only when the normal RFID flow cannot be completed</x-slot:meta>
+    </x-page-header>
 
     <section class="panel">
         <div class="panel-header">
             <div>
                 <div class="panel-title-row">
                     <h3>Manual Vehicle Log</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain manual log form',
-                        'text' => 'ENTRY logs open sessions. EXIT logs run the same matching rules used by the rest of the system. This page is a fallback workflow.',
-                    ])
-                </div>
+<p class="field-help">ENTRY logs open sessions. EXIT logs run the same matching rules used by the rest of the system. This page is a fallback workflow.</p>                </div>
             </div>
         </div>
 

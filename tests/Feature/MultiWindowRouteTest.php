@@ -28,7 +28,8 @@ class MultiWindowRouteTest extends TestCase
         $this->actingAs($admin)
             ->get('/admin')
             ->assertOk()
-            ->assertSee('Campus vehicle monitoring dashboard')
+            ->assertSee('class="page-header"', false)
+            ->assertSee('Dashboard')
             ->assertSee('Entrance Station')
             ->assertSee('Exit Station');
     }

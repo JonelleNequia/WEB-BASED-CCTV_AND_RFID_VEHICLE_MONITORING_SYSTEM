@@ -9,8 +9,9 @@ use App\Services\CalibrationService;
 use App\Services\DetectorRuntimeService;
 use App\Services\GuestPassService;
 use App\Services\RfidIngestService;
-use App\Support\RfidIngestResult;
 use App\Services\SettingsService;
+use App\Support\DisplayTime;
+use App\Support\RfidIngestResult;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -214,7 +215,7 @@ class StationController extends Controller
                     'entries_today_count' => (int) $entriesToday,
                     'exits_today_count' => (int) $exitsToday,
                     'event_time' => $event->event_time?->toIso8601String(),
-                    'display_time' => $event->event_time?->format('M d, Y • h:i:s A'),
+                    'display_time' => DisplayTime::datetimeSeconds($event->event_time),
                     'status' => $event->display_status_label,
                     'sort_time' => $this->sortTimestamp($event->created_at, $event->event_time),
                     // Phase 4: guest pass events show the pass number, not "GUEST / Owner N/A".
@@ -254,7 +255,7 @@ class StationController extends Controller
                     'entries_today_count' => 0,
                     'exits_today_count' => 0,
                     'event_time' => $observation->observed_at?->toIso8601String(),
-                    'display_time' => $observation->observed_at?->format('M d, Y • h:i:s A'),
+                    'display_time' => DisplayTime::datetimeSeconds($observation->observed_at),
                     'status' => 'Guest',
                     'snapshot_url' => $observation->snapshot_url,
                     'sort_time' => $this->sortTimestamp($observation->created_at, $observation->observed_at),

@@ -3,15 +3,8 @@
 
 @section('title', 'Guest Passes | PHILCST Vehicle Monitoring')
 @section('page-title', 'Guest Passes')
-@section('page-description', 'Temporary RFID passes for guest vehicles: issue at the Entrance, collect at the Exit.')
 
 @php
-    $statusBadge = fn (string $status): string => match ($status) {
-        'active' => 'badge-open',
-        'overstay' => 'badge-unmatched',
-        'lost_tag' => 'badge-manual-review',
-        default => 'badge-matched',
-    };
     $statusLabel = fn (string $status): string => match ($status) {
         'lost_tag' => 'Lost pass',
         default => ucfirst($status),
@@ -28,62 +21,28 @@
 @endphp
 
 @section('content')
-    <section class="hero-panel hero-panel-compact">
-        <div class="hero-panel-copy">
-            <span class="panel-kicker">Temporary RFID</span>
-            <h3>Guest pass desk</h3>
-            <div class="inline-status-list">
-                <span class="chip chip-brand">{{ $stats['passes_total'] }} guest passes</span>
-                <span class="chip chip-soft">Valid for {{ intdiv($validityMinutes, 60) }}h {{ $validityMinutes % 60 }}m by default</span>
-            </div>
-        </div>
+    <x-page-header title="Guest Passes">
+        <x-slot:meta>Default validity {{ intdiv($validityMinutes, 60) }}h {{ $validityMinutes % 60 }}m</x-slot:meta>
+        <x-slot:actions>
+            <button type="button" class="button button-secondary" data-drawer-open="manual-guest-drawer">Manual guest entry</button>
+            <button type="button" class="button button-primary" data-drawer-open="issue-pass-drawer">Issue Guest Pass</button>
+        </x-slot:actions>
+    </x-page-header>
 
-        <div class="hero-panel-actions">
-            <a href="{{ route('stations.entrance') }}" class="button button-secondary">Entrance Station</a>
-            <a href="{{ route('stations.exit') }}" class="button button-secondary">Exit Station</a>
-            <a href="{{ route('rfid-inventory.index', ['tag_type' => 'guest_pass']) }}" class="button button-secondary">Manage Passes</a>
-        </div>
-    </section>
+    <x-stat-row>
+        <x-stat label="Active Guests" :value="$stats['active_guests']" tone="brand" hint="Inside with a pass (incl. overstay)" data-guest-pass-stat="active_guests" />
+        <x-stat label="Passes Available" :value="$stats['passes_available'].' / '.$stats['passes_total']" :hint="$stats['passes_lost'].' lost pass(es)'" :href="route('rfid-inventory.index', ['tag_type' => 'guest_pass'])" />
+        <x-stat label="Overstay" :value="$stats['overstay']" tone="warning" hint="Past their valid-until time" :href="route('guest-passes.index', ['status' => 'overstay'])" />
+    </x-stat-row>
 
-    <div class="page-grid cards-3">
-        <article class="stat-card stat-card-brand">
-            <span class="stat-card-label">Active Guests</span>
-            <strong data-guest-pass-stat="active_guests">{{ $stats['active_guests'] }}</strong>
-            <p>Guests inside with a pass (including overstay).</p>
-        </article>
-
-        <article class="stat-card stat-card-success">
-            <span class="stat-card-label">Passes Available</span>
-            <strong>{{ $stats['passes_available'] }} <small>/ {{ $stats['passes_total'] }}</small></strong>
-            <p>{{ $stats['passes_lost'] }} lost pass(es).</p>
-        </article>
-
-        <article class="stat-card stat-card-warning">
-            <span class="stat-card-label">Overstay</span>
-            <strong>{{ $stats['overstay'] }}</strong>
-            <p>Still inside after their valid-until time.</p>
-        </article>
-    </div>
-
-    <section class="panel">
-        <div class="panel-header">
-            <div>
-                <div class="panel-title-row">
-                    <h3>Issue Guest Pass</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain issuing',
-                        'text' => 'Normally the Entrance Station opens this form when an available pass is tapped. Use this form when the reader is not available.',
-                    ])
-                </div>
-            </div>
-        </div>
-
+    <x-drawer id="issue-pass-drawer" title="Issue Guest Pass" :open="$errors->hasAny(['id_presented', 'rfid_tag_id', 'plate'])">
+        <p class="field-help">Normally the Entrance Station opens this form when an available pass is tapped. Use it here when the reader is not available.</p>
         @if ($availablePasses->isEmpty())
-            <div class="empty-state-inline">No available guest passes. Register passes in RFID Tags or use the manual fallback below.</div>
+            <x-empty-state title="No available guest passes" text="Register passes in RFID Tags, or use Manual guest entry." />
         @else
             <form method="POST" data-issue-form action="{{ route('guest-passes.issue', $availablePasses->first()) }}" class="stack-form">
                 @csrf
-                <div class="form-grid">
+                <div class="stack-form">
                     <div class="field">
                         <label for="issue_pass">Guest Pass</label>
                         <select id="issue_pass" data-issue-pass-select required>
@@ -132,20 +91,16 @@
                 </div>
                 @error('rfid_tag_id')<span class="field-error">{{ $message }}</span>@enderror
                 <div class="button-row">
+                    <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
                     <button type="submit" class="button button-primary">Issue Pass</button>
                 </div>
             </form>
         @endif
-    </section>
+    </x-drawer>
 
-    <section class="panel">
-        <div class="panel-header">
-            <div>
-                <h3>Guest Visits</h3>
-            </div>
-            <span class="chip chip-soft">{{ $visits->total() }} visit(s)</span>
-        </div>
-
+    <x-table title="Guest Visits" :paginator="$visits" :empty="$visits->isEmpty()" empty-title="No guest visits for this filter.">
+        <x-slot:toolbar><span class="text-muted">{{ $visits->total() }} visit(s)</span></x-slot:toolbar>
+        <x-slot:filters>
         <form method="GET" action="{{ route('guest-passes.index') }}" class="form-grid filter-grid">
             <div class="field">
                 <label for="filter_status">Status</label>
@@ -170,9 +125,8 @@
                 </div>
             </div>
         </form>
+        </x-slot:filters>
 
-        <div class="table-responsive">
-            <table>
                 <thead>
                     <tr>
                         <th>Pass</th>
@@ -187,7 +141,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @forelse ($visits as $visit)
+                    @foreach ($visits as $visit)
                         <tr>
                             <td><strong>{{ $visit->rfidTag?->display_number ?? 'N/A' }}</strong></td>
                             <td>{{ $visit->plate ?: 'No plate' }}</td>
@@ -198,15 +152,15 @@
                                     <div class="table-subtext">{{ $visit->destination }}</div>
                                 @endif
                             </td>
-                            <td>{{ $visit->entry_at?->format('M d, h:i A') ?? 'N/A' }}</td>
+                            <td><x-datetime :value="$visit->entry_at" /></td>
                             <td>
-                                {{ $visit->exit_at?->format('M d, h:i A') ?? 'Inside' }}
+                                <x-datetime :value="$visit->exit_at" fallback="Inside" />
                                 @if ($visit->isOpen() && $visit->valid_until)
-                                    <div class="table-subtext">Valid until {{ $visit->valid_until->format('h:i A') }}</div>
+                                    <div class="table-subtext">Valid until <x-datetime :value="$visit->valid_until" format="time" /></div>
                                 @endif
                             </td>
                             <td>{{ $duration($visit) }}</td>
-                            <td><span class="badge {{ $statusBadge($visit->status) }}">{{ $statusLabel($visit->status) }}</span></td>
+                            <td><x-badge :status="$visit->status === 'lost_tag' ? 'lost' : $visit->status" :label="$statusLabel($visit->status)" /></td>
                             <td>
                                 <div class="button-row guest-pass-actions">
                                     <a href="{{ route('guest-passes.visits.show', $visit) }}" class="button button-secondary button-sm">View</a>
@@ -231,34 +185,19 @@
                                 </div>
                             </td>
                         </tr>
-                    @empty
-                        <tr>
-                            <td colspan="9" class="table-empty">No guest visits for this filter.</td>
-                        </tr>
-                    @endforelse
+                    @endforeach
                 </tbody>
-            </table>
-        </div>
+    </x-table>
 
-        {{ $visits->links() }}
-    </section>
-
-    <details class="details-card">
-        <summary>
-            <span>Manual guest entry (fallback)</span>
-            <span class="chip chip-soft">When passes run out</span>
-        </summary>
-
-        <div class="details-card-body">
-            <p class="table-subtext">
-                Records a guest observation without a pass. It does not count as a guest inside.
-                <a href="{{ route('guest-observations.index') }}">View CCTV observations</a>
+    <x-drawer id="manual-guest-drawer" title="Manual guest entry (fallback)">
+            <p class="field-help">
+                For when passes run out. Records a guest observation without a pass; it does not count as a guest inside.
             </p>
 
             <form method="POST" action="{{ route('guest-observations.store') }}" enctype="multipart/form-data" class="stack-form">
                 @csrf
                 <input type="hidden" name="observation_source" value="manual">
-                <div class="form-grid">
+                <div class="stack-form">
                     <div class="field">
                         <label for="manual_plate">Plate Number</label>
                         <input id="manual_plate" type="text" name="plate_number" placeholder="Optional">
@@ -301,11 +240,11 @@
                     </div>
                 </div>
                 <div class="button-row">
-                    <button type="submit" class="button button-secondary">Save Manual Entry</button>
+                    <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
+                    <button type="submit" class="button button-primary">Save Manual Entry</button>
                 </div>
             </form>
-        </div>
-    </details>
+    </x-drawer>
 @endsection
 
 @push('scripts')

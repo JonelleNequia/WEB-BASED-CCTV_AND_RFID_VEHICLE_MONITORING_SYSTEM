@@ -2,74 +2,25 @@
 
 @section('title', 'Vehicle Registry | PHILCST Vehicle Access Monitoring')
 @section('page-title', 'Vehicle Registry')
-@section('page-description', 'Manage recurring vehicle records and assign available RFID tags.')
 
 @section('content')
     @php($shouldOpenVehicleForm = $errors->any() || old('plate_number') || old('rfid_tag_id'))
 
-    <section class="hero-panel hero-panel-compact">
-        <div class="hero-panel-copy">
-            <span class="panel-kicker">Vehicle Records</span>
-            <h3>Registered recurring vehicles</h3>
-            <div class="inline-status-list">
-                <span class="chip chip-brand">{{ $rfidStats['registered_vehicles'] ?? 0 }} vehicles</span>
-                <span class="chip chip-soft">{{ $rfidStats['available_tags'] ?? 0 }} available RFID tags</span>
-            </div>
-        </div>
+    <x-page-header title="Vehicle Registry">
+        <x-slot:actions>
+            <button type="button" class="button button-primary" data-drawer-open="add-vehicle-drawer">Add Vehicle</button>
+        </x-slot:actions>
+    </x-page-header>
 
-        <div class="hero-panel-actions">
-            <a href="{{ route('rfid-inventory.index') }}" class="button button-secondary">RFID Tags</a>
-            <a href="{{ route('rfid-scans.index') }}" class="button button-secondary">RFID Desk</a>
-        </div>
-    </section>
+    <x-stat-row>
+        <x-stat label="Registered Vehicles" :value="$rfidStats['registered_vehicles'] ?? 0" />
+        {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
+        <x-stat label="Inside Campus" :value="$rfidStats['vehicles_inside'] ?? 0"
+                :hint="($rfidStats['registered_inside'] ?? 0).' registered · '.($rfidStats['guests_inside'] ?? 0).' guests'" />
+        <x-stat label="Available RFID Tags" :value="$rfidStats['available_tags'] ?? 0" :href="route('rfid-inventory.index')" />
+    </x-stat-row>
 
-    <div class="page-grid cards-3">
-        <article class="stat-card stat-card-brand">
-            <div class="stat-card-head">
-                <span class="stat-card-label">Registered Vehicles</span>
-                <span class="stat-card-icon">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 6A2.5 2.5 0 0 0 3 8.5v6A2.5 2.5 0 0 0 5.5 17H6v1a1 1 0 1 0 2 0v-1h8v1a1 1 0 1 0 2 0v-1h.5A2.5 2.5 0 0 0 21 14.5v-6A2.5 2.5 0 0 0 18.5 6h-13M7 9.5a1.5 1.5 0 1 1-1.5 1.5A1.5 1.5 0 0 1 7 9.5m10 0a1.5 1.5 0 1 1-1.5 1.5A1.5 1.5 0 0 1 17 9.5M8.5 7.5l1-2h5l1 2z"/></svg>
-                </span>
-            </div>
-            <strong>{{ $rfidStats['registered_vehicles'] ?? 0 }}</strong>
-            <p>Recurring vehicles with an RFID-based campus flow.</p>
-        </article>
-
-        <article class="stat-card stat-card-brand-soft">
-            <div class="stat-card-head">
-                <span class="stat-card-label">Inside Campus</span>
-                <span class="stat-card-icon">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12 12 4l9 8v8a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
-                </span>
-            </div>
-            <strong>{{ $rfidStats['vehicles_inside'] ?? 0 }}</strong>
-            {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
-            <p>{{ $rfidStats['registered_inside'] ?? 0 }} registered · {{ $rfidStats['guests_inside'] ?? 0 }} guests</p>
-        </article>
-
-        <article class="stat-card stat-card-success">
-            <div class="stat-card-head">
-                <span class="stat-card-label">Available RFID Tags</span>
-                <span class="stat-card-icon">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.55 18.7 4.8 13.95a1 1 0 0 1 1.4-1.4l3.35 3.34 8.25-8.24a1 1 0 1 1 1.4 1.4z"/></svg>
-                </span>
-            </div>
-            <strong>{{ $rfidStats['available_tags'] ?? 0 }}</strong>
-            <p>Tags ready for vehicle assignment.</p>
-        </article>
-    </div>
-
-    <details class="panel collapsible-panel" @if ($shouldOpenVehicleForm) open @endif>
-        <summary class="collapsible-summary">
-            <span>
-                <span class="panel-kicker">New Registry Record</span>
-                <strong>Add Vehicle</strong>
-                <small>Assign one available RFID tag to a recurring vehicle.</small>
-            </span>
-            <span class="button button-secondary button-sm">Open Form</span>
-        </summary>
-
-        <div class="collapsible-body">
+    <x-drawer id="add-vehicle-drawer" title="Add Vehicle" :open="$shouldOpenVehicleForm">
             @php($selectedCategory = old('category', 'faculty_staff'))
             @php($categoryOtherValue = old('category_other', ! in_array($selectedCategory, $vehicleCategories, true) && $selectedCategory !== 'others' ? $selectedCategory : ''))
             @php($categorySelectValue = $categoryOtherValue !== '' ? 'others' : $selectedCategory)
@@ -180,29 +131,16 @@
                 </div>
 
                 <div class="button-row">
+                    <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
                     <button type="submit" class="button button-primary" @disabled($availableTags->isEmpty())>Save Vehicle</button>
-                    <a href="{{ route('rfid-inventory.index') }}" class="button button-secondary">Manage RFID Tags</a>
                 </div>
             </form>
-        </div>
-    </details>
+    </x-drawer>
 
-    <section class="panel">
-        <div class="panel-header">
-            <div>
-                <div class="panel-title-row">
-                    <h3>Registered Vehicles</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain registered vehicles list',
-                        'text' => 'This list contains recurring vehicle records only. RFID tag inventory is managed from the RFID Tags page.',
-                    ])
-                </div>
-            </div>
-            <a href="{{ route('rfid-inventory.index') }}" class="button button-secondary button-sm">RFID Tags</a>
-        </div>
-
-        <div class="table-responsive">
-            <table>
+    <x-table title="Registered Vehicles" :empty="$vehicles->isEmpty()" empty-title="No registered vehicles yet." empty-text="Add a vehicle and assign it an RFID tag.">
+        <x-slot:emptyAction>
+            <button type="button" class="button button-primary button-sm" data-drawer-open="add-vehicle-drawer">Add Vehicle</button>
+        </x-slot:emptyAction>
                 <thead>
                     <tr>
                         <th>Plate</th>
@@ -215,7 +153,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @forelse ($vehicles as $vehicle)
+                    @foreach ($vehicles as $vehicle)
                         <tr>
                             <td><strong>{{ $vehicle->plate_number }}</strong></td>
                             <td>{{ $vehicle->vehicle_owner_name ?: 'N/A' }}</td>
@@ -223,7 +161,7 @@
                             <td>{{ $vehicle->vehicle_type }}</td>
                             <td>
                                 @if (! $vehicle->rfidTag && $vehicle->rfidTags->isEmpty())
-                                    <span class="badge badge-secondary">No tag</span>
+                                    <x-badge status="no_tag" />
                                 @elseif ($vehicle->rfidTag)
                                     <span class="badge {{ $vehicle->rfidTag->status === 'assigned' ? 'badge-matched' : 'badge-unmatched' }}">
                                         #{{ $vehicle->rfidTag->tag_number ?: 'N/A' }} - {{ $vehicle->rfidTag->uid }}
@@ -239,24 +177,18 @@
                                 @endif
                             </td>
                             <td>
-                                <span class="badge {{ $vehicle->status === 'active' ? 'badge-matched' : 'badge-unmatched' }}">
-                                    {{ ucfirst($vehicle->status) }}
-                                </span>
-                                <div class="table-subtext">{{ ucfirst(strtolower($vehicle->current_state ?? 'outside')) }}</div>
+                                <x-badge :status="strtolower($vehicle->current_state ?? 'outside')" />
+                                @if ($vehicle->status !== 'active')
+                                    <x-badge :status="$vehicle->status" />
+                                @endif
                             </td>
                             <td>
                                 <a href="{{ route('vehicle-registry.edit', $vehicle) }}" class="button button-secondary button-sm">Edit</a>
                             </td>
                         </tr>
-                    @empty
-                        <tr>
-                            <td colspan="7" class="table-empty">No registered vehicles yet.</td>
-                        </tr>
-                    @endforelse
+                    @endforeach
                 </tbody>
-            </table>
-        </div>
-    </section>
+    </x-table>
 @endsection
 
 @push('scripts')

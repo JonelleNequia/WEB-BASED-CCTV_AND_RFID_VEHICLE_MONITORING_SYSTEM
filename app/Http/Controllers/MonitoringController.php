@@ -8,6 +8,7 @@ use App\Services\CalibrationService;
 use App\Services\DetectorRuntimeService;
 use App\Services\GuestObservationService;
 use App\Services\SettingsService;
+use App\Support\DisplayTime;
 use Illuminate\Http\JsonResponse;
 use Illuminate\View\View;
 
@@ -70,7 +71,7 @@ class MonitoringController extends Controller
                 'subtitle' => trim(($event->event_origin_label ?? 'Vehicle Event').' | '.($event->resulting_state ?: 'Pending state')),
                 'badge' => $event->event_type === 'ENTRY' ? 'matched' : 'closed',
                 'occurred_at' => $event->event_time?->toIso8601String(),
-                'display_time' => $event->event_time?->format('M d, Y h:i:s A'),
+                'display_time' => DisplayTime::datetimeSeconds($event->event_time),
             ]);
 
         $guestObservations = GuestVehicleObservation::query()
@@ -85,7 +86,7 @@ class MonitoringController extends Controller
                 'subtitle' => ucfirst($observation->location).' | '.trim(($observation->vehicle_color ?: '').' '.($observation->vehicle_type ?: 'Vehicle')),
                 'badge' => 'manual-review',
                 'occurred_at' => $observation->observed_at?->toIso8601String(),
-                'display_time' => $observation->observed_at?->format('M d, Y h:i:s A'),
+                'display_time' => DisplayTime::datetimeSeconds($observation->observed_at),
             ]);
 
         return $vehicleEvents

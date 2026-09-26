@@ -21,10 +21,6 @@
             <div>
                 <div class="panel-title-row">
                     <h3>Incomplete Records</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Incomplete records help',
-                        'text' => 'Open each record to add plate and vehicle details, then save completion.',
-                    ])
                 </div>
             </div>
             <span class="chip chip-soft">{{ $events->total() }} item(s)</span>

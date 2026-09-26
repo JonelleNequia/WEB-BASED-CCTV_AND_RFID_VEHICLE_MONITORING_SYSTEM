@@ -12,6 +12,7 @@ use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Services\EventService;
 use App\Services\VehicleRegistryService;
+use App\Support\DisplayTime;
 use App\Support\PhilippineTime;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
@@ -630,8 +631,8 @@ class VehicleEventController extends Controller
             'source_label' => $event->source_display_label,
             'station_label' => $event->camera?->camera_name ?: ($event->roi_name ?: 'No camera linked'),
             'state_label' => $event->resulting_state_label,
-            'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
-            'summary_label' => 'Vehicle Event #'.$event->id.' • '.($time?->format('M d, Y • h:i A') ?: 'No time'),
+            'display_time' => DisplayTime::datetime($time, 'No time'),
+            'summary_label' => 'Vehicle Event #'.$event->id.' • '.(DisplayTime::datetime($time, 'No time')),
             'event_time_export' => $time?->toDateTimeString(),
             'status_label' => $event->display_status_label,
             'status_badge_class' => $event->status_badge_class,
@@ -672,8 +673,8 @@ class VehicleEventController extends Controller
             'source_label' => $observation->observation_source === 'cctv' ? 'Guest CCTV' : 'Guest Manual',
             'station_label' => ucfirst($observation->location).' Station',
             'state_label' => 'Guest',
-            'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
-            'summary_label' => 'Guest Observation #'.$observation->id.' • '.($time?->format('M d, Y • h:i A') ?: 'No time'),
+            'display_time' => DisplayTime::datetime($time, 'No time'),
+            'summary_label' => 'Guest Observation #'.$observation->id.' • '.(DisplayTime::datetime($time, 'No time')),
             'event_time_export' => $time?->toDateTimeString(),
             'status_label' => 'Guest',
             'status_badge_class' => 'secondary',
@@ -711,8 +712,8 @@ class VehicleEventController extends Controller
             'source_label' => 'RFID Desk',
             'station_label' => ucfirst($scanLog->scan_location).' Station',
             'state_label' => $scanLog->resultingStateLabel,
-            'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
-            'summary_label' => 'RFID Scan #'.$scanLog->id.' • '.($time?->format('M d, Y • h:i A') ?: 'No time'),
+            'display_time' => DisplayTime::datetime($time, 'No time'),
+            'summary_label' => 'RFID Scan #'.$scanLog->id.' • '.(DisplayTime::datetime($time, 'No time')),
             'event_time_export' => $time?->toDateTimeString(),
             'status_label' => $scanLog->verificationLabel,
             'status_badge_class' => $scanLog->verificationBadgeClass,

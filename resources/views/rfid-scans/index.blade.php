@@ -2,7 +2,6 @@
 
 @section('title', 'RFID Desk | PHILCST Vehicle Access Monitoring')
 @section('page-title', 'RFID Desk')
-@section('page-description', 'Primary station for RFID verification, scan results, and automatic vehicle logs.')
 
 @section('content')
     @php($simulationEnabled = ($settings['rfid_simulation_mode'] ?? 'enabled') === 'enabled')
@@ -47,81 +46,32 @@
     @php($selectedRegisteredTagId = (string) old('vehicle_rfid_tag_id', ''))
     @php($selectedRegisteredTag = $registeredTagOptions->first(fn ($option) => (string) $option['id'] === $selectedRegisteredTagId))
 
-    <section class="hero-panel hero-panel-compact">
-        <div class="hero-panel-copy">
-            <span class="panel-kicker">Primary Workflow</span>
-            <h3>RFID Scan Simulation and Verification</h3>
-            <div class="inline-status-list">
-                <span class="chip chip-brand">RFID: Active</span>
-                <span class="chip chip-soft">Mode: {{ $simulationEnabled ? 'Simulation' : 'Restricted' }}</span>
-            </div>
-        </div>
+    <x-page-header title="RFID Desk">
+        <x-slot:meta>{{ $simulationEnabled ? 'Simulation mode' : 'Simulation off' }}</x-slot:meta>
+    </x-page-header>
 
-        <div class="hero-panel-actions">
-            <a href="{{ route('stations.entrance') }}" class="button button-primary">Entrance Station</a>
-            <a href="{{ route('stations.exit') }}" class="button button-primary">Exit Station</a>
-            @if (auth()->user()?->isAdmin())
-                <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Vehicle Registry</a>
-            @endif
-        </div>
-    </section>
+    <x-stat-row>
+        <x-stat label="Registered Vehicles" :value="$rfidStats['registered_vehicles'] ?? 0" />
+        {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
+        <x-stat label="Inside Campus" :value="$rfidStats['vehicles_inside'] ?? 0"
+                :hint="($rfidStats['registered_inside'] ?? 0).' registered · '.($rfidStats['guests_inside'] ?? 0).' guests'" />
+        <x-stat label="Registered Scans Today" :value="$rfidStats['registered_scans_today'] ?? 0" tone="success" />
+        <x-stat label="Needs Attention" :value="$rfidStats['attention_today'] ?? 0" tone="danger"
+                :href="($rfidStats['attention_today'] ?? 0) > 0 ? route('rfid-scans.index', ['verification_status' => 'anomaly']) : null"
+                hint="Anomalies and lost-pass alerts today" />
+    </x-stat-row>
 
-    <div class="page-grid cards-4">
-        <article class="stat-card stat-card-brand">
-            <div class="stat-card-head">
-                <span class="stat-card-label">Registered Vehicles</span>
-                <span class="stat-card-icon">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 6A2.5 2.5 0 0 0 3 8.5v6A2.5 2.5 0 0 0 5.5 17H6v1a1 1 0 1 0 2 0v-1h8v1a1 1 0 1 0 2 0v-1h.5A2.5 2.5 0 0 0 21 14.5v-6A2.5 2.5 0 0 0 18.5 6h-13M7 9.5a1.5 1.5 0 1 1-1.5 1.5A1.5 1.5 0 0 1 7 9.5m10 0a1.5 1.5 0 1 1-1.5 1.5A1.5 1.5 0 0 1 17 9.5M8.5 7.5l1-2h5l1 2z"/></svg>
-                </span>
-            </div>
-            <strong>{{ $rfidStats['registered_vehicles'] ?? 0 }}</strong>
-            <p>Recurring registered vehicles in RFID workflow.</p>
-        </article>
-
-        <article class="stat-card stat-card-brand-soft">
-            <div class="stat-card-head">
-                <span class="stat-card-label">Inside Campus</span>
-                <span class="stat-card-icon">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5a1 1 0 0 1 1 1v12a1 1 0 1 1-2 0V6a1 1 0 0 1 1-1m4 2a1 1 0 0 1 1 1v8a1 1 0 1 1-2 0V8a1 1 0 0 1 1-1m4-2a1 1 0 0 1 1 1v12a1 1 0 1 1-2 0V6a1 1 0 0 1 1-1m4 3a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0V9a1 1 0 0 1 1-1"/></svg>
-                </span>
-            </div>
-            <strong>{{ $rfidStats['vehicles_inside'] ?? 0 }}</strong>
-            {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
-            <p>{{ $rfidStats['registered_inside'] ?? 0 }} registered · {{ $rfidStats['guests_inside'] ?? 0 }} guests</p>
-        </article>
-
-        <article class="stat-card stat-card-success">
-            <div class="stat-card-head">
-                <span class="stat-card-label">Registered Scans Today</span>
-                <span class="stat-card-icon">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.55 18.7 4.8 13.95a1 1 0 0 1 1.4-1.4l3.35 3.34 8.25-8.24a1 1 0 1 1 1.4 1.4z"/></svg>
-                </span>
-            </div>
-            <strong>{{ $rfidStats['registered_scans_today'] ?? 0 }}</strong>
-            <p>RFID scans converted to ENTRY/EXIT by current vehicle state.</p>
-        </article>
-
-        <article class="stat-card stat-card-warning">
-            <div class="stat-card-head">
-                <span class="stat-card-label">Needs Attention</span>
-                <span class="stat-card-icon">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 1 21h22zm0 6a1 1 0 0 1 1 1v4a1 1 0 1 1-2 0V9a1 1 0 0 1 1-1m0 9a1.25 1.25 0 1 1 1.25-1.25A1.25 1.25 0 0 1 12 17"/></svg>
-                </span>
-            </div>
-            <strong>{{ $rfidStats['attention_today'] ?? 0 }}</strong>
-            {{-- Phase 4: today's anomalies and lost/disabled pass alerts. --}}
-            @forelse ($attentionItems as $item)
-                <p class="table-subtext">
-                    {{ $item->scan_time?->format('h:i A') }} · {{ ucfirst($item->scan_location) }} · {{ $item->anomaly_reason }}
+    {{-- Phase 4: today's anomalies and lost/disabled pass alerts. --}}
+    @if ($attentionItems->isNotEmpty())
+        <section class="panel attention-list">
+            @foreach ($attentionItems as $item)
+                <p>
+                    <x-badge status="anomaly" label="Flagged" />
+                    <x-datetime :value="$item->scan_time" format="time" /> · {{ ucfirst($item->scan_location) }} · {{ $item->anomaly_reason }}
                 </p>
-            @empty
-                <p>No anomalies or lost-pass alerts today.</p>
-            @endforelse
-            @if (($rfidStats['attention_today'] ?? 0) > 0)
-                <a href="{{ route('rfid-scans.index', ['verification_status' => 'anomaly']) }}" class="table-subtext">View all flagged scans</a>
-            @endif
-        </article>
-    </div>
+            @endforeach
+        </section>
+    @endif
 
     <div class="page-grid two-column">
         <section class="panel">
@@ -129,10 +79,6 @@
                 <div>
                     <div class="panel-title-row">
                         <h3>Scan RFID</h3>
-                        @include('layouts.partials.help', [
-                            'label' => 'Explain RFID scan form',
-                            'text' => 'Station readers record ENTRY at the Entrance and EXIT at the Exit. This desk simulation toggles registered vehicles (outside = ENTRY, inside = EXIT). Guest passes follow the station rules.',
-                        ])
                     </div>
                 </div>
             </div>
@@ -195,9 +141,6 @@
 
                 <div class="button-row">
                     <button type="submit" class="button button-primary {{ $simulationEnabled ? '' : 'button-disabled' }}" @disabled(! $simulationEnabled)>Simulate RFID Scan</button>
-                    @if (auth()->user()?->isAdmin())
-                        <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Manage Registry</a>
-                    @endif
                 </div>
             </form>
 
@@ -209,10 +152,6 @@
                 <div>
                     <div class="panel-title-row">
                         <h3>Latest Result</h3>
-                        @include('layouts.partials.help', [
-                            'label' => 'Explain latest result',
-                            'text' => 'This shows the most recent scan outcome, including whether the vehicle was recognized and whether a vehicle log was linked automatically.',
-                        ])
                     </div>
                 </div>
             </div>
@@ -221,7 +160,7 @@
                 <div class="result-card result-card-{{ $latestScan->verification_status === 'verified' ? 'success' : 'warning' }}">
                     <div class="result-card-head">
                         <strong>{{ $latestScan->verificationLabel }}</strong>
-                        <span class="badge badge-{{ $latestScan->verificationBadgeClass }}">{{ $latestScan->scanLocationLabel }}</span>
+                        <x-badge :status="$latestScan->scan_location === 'exit' ? 'exit' : 'entry'" :label="$latestScan->scanLocationLabel" />
                     </div>
                     <div class="detail-list">
                         <div><span>Tag UID</span><strong>{{ $latestScan->tag_uid }}</strong></div>
@@ -229,7 +168,7 @@
                         <div><span>Category</span><strong>{{ $latestScan->vehicle?->category ? ucfirst(str_replace('_', ' ', $latestScan->vehicle->category)) : 'N/A' }}</strong></div>
                         <div><span>Event Type</span><strong>{{ $latestScan->resolvedEventTypeLabel }}</strong></div>
                         <div><span>Current State</span><strong>{{ $latestScan->resultingStateLabel }}</strong></div>
-                        <div><span>Time</span><strong>{{ $latestScan->scan_time->format('M d, Y h:i A') }}</strong></div>
+                        <div><span>Time</span><strong><x-datetime :value="$latestScan->scan_time" /></strong></div>
                     </div>
 
                     <div class="mini-note">
@@ -245,27 +184,13 @@
                     </div>
                 </div>
             @else
-                <div class="empty-state">
-                    <h4>No scan result yet</h4>
-                    <p>Record the first RFID scan to see the latest result here.</p>
-                </div>
+                <x-empty-state title="No scan result yet" text="Record the first RFID scan to see the latest result here." />
             @endif
         </section>
     </div>
 
-    <section class="panel">
-        <div class="panel-header">
-            <div>
-                <div class="panel-title-row">
-                    <h3>RFID Scan History</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain RFID scan history',
-                        'text' => 'Verified scans can feed vehicle logs automatically. Attention states stay listed here even when no vehicle log is created.',
-                    ])
-                </div>
-            </div>
-        </div>
-
+    <x-table title="RFID Scan History" :paginator="$scanLogs" :empty="$scanLogs->isEmpty()" empty-title="No RFID scan history yet.">
+        <x-slot:filters>
         <form method="GET" action="{{ route('rfid-scans.index') }}" class="form-grid filter-grid">
             <div class="field span-2">
                 <label for="history_q">Search RFID Scan History</label>
@@ -303,9 +228,8 @@
                 </div>
             </div>
         </form>
+        </x-slot:filters>
 
-        <div class="table-responsive">
-            <table>
                 <thead>
                     <tr>
                         <th>Time</th>
@@ -320,9 +244,9 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @forelse ($scanLogs as $scan)
+                    @foreach ($scanLogs as $scan)
                         <tr>
-                            <td>{{ $scan->scan_time->format('M d, Y h:i A') }}</td>
+                            <td><x-datetime :value="$scan->scan_time" /></td>
                             <td><strong>{{ $scan->tag_uid }}</strong></td>
                             <td>
                                 <strong>{{ $scan->vehicle?->plate_number ?? 'GUEST' }}</strong>
@@ -350,17 +274,9 @@
                                 @endif
                             </td>
                         </tr>
-                    @empty
-                        <tr>
-                            <td colspan="9" class="table-empty">No RFID scan history yet.</td>
-                        </tr>
-                    @endforelse
+                    @endforeach
                 </tbody>
-            </table>
-        </div>
-
-        @include('layouts.partials.pagination', ['paginator' => $scanLogs])
-    </section>
+    </x-table>
 
     <script id="registered-rfid-tag-options" type="application/json">{!! json_encode($registeredTagOptions, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 @endsection

@@ -2,22 +2,13 @@
 
 @section('title', 'Vehicle Log Details | PHILCST Vehicle Access Monitoring')
 @section('page-title', 'Vehicle Log Details')
-@section('page-description', 'Review the vehicle log, RFID match, visual support, and any completion steps still required.')
 
 @section('content')
-    <section class="hero-panel hero-panel-compact">
-        <div class="hero-panel-copy">
-            <span class="panel-kicker">Vehicle Log</span>
-            <h3>Record #{{ $vehicleEvent->id }}</h3>
-        </div>
-
-        <div class="hero-panel-actions">
-            <span class="badge badge-{{ $vehicleEvent->status_badge_class }}">
-                {{ $vehicleEvent->display_status_label }}
-            </span>
-            <a href="{{ route('vehicle-events.index') }}" class="button button-secondary">Back to Logs</a>
-        </div>
-    </section>
+    <x-page-header :title="'Vehicle Log #'.$vehicleEvent->id" :back="route('vehicle-events.index')" back-label="Back to logs">
+        <x-slot:meta>
+            <span class="badge badge-{{ $vehicleEvent->status_badge_class }}">{{ $vehicleEvent->display_status_label }}</span>
+        </x-slot:meta>
+    </x-page-header>
 
     <div class="page-grid two-column">
         <section class="panel">
@@ -25,10 +16,6 @@
                 <div>
                     <div class="panel-title-row">
                         <h3>Summary</h3>
-                        @include('layouts.partials.help', [
-                            'label' => 'Explain log summary',
-                            'text' => 'This summary keeps the main operational details first: log type, source, plate, vehicle, station, time, and current workflow result.',
-                        ])
                     </div>
                 </div>
             </div>
@@ -43,7 +30,7 @@
                 <div><span>Station / Camera</span><strong>{{ $vehicleEvent->camera?->camera_name ?? 'No camera linked' }}</strong></div>
                 <div><span>RFID Match</span><strong>{{ $vehicleEvent->rfidScanLog ? '#'.$vehicleEvent->rfidScanLog->id.' • '.$vehicleEvent->rfidScanLog->verificationLabel : 'No RFID scan linked' }}</strong></div>
                 <div><span>Current State</span><strong>{{ $vehicleEvent->resulting_state_label }}</strong></div>
-                <div><span>Time</span><strong>{{ $vehicleEvent->event_time->format('M d, Y h:i A') }}</strong></div>
+                <div><span>Time</span><strong><x-datetime :value="$vehicleEvent->event_time" /></strong></div>
                 <div><span>Match</span><strong>{{ $vehicleEvent->match_display }}</strong></div>
                 <div><span>Plate Confidence</span><strong>{{ $vehicleEvent->plate_confidence ?? 'N/A' }}</strong></div>
             </div>
@@ -61,10 +48,6 @@
                 <div>
                     <div class="panel-title-row">
                         <h3>Visual Support</h3>
-                        @include('layouts.partials.help', [
-                            'label' => 'Explain visual support',
-                            'text' => 'Images and camera references support visual checking. They do not replace RFID as the main vehicle identifier.',
-                        ])
                     </div>
                 </div>
             </div>
@@ -95,10 +78,6 @@
                 <div>
                     <div class="panel-title-row">
                         <h3>Registered Vehicle</h3>
-                        @include('layouts.partials.help', [
-                            'label' => 'Explain registered vehicle section',
-                            'text' => 'When the plate matches the registry, the record can use the saved vehicle and RFID tag details automatically.',
-                        ])
                     </div>
                 </div>
             </div>
@@ -122,10 +101,7 @@
                     </div>
                 @endif
             @else
-                <div class="empty-state">
-                    <h4>No registered vehicle linked</h4>
-                    <p>Add or update the vehicle in the registry to strengthen RFID verification.</p>
-                </div>
+                <x-empty-state title="No registered vehicle linked" text="Add or update the vehicle in the registry to strengthen RFID verification." />
             @endif
         </section>
 
@@ -134,10 +110,6 @@
                 <div>
                     <div class="panel-title-row">
                         <h3>RFID Match</h3>
-                        @include('layouts.partials.help', [
-                            'label' => 'Explain RFID match section',
-                            'text' => 'A nearby RFID scan can be linked to the same vehicle log when the station, time, and registry details line up.',
-                        ])
                     </div>
                 </div>
             </div>
@@ -151,7 +123,7 @@
                         <div><span>Event Type</span><strong>{{ $vehicleEvent->rfidScanLog->resolvedEventTypeLabel }}</strong></div>
                         <div><span>Current State</span><strong>{{ $vehicleEvent->rfidScanLog->resultingStateLabel }}</strong></div>
                         <div><span>Reader</span><strong>{{ $vehicleEvent->rfidScanLog->reader_name }}</strong></div>
-                        <div><span>Time</span><strong>{{ $vehicleEvent->rfidScanLog->scan_time->format('M d, Y h:i A') }}</strong></div>
+                        <div><span>Time</span><strong><x-datetime :value="$vehicleEvent->rfidScanLog->scan_time" /></strong></div>
                     </div>
 
                 @if ($vehicleEvent->rfidScanLog->notes)
@@ -161,10 +133,7 @@
                     </div>
                 @endif
             @else
-                <div class="empty-state">
-                    <h4>No RFID match linked</h4>
-                    <p>This record currently stands on its own.</p>
-                </div>
+                <x-empty-state title="No RFID match linked" text="This record currently stands on its own." />
             @endif
         </section>
     </div>
@@ -175,10 +144,6 @@
                 <div>
                     <div class="panel-title-row">
                         <h3>Complete Camera Record</h3>
-                        @include('layouts.partials.help', [
-                            'label' => 'Explain complete record form',
-                            'text' => 'Use this form only for legacy camera-supported records that still need manual details.',
-                        ])
                     </div>
                 </div>
             </div>
@@ -236,10 +201,6 @@
             <div>
                 <div class="panel-title-row">
                     <h3>Entry Match</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain entry match section',
-                        'text' => 'EXIT records can point to the entry that best matches the same vehicle movement.',
-                    ])
                 </div>
             </div>
         </div>
@@ -250,13 +211,10 @@
                 <div><span>Plate</span><strong>{{ $vehicleEvent->matchedEntry->plate_text }}</strong></div>
                 <div><span>Vehicle</span><strong>{{ $vehicleEvent->matchedEntry->vehicle_color }} {{ $vehicleEvent->matchedEntry->display_vehicle_type }}</strong></div>
                 <div><span>Camera</span><strong>{{ $vehicleEvent->matchedEntry->camera?->camera_name ?? 'N/A' }}</strong></div>
-                <div><span>Time</span><strong>{{ $vehicleEvent->matchedEntry->event_time->format('M d, Y h:i A') }}</strong></div>
+                <div><span>Time</span><strong><x-datetime :value="$vehicleEvent->matchedEntry->event_time" /></strong></div>
             </div>
         @else
-            <div class="empty-state">
-                <h4>No entry match linked</h4>
-                <p>This log does not currently point to an entry record.</p>
-            </div>
+            <x-empty-state title="No entry match linked" text="This log does not currently point to an entry record." />
         @endif
     </section>
 
@@ -274,7 +232,7 @@
                     <div><span>Camera Source</span><strong>{{ $vehicleEvent->camera?->source_type ?? 'N/A' }} | {{ $vehicleEvent->camera?->source_value ?? 'N/A' }}</strong></div>
                     <div><span>Station / ROI</span><strong>{{ $vehicleEvent->roi_name ?: 'N/A' }}</strong></div>
                     <div><span>External Event Key</span><strong>{{ $vehicleEvent->external_event_key ?: 'Manual or RFID record' }}</strong></div>
-                    <div><span>Details Completed</span><strong>{{ $vehicleEvent->details_completed_at?->format('M d, Y h:i A') ?? 'Not completed yet' }}</strong></div>
+                    <div><span>Details Completed</span><strong><x-datetime :value="$vehicleEvent->details_completed_at" fallback="Not completed yet" /></strong></div>
                     <div>
                         <span>RFID Evidence</span>
                         <strong>

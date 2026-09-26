@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\GuestVehicleObservation;
 use App\Models\VehicleEvent;
+use App\Support\DisplayTime;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -148,7 +149,7 @@ class RealtimeLogController extends Controller
             'vehicle_color' => $observation->vehicle_color,
             'location' => $observation->location,
             'observed_at' => $observation->observed_at?->format('Y-m-d\TH:i'),
-            'display_time' => $observation->observed_at?->format('M d, Y h:i A'),
+            'display_time' => DisplayTime::datetime($observation->observed_at),
             'status' => $observation->status,
             'status_label' => 'Guest',
             'status_badge_class' => 'badge-secondary',
@@ -190,7 +191,7 @@ class RealtimeLogController extends Controller
             'entries_today_count' => (int) $entriesToday,
             'exits_today_count' => (int) $exitsToday,
             'event_time' => $event->event_time?->toIso8601String(),
-            'display_time' => $event->event_time?->format('M d, Y • h:i:s A'),
+            'display_time' => DisplayTime::datetimeSeconds($event->event_time),
             'status' => $event->display_status_label,
             'sort_time' => $this->sortTimestamp($event->created_at, $event->event_time),
             // Phase 4: guest pass events show the pass number.
@@ -219,7 +220,7 @@ class RealtimeLogController extends Controller
             'entries_today_count' => 0,
             'exits_today_count' => 0,
             'event_time' => $observation->observed_at?->toIso8601String(),
-            'display_time' => $observation->observed_at?->format('M d, Y • h:i:s A'),
+            'display_time' => DisplayTime::datetimeSeconds($observation->observed_at),
             'status' => 'Guest',
             'snapshot_url' => $observation->snapshot_url,
             'sort_time' => $this->sortTimestamp($observation->created_at, $observation->observed_at),
@@ -252,8 +253,8 @@ class RealtimeLogController extends Controller
             'source_label' => $event->event_origin_label,
             'station_label' => $event->camera?->camera_name ?: ($event->roi_name ?: 'No camera linked'),
             'state_label' => $event->resulting_state_label,
-            'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
-            'summary_label' => 'Vehicle Event #'.$event->id.' • '.($time?->format('M d, Y • h:i A') ?: 'No time'),
+            'display_time' => DisplayTime::datetime($time, 'No time'),
+            'summary_label' => 'Vehicle Event #'.$event->id.' • '.(DisplayTime::datetime($time, 'No time')),
             'event_time_export' => $time?->toDateTimeString(),
             'status_label' => $event->display_status_label,
             'status_badge_class' => $event->status_badge_class,
@@ -288,8 +289,8 @@ class RealtimeLogController extends Controller
             'source_label' => $observation->observation_source === 'cctv' ? 'Guest CCTV' : 'Guest Manual',
             'station_label' => ucfirst($observation->location).' Station',
             'state_label' => 'Guest',
-            'display_time' => $time?->format('M d, Y • h:i A') ?: 'No time',
-            'summary_label' => 'Guest Observation #'.$observation->id.' • '.($time?->format('M d, Y • h:i A') ?: 'No time'),
+            'display_time' => DisplayTime::datetime($time, 'No time'),
+            'summary_label' => 'Guest Observation #'.$observation->id.' • '.(DisplayTime::datetime($time, 'No time')),
             'event_time_export' => $time?->toDateTimeString(),
             'status_label' => 'Guest',
             'status_badge_class' => 'secondary',

@@ -2,34 +2,11 @@
 
 @section('title', 'Camera Calibration | PHILCST Vehicle Monitoring')
 @section('page-title', 'Camera Calibration')
-@section('page-description', 'Admin setup for YOLOv8 detection zones, ROI masks, trigger lines, and camera device assignments.')
 
 @section('content')
-    <section class="hero-panel hero-panel-compact">
-        <div class="hero-panel-copy">
-            <span class="panel-kicker">Admin Setup</span>
-            <h3>YOLOv8 ROI and trigger-line calibration</h3>
-            <div class="inline-status-list">
-                <span class="chip chip-brand">Entrance + Exit</span>
-                <span class="chip chip-soft">Saved locally</span>
-            </div>
-        </div>
+    <x-page-header title="Camera Calibration" />
 
-        <div class="hero-panel-actions">
-            <a href="{{ route('settings.index') }}" class="button button-secondary">System Settings</a>
-            <a href="{{ route('stations.entrance') }}" class="button button-primary">Entrance Station</a>
-            <a href="{{ route('stations.exit') }}" class="button button-primary">Exit Station</a>
-        </div>
-    </section>
-
-    <section class="panel calibration-help">
-        <div class="panel-header">
-            <div>
-                <h3>Calibration Workflow</h3>
-                <p>Select a browser camera, click point-by-point to draw the polygon ROI first, draw the trigger line second, then save calibration. The Python detector uses these shapes to decide when a vehicle crossing becomes a system event.</p>
-            </div>
-        </div>
-    </section>
+    <p class="field-help">Pick a camera, click point by point to draw the detection zone, then draw the trigger line, then save. The detector logs a vehicle when it crosses the line inside the zone.</p>
 
     <div class="camera-grid">
         @foreach ($cameras as $role => $camera)

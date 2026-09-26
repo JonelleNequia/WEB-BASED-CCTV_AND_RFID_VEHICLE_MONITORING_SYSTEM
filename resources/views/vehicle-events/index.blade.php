@@ -2,74 +2,25 @@
 
 @section('title', 'Event Logs | PHILCST Vehicle Access Monitoring')
 @section('page-title', 'Event Logs')
-@section('page-description', 'Review vehicle events, guest observations, and report-ready filtered records from one searchable list.')
 
 @section('content')
-    <section class="hero-panel hero-panel-compact">
-        <div class="hero-panel-copy">
-            <span class="panel-kicker">Central Record</span>
-            <h3>Vehicle operations logs</h3>
-            <div class="inline-status-list">
-                <span class="chip chip-brand">RFID-first logs</span>
-                <span class="chip chip-soft">Filtered list is the report</span>
-            </div>
-        </div>
-
-        <div class="hero-panel-actions">
-            <a href="{{ route('stations.entrance') }}" class="button button-secondary">Entrance Station</a>
-            <a href="{{ route('stations.exit') }}" class="button button-secondary">Exit Station</a>
+    <x-page-header title="Event Logs">
+        <x-slot:actions>
             @if (auth()->user()?->isAdmin())
-                <a href="{{ route('vehicle-registry.index') }}" class="button button-secondary">Registry</a>
-                <a href="{{ route('guest-observations.index') }}" class="button button-secondary">Guest Monitoring</a>
                 <a href="{{ route('vehicle-events.create') }}" class="button button-primary">Quick Manual Log</a>
             @endif
-        </div>
-    </section>
+        </x-slot:actions>
+    </x-page-header>
 
-    <div class="page-grid cards-5">
-        <article class="stat-card stat-card-brand">
-            <span class="stat-card-label">{{ $selectedPeriodLabel }} Logs</span>
-            <strong>{{ $eventLogSummary['total'] }}</strong>
-            <p>All visible records in the current range.</p>
-        </article>
-
-        <article class="stat-card stat-card-success">
-            <span class="stat-card-label">Entries</span>
-            <strong>{{ $eventLogSummary['entries'] }}</strong>
-            <p>ENTRY logs in the current range.</p>
-        </article>
-
-        <article class="stat-card stat-card-brand-soft">
-            <span class="stat-card-label">Exits</span>
-            <strong>{{ $eventLogSummary['exits'] }}</strong>
-            <p>EXIT logs in the current range.</p>
-        </article>
-
-        <article class="stat-card stat-card-warning">
-            <span class="stat-card-label">Guests</span>
-            <strong>{{ $eventLogSummary['guests'] }}</strong>
-            <p>Guest pass, CCTV and manual guest logs in the current range.</p>
-        </article>
-
-        <article class="stat-card">
-            <span class="stat-card-label">RFID Only</span>
-            <strong>{{ $eventLogSummary['rfid'] }}</strong>
-            <p>RFID scan records without linked events.</p>
-        </article>
-    </div>
+    <x-stat-row>
+        <x-stat :label="$selectedPeriodLabel.' Logs'" :value="$eventLogSummary['total']" />
+        <x-stat label="Entries" :value="$eventLogSummary['entries']" />
+        <x-stat label="Exits" :value="$eventLogSummary['exits']" />
+        <x-stat label="Guests" :value="$eventLogSummary['guests']" tone="brand" hint="Guest pass, CCTV and manual" />
+        <x-stat label="RFID Only" :value="$eventLogSummary['rfid']" hint="Scans without a linked event" />
+    </x-stat-row>
 
     <section class="panel printable-report-panel">
-        <div class="panel-header">
-            <div>
-                <div class="panel-title-row">
-                    <h3>Filters</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain log filters',
-                        'text' => 'Filter by plate, log type, workflow status, or date range. Guest and review records remain searchable here.',
-                    ])
-                </div>
-            </div>
-        </div>
 
         <form method="GET" action="{{ route('vehicle-events.index') }}" class="form-grid filter-grid">
             <div class="field">
@@ -186,13 +137,9 @@
             <div>
                 <div class="panel-title-row">
                     <h3>Event Logs</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain vehicle logs table',
-                        'text' => 'RFID-linked records are the normal operational path. Camera-linked details appear only when available for support.',
-                    ])
                 </div>
             </div>
-            <span class="chip chip-soft">{{ $logs->total() }} total</span>
+            <span class="text-muted">{{ $logs->total() }} total</span>
         </div>
 
         <div class="event-log-card-list event-log-list-view" data-event-log-list>
@@ -237,10 +184,7 @@
                     </div>
                 </article>
             @empty
-                <div class="empty-state">
-                    <h4>No records matched the current filters</h4>
-                    <p>Adjust the report filters to widen the visible list.</p>
-                </div>
+                <x-empty-state title="No records matched the current filters" text="Adjust the filters to widen the list." />
             @endforelse
         </div>
 

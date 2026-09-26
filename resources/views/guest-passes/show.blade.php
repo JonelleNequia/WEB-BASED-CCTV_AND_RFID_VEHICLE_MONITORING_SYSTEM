@@ -3,7 +3,6 @@
 
 @section('title', 'Guest Visit | PHILCST Vehicle Monitoring')
 @section('page-title', 'Guest Visit')
-@section('page-description', ($visit->rfidTag?->label ?? 'Guest Pass').' · '.($visit->plate ?: 'No plate'))
 
 @php
     $snapshotUrl = fn (?string $path): ?string => $path && \Illuminate\Support\Facades\Storage::disk('public')->exists($path)
@@ -14,21 +13,14 @@
 @endphp
 
 @section('content')
-    <section class="hero-panel hero-panel-compact">
-        <div class="hero-panel-copy">
-            <span class="panel-kicker">{{ $visit->rfidTag?->label ?? 'Guest Pass' }}</span>
-            <h3>{{ $visit->plate ?: 'No plate recorded' }}</h3>
-            <div class="inline-status-list">
-                <span class="chip chip-brand">{{ $visit->status === 'lost_tag' ? 'Lost pass' : ucfirst($visit->status) }}</span>
-                @if ($visit->valid_until)
-                    <span class="chip chip-soft">Valid until {{ $visit->valid_until->format('M d, h:i A') }}</span>
-                @endif
-            </div>
-        </div>
-        <div class="hero-panel-actions">
-            <a href="{{ route('guest-passes.index') }}" class="button button-secondary">Back to Guest Passes</a>
-        </div>
-    </section>
+    <x-page-header :title="($visit->rfidTag?->label ?? 'Guest Pass').' · '.($visit->plate ?: 'No plate')" :back="route('guest-passes.index')" back-label="Back to Guest Passes">
+        <x-slot:meta>
+            <x-badge :status="$visit->status === 'lost_tag' ? 'lost' : $visit->status" :label="$visit->status === 'lost_tag' ? 'Lost pass' : ucfirst($visit->status)" />
+            @if ($visit->valid_until)
+                Valid until <x-datetime :value="$visit->valid_until" />
+            @endif
+        </x-slot:meta>
+    </x-page-header>
 
     <div class="page-grid two-column">
         <section class="panel">
@@ -40,8 +32,8 @@
                 <div><span>Destination</span><strong>{{ $visit->destination ?: 'N/A' }}</strong></div>
                 <div><span>ID Presented</span><strong>{{ $visit->id_presented ?: 'None' }}</strong></div>
                 <div><span>Issued By</span><strong>{{ $visit->issuer?->name ?? 'Station' }}</strong></div>
-                <div><span>Entry</span><strong>{{ $visit->entry_at?->format('M d, Y h:i A') ?? 'N/A' }}</strong></div>
-                <div><span>Exit</span><strong>{{ $visit->exit_at?->format('M d, Y h:i A') ?? 'Still inside' }}</strong></div>
+                <div><span>Entry</span><strong><x-datetime :value="$visit->entry_at" /></strong></div>
+                <div><span>Exit</span><strong><x-datetime :value="$visit->exit_at" fallback="Still inside" /></strong></div>
             </div>
             @if ($visit->notes)
                 <div class="mini-note">
@@ -84,8 +76,8 @@
                 <tbody>
                     @forelse ($visit->vehicleEvents as $event)
                         <tr>
-                            <td>{{ $event->event_time?->format('M d, Y h:i A') }}</td>
-                            <td><span class="badge {{ $event->event_type === 'ENTRY' ? 'badge-open' : 'badge-matched' }}">{{ $event->event_type }}</span></td>
+                            <td><x-datetime :value="$event->event_time" /></td>
+                            <td><x-badge :status="strtolower($event->event_type)" :label="$event->event_type" /></td>
                             <td>{{ $event->roi_name }}</td>
                             <td>{{ $event->anomaly_reason ?: '' }}</td>
                             <td><a href="{{ route('vehicle-events.show', $event) }}" class="button button-secondary button-sm">Open</a></td>

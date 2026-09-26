@@ -28,7 +28,7 @@ class RfidSimulationTest extends TestCase
         $this->actingAs($user)
             ->get(route('rfid-scans.index'))
             ->assertOk()
-            ->assertSee('RFID Scan Simulation')
+            ->assertSee('RFID Desk')
             ->assertSee('Simulate RFID Scan');
     }
 

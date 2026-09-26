@@ -24,10 +24,6 @@
             <div>
                 <div class="panel-title-row">
                     <h3>{{ ucfirst($location) }} Operation</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain station operation',
-                        'text' => 'For registered recurring vehicles, scan results are state-based: outside becomes ENTRY and inside becomes EXIT, even on the same station.',
-                    ])
                 </div>
             </div>
             <div class="inline-status-list">
@@ -147,10 +143,6 @@
                 <div>
                     <div class="panel-title-row">
                         <h3>Recent {{ ucfirst($location) }} Activity</h3>
-                        @include('layouts.partials.help', [
-                            'label' => 'Explain recent station activity',
-                            'text' => 'This combines recent scans and the linked vehicle movement so the operator can confirm the latest actions quickly.',
-                        ])
                     </div>
                 </div>
                 <a href="{{ route('vehicle-events.index') }}" class="button button-secondary button-sm">Event Logs</a>
@@ -186,10 +178,6 @@
                 <div>
                     <div class="panel-title-row">
                         <h3>Optional Camera View</h3>
-                        @include('layouts.partials.help', [
-                            'label' => 'Explain optional camera view',
-                            'text' => 'This live feed supports observation and visual confirmation. The station can still operate when camera preview is unavailable.',
-                        ])
                     </div>
                 </div>
                 <a href="{{ route('monitoring.index') }}" class="button button-secondary button-sm">Camera Monitoring</a>

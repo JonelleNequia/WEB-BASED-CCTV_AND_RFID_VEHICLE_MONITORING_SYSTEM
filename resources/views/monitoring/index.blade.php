@@ -33,10 +33,6 @@
                     <div>
                         <div class="panel-title-row">
                             <h3>Intelligent CCTV Feed</h3>
-                            @include('layouts.partials.help', [
-                                'label' => 'Explain intelligent feed',
-                                'text' => 'The Python YOLOv8 service draws vehicle boxes and verification labels before the frame is shown here.',
-                            ])
                         </div>
                     </div>
                     <span class="badge {{ ($detectorStatus['service_running'] ?? false) ? 'badge-matched' : 'badge-secondary' }}" data-detector-status-badge>

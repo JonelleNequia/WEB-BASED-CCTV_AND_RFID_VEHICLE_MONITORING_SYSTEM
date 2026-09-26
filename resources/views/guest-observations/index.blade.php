@@ -2,55 +2,24 @@
 
 @section('title', 'Guest Monitoring | PHILCST Vehicle Monitoring')
 @section('page-title', 'Guest Monitoring')
-@section('page-description', 'Manual and CCTV-supported guest vehicle observation records for entrance and exit operations.')
 
 @section('content')
-    <section class="hero-panel hero-panel-compact">
-        <div class="hero-panel-copy">
-            <span class="panel-kicker">CCTV Support</span>
-            <h3>Guest vehicle observation desk</h3>
-            <div class="inline-status-list">
-                <span class="chip chip-brand">Guest flow</span>
-                <span class="chip chip-soft">No RFID required</span>
-            </div>
-        </div>
+    <x-page-header title="Guest Monitoring">
+        <x-slot:actions>
+            <button type="button" class="button button-primary" data-drawer-open="add-observation-drawer">Add Guest Observation</button>
+        </x-slot:actions>
+    </x-page-header>
 
-        <div class="hero-panel-actions">
-            <a href="{{ route('stations.entrance') }}" class="button button-secondary">Entrance Station</a>
-            <a href="{{ route('stations.exit') }}" class="button button-secondary">Exit Station</a>
-            <a href="{{ route('vehicle-events.index') }}" class="button button-secondary">Event Logs</a>
-        </div>
-    </section>
+    <x-stat-row>
+        <x-stat label="Guest Observations Today" :value="$guestCountToday" tone="warning" />
+    </x-stat-row>
 
-    <div class="page-grid cards-4">
-        <article class="stat-card stat-card-warning">
-            <div class="stat-card-head">
-                <span class="stat-card-label">Guest Observations Today</span>
-            </div>
-            <strong>{{ $guestCountToday }}</strong>
-            <p>Guest vehicle observations recorded today.</p>
-        </article>
-    </div>
-
-    <div class="page-grid two-column">
-        <section class="panel">
-            <div class="panel-header">
-                <div>
-                    <div class="panel-title-row">
-                        <h3>Add Guest Observation</h3>
-                        @include('layouts.partials.help', [
-                            'label' => 'Explain guest observation form',
-                            'text' => 'Use this form for guest vehicles at the entrance or exit. This flow is separate from recurring RFID scanning.',
-                        ])
-                    </div>
-                </div>
-            </div>
-
+    <x-drawer id="add-observation-drawer" title="Add Guest Observation" :open="$errors->any()">
             <form method="POST" action="{{ route('guest-observations.store') }}" enctype="multipart/form-data" class="stack-form guest-observation-form">
                 @csrf
                 <input type="hidden" name="observation_source" value="manual">
 
-                <div class="form-grid">
+                <div class="stack-form">
                     <div class="field">
                         <label for="plate_number">Plate Number</label>
                         <input id="plate_number" type="text" name="plate_number" value="{{ old('plate_number', old('plate_text')) }}" placeholder="Optional for guest vehicle">
@@ -104,20 +73,17 @@
                 </div>
 
                 <div class="button-row">
+                    <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
                     <button type="submit" class="button button-primary">Save Guest Observation</button>
                 </div>
             </form>
-        </section>
+    </x-drawer>
 
         <section class="panel">
             <div class="panel-header">
                 <div>
                     <div class="panel-title-row">
                         <h3>Latest Guest Capture</h3>
-                        @include('layouts.partials.help', [
-                            'label' => 'Explain guest capture',
-                            'text' => 'Guest RFID scans and camera timeouts create CCTV-supported guest observations with the latest available camera frame.',
-                        ])
                     </div>
                 </div>
             </div>
@@ -127,38 +93,25 @@
                 <div class="result-card result-card-warning">
                     <div class="result-card-head">
                         <strong>Guest captured</strong>
-                        <span class="badge badge-secondary">{{ ucfirst($latestUnregisteredCapture->location) }}</span>
+                        <x-badge :status="$latestUnregisteredCapture->location === 'exit' ? 'exit' : 'entry'" :label="ucfirst($latestUnregisteredCapture->location)" />
                     </div>
                     <img src="{{ $latestSnapshotUrl }}" alt="Guest vehicle capture" class="capture-preview">
                     <div class="detail-list">
                         <div><span>Camera</span><strong>{{ $latestUnregisteredCapture->camera?->camera_name ?: 'No camera linked' }}</strong></div>
                         <div><span>Plate</span><strong>{{ $latestUnregisteredCapture->plate_number ?: $latestUnregisteredCapture->plate_text ?: 'No plate detected' }}</strong></div>
                         <div><span>Color</span><strong>{{ $latestUnregisteredCapture->vehicle_color ?: 'No color detected' }}</strong></div>
-                        <div><span>Captured</span><strong>{{ $latestUnregisteredCapture->observed_at->format('M d, Y h:i A') }}</strong></div>
+                        <div><span>Captured</span><strong><x-datetime :value="$latestUnregisteredCapture->observed_at" /></strong></div>
                     </div>
                     <p>{{ $latestUnregisteredCapture->notes }}</p>
                 </div>
             @else
-                <div class="empty-state">
-                    <h4>No guest capture yet</h4>
-                    <p>Guest detections will appear here with a CCTV snapshot when a latest frame is available.</p>
-                </div>
+                <x-empty-state title="No guest capture yet" text="Guest detections will appear here with a CCTV snapshot when a latest frame is available." />
             @endif
         </section>
-    </div>
 
-    <section class="panel">
-        <div class="panel-header">
-            <div>
-                <div class="panel-title-row">
-                    <h3>Filter Guest Logs</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain guest log filters',
-                        'text' => 'Filter by plate, location, and date range.',
-                    ])
-                </div>
-            </div>
-        </div>
+    <x-table title="Guest Observation Logs" :paginator="$observations" class="guest-log-table-wrap">
+        <x-slot:toolbar><span class="text-muted" data-guest-total-count>{{ $observations->total() }} total</span></x-slot:toolbar>
+        <x-slot:filters>
 
             <form method="GET" action="{{ route('guest-observations.index') }}" class="form-grid filter-grid guest-filter-grid">
                 <div class="field">
@@ -193,24 +146,8 @@
                     </div>
                 </div>
             </form>
-    </section>
+        </x-slot:filters>
 
-    <section class="panel">
-        <div class="panel-header">
-            <div>
-                <div class="panel-title-row">
-                    <h3>Guest Observation Logs</h3>
-                    @include('layouts.partials.help', [
-                        'label' => 'Explain guest observation logs',
-                        'text' => 'Guest observations are intentionally separate from registered RFID activity.',
-                    ])
-                </div>
-            </div>
-            <span class="chip chip-soft" data-guest-total-count>{{ $observations->total() }} total</span>
-        </div>
-
-        <div class="table-responsive guest-log-table-wrap">
-            <table class="guest-log-table">
                 <colgroup>
                     <col class="guest-col-time">
                     <col class="guest-col-snapshot">
@@ -241,14 +178,14 @@
                     @forelse ($observations as $observation)
                         @php($snapshotUrl = $observation->snapshot_url)
                         <tr>
-                            <td>{{ $observation->observed_at->format('M d, Y h:i A') }}</td>
+                            <td><x-datetime :value="$observation->observed_at" /></td>
                             <td><img src="{{ $snapshotUrl }}" alt="Guest vehicle snapshot" class="thumb thumb-sm"></td>
                             <td>{{ $observation->plate_number ?: $observation->plate_text ?: 'No plate' }}</td>
                             <td>{{ $observation->vehicle_color ?: 'N/A' }}</td>
                             <td>{{ $observation->vehicle_type ?: 'N/A' }}</td>
                             <td>{{ ucfirst($observation->location) }}</td>
                             <td>
-                                <span class="badge badge-secondary">Guest</span>
+                                <x-badge status="guest" label="Guest" />
                             </td>
                             <td>{{ $observation->camera?->camera_name ?: 'N/A' }}</td>
                             <td>{{ $observation->notes ?: 'No notes' }}</td>
@@ -259,16 +196,13 @@
                             </td>
                         </tr>
                     @empty
+                        {{-- Kept inside the table so live rows can replace it. --}}
                         <tr>
                             <td colspan="10" class="table-empty">No guest observations yet.</td>
                         </tr>
                     @endforelse
                 </tbody>
-            </table>
-        </div>
-
-        @include('layouts.partials.pagination', ['paginator' => $observations])
-    </section>
+    </x-table>
 
     <div class="modal-backdrop is-hidden" data-guest-modal>
         <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="guest_modal_title">
@@ -350,7 +284,7 @@
         'vehicle_color' => $observation->vehicle_color,
         'location' => $observation->location,
         'observed_at' => $observation->observed_at?->format('Y-m-d\TH:i'),
-        'display_time' => $observation->observed_at?->format('M d, Y h:i A'),
+        'display_time' => \App\Support\DisplayTime::datetime($observation->observed_at),
         'status' => $observation->status,
         'status_label' => 'Guest',
         'status_badge_class' => 'badge-secondary',

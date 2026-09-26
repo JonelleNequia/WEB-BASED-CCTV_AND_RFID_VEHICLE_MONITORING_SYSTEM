@@ -25,7 +25,7 @@
                     <h1>{{ $stationLabel }}</h1>
                 </div>
                 <div class="station-status-stack">
-                    <span class="station-clock" data-station-clock>{{ now()->format('M d, Y h:i:s A') }}</span>
+                    <span class="station-clock" data-station-clock>{{ \App\Support\DisplayTime::datetimeSeconds(now()) }}</span>
                     <span class="station-status-chip {{ ($cameraStatus['camera_running'] ?? false) ? 'is-online' : 'is-standby' }}" data-camera-status-chip>
                         {{ ($cameraStatus['camera_running'] ?? false) ? 'Live' : 'Standby' }}
                     </span>
@@ -194,6 +194,7 @@
         ],
     ])
     <script id="station-kiosk-data" type="application/json">{!! json_encode($stationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
+    <script src="{{ asset('js/ui.js') }}"></script>
     <script src="{{ asset('js/station-kiosk.js') }}"></script>
 </body>
 </html>

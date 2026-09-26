@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Camera;
+use App\Support\DisplayTime;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -150,7 +151,7 @@ class CalibrationService
             'last_connection_status' => $camera->last_connection_status ?: 'unknown',
             'last_connection_message' => $camera->last_connection_message ?: 'Waiting for browser camera access.',
             'last_connected_at' => $camera->last_connected_at?->toIso8601String(),
-            'last_connected_at_display' => $camera->last_connected_at?->format('M d, Y h:i A') ?? 'Not connected yet',
+            'last_connected_at_display' => DisplayTime::datetime($camera->last_connected_at, 'Not connected yet'),
             'status' => $camera->status,
         ];
     }

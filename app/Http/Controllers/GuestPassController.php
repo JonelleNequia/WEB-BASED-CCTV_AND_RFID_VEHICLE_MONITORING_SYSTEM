@@ -7,6 +7,7 @@ use App\Models\GuestVisit;
 use App\Models\RfidScanLog;
 use App\Models\RfidTag;
 use App\Services\GuestPassService;
+use App\Support\DisplayTime;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -103,7 +104,7 @@ class GuestPassController extends Controller
      */
     public function cardReturned(Request $request, GuestVisit $guestVisit): JsonResponse
     {
-        $note = 'Card and ID returned (confirmed by '.($request->user()?->name ?? 'guard').' at '.now()->format('M d, Y h:i A').').';
+        $note = 'Card and ID returned (confirmed by '.($request->user()?->name ?? 'guard').' at '.DisplayTime::datetime(now()).').';
         $guestVisit->forceFill(['notes' => trim(($guestVisit->notes ? $guestVisit->notes."\n" : '').$note)])->save();
 
         return response()->json(['message' => 'Card return confirmed.']);

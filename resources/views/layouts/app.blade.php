@@ -11,45 +11,16 @@
 <body class="app-body">
     <div class="app-shell">
         <aside class="sidebar">
+            {{-- UI Phase 1: compact brand; the big topbar is replaced by <x-page-header> on each page. --}}
             <div class="brand-block">
-                <div class="brand-mark-wrap">
-                    <span class="brand-mark">PHILCST</span>
-                    <span class="brand-chip">Vehicle Operations</span>
-                </div>
-
-                <h1>Campus Vehicle Monitoring</h1>
+                <span class="brand-mark">PHILCST</span>
+                <span class="brand-name">Vehicle Monitoring</span>
             </div>
 
             @include('layouts.partials.navigation')
         </aside>
 
         <div class="content-shell">
-            <header class="topbar">
-                <div class="topbar-main">
-                    <p class="topbar-breadcrumb">Vehicle Operations / @yield('page-title', 'Dashboard')</p>
-                    <p class="eyebrow">@yield('eyebrow', 'Offline Local System')</p>
-                    <h2>@yield('page-title', 'Dashboard')</h2>
-                    <p class="page-copy">@yield('page-description', 'Manage vehicle access, RFID activity, guest monitoring, and camera support from one console.')</p>
-                </div>
-
-                <div class="topbar-meta">
-                    <div class="topbar-user">
-                        <span class="topbar-avatar">
-                            <img src="{{ asset('images/logo-placeholder.png') }}" alt="PHILCST logo">
-                        </span>
-                        <div>
-                            <strong>{{ auth()->user()->name ?? 'System Administrator' }}</strong>
-                            <span>{{ auth()->user()->email }}</span>
-                        </div>
-                    </div>
-
-                    <div class="topbar-meta-row">
-                        <span class="chip chip-brand">Offline Local</span>
-                        <span class="topbar-time">{{ now()->format('M d, Y h:i A') }}</span>
-                    </div>
-                </div>
-            </header>
-
             <main class="page-content">
                 @include('layouts.partials.flash')
                 @yield('content')
@@ -57,6 +28,7 @@
         </div>
     </div>
 
+    <script src="{{ asset('js/ui.js') }}"></script>
     @stack('scripts')
 </body>
 </html>
