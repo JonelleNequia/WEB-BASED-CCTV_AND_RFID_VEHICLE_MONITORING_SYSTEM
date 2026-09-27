@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Camera;
+use App\Support\CameraSource;
 use App\Support\DisplayTime;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -61,11 +62,11 @@ class CalibrationService
      *
      * @return array<string, array<string, mixed>>
      */
-    public function cameraPayload(): array
+    public function cameraPayload(bool $withSecrets = false): array
     {
         return $this->ensureRequiredCameras()
             ->mapWithKeys(fn (Camera $camera): array => [
-                $camera->camera_role => $this->transformCamera($camera),
+                $camera->camera_role => $this->transformCamera($camera, $withSecrets),
             ])
             ->all();
     }
@@ -133,17 +134,27 @@ class CalibrationService
      *
      * @return array<string, mixed>
      */
-    protected function transformCamera(Camera $camera): array
+    protected function transformCamera(Camera $camera, bool $withSecrets = false): array
     {
+        $sourceType = $camera->source_type ?: 'webcam';
+        $sourceValue = $camera->source_value ?: '0';
+
+        // Plug-and-detect: pages and page JSON never get the camera password
+        // or credentials embedded in the URL; only the Python export does.
+        $secrets = $withSecrets
+            ? ['source_value' => $sourceValue, 'source_password' => $camera->source_password ?? '']
+            : ['source_value' => CameraSource::withoutCredentials($sourceValue)];
+
         return [
             'id' => $camera->id,
             'camera_name' => $camera->camera_name,
             'camera_role' => $camera->camera_role,
             'role_label' => $camera->camera_role === 'entrance' ? 'Entrance Camera' : 'Exit Camera',
-            'source_type' => $camera->source_type ?: 'webcam',
-            'source_value' => $camera->source_value ?: '0',
+            'source_type' => $sourceType,
+            ...$secrets,
+            'source_display' => CameraSource::display($sourceType, $sourceValue),
             'source_username' => $camera->source_username ?? '',
-            'source_password' => $camera->source_password ?? '',
+            'has_password' => filled($camera->source_password),
             'browser_device_id' => $camera->browser_device_id,
             'browser_label' => $camera->browser_label,
             'calibration_mask' => $camera->calibration_mask_json,

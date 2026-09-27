@@ -175,3 +175,37 @@ On some systems, browser preview and OpenCV cannot open the same webcam at the s
 
 - make sure `pip install -r requirements.txt` completed successfully
 - if needed, manually place `yolov8n.pt` in a reachable location and change `MODEL_PATH`
+
+## Plug-and-detect device service (cameras and UHF readers)
+
+`device_service.py` runs next to the detector. Laravel starts it automatically
+(like the detector) and it:
+
+- watches this PC's network (LAN cable in/out, new IP, subnet or gateway) and
+  scans automatically; with no cable the Settings page shows "Waiting for LAN connection"
+- finds cameras (ONVIF WS-Discovery + RTSP) and UHF readers (TCP/UDP port
+  probes, reader-module broadcast search, inventory commands); a reader is
+  only "confirmed" by real tag data or a valid protocol reply
+- identifies devices by MAC address, so a new DHCP address does not break an
+  Entrance/Exit assignment
+- keeps the assigned UHF reader of each station connected and sends each tag
+  to Laravel's RFID API (same rules as the Station page)
+
+Nothing in the code names a device IP, subnet or port. Ports, discovery
+packets, camera stream paths and factory-default addresses are in
+`devices/data/discovery_profiles.json` (editable).
+
+Diagnostics (from the Laravel project root):
+
+```bash
+php artisan devices:scan --verbose           # one scan, every step printed, results saved
+php artisan devices:scan --target=IP -v      # also probe one address
+php artisan devices:listen IP:PORT           # raw bytes a reader sends (hold a tag near it)
+php artisan devices:start                    # start the background service now
+```
+
+Tests without hardware: `python -m unittest discover -s tests` and
+`python tools/fake_uhf_reader.py --port PORT --protocol r2000 --mode active`.
+
+Files: `storage/app/devices/` (status, last scan, runtime config, raw reader
+capture) and `storage/logs/device-service.log`.

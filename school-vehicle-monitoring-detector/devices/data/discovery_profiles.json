@@ -1,0 +1,95 @@
+{
+    "_about": "Editable data for automatic device detection. The code never names a device IP, subnet or port: everything it probes comes from this file or from the OS at runtime. Add a port, a discovery packet or a camera stream path here instead of changing code.",
+
+    "scan": {
+        "network_poll_seconds": 3,
+        "network_settle_seconds": 4,
+        "periodic_scan_seconds": 120,
+        "device_lost_rescan_min_seconds": 30,
+        "max_hosts_per_interface": 1024,
+        "max_concurrency": 128,
+        "connect_timeout_seconds": 0.7,
+        "arp_settle_seconds": 2.0,
+        "arp_trigger_port": 9,
+        "udp_reply_seconds": 2.5,
+        "reader_passive_listen_seconds": 1.5,
+        "reader_reply_timeout_seconds": 0.8,
+        "http_banner_ports": [80, 8080],
+        "ignore_interface_patterns": ["^lo\\d*$", "^gif", "^stf", "^anpi", "^ap\\d", "^awdl", "^llw", "^utun", "^bridge", "^vboxnet", "^docker", "^veth", "^virbr", "vEthernet", "VMware", "VirtualBox", "Hyper-V", "Loopback", "Tailscale", "ZeroTier", "Bluetooth", "Thunderbolt Bridge"],
+        "wifi_interface_patterns": ["wi-?fi", "wlan", "wireless", "airport", "802\\.11"],
+        "wired_interface_patterns": ["ethernet", "\\blan\\b", "local area connection", "usb", "^eth\\d", "^en[ops]", "realtek", "ax88179", "gigabit"]
+    },
+
+    "temporary_ip": {
+        "enabled": true,
+        "_note": "Used only when the service runs with admin rights and a device answered from another subnet (or a direct cable has only a 169.254 address). The address is removed right after the scan."
+    },
+
+    "camera": {
+        "rtsp_ports": [554, 8554, 10554],
+        "onvif": {
+            "multicast_group": "239.255.255.250",
+            "port": 3702,
+            "listen_seconds": 3
+        },
+        "vendors": [
+            {
+                "name": "TP-Link VIGI",
+                "match": ["VIGI", "TP-LINK", "TP-Link", "TPLINK"],
+                "rtsp_paths": {"main": "/stream1", "sub": "/stream2"},
+                "factory_default_ips": ["192.168.0.60"]
+            },
+            {
+                "name": "Hikvision",
+                "match": ["Hikvision", "HIKVISION"],
+                "rtsp_paths": {"main": "/Streaming/Channels/101", "sub": "/Streaming/Channels/102"},
+                "factory_default_ips": ["192.168.1.64"]
+            },
+            {
+                "name": "Dahua",
+                "match": ["Dahua", "DAHUA"],
+                "rtsp_paths": {"main": "/cam/realmonitor?channel=1&subtype=0", "sub": "/cam/realmonitor?channel=1&subtype=1"},
+                "factory_default_ips": ["192.168.1.108"]
+            },
+            {
+                "name": "Camera",
+                "match": [],
+                "rtsp_paths": {"main": "/stream1", "sub": "/stream2"},
+                "factory_default_ips": []
+            }
+        ]
+    },
+
+    "uhf_reader": {
+        "tcp_ports": [6000, 4001, 27011, 20108, 8899, 4196, 10001, 2022, 9090, 8160, 5084, 1969, 8086, 49152, 100],
+        "udp_ports": [6000, 4001, 27011, 20108, 8899, 4196, 1969],
+        "client_mode_listen_ports": [6000, 4001, 27011, 8234, 9090],
+        "broadcast_discovery": [
+            {"name": "USR IOT module search", "port": 1500, "payload_hex": "ff010102"},
+            {"name": "USR IOT module search (text)", "port": 48899, "payload_text": "www.usr.cn"},
+            {"name": "Hi-Flying module search", "port": 48899, "payload_text": "HF-A11ASSISTHREAD"}
+        ],
+        "probe_commands": [
+            {"protocol": "r2000", "purpose": "info", "address": 255, "command": "72", "data": ""},
+            {"protocol": "chafon", "purpose": "info", "address": 255, "command": "21", "data": ""},
+            {"protocol": "bb7e", "purpose": "info", "command": "03", "data": "00"},
+            {"protocol": "r2000", "purpose": "inventory", "address": 255, "command": "89", "data": "01"},
+            {"protocol": "chafon", "purpose": "inventory", "address": 255, "command": "01", "data": ""},
+            {"protocol": "bb7e", "purpose": "inventory", "command": "22", "data": ""}
+        ],
+        "vendor_hints": ["USR IOT", "Jinan USR", "Hi-flying", "HF-", "ZLAN", "Chafon", "Hopeland", "Impinj", "Invengo", "ThingMagic", "Alien Technology", "WIZnet", "Lantronix", "Moxa", "Shenzhen", "Guangzhou"],
+        "factory_default_ips": ["192.168.1.190", "192.168.1.192", "192.168.1.200", "192.168.1.116", "192.168.0.178", "192.168.0.7", "192.168.0.250", "10.10.100.254"]
+    },
+
+    "reader_link": {
+        "connect_timeout_seconds": 3,
+        "poll_after_idle_seconds": 2.0,
+        "poll_interval_seconds": 0.3,
+        "repeat_after_absent_seconds": 5,
+        "reconnect_min_seconds": 2,
+        "reconnect_max_seconds": 30,
+        "lost_after_failures": 3,
+        "capture_frames_per_session": 40,
+        "capture_log_max_bytes": 1048576
+    }
+}

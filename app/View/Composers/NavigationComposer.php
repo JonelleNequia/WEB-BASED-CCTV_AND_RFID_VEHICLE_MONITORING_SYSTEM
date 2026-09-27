@@ -4,6 +4,7 @@ namespace App\View\Composers;
 
 use App\Services\AlertSummaryService;
 use App\Services\DetectorRuntimeService;
+use App\Services\DeviceServiceRuntime;
 use App\Services\SettingsService;
 use Illuminate\View\View;
 use Throwable;
@@ -16,7 +17,8 @@ class NavigationComposer
     public function __construct(
         protected AlertSummaryService $alertSummaryService,
         protected DetectorRuntimeService $detectorRuntimeService,
-        protected SettingsService $settingsService
+        protected SettingsService $settingsService,
+        protected DeviceServiceRuntime $deviceServiceRuntime
     ) {
     }
 
@@ -45,18 +47,34 @@ class NavigationComposer
         $camerasOnline = $cameras->filter(fn ($camera): bool => (bool) ($camera['camera_running'] ?? false))->count();
         $detectorOnline = (bool) ($runtime['service_running'] ?? false);
 
-        // NFC readers type into the Station page and the RFID Desk simulates;
-        // a UHF Ethernet reader needs the network listener (not installed yet).
-        $readerTypes = [
-            $this->settingsService->get('entrance_reader_type', 'nfc'),
-            $this->settingsService->get('exit_reader_type', 'nfc'),
-        ];
-        $readersReady = collect($readerTypes)->every(fn ($type): bool => in_array($type, ['nfc', 'simulated'], true));
+        // NFC readers type into the Station page and the RFID Desk simulates.
+        // Plug-and-detect: a UHF reader is ready when the device service is
+        // connected to it.
+        try {
+            $devices = $this->deviceServiceRuntime->readStatus();
+        } catch (Throwable) {
+            $devices = [];
+        }
+
+        $readerProblems = collect(['entrance', 'exit'])
+            ->filter(fn (string $station): bool => $this->settingsService->get("{$station}_reader_type", 'nfc') === 'uhf_ethernet')
+            ->map(function (string $station) use ($devices): ?string {
+                $link = (array) data_get($devices, "readers.$station", []);
+
+                return match (true) {
+                    ! ($devices['service_running'] ?? false) => 'Device service off',
+                    empty($link['target']) => 'Assign UHF reader',
+                    ($link['state'] ?? null) !== 'connected' => 'UHF offline',
+                    default => null,
+                };
+            })
+            ->filter();
+        $readersReady = $readerProblems->isEmpty();
 
         return [
             ['label' => 'Detector', 'ok' => $detectorOnline, 'detail' => $detectorOnline ? 'Running' : 'Standby'],
             ['label' => 'Cameras', 'ok' => $camerasOnline === 2, 'detail' => $camerasOnline.'/2 live'],
-            ['label' => 'Readers', 'ok' => $readersReady, 'detail' => $readersReady ? 'Ready' : 'UHF listener pending'],
+            ['label' => 'Readers', 'ok' => $readersReady, 'detail' => $readersReady ? 'Ready' : (string) $readerProblems->first()],
         ];
     }
 }

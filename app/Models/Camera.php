@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\EncryptedSecret;
 use App\Models\Concerns\StoresLocalTime;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -36,6 +37,15 @@ class Camera extends Model
     ];
 
     /**
+     * Plug-and-detect: never serialize the camera password.
+     *
+     * @var list<string>
+     */
+    protected $hidden = [
+        'source_password',
+    ];
+
+    /**
      * Attribute casting for JSON calibration data and timestamps.
      *
      * @return array<string, string>
@@ -43,6 +53,8 @@ class Camera extends Model
     protected function casts(): array
     {
         return [
+            // Plug-and-detect: stored encrypted with APP_KEY.
+            'source_password' => EncryptedSecret::class,
             'calibration_mask_json' => 'array',
             'calibration_line_json' => 'array',
             'last_connected_at' => 'datetime',

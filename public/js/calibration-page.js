@@ -33,7 +33,7 @@
             this.lineValue = element.querySelector('[data-line-value]');
             this.saveButton = element.querySelector('[data-save]');
             this.ctx = this.canvas.getContext('2d');
-            this.streamUrl = camera.stream_url || this.video?.dataset.streamUrl || `http://127.0.0.1:8765/stream/${camera.camera_role}`;
+            this.streamUrl = camera.stream_url || this.video?.dataset.streamUrl || "";
             this.selectedDevice = null;
             this.availableDevices = [];
             this.currentTool = 'mask';
@@ -168,7 +168,7 @@
             this.connectionStatus = status;
             this.statusValue.textContent = label;
             this.messageValue.textContent = message;
-            this.sourceValue.textContent = `${this.camera.source_type} | ${this.camera.source_value}`;
+            this.sourceValue.textContent = this.camera.source_display || this.camera.source_type;
             this.browserValue.textContent = this.streamUrl || this.camera.browser_label || 'No detector stream URL';
             this.statusBadge.textContent = label;
             this.statusBadge.className = `badge ${
@@ -380,7 +380,7 @@
             this.maskDraftPoints = [];
             this.lineShape = camera.calibration_line || null;
             this.streamUrl = camera.stream_url || this.streamUrl;
-            this.sourceValue.textContent = `${camera.source_type} | ${camera.source_value}`;
+            this.sourceValue.textContent = camera.source_display || camera.source_type;
             this.browserValue.textContent = this.streamUrl;
             this.updateCalibrationSummary();
             this.render();

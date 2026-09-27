@@ -43,7 +43,7 @@
 
             <div class="station-video-footer">
                 <span>{{ $camera['camera_name'] }}</span>
-                <span data-camera-source>{{ strtoupper($camera['source_type']) }} | {{ $camera['source_value'] }}</span>
+                <span data-camera-source>{{ $camera['source_display'] }}</span>
                 <span data-camera-frames>{{ $cameraStatus['processed_frames'] ?? 0 }} frames</span>
                 <span data-camera-detections>{{ $cameraStatus['active_detections'] ?? 0 }} active / {{ $cameraStatus['detections_seen'] ?? 0 }} detections</span>
                 <span data-rfid-status>RFID Ready</span>

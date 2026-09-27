@@ -38,7 +38,7 @@ class GateMonitorController extends Controller
                 'short_label' => $label,
                 'camera' => $cameras[$location] ?? [],
                 'camera_status' => $runtime['cameras'][$location] ?? [],
-                'stream_url' => $runtime['cameras'][$location]['stream_url'] ?? "http://127.0.0.1:8765/stream/{$location}",
+                'stream_url' => $runtime['cameras'][$location]['stream_url'] ?? $detectorRuntimeService->defaultStreamUrl($location),
                 'latest_scan' => $this->latestScan($location),
                 'logs' => app(RealtimeLogController::class)->gateLogRows($location, 8),
                 'kiosk_url' => route($location === 'exit' ? 'stations.exit' : 'stations.entrance'),
@@ -63,7 +63,7 @@ class GateMonitorController extends Controller
             $camera = $runtime['cameras'][$location] ?? [];
             $gates[$location] = [
                 'camera_running' => (bool) ($camera['camera_running'] ?? false),
-                'stream_url' => $camera['stream_url'] ?? "http://127.0.0.1:8765/stream/{$location}",
+                'stream_url' => $camera['stream_url'] ?? $detectorRuntimeService->defaultStreamUrl($location),
                 'latest_scan' => $this->latestScan($location),
                 'logs' => app(RealtimeLogController::class)->gateLogRows($location, 8),
             ];

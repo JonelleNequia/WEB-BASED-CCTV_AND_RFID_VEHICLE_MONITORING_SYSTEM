@@ -229,7 +229,7 @@
                 <div class="detail-list">
                     <div><span>Workflow Status</span><strong>{{ ucfirst(str_replace('_', ' ', $vehicleEvent->event_status)) }}</strong></div>
                     <div><span>Detected Vehicle Type</span><strong>{{ $vehicleEvent->detected_vehicle_type ?: 'N/A' }}</strong></div>
-                    <div><span>Camera Source</span><strong>{{ $vehicleEvent->camera?->source_type ?? 'N/A' }} | {{ $vehicleEvent->camera?->source_value ?? 'N/A' }}</strong></div>
+                    <div><span>Camera Source</span><strong>{{ $vehicleEvent->camera ? \App\Support\CameraSource::display($vehicleEvent->camera->source_type, $vehicleEvent->camera->source_value) : 'N/A' }}</strong></div>
                     <div><span>Station / ROI</span><strong>{{ $vehicleEvent->roi_name ?: 'N/A' }}</strong></div>
                     <div><span>External Event Key</span><strong>{{ $vehicleEvent->external_event_key ?: 'Manual or RFID record' }}</strong></div>
                     <div><span>Details Completed</span><strong><x-datetime :value="$vehicleEvent->details_completed_at" fallback="Not completed yet" /></strong></div>

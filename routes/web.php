@@ -5,6 +5,7 @@ use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\CalibrationController;
 use App\Http\Controllers\CameraFileController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DeviceController;
 use App\Http\Controllers\EvidenceController;
 use App\Http\Controllers\GuestObservationController;
 use App\Http\Controllers\GateMonitorController;
@@ -159,6 +160,14 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
             ->name('reports.export.csv');
         Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('settings.update');
+        // Plug-and-detect: Settings › Stations & Readers › Devices.
+        Route::get('/settings/devices', [DeviceController::class, 'index'])->name('settings.devices.index');
+        Route::post('/settings/devices/scan', [DeviceController::class, 'scan'])->name('settings.devices.scan');
+        Route::post('/settings/devices/unassign', [DeviceController::class, 'unassign'])->name('settings.devices.unassign');
+        Route::post('/settings/devices/acknowledge', [DeviceController::class, 'acknowledge'])->name('settings.devices.acknowledge');
+        Route::post('/settings/devices/{networkDevice}/assign', [DeviceController::class, 'assign'])
+            ->whereNumber('networkDevice')
+            ->name('settings.devices.assign');
         Route::get('/camera-calibration/heartbeat', [CalibrationController::class, 'heartbeat'])->name('calibration.heartbeat');
         Route::put('/calibration', [CalibrationController::class, 'update'])->name('calibration.update');
         Route::put('/camera-browser/state', [CalibrationController::class, 'syncState'])->name('camera-browser.state');

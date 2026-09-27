@@ -3,3 +3,5 @@ requests>=2.31,<3.0
 ultralytics>=8.3,<9.0
 easyocr>=1.7,<2.0
 pytesseract>=0.3,<0.4
+# Plug-and-detect device service (network interfaces on macOS and Windows).
+psutil>=5.9

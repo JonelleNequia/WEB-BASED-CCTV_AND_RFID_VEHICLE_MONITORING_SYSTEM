@@ -24,9 +24,25 @@ STATUS_WRITE_INTERVAL_SECONDS = 1.0
 API_TIMEOUT_SECONDS = 10
 RFID_MATCH_TIMEOUT_SECONDS = 0.45
 JPEG_QUALITY = 82
+
+
+def _exported_system_settings():
+    """
+    Plug-and-detect: the stream host/port are set once in Laravel
+    (config/monitoring.php, DETECTOR_STREAM_PORT) and exported here.
+    """
+    try:
+        loaded = json.loads(RUNTIME_CONFIG_PATH.read_text(encoding="utf-8"))
+        return loaded.get("system_settings") or {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+_EXPORTED = _exported_system_settings()
 MJPEG_STREAM_BIND_HOST = os.environ.get("MJPEG_STREAM_BIND_HOST", "0.0.0.0")
-MJPEG_STREAM_HOST = os.environ.get("MJPEG_STREAM_HOST", "127.0.0.1")
-MJPEG_STREAM_PORT = 8765
+MJPEG_STREAM_HOST = os.environ.get("MJPEG_STREAM_HOST") or _EXPORTED.get("stream_host") or "localhost"
+# Fallback only when Laravel has not exported a config yet (same default as config/monitoring.php).
+MJPEG_STREAM_PORT = int(os.environ.get("DETECTOR_STREAM_PORT") or _EXPORTED.get("stream_port") or 8765)
 DETECTION_FRAME_INTERVAL = 3
 CAPTURE_DRAIN_FRAMES = 1
 STREAM_FRAME_MAX_WIDTH = 1280
@@ -94,11 +110,13 @@ DEFAULT_RUNTIME_CONFIG = {
     "system_settings": {
         "operating_mode": "manual",
         "python_api_key": "",
-        "app_url": "http://127.0.0.1:8000",
-        "event_ingest_url": "http://127.0.0.1:8000/api/v1/integration/events",
-        "guest_observation_url": "http://127.0.0.1:8000/api/guest-observation",
-        "rfid_match_url": "http://127.0.0.1:8000/api/latest-scan",
-        "status_url": "http://127.0.0.1:8000/api/v1/integration/status",
+        # Plug-and-detect: Laravel writes the real URLs (from APP_URL) into
+        # camera_runtime_config.json before it starts the detector.
+        "app_url": "",
+        "event_ingest_url": "",
+        "guest_observation_url": "",
+        "rfid_match_url": "",
+        "status_url": "",
     },
     "cameras": {
         "entrance": default_camera_config("entrance"),

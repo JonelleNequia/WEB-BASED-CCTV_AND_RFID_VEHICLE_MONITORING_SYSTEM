@@ -49,7 +49,7 @@ class StationController extends Controller
             'camera' => $camera,
             'detectorStatus' => $detectorStatus,
             'cameraStatus' => $cameraStatus,
-            'streamUrl' => $cameraStatus['stream_url'] ?? "http://127.0.0.1:8765/stream/{$location}",
+            'streamUrl' => $cameraStatus['stream_url'] ?? $detectorRuntimeService->defaultStreamUrl($location),
             'logs' => $this->recentLogs(),
         ]);
     }
@@ -72,7 +72,7 @@ class StationController extends Controller
             'event_type' => $eventType,
             'runtime' => $runtime,
             'camera' => $runtime['cameras'][$location] ?? null,
-            'stream_url' => $runtime['cameras'][$location]['stream_url'] ?? "http://127.0.0.1:8765/stream/{$location}",
+            'stream_url' => $runtime['cameras'][$location]['stream_url'] ?? $detectorRuntimeService->defaultStreamUrl($location),
             'logs' => $this->recentLogs(),
             'generated_at' => now()->toIso8601String(),
         ]);

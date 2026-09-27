@@ -33,5 +33,6 @@
         <env name="NIGHTWATCH_ENABLED" value="false"/>
         <env name="DETECTOR_API_KEY" value="test-detector-key"/>
         <env name="CAMERA_FILES_PATH" value="storage/framework/testing/camera"/>
+        <env name="DEVICE_FILES_PATH" value="storage/framework/testing/devices"/>
     </php>
 </phpunit>

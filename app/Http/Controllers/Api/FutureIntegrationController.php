@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\AuthorizesIntegration;
 use App\Http\Controllers\Controller;
 use App\Models\ActiveSession;
 use App\Models\Camera;
@@ -23,6 +24,8 @@ use Throwable;
 
 class FutureIntegrationController extends Controller
 {
+    use AuthorizesIntegration;
+
     protected const RFID_OVERLAY_LOOKAHEAD_SECONDS = 5;
 
     protected const RFID_OVERLAY_POLL_MICROSECONDS = 200000;
@@ -785,34 +788,6 @@ class FutureIntegrationController extends Controller
         }
 
         return str((string) $color)->trim()->title()->value();
-    }
-
-    protected function authorizeIntegrationRequest(Request $request, SettingsService $settingsService): ?JsonResponse
-    {
-        // Phase 6: key from .env (DETECTOR_API_KEY), not the database.
-        $configuredKey = $settingsService->detectorApiKey();
-        $providedKey = trim((string) $request->header('X-Api-Key', ''));
-
-        if ($configuredKey !== '' && hash_equals($configuredKey, $providedKey)) {
-            return null;
-        }
-
-        if ($settingsService->allowsKeylessLocalIntegration() && $this->isLoopbackRequest($request)) {
-            return null;
-        }
-
-        return response()->json([
-            'message' => 'API key is missing or invalid.',
-        ], 401);
-    }
-
-    protected function isLoopbackRequest(Request $request): bool
-    {
-        $ip = (string) ($request->ip() ?: $request->server('REMOTE_ADDR', ''));
-
-        return $ip === '::1'
-            || $ip === 'localhost'
-            || str_starts_with($ip, '127.');
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Camera;
+use App\Models\DeviceAssignment;
 use App\Models\SystemSetting;
 use Illuminate\Support\Facades\File;
 
@@ -46,6 +47,12 @@ class SettingsService
             'exit_reader_type' => 'nfc',
             'exit_reader_ip' => '',
             'exit_reader_port' => '',
+            // Plug-and-detect: the manual address is used only when this is '1'
+            // (otherwise the reader assigned in Settings › Devices is used).
+            'entrance_reader_manual' => '0',
+            'exit_reader_manual' => '0',
+            'entrance_reader_transport' => 'tcp',
+            'exit_reader_transport' => 'tcp',
         ];
     }
 
@@ -139,7 +146,7 @@ class SettingsService
      */
     public function cameraConfigurations(): array
     {
-        $cameras = $this->calibrationService->cameraPayload();
+        $cameras = $this->calibrationService->cameraPayload(withSecrets: true);
 
         return [
             'entrance' => $cameras['entrance'],
@@ -166,6 +173,8 @@ class SettingsService
                 'cctv_simulation_mode' => $settings['cctv_simulation_mode'] ?? 'enabled',
                 'rfid_simulation_mode' => $settings['rfid_simulation_mode'] ?? 'enabled',
                 'python_api_key' => $this->detectorApiKey(),
+                'stream_host' => (string) config('monitoring.stream.host'),
+                'stream_port' => (int) config('monitoring.stream.port'),
                 'app_url' => $integrationBaseUrl,
                 'event_ingest_url' => $integrationBaseUrl.'/api/v1/integration/events',
                 'guest_observation_url' => $integrationBaseUrl.'/api/guest-observation',
@@ -215,14 +224,41 @@ class SettingsService
 
             $cameraData = $cameraConfigurations[$role];
 
-            Camera::query()->forRole($role)->update([
+            $camera = Camera::query()->forRole($role)->first();
+
+            if ($camera === null) {
+                continue;
+            }
+
+            $camera->fill([
                 'camera_name' => (string) ($cameraData['camera_name'] ?? ($role === 'entrance' ? 'PHILCST Entrance Camera' : 'PHILCST Exit Camera')),
-                'source_type' => (string) ($cameraData['source_type'] ?? 'webcam'),
-                'source_value' => (string) ($cameraData['source_value'] ?? '0'),
                 'source_username' => (string) ($cameraData['source_username'] ?? ''),
-                'source_password' => (string) ($cameraData['source_password'] ?? ''),
                 'status' => 'active',
             ]);
+
+            // Plug-and-detect: an assigned network camera keeps the address
+            // the device service found; the manual source is ignored.
+            $managed = DeviceAssignment::query()
+                ->where('station', $role)
+                ->where('role', DeviceAssignment::ROLE_CAMERA)
+                ->exists();
+
+            if (! $managed) {
+                $camera->fill([
+                    'source_type' => (string) ($cameraData['source_type'] ?? 'webcam'),
+                    'source_value' => (string) ($cameraData['source_value'] ?? '0'),
+                ]);
+            }
+
+            // The password is never shown again: blank keeps the saved one.
+            if (filled($cameraData['source_password'] ?? null)) {
+                $camera->source_password = (string) $cameraData['source_password'];
+            } elseif (! empty($cameraData['clear_password'])) {
+                $camera->source_password = null;
+            }
+
+            // Saved through the model so the encrypted cast applies.
+            $camera->save();
         }
     }
 
@@ -239,14 +275,23 @@ class SettingsService
             return rtrim($explicitUrl, '/');
         }
 
-        $appUrl = rtrim((string) config('app.url', 'http://127.0.0.1:8000'), '/');
+        // Plug-and-detect: derived from APP_URL only (no fixed address or
+        // port in the code). "localhost" becomes the IPv4 loopback so Python
+        // does not try IPv6 first.
+        $appUrl = rtrim((string) config('app.url'), '/');
+        $parts = parse_url($appUrl) ?: [];
 
         if (($settings['deployment_mode'] ?? 'offline_local') === 'offline_local'
-            && in_array($appUrl, ['http://localhost', 'https://localhost'], true)) {
-            return 'http://127.0.0.1:8000';
+            && strtolower((string) ($parts['host'] ?? '')) === 'localhost') {
+            $appUrl = (string) preg_replace('#//localhost#i', '//127.0.0.1', $appUrl, 1);
         }
 
-        return $appUrl ?: 'http://127.0.0.1:8000';
+        return $appUrl;
+    }
+
+    public function integrationUrl(): string
+    {
+        return $this->integrationBaseUrl($this->all());
     }
 
     /**

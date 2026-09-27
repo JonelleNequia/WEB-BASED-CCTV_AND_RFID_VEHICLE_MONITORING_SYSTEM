@@ -62,4 +62,40 @@ return [
     */
 
     'camera_files_path' => env('CAMERA_FILES_PATH', storage_path('app/camera')),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Detector Live Stream
+    |--------------------------------------------------------------------------
+    |
+    | The Python detector serves the live MJPEG view on this PC. The port is
+    | set here once (and exported to Python), not repeated in the code.
+    |
+    */
+
+    'stream' => [
+        'host' => env('DETECTOR_STREAM_HOST', '127.0.0.1'),
+        'port' => (int) env('DETECTOR_STREAM_PORT', 8765),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Plug-and-detect Devices
+    |--------------------------------------------------------------------------
+    |
+    | The device service (school-vehicle-monitoring-detector/device_service.py)
+    | finds cameras and UHF readers on the network. Ports, discovery packets
+    | and camera stream paths live in the editable profiles file.
+    |
+    */
+
+    'devices' => [
+        'files_path' => env('DEVICE_FILES_PATH', storage_path('app/devices')),
+        'profiles_path' => env('DEVICE_PROFILES_PATH', base_path('school-vehicle-monitoring-detector/devices/data/discovery_profiles.json')),
+        'status_stale_after_seconds' => 20,
+        'probe_timeout_seconds' => 3,
+    ],
+
+    // Runtime logs of the Python services are rotated past this size.
+    'runtime_log_max_bytes' => (int) env('RUNTIME_LOG_MAX_BYTES', 5 * 1024 * 1024),
 ];

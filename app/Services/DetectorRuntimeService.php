@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Support\CameraFiles;
+use App\Support\CameraSource;
+use App\Support\PythonLauncher;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\File;
 
@@ -31,6 +33,8 @@ class DetectorRuntimeService
 
         if (($status['service_running'] ?? false) && $this->isFresh($status['updated_at'] ?? null)) {
             $this->registerLaunchSuccess();
+            // Plug-and-detect: keep the detector log from growing without limit.
+            PythonLauncher::rotateLog($this->runtimeLogPath());
 
             return [
                 ...$status,
@@ -113,6 +117,13 @@ class DetectorRuntimeService
             ? $decoded['cameras']
             : $fallback['cameras'];
 
+        // Plug-and-detect: status reaches Station pages; never pass a login inside a URL.
+        foreach ($decoded['cameras'] as $role => $camera) {
+            if (is_array($camera) && is_string($camera['source_value'] ?? null)) {
+                $decoded['cameras'][$role]['source_value'] = CameraSource::withoutCredentials($camera['source_value']);
+            }
+        }
+
         if (($decoded['service_running'] ?? false) && ! $this->isFresh($decoded['updated_at'] ?? null)) {
             $decoded['service_running'] = false;
             $decoded['service_message'] = 'Detector status is stale. A restart will be attempted while monitoring stays online.';
@@ -163,7 +174,7 @@ class DetectorRuntimeService
      */
     public function streamUrlForRole(string $role, array $status = [], ?string $viewerHost = null): string
     {
-        $defaultUrl = "http://127.0.0.1:8765/stream/{$role}";
+        $defaultUrl = $this->defaultStreamUrl($role);
         $streamUrl = (string) data_get($status, "cameras.$role.stream_url", $defaultUrl);
         $viewerHost = trim((string) $viewerHost);
 
@@ -178,11 +189,27 @@ class DetectorRuntimeService
             return $streamUrl;
         }
 
-        $port = isset($parts['port']) ? ':'.$parts['port'] : ':8765';
+        $port = ':'.($parts['port'] ?? $this->streamPort());
         $path = $parts['path'] ?? "/stream/{$role}";
         $query = isset($parts['query']) ? '?'.$parts['query'] : '';
 
         return 'http://'.$viewerHost.$port.$path.$query;
+    }
+
+    /**
+     * Plug-and-detect: the stream host/port come from config/monitoring.php
+     * (DETECTOR_STREAM_HOST / DETECTOR_STREAM_PORT), not from the code.
+     */
+    public function defaultStreamUrl(string $role): string
+    {
+        $host = (string) config('monitoring.stream.host', 'localhost');
+
+        return 'http://'.$host.':'.$this->streamPort().'/stream/'.$role;
+    }
+
+    public function streamPort(): int
+    {
+        return (int) config('monitoring.stream.port');
     }
 
     public function markStationViewerActive(string $location): void
@@ -391,7 +418,7 @@ class DetectorRuntimeService
             'detection_ready' => false,
             'source_type' => $camera['source_type'],
             'source_value' => $camera['source_value'],
-            'stream_url' => 'http://127.0.0.1:8765/stream/'.$camera['camera_role'],
+            'stream_url' => $this->defaultStreamUrl($camera['camera_role']),
             'calibration_ready' => ! empty($camera['calibration_mask']) && ! empty($camera['calibration_line']),
             'last_capture_time' => null,
             'last_error' => 'Detector has not processed this camera yet.',
@@ -408,55 +435,9 @@ class DetectorRuntimeService
      */
     protected function launchBackgroundProcess(): bool
     {
-        $scriptPath = base_path('school-vehicle-monitoring-detector/camera_service.py');
-
-        if (! File::exists($scriptPath)) {
-            return false;
-        }
-
-        File::ensureDirectoryExists(dirname($this->runtimeLogPath()));
         File::ensureDirectoryExists(dirname($this->launchStatePath()));
 
-        $workingDirectory = base_path('school-vehicle-monitoring-detector');
-        $pythonExecutable = $this->detectPythonExecutable();
-        $logPath = $this->runtimeLogPath();
-
-        $command = match (PHP_OS_FAMILY) {
-            'Windows' => 'cd /d '.escapeshellarg($workingDirectory)
-                .' && start "" /B '.escapeshellarg($pythonExecutable)
-                .' '.escapeshellarg($scriptPath)
-                .' >> '.escapeshellarg($logPath).' 2>&1',
-            // Phase 1: close inherited descriptors 3-9 first. Without this the
-            // detector inherited the PHP dev server's listening socket and kept
-            // port 8000 busy, so "php artisan serve" moved to :8001 and
-            // requests to :8000 hung.
-            default => 'exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; cd '.escapeshellarg($workingDirectory)
-                .' && nohup '.escapeshellarg($pythonExecutable)
-                .' '.escapeshellarg($scriptPath)
-                .' >> '.escapeshellarg($logPath).' 2>&1 &',
-        };
-
-        $shellCommand = PHP_OS_FAMILY === 'Windows'
-            ? 'cmd /c '.$command
-            : '/bin/sh -lc '.escapeshellarg($command);
-
-        $process = @proc_open($shellCommand, [
-            0 => ['pipe', 'r'],
-            1 => ['pipe', 'w'],
-            2 => ['pipe', 'w'],
-        ], $pipes);
-
-        if (! is_resource($process)) {
-            return false;
-        }
-
-        foreach ($pipes as $pipe) {
-            fclose($pipe);
-        }
-
-        proc_close($process);
-
-        return true;
+        return PythonLauncher::launch('camera_service.py', $this->runtimeLogPath());
     }
 
     protected function launchStatePath(): string
@@ -552,30 +533,6 @@ class DetectorRuntimeService
             'failed_attempts' => $failedAttempts,
             'lock_until' => $lockUntil,
         ]);
-    }
-
-    protected function detectPythonExecutable(): string
-    {
-        $candidates = [
-            base_path('school-vehicle-monitoring-detector/.venv/bin/python'),
-            base_path('school-vehicle-monitoring-detector/.venv/Scripts/python.exe'),
-            'python3',
-            'python',
-        ];
-
-        foreach ($candidates as $candidate) {
-            if (str_contains($candidate, DIRECTORY_SEPARATOR)) {
-                if (File::exists($candidate)) {
-                    return $candidate;
-                }
-
-                continue;
-            }
-
-            return $candidate;
-        }
-
-        return 'python3';
     }
 
     protected function isFresh(?string $timestamp): bool

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\DetectorRuntimeService;
 use App\Support\CameraFiles;
+use App\Support\CameraSource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\File;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -47,6 +48,6 @@ class CameraFileController extends Controller
 
     public static function withoutCredentials(string $url): string
     {
-        return (string) preg_replace('#^([a-z][a-z0-9+.-]*://)[^/@\s]+@#i', '$1***@', $url);
+        return CameraSource::withoutCredentials($url);
     }
 }

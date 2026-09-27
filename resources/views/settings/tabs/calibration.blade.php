@@ -52,7 +52,7 @@
                 <div class="camera-detail-grid calibration-detail-grid">
                     <div>
                         <span>Source</span>
-                        <strong data-source-value>{{ $camera['source_type'] }} | {{ $camera['source_value'] }}</strong>
+                        <strong data-source-value>{{ $camera['source_display'] }}</strong>
                     </div>
                     <div>
                         <span>Stream URL</span>

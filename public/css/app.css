@@ -5773,3 +5773,294 @@ button[aria-busy="true"] {
 .data-table .table-responsive {
     overflow-x: auto;
 }
+
+/* ==========================================================================
+   Plug-and-detect: Settings › Stations & Readers › Devices
+   ========================================================================== */
+
+.devices-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+}
+
+/* The wide device table scrolls inside its box instead of widening the page. */
+.devices-panel > * {
+    min-width: 0;
+}
+
+.devices-interfaces .chip {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+/* Author display rules (grid/flex) would otherwise override [hidden]. */
+.devices-assign [hidden],
+.devices-panel [hidden] {
+    display: none !important;
+}
+
+.devices-panel .panel-header {
+    margin-bottom: 0;
+}
+
+.devices-intro {
+    margin: 0.2rem 0 0;
+    font-size: 0.9rem;
+}
+
+.devices-network {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0.8rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: #fafafb;
+}
+
+.devices-network-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    font-weight: 600;
+}
+
+.devices-network .field-help,
+.devices-network .field-error {
+    margin: 0;
+}
+
+.devices-interfaces {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.devices-stations {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+    gap: 0.8rem;
+}
+
+.devices-station {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0.85rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.devices-station h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: #2f2250;
+}
+
+.devices-slot {
+    display: grid;
+    grid-template-columns: 6.5rem minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0.6rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+}
+
+.devices-slot-label {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    padding-top: 0.15rem;
+}
+
+.devices-slot-body {
+    display: grid;
+    gap: 0.2rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.devices-slot-title {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.devices-link {
+    font-size: 0.85rem;
+    color: #92400e;
+}
+
+.devices-link-ok {
+    color: #166534;
+}
+
+.devices-table td {
+    vertical-align: top;
+}
+
+.devices-row {
+    cursor: pointer;
+}
+
+.devices-row:hover {
+    background: #faf8fe;
+}
+
+.devices-row.is-new {
+    background: #eef6ff;
+    box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.devices-row .badge + .badge,
+.devices-row strong + .badge {
+    margin-left: 0.35rem;
+}
+
+.mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+}
+
+.devices-guidance {
+    display: grid;
+    gap: 0.4rem;
+    margin-top: 1rem;
+    padding: 0.8rem 0.9rem;
+    border: 1px solid #fcd34d;
+    border-radius: var(--radius-md);
+    background: #fffbeb;
+    color: #78350f;
+}
+
+.devices-guidance p {
+    margin: 0;
+}
+
+.devices-command {
+    margin: 0;
+    padding: 0.6rem;
+    border-radius: 8px;
+    background: #1f1b2e;
+    color: #f5f3ff;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.devices-assign {
+    margin-top: 1.2rem;
+}
+
+.devices-choice,
+.devices-login {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.devices-login {
+    display: grid;
+    background: #fafafb;
+}
+
+.devices-choice legend,
+.devices-login legend {
+    padding: 0 0.3rem;
+    font-weight: 700;
+    font-size: 0.86rem;
+}
+
+.devices-choice-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+}
+
+.devices-choice-option input {
+    width: auto;
+    margin: 0;
+}
+
+.devices-choice-option:has(input:checked) {
+    border-color: var(--purple);
+    background: var(--purple-soft);
+    font-weight: 600;
+}
+
+.devices-assign-message {
+    margin: 0;
+    font-size: 0.88rem;
+}
+
+.devices-assign-message:empty {
+    display: none;
+}
+
+.devices-assign-message[data-state="error"] {
+    color: #7f1d1d;
+    font-weight: 600;
+}
+
+.devices-assign-message[data-state="pending"] {
+    color: #78350f;
+}
+
+.devices-current {
+    display: grid;
+    gap: 0.4rem;
+    margin-top: 1rem;
+}
+
+.devices-current-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.devices-tip {
+    margin: 0;
+}
+
+/* Collapsed "Advanced" sections (manual addresses, other devices). */
+.advanced-section {
+    margin-top: 0.4rem;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.75rem;
+}
+
+.advanced-section > summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: var(--text-muted);
+}
+
+.advanced-section[open] {
+    display: grid;
+    gap: 0.6rem;
+}
+
+.advanced-section[open] > summary {
+    color: var(--text);
+}
+
+@media (max-width: 720px) {
+    .devices-slot {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .devices-slot-label {
+        grid-column: 1 / -1;
+    }
+}

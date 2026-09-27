@@ -46,6 +46,9 @@ class SaveSettingsRequest extends FormRequest
             'entrance_reader_type', 'exit_reader_type',
             'entrance_reader_ip', 'exit_reader_ip',
             'entrance_reader_port', 'exit_reader_port',
+            // Plug-and-detect: manual override switch and protocol.
+            'entrance_reader_manual', 'exit_reader_manual',
+            'entrance_reader_transport', 'exit_reader_transport',
             'rfid_cooldown_seconds',
         ],
         'cameras' => ['camera_configs', 'camera_source_placeholder'],
@@ -76,10 +79,16 @@ class SaveSettingsRequest extends FormRequest
             // Phase 4: Reader Configuration and Guest Pass settings.
             'entrance_reader_type' => ['sometimes', 'in:nfc,uhf_ethernet,simulated'],
             'exit_reader_type' => ['sometimes', 'in:nfc,uhf_ethernet,simulated'],
-            'entrance_reader_ip' => ['nullable', 'required_if:entrance_reader_type,uhf_ethernet', 'ip'],
-            'exit_reader_ip' => ['nullable', 'required_if:exit_reader_type,uhf_ethernet', 'ip'],
-            'entrance_reader_port' => ['nullable', 'required_if:entrance_reader_type,uhf_ethernet', 'integer', 'between:1,65535'],
-            'exit_reader_port' => ['nullable', 'required_if:exit_reader_type,uhf_ethernet', 'integer', 'between:1,65535'],
+            // Plug-and-detect: the reader is picked in Devices; the address is
+            // needed only for the manual override, and must be a local address.
+            'entrance_reader_manual' => ['sometimes', 'in:0,1'],
+            'exit_reader_manual' => ['sometimes', 'in:0,1'],
+            'entrance_reader_transport' => ['sometimes', 'in:tcp,udp'],
+            'exit_reader_transport' => ['sometimes', 'in:tcp,udp'],
+            'entrance_reader_ip' => ['nullable', 'required_if:entrance_reader_manual,1', 'ipv4', $this->localAddressRule()],
+            'exit_reader_ip' => ['nullable', 'required_if:exit_reader_manual,1', 'ipv4', $this->localAddressRule()],
+            'entrance_reader_port' => ['nullable', 'required_if:entrance_reader_manual,1', 'integer', 'between:1,65535'],
+            'exit_reader_port' => ['nullable', 'required_if:exit_reader_manual,1', 'integer', 'between:1,65535'],
             'rfid_cooldown_seconds' => ['sometimes', 'integer', 'min:0', 'max:3600'],
             'guest_pass_validity_minutes' => ['sometimes', 'integer', 'min:15', 'max:1440'],
             'guest_pass_overstay_grace_minutes' => ['sometimes', 'integer', 'min:0', 'max:720'],
@@ -90,12 +99,30 @@ class SaveSettingsRequest extends FormRequest
             'camera_configs.entrance.source_value' => ['required', 'string', 'max:500'],
             'camera_configs.entrance.source_username' => ['nullable', 'string', 'max:255'],
             'camera_configs.entrance.source_password' => ['nullable', 'string', 'max:255'],
+            'camera_configs.entrance.clear_password' => ['nullable', 'boolean'],
             'camera_configs.exit.camera_name' => ['required', 'string', 'max:100'],
             'camera_configs.exit.source_type' => ['required', 'in:webcam,rtsp,url'],
             'camera_configs.exit.source_value' => ['required', 'string', 'max:500'],
             'camera_configs.exit.source_username' => ['nullable', 'string', 'max:255'],
             'camera_configs.exit.source_password' => ['nullable', 'string', 'max:255'],
+            'camera_configs.exit.clear_password' => ['nullable', 'boolean'],
         ];
+    }
+
+    /**
+     * A reader address must be on a local network (private or link-local),
+     * never a public internet address typed by mistake.
+     */
+    protected function localAddressRule(): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail): void {
+            // Private, link-local and loopback ranges fail this filter; public ones pass.
+            $isPublic = filter_var($value, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
+
+            if ($isPublic) {
+                $fail('This is not a local network address. Check the reader IP, or pick the reader in Devices instead.');
+            }
+        };
     }
 
     /**
@@ -168,7 +195,7 @@ class SaveSettingsRequest extends FormRequest
                     $parsed = parse_url($sourceValue);
 
                     if (strtolower((string) ($parsed['scheme'] ?? '')) !== 'rtsp' || empty($parsed['host'])) {
-                        $validator->errors()->add($field, "$label RTSP source must be a full URL like rtsp://192.168.1.50:554/stream1. Do not use 0 for RTSP.");
+                        $validator->errors()->add($field, "$label RTSP source must be a full rtsp:// address with the camera host and stream path. Do not use 0 for RTSP.");
                     }
 
                     continue;

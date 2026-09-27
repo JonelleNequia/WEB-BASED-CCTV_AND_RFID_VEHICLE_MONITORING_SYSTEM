@@ -290,16 +290,28 @@ class Phase4UiTest extends TestCase
         $this->actingAs($this->admin)
             ->get(route('settings.index', ['tab' => 'stations']))
             ->assertOk()
-            ->assertSee('Reader Configuration')
-            ->assertSee('UHF Ethernet (TCP/IP)')
+            // Plug-and-detect: readers are picked in Devices; the address is under Advanced.
+            ->assertSee('Reader Type')
+            ->assertSee('UHF (network reader)')
+            ->assertSee('Advanced: manual reader address')
             ->assertDontSee('Entrance Reader Name');
 
         // UI Phase 2: each section is its own Settings tab.
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'guest-pass']))->assertSee('Default Validity (minutes)');
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'cameras']))->assertSee('Camera Sources');
 
+        // UHF without a manual address is fine (the reader comes from Devices).
+        $this->actingAs($this->admin)
+            ->from(route('settings.index'))
+            ->put(route('settings.update'), $this->settingsPayload([
+                'entrance_reader_type' => 'uhf_ethernet',
+                'entrance_reader_ip' => '',
+            ]))
+            ->assertSessionHasNoErrors();
+
         $payload = $this->settingsPayload([
             'entrance_reader_type' => 'uhf_ethernet',
+            'entrance_reader_manual' => '1',
             'entrance_reader_ip' => '',
         ]);
 
@@ -308,10 +320,21 @@ class Phase4UiTest extends TestCase
             ->put(route('settings.update'), $payload)
             ->assertSessionHasErrors(['entrance_reader_ip', 'entrance_reader_port']);
 
+        // A public internet address (like the old typo) is rejected.
+        $this->actingAs($this->admin)
+            ->from(route('settings.index'))
+            ->put(route('settings.update'), $this->settingsPayload([
+                'entrance_reader_manual' => '1',
+                'entrance_reader_ip' => '8.8.8.8',
+                'entrance_reader_port' => 6000,
+            ]))
+            ->assertSessionHasErrors(['entrance_reader_ip']);
+
         $this->actingAs($this->admin)
             ->from(route('settings.index'))
             ->put(route('settings.update'), $this->settingsPayload([
                 'entrance_reader_type' => 'uhf_ethernet',
+                'entrance_reader_manual' => '1',
                 'entrance_reader_ip' => '192.168.100.50',
                 'entrance_reader_port' => 6000,
                 'guest_pass_validity_minutes' => 180,

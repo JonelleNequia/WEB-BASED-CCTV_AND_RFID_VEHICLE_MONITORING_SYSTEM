@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ResolvesTab;
 use App\Http\Requests\SaveSettingsRequest;
+use App\Models\DeviceAssignment;
+use App\Services\DeviceRegistryService;
+use App\Services\DeviceServiceRuntime;
 use App\Services\SettingsService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -42,11 +45,20 @@ class SettingsController extends Controller
     {
         $settingsService->ensureCameraRuntimeConfigExists();
 
+        // Plug-and-detect: the Devices panel (Stations & Readers) and the
+        // camera assignments shown on the Cameras tab.
+        if ($tab === 'stations') {
+            app(DeviceServiceRuntime::class)->ensureRunning();
+        }
+
         return view('settings.index', [
             'tab' => $tab,
             'settings' => $settingsService->all(),
             'cameraConfigs' => $settingsService->cameraConfigurations(),
             'detectorKeySet' => $settingsService->detectorApiKey() !== '',
+            'devicesPayload' => $tab === 'stations' ? app(DeviceRegistryService::class)->panelPayload() : null,
+            'cameraAssignments' => DeviceAssignment::query()->with('device')
+                ->where('role', DeviceAssignment::ROLE_CAMERA)->get()->keyBy('station'),
         ]);
     }
 
@@ -56,6 +68,10 @@ class SettingsController extends Controller
     public function update(SaveSettingsRequest $request, SettingsService $settingsService): RedirectResponse
     {
         $settingsService->save($request->validated());
+
+        // Plug-and-detect: a manual reader address or label change goes to Python.
+        app(DeviceRegistryService::class)->exportRuntimeConfig();
+
         $section = self::TABS[$request->input('section')] ?? 'System settings';
 
         return back()->with('status', $section.' saved.');

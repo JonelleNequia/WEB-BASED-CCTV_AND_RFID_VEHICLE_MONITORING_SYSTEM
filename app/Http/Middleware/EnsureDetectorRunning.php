@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Services\DetectorRuntimeService;
+use App\Services\DeviceServiceRuntime;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -21,7 +22,8 @@ class EnsureDetectorRunning
     protected const CHECK_EVERY_SECONDS = 20;
 
     public function __construct(
-        protected DetectorRuntimeService $detectorRuntimeService
+        protected DetectorRuntimeService $detectorRuntimeService,
+        protected DeviceServiceRuntime $deviceServiceRuntime
     ) {
     }
 
@@ -39,6 +41,16 @@ class EnsureDetectorRunning
             }
         } catch (Throwable) {
             // Never break a page because the detector check failed.
+        }
+
+        try {
+            // Plug-and-detect: keep the device service (network watcher,
+            // discovery, UHF reader link) running too.
+            if (Cache::add('device-service-heartbeat', true, self::CHECK_EVERY_SECONDS)) {
+                $this->deviceServiceRuntime->ensureRunning();
+            }
+        } catch (Throwable) {
+            // Never break a page because the device service check failed.
         }
 
         return $response;
