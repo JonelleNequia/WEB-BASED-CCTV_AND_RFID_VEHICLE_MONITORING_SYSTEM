@@ -32,6 +32,14 @@ class DeviceController extends Controller
         ]);
     }
 
+    public function find(DeviceRegistryService $registry, DeviceServiceRuntime $runtime): JsonResponse
+    {
+        $registry->requestFind(90);
+        $runtime->ensureRunning();
+
+        return response()->json(['message' => 'Recording the devices already on the network. Wait for the prompt, then plug in the reader.']);
+    }
+
     public function identify(DeviceRegistryService $registry, DeviceServiceRuntime $runtime): JsonResponse
     {
         $seconds = (int) data_get(\App\Support\DeviceFiles::profiles(), 'uhf_reader.identify_seconds', 45);

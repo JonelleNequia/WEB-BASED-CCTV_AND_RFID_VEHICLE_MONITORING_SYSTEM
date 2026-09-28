@@ -17,7 +17,8 @@ PROJECT_ROOT = DETECTOR_ROOT.parent
 DEVICE_FILES_DIR = Path(os.environ.get("DEVICE_FILES_PATH") or (PROJECT_ROOT / "storage" / "app" / "devices"))
 STATUS_PATH = DEVICE_FILES_DIR / "device_service_status.json"
 SCAN_RESULT_PATH = DEVICE_FILES_DIR / "last_scan.json"
-RUNTIME_CONFIG_PATH = DEVICE_FILES_DIR / "device_runtime_config.json"
+# Overridable so `sudo ... --find` can read the config without writing root-owned files here.
+RUNTIME_CONFIG_PATH = Path(os.environ.get("DEVICE_RUNTIME_CONFIG_PATH") or (DEVICE_FILES_DIR / "device_runtime_config.json"))
 LOCK_PATH = DEVICE_FILES_DIR / "device_service.pid"
 CAPTURE_LOG_PATH = DEVICE_FILES_DIR / "reader_capture.log"
 SERVICE_LOG_PATH = PROJECT_ROOT / "storage" / "logs" / "device-service.log"

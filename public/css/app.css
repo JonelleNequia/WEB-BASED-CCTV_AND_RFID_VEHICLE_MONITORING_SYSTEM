@@ -6149,3 +6149,41 @@ button[aria-busy="true"] {
 .devices-identify .field-help {
     margin: 0;
 }
+
+/* Devices › Find my reader */
+.devices-find {
+    display: grid;
+    gap: 0.6rem;
+    padding: 0.9rem 1rem;
+    border: 2px solid var(--purple);
+    border-radius: var(--radius-md);
+    background: var(--purple-soft);
+}
+
+.devices-find p {
+    margin: 0;
+}
+
+.devices-find-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.2rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.devices-find-steps .is-done {
+    color: #166534;
+}
+
+.devices-find-steps .is-done::before {
+    content: "✓ ";
+}
+
+.devices-find-steps .is-current {
+    color: var(--text);
+    font-weight: 700;
+}

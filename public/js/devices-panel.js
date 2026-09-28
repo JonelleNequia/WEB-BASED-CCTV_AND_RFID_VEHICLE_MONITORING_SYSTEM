@@ -703,6 +703,7 @@
         renderIfChanged('devices', data.devices, renderLists);
         renderIfChanged('diagnostics', data.diagnostics, renderDiagnostics);
         renderIdentify();
+        renderFind();
         announceNewDevices();
     }
 
@@ -767,7 +768,7 @@
         } catch (error) {
             // Keep the last list during short hiccups.
         }
-        schedule((data.scan || {}).running || (data.identify || {}).running || identifyPending ? 1500 : 5000);
+        schedule((data.scan || {}).running || (data.identify || {}).running || (data.find || {}).running || identifyPending || findPending ? 1000 : 5000);
     }
 
     /* ---------- identify reader ---------- */
@@ -817,6 +818,128 @@
         }
         box.replaceChildren(...nodes);
     }
+
+    /* ---------- find my reader (before/after) ---------- */
+
+    let findPending = false;
+    const FIND_TONE = {
+        reader_found: 'success', reader_answered: 'success', other_subnet: 'warning', dhcp_no_address: 'warning',
+        not_a_reader: 'warning', only_phones: 'warning', nothing: 'critical', nothing_no_passive: 'warning',
+    };
+
+    function renderFind() {
+        const box = panel.querySelector('[data-devices-find-box]');
+        const find = data.find;
+        const findButton = panel.querySelector('[data-devices-find]');
+        findButton.disabled = !!(find && find.running) || findPending;
+        if (!find && !findPending) {
+            box.hidden = true;
+            return;
+        }
+        box.hidden = false;
+        const nodes = [];
+        const head = el('div', 'devices-network-head');
+
+        if (!find || (findPending && !find.running && find.phase === 'done' && !find.finished_at)) {
+            head.append(badge('info', 'Find my reader'), el('span', null, 'Starting…'));
+            box.replaceChildren(head);
+            return;
+        }
+
+        const steps = el('ol', 'devices-find-steps');
+        [['baseline', '1. Record the devices already on the network'], ['waiting', '2. Plug in or power on the reader'],
+            ['finishing', '3. Check the new device'], ['done', '4. Result']].forEach(function ([phase, label]) {
+            const order = ['baseline', 'waiting', 'finishing', 'done'];
+            const li = el('li', order.indexOf(phase) < order.indexOf(find.phase) ? 'is-done' : (phase === find.phase ? 'is-current' : ''), label);
+            steps.append(li);
+        });
+        nodes.push(steps);
+
+        if (find.phase === 'baseline') {
+            head.append(badge('info', 'Please wait'), el('strong', null, 'Recording the devices already on the network… Do not plug the reader in yet.'));
+        } else if (find.phase === 'waiting') {
+            const left = Math.max(0, Math.round((new Date(find.waiting_until).getTime() - Date.now()) / 1000));
+            head.append(badge('warning', `Now · ${left}s`), el('strong', null, 'Plug in the reader\'s LAN cable or switch its power on NOW.'));
+        } else if (find.phase === 'finishing') {
+            head.append(badge('info', 'Checking'), el('strong', null, 'Checking the new device: all ports, reader commands. Hold a UHF tag near the reader.'));
+        } else {
+            head.append(badge(FIND_TONE[find.result] || 'info', 'Result'), el('strong', null, find.message || ''));
+        }
+        nodes.unshift(head);
+
+        const passive = find.passive || {};
+        nodes.push(el('p', 'field-help', `Devices already on the network: ${find.baseline_count ?? '—'} · Passive listening: ${passive.available ? 'on (' + passive.interface + ')' : 'off. ' + (passive.reason || '')}`));
+
+        if (find.other_subnet && find.other_subnet.commands) {
+            const platform = (data.service || {}).platform || 'darwin';
+            const commands = find.other_subnet.commands[platform] || find.other_subnet.commands.darwin;
+            nodes.push(el('p', null, `To reach it now, give this PC the address ${find.other_subnet.pc_ip} on ${find.other_subnet.network} (admin rights):`));
+            nodes.push(el('pre', 'devices-command', `${commands.add}\n\n# remove it afterwards:\n${commands.remove}`));
+        }
+
+        const devices = find.new_devices || [];
+        if (devices.length) {
+            const list = el('ul', 'devices-warnings');
+            devices.forEach(function (device) {
+                const probe = device.probe || {};
+                const reader = probe.reader || {};
+                const li = el('li');
+                const parts = [
+                    `${device.mac} (${device.vendor || 'unknown maker'})`,
+                    device.ips && device.ips.length ? `IP ${device.ips.join(', ')}` : 'no IP yet',
+                    device.reachable ? 'on this network' : 'not on this network',
+                    `seen by ${(device.seen_by || []).join(' + ')}`,
+                ];
+                if (probe.open_tcp) {
+                    parts.push(`TCP ports ${probe.open_tcp.join(', ') || 'none'}`);
+                }
+                if (device.passive) {
+                    parts.push(`${device.passive.packets} packet(s), DHCP requests ${device.passive.dhcp_requests}`);
+                }
+                if (reader.message) {
+                    parts.push(reader.message);
+                }
+                li.append(badge(device.randomized_mac ? 'neutral' : 'info', device.randomized_mac ? 'phone?' : 'new'), el('span', null, parts.join(' · ')));
+                list.append(li);
+                (reader.unknown_data || []).concat(reader.replies || []).forEach(function (item) {
+                    const hex = el('li');
+                    hex.append(badge('warning', 'hex'), el('span', 'mono', `${item.ip} ${item.transport}/${item.port}: ${item.raw_hex}`));
+                    list.append(hex);
+                });
+            });
+            nodes.push(list);
+        }
+
+        const found = devices.find((device) => ((device.probe || {}).reader || {}).found?.length || ((device.probe || {}).reader || {}).replies?.length);
+        if (found && !find.running) {
+            const saved = (data.devices || []).find((device) => device.mac === found.mac);
+            if (saved) {
+                nodes.push(button('Assign this reader to a station', 'button button-primary button-sm', () => openDevice(saved.id)));
+            }
+        }
+
+        if ((find.events || []).length) {
+            const details = el('details', 'advanced-section');
+            details.append(el('summary', null, 'Step-by-step log'), el('pre', 'devices-command', find.events.join('\n')));
+            nodes.push(details);
+        }
+        box.replaceChildren(...nodes);
+    }
+
+    panel.querySelector('[data-devices-find]').addEventListener('click', async function () {
+        findPending = true;
+        data.find = null;
+        renderFind();
+        try {
+            const result = await post(panel.dataset.findUrl);
+            window.ui.toast(result.json.message, 'info', { timeout: 8000 });
+            schedule(1000);
+        } catch (error) {
+            window.ui.toast(error.message, 'error');
+        } finally {
+            window.setTimeout(function () { findPending = false; }, 8000);
+        }
+    });
 
     let identifyPending = false;
     panel.querySelector('[data-devices-identify]').addEventListener('click', async function () {

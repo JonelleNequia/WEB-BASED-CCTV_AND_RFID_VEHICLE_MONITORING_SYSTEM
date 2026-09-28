@@ -164,6 +164,7 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         Route::get('/settings/devices', [DeviceController::class, 'index'])->name('settings.devices.index');
         Route::post('/settings/devices/scan', [DeviceController::class, 'scan'])->name('settings.devices.scan');
         Route::post('/settings/devices/identify', [DeviceController::class, 'identify'])->name('settings.devices.identify');
+        Route::post('/settings/devices/find', [DeviceController::class, 'find'])->name('settings.devices.find');
         Route::get('/settings/cameras/{station}/encoder', [DeviceController::class, 'encoderPreview'])
             ->whereIn('station', ['entrance', 'exit'])->name('settings.cameras.encoder');
         Route::post('/settings/cameras/{station}/encoder/optimize', [DeviceController::class, 'encoderOptimize'])

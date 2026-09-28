@@ -61,6 +61,7 @@ from devices.paths import (
     load_runtime_config,
     write_json_atomic,
 )
+from devices.find import FindReaderWizard
 from devices.identify import ReaderIdentifier
 from devices.reader_link import CaptureLog, ClientModeListener, ReaderLink, TagPoster, utc_now
 from devices.scanner import Scanner
@@ -146,6 +147,8 @@ class DeviceService:
         self.handled_identify = (self.runtime.get("identify_request") or {}).get("id")
         self.identifier = None
         self.identify_last = None
+        self.handled_find = (self.runtime.get("find_request") or {}).get("id")
+        self.finder = None
         self.network = netinfo.snapshot(profiles)
         self.pending_network = None
         self.pending_network_at = 0.0
@@ -297,6 +300,23 @@ class DeviceService:
         ok, error = post_scan({"scan": {"trigger": "identify", "complete": False}, "devices": devices}, self.runtime)
         log("Identified reader sent to Laravel" if ok else f"Could not send identified reader: {error}")
 
+    # -- find my reader (before/after plug-in) ----------------------------
+    def request_find(self, request):
+        if self.finder and self.finder.snapshot().get("running"):
+            return
+        seconds = int(request.get("seconds") or 90)
+        log(f"Find my reader: started for {seconds}s")
+        self.finder = FindReaderWizard(self.profiles, seconds, log,
+                                       client_seen=lambda: self.listener.snapshot().get("seen", {}))
+        threading.Thread(target=self._find, daemon=True).start()
+
+    def _find(self):
+        result = self.finder.run()
+        payload = find_payload(result)
+        if payload["devices"]:
+            ok, error = post_scan(payload, self.runtime)
+            log("Find my reader: new device(s) sent to Laravel" if ok else f"Find my reader: could not send results: {error}")
+
     def identify_status(self):
         if self.identifier and self.identifier.snapshot().get("running"):
             return self.identifier.snapshot()
@@ -355,6 +375,7 @@ class DeviceService:
             "temporary_ip_suggestions": result.get("temporary_ip_suggestions", []),
             "diagnostics": result.get("diagnostics"),
             "identify": self.identify_status(),
+            "find": self.finder.snapshot() if self.finder else None,
         })
 
     # -- main loop ------------------------------------------------------
@@ -397,6 +418,11 @@ class DeviceService:
                     self.pending_network = None
 
             # Scan again requested from Settings.
+            find = self.runtime.get("find_request") or {}
+            if find.get("id") and find["id"] != self.handled_find:
+                self.handled_find = find["id"]
+                self.request_find(find)
+
             identify = self.runtime.get("identify_request") or {}
             if identify.get("id") and identify["id"] != self.handled_identify:
                 self.handled_identify = identify["id"]
@@ -426,6 +452,36 @@ class DeviceService:
                     log(f"Could not write status: {error}")
 
             time.sleep(0.5)
+
+
+def find_payload(result):
+    """New devices from Find my reader as a (partial) scan for Laravel."""
+    devices = []
+    for item in result.get("new_devices", []):
+        if not item.get("ip") or item.get("randomized_mac"):
+            continue
+        reader = (item.get("probe") or {}).get("reader") or {}
+        found = (reader.get("found") or reader.get("replies") or [None])[0]
+        device = {
+            "key": item["mac"], "mac": item["mac"], "ip": item["ip"], "reachable": bool(item.get("reachable")),
+            "online": True, "vendor": item.get("vendor"), "randomized_mac": False,
+            "open_ports": {"tcp": (item.get("probe") or {}).get("open_tcp", [])},
+            "discovered_by": ["find-my-reader"] + item.get("seen_by", []),
+            "kind": "unknown", "confidence": "none", "name": "New device (Find my reader)",
+        }
+        if found:
+            device.update({
+                "kind": "rfid_reader", "confidence": "confirmed", "name": "UHF RFID reader",
+                "reader": {"transport": found["transport"].split("-")[0], "port": found.get("port"), "protocol": found.get("protocol"),
+                           "work_mode": "unknown", "confirmed": True, "sample_tags": found.get("tags", []),
+                           "raw_sample_hex": found.get("raw_hex")},
+            })
+        elif item.get("reachable") is False:
+            device["kind"] = "rfid_reader"
+            device["confidence"] = "possible"
+            device["name"] = "New device on another network"
+        devices.append(device)
+    return {"scan": {"trigger": "find-my-reader", "complete": False}, "devices": devices}
 
 
 def claim_single_instance():
@@ -463,6 +519,43 @@ def scan_once(args, profiles):
         log("Results sent to Laravel." if ok else f"Could not send results to Laravel: {error}")
     if args.json:
         print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
+def find(args, profiles):
+    """Find my reader in the terminal (passive listening works here with sudo)."""
+    wizard = FindReaderWizard(profiles, args.seconds, log, passive=not args.no_passive)
+    thread = threading.Thread(target=wizard.run, daemon=True)
+    thread.start()
+    announced = False
+    while thread.is_alive():
+        state = wizard.snapshot()
+        if state["phase"] == "waiting" and not announced:
+            print("")
+            print(">>> PLUG IN or POWER ON the UHF reader now. Listening for %ss..." % args.seconds, flush=True)
+            print("")
+            announced = True
+        time.sleep(0.5)
+    result = wizard.snapshot()
+    print("")
+    print("RESULT: " + result.get("message", ""))
+    for device in result.get("new_devices", []):
+        probe = device.get("probe") or {}
+        print(f"  new device {device['mac']} ({device.get('vendor') or 'unknown maker'}) ips={device.get('ips')} "
+              f"reachable={device.get('reachable')} seen_by={device.get('seen_by')} tcp={probe.get('open_tcp')}")
+        if device.get("passive"):
+            print(f"    passive: {device['passive']}")
+        for key in ("found", "replies", "unknown_data"):
+            for entry in (probe.get("reader") or {}).get(key, []):
+                print(f"    {key}: {entry}")
+    if result.get("other_subnet", {}).get("commands"):
+        commands = result["other_subnet"]["commands"].get(netinfo.SYSTEM) or {}
+        print(f"  To reach it now: {commands.get('add')}   (remove later: {commands.get('remove')})")
+    if args.post:
+        payload = find_payload(result)
+        if payload["devices"]:
+            ok, error = post_scan(payload, load_runtime_config())
+            print("Saved to the system." if ok else f"Could not save to the system: {error}")
     return 0
 
 
@@ -548,6 +641,8 @@ def main():
     parser.add_argument("--post", action="store_true", help="send the scan result to Laravel")
     parser.add_argument("--target", action="append", default=[], help="also probe this IP (repeatable)")
     parser.add_argument("--allow-temp-ip", action="store_true", help="use a temporary IP for other subnets (admin)")
+    parser.add_argument("--find", action="store_true", help="Find my reader: baseline, plug in, watch for new devices")
+    parser.add_argument("--no-passive", action="store_true", help="do not capture raw packets")
     parser.add_argument("--listen", help="IP:PORT of a reader to listen to")
     parser.add_argument("--transport", choices=["tcp", "udp"], default="tcp")
     parser.add_argument("--seconds", type=int, default=30)
@@ -555,9 +650,12 @@ def main():
 
     # Diagnostics print to the console only (they may run with sudo, and a
     # root-owned log file would block the background service).
-    setup_logging(args.verbose or args.scan_once or bool(args.listen), to_file=not (args.scan_once or args.listen))
+    setup_logging(args.verbose or args.scan_once or bool(args.listen) or args.find,
+                  to_file=not (args.scan_once or args.listen or args.find))
     profiles = load_profiles()
 
+    if args.find:
+        return find(args, profiles)
     if args.listen:
         return listen(args, profiles)
     if args.scan_once:

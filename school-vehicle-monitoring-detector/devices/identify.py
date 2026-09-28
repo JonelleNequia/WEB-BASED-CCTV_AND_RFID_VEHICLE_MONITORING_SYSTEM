@@ -39,8 +39,11 @@ def identify_ports(profiles):
 
 
 class ReaderIdentifier:
-    def __init__(self, profiles, candidates, seconds, log, client_seen=None):
+    def __init__(self, profiles, candidates, seconds, log, client_seen=None, known_ports=None, udp_ports=None):
         self.profiles = profiles
+        # Ports already found by a full scan (Find my reader): no second scan.
+        self.known_ports = known_ports
+        self.udp_ports = udp_ports
         self.candidates = candidates  # list of {"ip", "mac"}
         self.seconds = float(seconds)
         self.log = log
@@ -54,6 +57,7 @@ class ReaderIdentifier:
             "open_ports": {},
             "phase": "Scanning ports",
             "found": [],
+            "replies": [],
             "unknown_data": [],
             "message": "Listening. Hold a UHF tag near the reader.",
         }
@@ -61,7 +65,7 @@ class ReaderIdentifier:
     def snapshot(self):
         with self.lock:
             return {**self.state, "open_ports": dict(self.state["open_ports"]), "found": list(self.state["found"]),
-                    "unknown_data": list(self.state["unknown_data"])}
+                    "replies": list(self.state["replies"]), "unknown_data": list(self.state["unknown_data"])}
 
     def _set(self, **values):
         with self.lock:
@@ -75,22 +79,29 @@ class ReaderIdentifier:
             self._set(message=f"Identify stopped: {error}")
             self.log(f"Identify error: {error}")
         finally:
-            found = self.snapshot()["found"]
-            self._set(
-                running=False,
-                finished_at=utc_now(),
-                phase="Done",
-                message=(f"Reader found at {found[0]['ip']} ({found[0]['transport'].upper()} {found[0]['port']}, {found[0]['protocol']})."
-                         if found else (
-                             "No reader sent tag data. Check that it is powered and on this network, then try again."
-                             if self.candidates else
-                             "No possible reader on this network: only the router, cameras and phones/laptops answered. "
-                             "The reader is not connected here (check its power and LAN cable), or it has a fixed IP on another network."
-                         )),
-            )
+            snap = self.snapshot()
+            self._set(running=False, finished_at=utc_now(), phase="Done", message=self._verdict(snap["found"], snap["replies"]))
         return self.snapshot()
 
+    def _verdict(self, found, replies):
+        if found:
+            first = found[0]
+            return f"Reader found at {first['ip']} ({first['transport'].upper()} {first['port']}, {first['protocol']})."
+        if replies:
+            first = replies[0]
+            return (f"Reader answered at {first['ip']} ({first['transport'].upper()} {first['port']}, {first['protocol']}) "
+                    "but no tag was read. Hold a tag closer to the reader and try again.")
+        if self.candidates:
+            return "No reader sent tag data. Check that it is powered and on this network, then try again."
+        return ("No possible reader on this network: only the router, cameras and phones/laptops answered. "
+                "The reader is not connected here (check its power and LAN cable), or it has a fixed IP on another network.")
+
     async def _run(self, started):
+        if self.known_ports is not None:
+            with self.lock:
+                self.state["open_ports"].update(self.known_ports)
+            await self._listen_all(started, dict(self.known_ports))
+            return
         ports = identify_ports(self.profiles)
         semaphore = asyncio.Semaphore(256)
         timeout = 0.4
@@ -124,6 +135,9 @@ class ReaderIdentifier:
             ip, found_ports = task.result()
             open_ports[ip] = found_ports
 
+        await self._listen_all(started, open_ports)
+
+    async def _listen_all(self, started, open_ports):
         self._set(phase="Listening for tag data")
         deadline = started + self.seconds
         listeners = [
@@ -150,6 +164,20 @@ class ReaderIdentifier:
         self.log(f"Identify: READER FOUND {ip} {transport}/{port} {entry['protocol']} tags {tags[:3]}")
         return True
 
+    def _reply(self, ip, transport, port, frames, raw):
+        """A valid reader frame that is not a tag (e.g. the answer to an info command)."""
+        replies = [frame for frame in frames if frame.kind == "reply"]
+        if not replies:
+            return
+        with self.lock:
+            if any(item["ip"] == ip and item["port"] == port for item in self.state["replies"]):
+                return
+            self.state["replies"].append({
+                "ip": ip, "transport": transport, "port": port, "protocol": replies[0].protocol,
+                "command": replies[0].command, "raw_hex": raw[:64].hex(" ").upper(),
+            })
+        self.log(f"Identify: {ip} {transport}/{port} answered as a {replies[0].protocol} reader: {raw[:32].hex(' ').upper()}")
+
     def _unknown(self, ip, transport, port, data):
         with self.lock:
             if any(item["ip"] == ip and item["port"] == port for item in self.state["unknown_data"]):
@@ -170,8 +198,10 @@ class ReaderIdentifier:
         except (OSError, asyncio.TimeoutError):
             return
         decoder = uhf.StreamDecoder()
+        info = [command for _p, _u, command in uhf.probe_commands(self.profiles, "info")]
         commands = [command for _p, _u, command in uhf.probe_commands(self.profiles, "inventory")]
         seen_bytes = b""
+        sent_info = False
         next_poll = time.monotonic() + 1.0
         try:
             while time.monotonic() < deadline and not self._done():
@@ -186,12 +216,15 @@ class ReaderIdentifier:
                     frames = decoder.feed(data)
                     if self._found(ip, "tcp", port, [f for f in frames if f.kind == "tag"], data):
                         return
+                    self._reply(ip, "tcp", port, frames, data)
                     if len(seen_bytes) >= 8 and not frames and not _other_service(seen_bytes):
                         self._unknown(ip, "tcp", port, seen_bytes)
                 if time.monotonic() >= next_poll and commands:
                     next_poll = time.monotonic() + 1.0
                     try:
-                        writer.write(b"".join(commands))
+                        # Ask "who are you" once (answered even without a tag), then poll for tags.
+                        writer.write(b"".join((info if not sent_info else []) + commands))
+                        sent_info = True
                         await writer.drain()
                     except OSError:
                         return
@@ -199,8 +232,8 @@ class ReaderIdentifier:
             writer.close()
 
     async def _listen_udp(self, deadline):
-        ports = [int(port) for port in self.profiles.get("uhf_reader", {}).get("udp_ports", [])]
-        commands = [command for _p, _u, command in uhf.probe_commands(self.profiles, "inventory")]
+        ports = [int(port) for port in (self.udp_ports if self.udp_ports is not None else self.profiles.get("uhf_reader", {}).get("udp_ports", []))]
+        commands = [command for _p, _u, command in uhf.probe_commands(self.profiles)]
         if not ports or not commands or not self.candidates:
             return
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -224,7 +257,11 @@ class ReaderIdentifier:
                     await asyncio.sleep(0.1)
                     continue
                 frames, _protocol = uhf.decode_once(data)
-                if not self._found(ip, "udp", port, [f for f in frames if f.kind == "tag"], data) and data:
+                if self._found(ip, "udp", port, [f for f in frames if f.kind == "tag"], data):
+                    continue
+                if any(frame.kind == "reply" for frame in frames):
+                    self._reply(ip, "udp", port, frames, data)
+                elif data:
                     self._unknown(ip, "udp", port, data)
         finally:
             sock.close()

@@ -98,6 +98,40 @@ Artisan::command('devices:listen {address : Reader IP:PORT} {--udp : Use UDP ins
     return $runDeviceTool($arguments, fn (string $buffer) => $this->output->write($buffer));
 })->purpose('Print the raw data a UHF reader sends (hold a tag near it)');
 
+// Find my reader in the terminal. Passive listening (readers on another
+// network) needs admin rights: on macOS/Linux this asks for your password.
+Artisan::command('devices:find {--seconds=90} {--no-passive : Skip raw packet listening (no password needed)}', function () {
+    $python = PythonLauncher::pythonExecutable();
+    $arguments = [$python, 'device_service.py', '--find', '--post', '--seconds', (string) (int) $this->option('seconds')];
+    $environment = [
+        'DEVICE_FILES_PATH' => DeviceFiles::directory(),
+        'PYTHONUNBUFFERED' => '1',
+        'PYTHONDONTWRITEBYTECODE' => '1',
+    ];
+
+    if ($this->option('no-passive')) {
+        $arguments[] = '--no-passive';
+    } elseif (PHP_OS_FAMILY !== 'Windows' && function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+        // Only the Python part runs as admin, with its own temp folder, so no
+        // root-owned files end up in the project.
+        $this->line('Passive listening needs admin rights; enter your computer password if asked.');
+        $arguments = ['sudo', 'env',
+            'PYTHONUNBUFFERED=1', 'PYTHONDONTWRITEBYTECODE=1',
+            'DEVICE_FILES_PATH='.sys_get_temp_dir().'/philcst-find',
+            'DEVICE_RUNTIME_CONFIG_PATH='.DeviceFiles::runtimeConfigPath(),
+            ...$arguments];
+    } elseif (PHP_OS_FAMILY === 'Windows') {
+        $this->line('Tip: run this in an Administrator window (with Npcap installed) to also hear readers on another network.');
+    }
+
+    $process = new Process($arguments, PythonLauncher::directory(), $environment, null, 900);
+    if (Process::isTtySupported()) {
+        $process->setTty(true);
+    }
+
+    return $process->run(fn (string $type, string $buffer) => $this->output->write($buffer));
+})->purpose('Find the UHF reader by plugging it in (before/after scan, passive listening, port scan)');
+
 Artisan::command('devices:start', function (DeviceServiceRuntime $runtime) {
     Cache::forget('device-service-launch');
     $runtime->ensureRunning();

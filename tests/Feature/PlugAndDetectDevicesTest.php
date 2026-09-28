@@ -310,6 +310,34 @@ class PlugAndDetectDevicesTest extends TestCase
         $this->assertGreaterThan(0, $config['identify_request']['seconds']);
     }
 
+    public function test_find_my_reader_request_and_progress(): void
+    {
+        $this->actingAs($this->admin)->postJson(route('settings.devices.find'))->assertOk();
+        $config = json_decode(File::get(DeviceFiles::runtimeConfigPath()), true);
+        $this->assertSame(90, $config['find_request']['seconds']);
+
+        File::put(DeviceFiles::statusPath(), json_encode([
+            'service_running' => true,
+            'updated_at' => now()->toIso8601String(),
+            'find' => [
+                'running' => false, 'phase' => 'done', 'result' => 'other_subnet', 'baseline_count' => 2,
+                'message' => 'The new device uses the fixed IP 203.0.113.190.',
+                'passive' => ['available' => true, 'interface' => 'en7'],
+                'new_devices' => [['mac' => 'D8:A0:1D:00:00:02', 'ips' => ['203.0.113.190'], 'reachable' => false]],
+                'other_subnet' => ['ip' => '203.0.113.190', 'network' => '203.0.113.0/24', 'pc_ip' => '203.0.113.254'],
+            ],
+        ]));
+
+        $this->actingAs($this->admin)->getJson(route('settings.devices.index'))
+            ->assertOk()
+            ->assertJsonPath('find.result', 'other_subnet')
+            ->assertJsonPath('find.new_devices.0.mac', 'D8:A0:1D:00:00:02')
+            ->assertJsonPath('find.other_subnet.pc_ip', '203.0.113.254');
+
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'stations']))
+            ->assertOk()->assertSee('Find my reader');
+    }
+
     public function test_camera_password_is_never_sent_to_the_pages(): void
     {
         Camera::query()->forRole('entrance')->firstOrFail()

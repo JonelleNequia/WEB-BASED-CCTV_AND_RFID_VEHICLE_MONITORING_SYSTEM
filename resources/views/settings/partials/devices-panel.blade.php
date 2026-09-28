@@ -7,6 +7,7 @@
          data-index-url="{{ route('settings.devices.index') }}"
          data-scan-url="{{ route('settings.devices.scan') }}"
          data-identify-url="{{ route('settings.devices.identify') }}"
+         data-find-url="{{ route('settings.devices.find') }}"
          data-unassign-url="{{ route('settings.devices.unassign') }}"
          data-acknowledge-url="{{ route('settings.devices.acknowledge') }}">
     <div class="panel-header panel-header-modern">
@@ -16,6 +17,8 @@
         </div>
         <div class="button-row">
             <x-live-indicator />
+            <button type="button" class="button button-primary button-sm" data-devices-find
+                    title="Record the network, plug in the reader, and see what appears">Find my reader</button>
             <button type="button" class="button button-secondary button-sm" data-devices-identify
                     title="Listen to every device while you hold a UHF tag near the reader">Identify reader</button>
             <button type="button" class="button button-secondary button-sm" data-devices-scan>Scan again</button>
@@ -23,6 +26,9 @@
     </div>
 
     <div class="devices-network" data-devices-network role="status" aria-live="polite"></div>
+
+    {{-- Find my reader: before/after wizard. --}}
+    <div class="devices-find" data-devices-find-box role="status" aria-live="polite" hidden></div>
 
     {{-- Identify reader: live progress and result. --}}
     <div class="devices-identify" data-devices-identify-box role="status" aria-live="polite" hidden></div>

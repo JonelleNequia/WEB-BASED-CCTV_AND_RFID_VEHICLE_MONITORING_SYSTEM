@@ -423,3 +423,116 @@ class LiveLatencyTests(unittest.TestCase):
 
         box = scale_box((100, 100, 200, 150), (416, 736, 3), (1440, 2560, 3), pad=0)
         self.assertEqual(box, (347, 346, 695, 519))
+
+
+class FindMyReaderTests(unittest.TestCase):
+    """Before/after wizard: new MACs, passive packets, verdicts."""
+
+    def test_passive_parser_reads_arp_dhcp_and_broadcasts(self):
+        from devices.passive import PassiveListener
+
+        listener = PassiveListener("en7", {"DC:32:62:56:1E:02"}, lambda message: None)
+        listener.parse("1727561234.1 d8:a0:1d:00:00:02 > ff:ff:ff:ff:ff:ff, ethertype ARP (0x0806), length 60: Request who-has 203.0.113.190 tell 203.0.113.190, length 46")
+        listener.parse("1727561234.2 d8:a0:1d:00:00:02 > ff:ff:ff:ff:ff:ff, ethertype IPv4 (0x0800), length 60: 203.0.113.190.4001 > 255.255.255.255.1500: UDP, length 16")
+        listener.parse("1727561234.3 d8:a0:1d:00:00:03 > ff:ff:ff:ff:ff:ff, ethertype IPv4 (0x0800), length 342: 0.0.0.0.68 > 255.255.255.255.67: BOOTP/DHCP, Request from d8:a0:1d:00:00:03, length 300")
+        listener.parse("1727561234.4 dc:32:62:56:1e:02 > ff:ff:ff:ff:ff:ff, ethertype ARP (0x0806), length 42: Request who-has 198.51.100.9 tell 198.51.100.2, length 28")
+        heard = listener.snapshot()
+        reader = heard["D8:A0:1D:00:00:02"]
+        self.assertEqual(reader["ips"], ["203.0.113.190"])
+        self.assertEqual(reader["arp_announces"], 1)
+        self.assertEqual(reader["broadcast_ports"], [1500])
+        self.assertEqual(heard["D8:A0:1D:00:00:03"]["dhcp_requests"], 1)
+        self.assertEqual(heard["D8:A0:1D:00:00:03"]["ips"], [])
+        self.assertNotIn("DC:32:62:56:1E:02", heard)  # this PC itself
+
+    def wizard(self, sweeps, scan_ports):
+        """Run the wizard on a fake LAN whose ARP sweeps return `sweeps` in turn."""
+        from devices import find
+
+        lan = {"name": "en7", "label": "USB LAN", "kind": "ethernet", "ip": "127.0.0.2", "network": "127.0.0.0/8",
+               "gateway": None, "link_local": False, "mac": "DC:32:62:56:1E:02"}
+        wizard = find.FindReaderWizard(load_profiles(), 3, lambda message: None, passive=False, listen_seconds=4)
+        calls = iter(sweeps)
+
+        async def fake_scan(ip, timeout=0.4, concurrency=800):
+            return scan_ports
+
+        with mock.patch.object(find.netinfo, "interfaces", return_value=[lan]), \
+                mock.patch.object(find.FindReaderWizard, "_sweep", lambda self, interfaces: next(calls, sweeps[-1])), \
+                mock.patch.object(find, "full_tcp_scan", fake_scan):
+            return wizard.run()
+
+    def _run_with_fake_listener(self, wizard, passive):
+        """Passive listening that hears nothing during the baseline, then `passive`."""
+        from devices import find
+
+        calls = {"count": 0}
+
+        def snapshot():
+            calls["count"] += 1
+            return {} if calls["count"] == 1 else passive
+
+        with mock.patch.object(find, "availability", return_value=(True, "test")), \
+                mock.patch.object(find, "PassiveListener", lambda *args: mock.Mock(start=lambda: None, stop=lambda: None, snapshot=snapshot)):
+            wizard.passive_wanted = True
+            return wizard.run()
+
+    def test_new_reader_on_this_network_is_found_by_its_tags(self):
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(4)
+        port = server.getsockname()[1]
+        inventory = uhf.build_command("r2000", "89", "01")
+
+        def serve():
+            while True:
+                try:
+                    connection, _ = server.accept()
+                except OSError:
+                    return
+                def handle(conn):
+                    conn.settimeout(5)
+                    try:
+                        while True:
+                            data = conn.recv(256)
+                            if not data:
+                                return
+                            if inventory in data:
+                                conn.sendall(r2000_tag_frame())
+                    except OSError:
+                        return
+                threading.Thread(target=handle, args=(connection,), daemon=True).start()
+
+        threading.Thread(target=serve, daemon=True).start()
+        result = self.wizard([{}, {"127.0.0.1": "D8:A0:1D:00:00:02"}], scan_ports=[port])
+        server.close()
+        self.assertEqual(result["result"], "reader_found", result["message"])
+        self.assertEqual(result["new_devices"][0]["mac"], "D8:A0:1D:00:00:02")
+        self.assertIn(EPC, result["message"])
+
+    def test_reader_with_a_fixed_ip_elsewhere_is_reported_with_the_fix(self):
+        heard = {"D8:A0:1D:00:00:02": {"mac": "D8:A0:1D:00:00:02", "packets": 3, "ips": ["203.0.113.190"], "arp_announces": 1,
+                                       "dhcp_requests": 0, "dhcp_replies": 0, "broadcast_ports": [], "sample": None}}
+        result = self._run_with_fake_listener(self._make(), heard)
+        self.assertEqual(result["result"], "other_subnet", result["message"])
+        self.assertEqual(result["other_subnet"]["network"], "203.0.113.0/24")
+        self.assertIn("DHCP", result["message"])
+
+    def test_dhcp_without_address_and_silence(self):
+        heard = {"D8:A0:1D:00:00:03": {"mac": "D8:A0:1D:00:00:03", "packets": 4, "ips": [], "arp_announces": 0,
+                                       "dhcp_requests": 4, "dhcp_replies": 0, "broadcast_ports": [], "sample": None}}
+        self.assertEqual(self._run_with_fake_listener(self._make(), heard)["result"], "dhcp_no_address")
+        self.assertEqual(self._run_with_fake_listener(self._make(), {})["result"], "nothing")
+
+    def _make(self):
+        from devices import find
+
+        lan = {"name": "en7", "label": "USB LAN", "kind": "ethernet", "ip": "198.51.100.2", "network": "198.51.100.0/24",
+               "gateway": "198.51.100.1", "link_local": False, "mac": "DC:32:62:56:1E:02"}
+        wizard = find.FindReaderWizard(load_profiles(), 2, lambda message: None, listen_seconds=2)
+        self._patches = [mock.patch.object(find.netinfo, "interfaces", return_value=[lan]),
+                         mock.patch.object(find.FindReaderWizard, "_sweep", lambda self, interfaces: {})]
+        for patch in self._patches:
+            patch.start()
+        self.addCleanup(lambda: [patch.stop() for patch in self._patches])
+        return wizard

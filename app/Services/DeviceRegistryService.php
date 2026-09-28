@@ -540,6 +540,17 @@ class DeviceRegistryService
         return $id;
     }
 
+    /**
+     * "Find my reader": baseline, then watch for a device that appears.
+     */
+    public function requestFind(int $seconds): string
+    {
+        $id = (string) Str::uuid();
+        $this->exportRuntimeConfig(null, null, ['id' => $id, 'seconds' => $seconds, 'requested_at' => now()->toIso8601String()]);
+
+        return $id;
+    }
+
     public function requestScan(): string
     {
         $id = (string) Str::uuid();
@@ -551,7 +562,7 @@ class DeviceRegistryService
     /**
      * @param  array<string, string>|null  $scanRequest
      */
-    public function exportRuntimeConfig(?array $scanRequest = null, ?array $identifyRequest = null): void
+    public function exportRuntimeConfig(?array $scanRequest = null, ?array $identifyRequest = null, ?array $findRequest = null): void
     {
         $path = DeviceFiles::runtimeConfigPath();
         $current = is_file($path) ? (array) json_decode((string) File::get($path), true) : [];
@@ -566,6 +577,7 @@ class DeviceRegistryService
             ],
             'scan_request' => $scanRequest ?? ($current['scan_request'] ?? null),
             'identify_request' => $identifyRequest ?? ($current['identify_request'] ?? null),
+            'find_request' => $findRequest ?? ($current['find_request'] ?? null),
             'stations' => collect(DeviceAssignment::STATIONS)->mapWithKeys(fn (string $station): array => [
                 $station => [
                     'label' => $settings["{$station}_portal_label"] ?? ucfirst($station),
@@ -713,6 +725,10 @@ class DeviceRegistryService
             ],
             'diagnostics' => $this->diagnostics($status),
             'identify' => $this->identifyPayload($status),
+            'find' => is_array($status['find'] ?? null) ? Arr::only($status['find'], [
+                'running', 'started_at', 'finished_at', 'seconds', 'phase', 'phase_label', 'baseline_count', 'interfaces',
+                'passive', 'new_devices', 'events', 'result', 'message', 'waiting_until', 'other_subnet',
+            ]) : null,
             'stations' => collect(DeviceAssignment::STATIONS)->mapWithKeys(fn (string $station): array => [
                 $station => [
                     'label' => ucfirst($station),
