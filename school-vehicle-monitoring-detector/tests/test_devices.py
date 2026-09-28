@@ -264,3 +264,39 @@ class ReaderLinkTests(unittest.TestCase):
         self.assertEqual(posted[0]["payload_json"]["protocol"], "r2000")
         self.assertEqual(link.snapshot()["protocol"], "r2000")
         self.assertEqual(link.snapshot()["work_mode"], "active")
+
+
+class DiagnosticsTests(unittest.TestCase):
+    """The Devices panel explains why nothing was found."""
+
+    def build(self, interfaces, arp, access="ok", firewall=None, arp_stats=None):
+        from devices import diagnostics
+
+        snap = {"interfaces": interfaces}
+        sweep = {item["name"]: ["x"] * 253 for item in interfaces}
+        return diagnostics.build(
+            snap, sweep, dict(arp), arp, {}, {}, arp_stats or {"sent": 253, "errors": {}}, [],
+            {"result": access, "checks": []}, firewall or {"enabled": False}, False,
+        )
+
+    @staticmethod
+    def lan(ip="198.51.100.2", gateway="198.51.100.1", link_local=False, kind="ethernet"):
+        return {"name": "en7", "label": "USB LAN", "kind": kind, "ip": ip, "network": ip.rsplit(".", 1)[0] + ".0/24",
+                "gateway": gateway, "link_local": link_local}
+
+    def codes(self, result):
+        return [warning["code"] for warning in result["warnings"]]
+
+    def test_only_the_router_answered_on_the_lan(self):
+        result = self.build([self.lan()], {"198.51.100.1": "F4:2D:06:A2:2F:70"})
+        self.assertIn("lan_only_router", self.codes(result))
+        self.assertEqual(result["interfaces"][0]["hosts_swept"], 253)
+        self.assertEqual(result["interfaces"][0]["os_hosts"][0]["ip"], "198.51.100.1")
+
+    def test_wifi_only_and_link_local_and_blocked(self):
+        self.assertIn("no_ethernet", self.codes(self.build([self.lan(kind="wifi")], {})))
+        self.assertIn("link_local", self.codes(self.build([self.lan(ip="169.254.3.4", gateway=None, link_local=True)], {})))
+        self.assertIn("local_network_blocked", self.codes(self.build([self.lan()], {}, access="blocked")))
+        blocked = self.build([self.lan()], {}, arp_stats={"sent": 253, "errors": {"No route to host": 253}})
+        self.assertIn("sends_failed", self.codes(blocked))
+        self.assertIn("firewall_block_all", self.codes(self.build([self.lan()], {}, firewall={"enabled": True, "block_all": True})))

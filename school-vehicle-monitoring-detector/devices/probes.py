@@ -26,16 +26,21 @@ def trigger_arp(hosts, port, pause_every=64):
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setblocking(False)
+    errors = {}
     try:
         for index, host in enumerate(hosts):
             try:
                 sock.sendto(b"", (host, int(port)))
-            except OSError:
-                pass
+            except OSError as error:
+                # Counted, not hidden: "No route to host" for every host means
+                # the OS blocks this process from the local network.
+                key = error.strerror or error.__class__.__name__
+                errors[key] = errors.get(key, 0) + 1
             if index and index % pause_every == 0:
                 time.sleep(0.01)
     finally:
         sock.close()
+    return {"sent": len(hosts), "errors": errors}
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +286,7 @@ def reader_udp_probe(hosts, profiles):
     return results
 
 
-def broadcast_discovery(interfaces, profiles):
+def broadcast_discovery(interfaces, profiles, errors=None):
     """
     Search packets used by the serial-to-Ethernet modules inside many generic
     readers. Any reply means "a network module lives at this address".
@@ -301,14 +306,15 @@ def broadcast_discovery(interfaces, profiles):
             sock.setblocking(False)
             try:
                 sock.bind(("", 0))
-            except OSError:
+            except OSError as error:
+                _note(errors, f"Reader broadcast ({probe['name']}): could not open a socket: {error}")
                 sock.close()
                 continue
             for destination in destinations:
                 try:
                     sock.sendto(payload, (destination, int(probe["port"])))
-                except OSError:
-                    pass
+                except OSError as error:
+                    _note(errors, f"Reader broadcast to {destination}: {error}")
             sockets.append((sock, probe["name"]))
 
         deadline = time.monotonic() + wait
@@ -352,7 +358,12 @@ WS_PROBE = (
 )
 
 
-def onvif_discovery(interfaces, profiles):
+def _note(errors, message):
+    if errors is not None and message not in errors:
+        errors.append(message)
+
+
+def onvif_discovery(interfaces, profiles, errors=None):
     """
     Multicast a WS-Discovery probe out of every interface and parse ProbeMatches.
     Works across subnets on the same cable because it is multicast.
@@ -374,7 +385,8 @@ def onvif_discovery(interfaces, profiles):
             sock.bind((item["ip"], 0))
             sock.sendto(WS_PROBE.format(message_id=uuid.uuid4()).encode(), (group, int(port)))
             sockets.append(sock)
-        except OSError:
+        except OSError as error:
+            _note(errors, f"ONVIF multicast on {item['name']} ({item['ip']}): {error}")
             sock.close()
 
     found = {}

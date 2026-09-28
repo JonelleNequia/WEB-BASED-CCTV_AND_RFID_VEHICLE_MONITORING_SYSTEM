@@ -58,7 +58,13 @@ def refresh_hardware_ports():
 
 def interface_label(name):
     if SYSTEM == "darwin":
-        return _mac_hardware_ports().get(name) or name
+        ports = _mac_hardware_ports()
+        if name not in ports and name.startswith("en"):
+            # A USB/Thunderbolt LAN adapter plugged in after start: reload the
+            # list, or it is taken for "other" instead of Ethernet.
+            refresh_hardware_ports()
+            ports = _mac_hardware_ports()
+        return ports.get(name) or name
     return name
 
 

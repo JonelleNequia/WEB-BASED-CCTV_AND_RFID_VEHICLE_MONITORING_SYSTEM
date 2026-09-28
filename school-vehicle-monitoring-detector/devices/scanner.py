@@ -21,7 +21,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from . import netinfo, probes, tempip
+from . import diagnostics, netinfo, probes, tempip
 from .oui import is_randomized, mac_from_uuid, vendor_for
 
 
@@ -92,14 +92,23 @@ class Scanner:
             self.log(f"Sweeping {len(hosts)} addresses on {item['name']}")
 
         self.progress("Looking for devices (ARP, ONVIF, reader broadcast)")
+        probe_errors = []
+        arp_stats = {"sent": 0, "errors": {}}
         with ThreadPoolExecutor(max_workers=3) as pool:
-            onvif_future = pool.submit(probes.onvif_discovery, interfaces, self.profiles)
-            module_future = pool.submit(probes.broadcast_discovery, interfaces, self.profiles)
+            onvif_future = pool.submit(probes.onvif_discovery, interfaces, self.profiles, probe_errors)
+            module_future = pool.submit(probes.broadcast_discovery, interfaces, self.profiles, probe_errors)
             for hosts in sweep.values():
-                probes.trigger_arp(hosts + targets, self.scan_settings.get("arp_trigger_port"))
+                stats = probes.trigger_arp(hosts + targets, self.scan_settings.get("arp_trigger_port"))
+                arp_stats["sent"] += stats["sent"]
+                for reason, count in stats["errors"].items():
+                    arp_stats["errors"][reason] = arp_stats["errors"].get(reason, 0) + count
             time.sleep(float(self.scan_settings.get("arp_settle_seconds", 2.0)))
             onvif = onvif_future.result()
             modules = module_future.result()
+        if arp_stats["errors"]:
+            self.log(f"Send errors while sweeping: {arp_stats['errors']}")
+        for message in probe_errors:
+            self.log(f"Probe error: {message}")
 
         arp = netinfo.arp_table()
         live = {
@@ -107,6 +116,17 @@ class Scanner:
             if ip not in own_ips and (interface_for(ip, interfaces) or ip in targets)
         }
         self.log(f"ARP: {len(live)} live host(s) on connected subnets")
+        for item in interfaces:
+            seen = sorted(ip for ip in live if interface_for(ip, [item]))
+            self.log(f"  {item['name']}: {len(seen)} host(s) seen by the OS {', '.join(seen)}".rstrip())
+
+        # Why a scan finds nothing: checked every time and shown in Settings.
+        diag = diagnostics.build(
+            snap, sweep, live, arp, onvif, modules, arp_stats, probe_errors,
+            diagnostics.local_network_access(interfaces), diagnostics.firewall_state(), netinfo.is_admin(),
+        )
+        for warning in diag["warnings"]:
+            self.log(f"Warning ({warning['code']}): {warning['message']}")
         for ip, info in onvif.items():
             self.log(f"ONVIF reply: {ip} {info.get('manufacturer') or ''} {info.get('hardware') or ''} {info.get('xaddr') or ''}".rstrip())
         for ip, info in modules.items():
@@ -133,10 +153,19 @@ class Scanner:
             carried = self._recheck_known(known, live)
 
         # 4. Other-subnet devices (multicast/broadcast replies we cannot reach).
-        unreachable = sorted(
+        unreachable = set(
             ip for ip in set(onvif) | set(modules)
             if not interface_for(ip, interfaces) and ip not in own_ips
         )
+        # Silent devices with a fixed IP on another subnet never answer a
+        # search. When a temporary address is explicitly allowed, also try the
+        # given targets and the factory-default addresses from the profiles.
+        if allow_temp_ip:
+            unreachable |= {
+                ip for ip in list(targets) + self._factory_default_ips()
+                if not interface_for(ip, interfaces) and ip not in own_ips
+            }
+        unreachable = sorted(unreachable)
         temp_results, suggestions = self._other_subnets(unreachable, snap, allow_temp_ip, known)
 
         devices = self._build_devices(
@@ -164,6 +193,7 @@ class Scanner:
                 "complete": not light,
             },
             "network": snap,
+            "diagnostics": diag,
             "devices": sorted(devices, key=_device_order),
             "temporary_ip_suggestions": suggestions,
         }
@@ -252,6 +282,11 @@ class Scanner:
             carried[mac] = device
         return carried
 
+    def _factory_default_ips(self):
+        camera = [ip for vendor in self.profiles.get("camera", {}).get("vendors", []) for ip in vendor.get("factory_default_ips", [])]
+        reader = self.profiles.get("uhf_reader", {}).get("factory_default_ips", [])
+        return list(dict.fromkeys(camera + reader))
+
     def _other_subnets(self, unreachable, snap, allow_temp_ip, known):
         """
         Reach devices that answered from another subnet with a temporary
@@ -300,6 +335,7 @@ class Scanner:
                 time.sleep(float(self.scan_settings.get("arp_settle_seconds", 2.0)))
                 arp = netinfo.arp_table()
                 found = {host: mac for host, mac in arp.items() if host in hosts}
+                self.log(f"{address['network']}: {len(found)} host(s) answered " + ", ".join(f"{host} {mac}" for host, mac in sorted(found.items())))
                 details = self._probe_hosts(sorted(set(found) | {ip}))
                 for host, info in details.items():
                     results[host] = {**info, "mac": found.get(host), "via_temporary_ip": address["ip"]}
@@ -317,7 +353,8 @@ class Scanner:
             module = modules.get(ip)
             mac = live.get(ip) or info.get("mac") or (mac_from_uuid(onvif_info.get("endpoint")) if onvif_info else None)
             interface = interface_for(ip, interfaces)
-            reachable = interface is not None or ip in targets
+            # A target on another network counts as reachable only if it answered directly.
+            reachable = interface is not None or bool(info.get("open_tcp") and not info.get("via_temporary_ip"))
             if not (info.get("open_tcp") or onvif_info or module or mac):
                 continue
 

@@ -6064,3 +6064,28 @@ button[aria-busy="true"] {
         grid-column: 1 / -1;
     }
 }
+
+/* Plug-and-detect: Devices › Diagnostics */
+.devices-warnings {
+    display: grid;
+    gap: 0.45rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.devices-warnings li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.88rem;
+    line-height: 1.4;
+}
+
+.devices-warnings .badge {
+    flex-shrink: 0;
+}
+
+.devices-diagnostics .table-subtext.mono {
+    white-space: pre-line;
+}

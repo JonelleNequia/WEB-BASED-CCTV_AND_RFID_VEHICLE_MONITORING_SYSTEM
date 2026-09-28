@@ -221,6 +221,40 @@ class PlugAndDetectDevicesTest extends TestCase
         $this->assertSame(0, NetworkDevice::query()->where('is_new', true)->count());
     }
 
+    public function test_diagnostics_explain_an_empty_lan(): void
+    {
+        File::ensureDirectoryExists(DeviceFiles::directory());
+        File::put(DeviceFiles::scanResultPath(), json_encode([
+            'scan' => ['finished_at' => now()->toIso8601String(), 'trigger' => 'network_change', 'duration_seconds' => 5.8, 'complete' => true],
+            'devices' => [],
+            'diagnostics' => [
+                'interfaces' => [[
+                    'name' => 'en7', 'label' => 'USB LAN', 'kind' => 'ethernet', 'ip' => '198.51.100.2', 'network' => '198.51.100.0/24',
+                    'gateway' => '198.51.100.1', 'link_local' => false, 'hosts_swept' => 253,
+                    'os_hosts' => [['ip' => '198.51.100.1', 'mac' => 'F4:2D:06:A2:2F:70']], 'only_gateway' => true,
+                ]],
+                'local_network' => ['result' => 'ok'],
+                'firewall' => ['enabled' => true, 'python_allowed' => true],
+                'warnings' => [['code' => 'lan_only_router', 'level' => 'warning', 'message' => 'Only the router answered on USB LAN.']],
+            ],
+        ]));
+
+        $this->actingAs($this->admin)
+            ->getJson(route('settings.devices.index'))
+            ->assertOk()
+            ->assertJsonPath('diagnostics.interfaces.0.hosts_swept', 253)
+            ->assertJsonPath('diagnostics.interfaces.0.os_hosts.0.ip', '198.51.100.1')
+            ->assertJsonPath('diagnostics.local_network', 'ok')
+            // No status file = service not running: said first, then the scan's own warnings.
+            ->assertJsonPath('diagnostics.warnings.0.code', 'service_stopped')
+            ->assertJsonPath('diagnostics.warnings.1.code', 'lan_only_router');
+
+        $this->actingAs($this->admin)
+            ->get(route('settings.index', ['tab' => 'stations']))
+            ->assertOk()
+            ->assertSee('data-devices-diagnostics', false);
+    }
+
     public function test_camera_password_is_never_sent_to_the_pages(): void
     {
         Camera::query()->forRole('entrance')->firstOrFail()

@@ -25,6 +25,12 @@
 
     <div class="devices-list" data-devices-list></div>
 
+    {{-- Why a scan found nothing: interfaces scanned, what the OS sees, warnings. --}}
+    <details class="advanced-section devices-diagnostics" data-devices-diagnostics-box>
+        <summary>Diagnostics <span data-devices-diagnostics-count></span></summary>
+        <div data-devices-diagnostics></div>
+    </details>
+
     <details class="advanced-section devices-other">
         <summary>Other devices on the network (<span data-devices-other-count>0</span>)</summary>
         <div data-devices-other></div>

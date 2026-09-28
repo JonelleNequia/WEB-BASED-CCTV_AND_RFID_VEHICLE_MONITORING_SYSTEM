@@ -649,6 +649,7 @@ class DeviceRegistryService
                 'last_finished_display' => DisplayTime::datetime(data_get($status, 'scan.last.finished_at'), 'Not scanned yet'),
                 'error' => data_get($status, 'scan.error') ?: data_get($status, 'scan.post_error'),
             ],
+            'diagnostics' => $this->diagnostics($status),
             'stations' => collect(DeviceAssignment::STATIONS)->mapWithKeys(fn (string $station): array => [
                 $station => [
                     'label' => ucfirst($station),
@@ -665,6 +666,46 @@ class DeviceRegistryService
                 'new' => $devices->where('is_new', true)->count(),
             ],
             'generated_at' => now()->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Why the last scan found what it found (see devices/diagnostics.py),
+     * plus problems only Laravel can see (service stopped, results not received).
+     *
+     * @param  array<string, mixed>  $status
+     * @return array<string, mixed>
+     */
+    protected function diagnostics(array $status): array
+    {
+        // The newest scan wins: the background service or `devices:scan`.
+        $path = DeviceFiles::scanResultPath();
+        $scan = is_file($path) ? (array) json_decode((string) File::get($path), true) : [];
+        $diagnostics = (array) ($scan['diagnostics'] ?? $status['diagnostics'] ?? []);
+        $warnings = array_values((array) ($diagnostics['warnings'] ?? []));
+
+        if (! ($status['service_running'] ?? false)) {
+            array_unshift($warnings, ['code' => 'service_stopped', 'level' => 'critical',
+                'message' => 'The device service is not running, so nothing is scanned. It starts on its own within a minute; if not, run php artisan devices:start and check storage/logs/device-service.stdout.log.']);
+        }
+
+        if ($postError = data_get($status, 'scan.post_error')) {
+            $warnings[] = ['code' => 'post_failed', 'level' => 'warning',
+                'message' => 'Scan results could not be sent to this app: '.$postError];
+        }
+
+        return [
+            'scanned_at' => data_get($scan, 'scan.finished_at'),
+            'scanned_display' => DisplayTime::datetime(data_get($scan, 'scan.finished_at'), 'Not scanned yet'),
+            'trigger' => data_get($scan, 'scan.trigger'),
+            'duration' => data_get($scan, 'scan.duration_seconds'),
+            'interfaces' => array_values((array) ($diagnostics['interfaces'] ?? [])),
+            'local_network' => data_get($diagnostics, 'local_network.result', 'unknown'),
+            'firewall' => (array) ($diagnostics['firewall'] ?? []),
+            'admin' => (bool) ($diagnostics['admin'] ?? false),
+            'onvif_replies' => (int) ($diagnostics['onvif_replies'] ?? 0),
+            'module_replies' => (int) ($diagnostics['module_replies'] ?? 0),
+            'warnings' => $warnings,
         ];
     }
 

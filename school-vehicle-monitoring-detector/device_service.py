@@ -70,10 +70,12 @@ STATUS_EVERY_SECONDS = 2.0
 logger = logging.getLogger("devices")
 
 
-def setup_logging(verbose):
+def setup_logging(verbose, to_file=True):
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)s %(message)s", "%Y-%m-%d %H:%M:%S")
     try:
+        if not to_file:
+            raise OSError("console only")
         SERVICE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         handler = RotatingFileHandler(SERVICE_LOG_PATH, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
         handler.setFormatter(formatter)
@@ -288,6 +290,7 @@ class DeviceService:
             "client_listener": self.listener.snapshot(),
             "handled_scan_request": self.handled_request,
             "temporary_ip_suggestions": result.get("temporary_ip_suggestions", []),
+            "diagnostics": result.get("diagnostics"),
         })
 
     # -- main loop ------------------------------------------------------
@@ -481,7 +484,9 @@ def main():
     parser.add_argument("--seconds", type=int, default=30)
     args = parser.parse_args()
 
-    setup_logging(args.verbose or args.scan_once or bool(args.listen))
+    # Diagnostics print to the console only (they may run with sudo, and a
+    # root-owned log file would block the background service).
+    setup_logging(args.verbose or args.scan_once or bool(args.listen), to_file=not (args.scan_once or args.listen))
     profiles = load_profiles()
 
     if args.listen:

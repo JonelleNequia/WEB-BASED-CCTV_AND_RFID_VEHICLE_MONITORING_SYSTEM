@@ -180,6 +180,92 @@
 
     /* ---------- device tables ---------- */
 
+    /* ---------- diagnostics ---------- */
+
+    const WARNING_TONE = { critical: 'critical', warning: 'warning', info: 'info' };
+
+    function renderDiagnostics() {
+        const diag = data.diagnostics || {};
+        const box = panel.querySelector('[data-devices-diagnostics]');
+        const details = panel.querySelector('[data-devices-diagnostics-box]');
+        const warnings = diag.warnings || [];
+        const serious = warnings.filter((warning) => warning.level !== 'info');
+        const found = ((data.counts || {}).cameras || 0) + ((data.counts || {}).readers || 0);
+
+        panel.querySelector('[data-devices-diagnostics-count]').textContent = serious.length
+            ? `(${serious.length} warning${serious.length === 1 ? '' : 's'})` : '(no problems)';
+        // Open by itself when nothing was found and there is a reason to show.
+        if (serious.length && !found && !details.dataset.touched) {
+            details.open = true;
+        }
+
+        const nodes = [];
+        if (warnings.length) {
+            const list = el('ul', 'devices-warnings');
+            warnings.forEach(function (warning) {
+                const item = el('li');
+                item.append(badge(WARNING_TONE[warning.level] || 'neutral', warning.level), el('span', null, warning.message));
+                list.append(item);
+            });
+            nodes.push(list);
+        }
+
+        const interfaces = diag.interfaces || [];
+        const wrap = el('div', 'table-responsive');
+        const tableNode = el('table', 'devices-table');
+        const headRow = el('tr');
+        ['Interface', 'Type', 'This PC', 'Router', 'Addresses scanned', 'Seen by the OS'].forEach((label) => headRow.append(el('th', null, label)));
+        const head = el('thead');
+        head.append(headRow);
+        const body = el('tbody');
+        if (!interfaces.length) {
+            const tr = el('tr');
+            const td = el('td', 'text-muted', 'No scan yet, or no connected interface.');
+            td.colSpan = 6;
+            tr.append(td);
+            body.append(tr);
+        }
+        interfaces.forEach(function (item) {
+            const tr = el('tr');
+            const hosts = item.os_hosts || [];
+            const seen = el('td');
+            seen.append(el('strong', null, String(hosts.length)));
+            if (hosts.length) {
+                seen.append(el('div', 'table-subtext mono', hosts.map((host) => `${host.ip} · ${host.mac}`).join('\n')));
+            }
+            tr.append(
+                el('td', null, `${item.label || item.name} (${item.name})`),
+                el('td', null, item.kind === 'ethernet' ? 'LAN' : item.kind === 'wifi' ? 'Wi-Fi' : item.kind),
+                el('td', 'nowrap', `${item.ip} · ${item.network}${item.link_local ? ' · no DHCP' : ''}`),
+                el('td', 'nowrap', item.gateway || '—'),
+                el('td', null, String(item.hosts_swept)),
+                seen
+            );
+            body.append(tr);
+        });
+        tableNode.append(head, body);
+        wrap.append(tableNode);
+        nodes.push(wrap);
+
+        const firewall = diag.firewall || {};
+        const checks = el('p', 'field-help');
+        checks.textContent = [
+            `Last scan: ${diag.scanned_display || '—'}${diag.trigger ? ` (${diag.trigger})` : ''}${diag.duration ? ` · ${diag.duration}s` : ''}`,
+            `Local network access: ${diag.local_network || 'unknown'}`,
+            `Firewall: ${firewall.enabled === true ? 'on' : firewall.enabled === false ? 'off' : 'unknown'}${firewall.python_allowed === true ? ' (Python allowed)' : firewall.python_allowed === false ? ' (Python NOT allowed)' : ''}`,
+            `Admin rights: ${diag.admin ? 'yes' : 'no'}`,
+            `ONVIF replies: ${diag.onvif_replies || 0}`,
+            `Reader-module replies: ${diag.module_replies || 0}`,
+        ].join(' · ');
+        nodes.push(checks);
+
+        box.replaceChildren(...nodes);
+    }
+
+    panel.querySelector('[data-devices-diagnostics-box]').addEventListener('toggle', function () {
+        this.dataset.touched = '1';
+    });
+
     function renderLists() {
         const devices = data.devices || [];
         const main = devices.filter((device) => ['camera', 'rfid_reader'].includes(device.kind));
@@ -190,7 +276,8 @@
             const empty = el('div', 'empty-block');
             empty.append(
                 el('strong', null, (data.scan || {}).running ? 'Looking for cameras and readers…' : 'No camera or UHF reader found yet'),
-                el('p', null, 'Plug the LAN cable of the camera and the reader into the router/switch (or straight into this PC). They appear here within a few seconds.')
+                el('p', null, 'Plug the LAN cable of the camera and the reader into the router/switch (or straight into this PC). They appear here within a few seconds.'),
+                el('p', null, 'Still nothing? Open Diagnostics below: it shows which network was scanned and what this PC can see.')
             );
             list.replaceChildren(empty);
         } else {
@@ -520,6 +607,7 @@
         renderIfChanged('network', [data.service, data.network, data.scan, data.counts], renderNetwork);
         renderIfChanged('stations', data.stations, renderStations);
         renderIfChanged('devices', data.devices, renderLists);
+        renderIfChanged('diagnostics', data.diagnostics, renderDiagnostics);
         announceNewDevices();
     }
 
