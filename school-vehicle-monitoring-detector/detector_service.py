@@ -46,6 +46,7 @@ from config import (
     annotated_frame_path,
     latest_frame_path,
     load_runtime_config,
+    performance_settings,
     resolve_capture_source,
 )
 from laravel_client import LaravelEventClient
@@ -61,15 +62,30 @@ from tracking import (
 )
 from anpr import detect_vehicle_color, ocr_runtime_status, read_license_plate
 from camera_health import RtspDiagnosis, take_over_stale_detector
+import metrics
+from hires import HiResGrabber, scale_box
 
 CAMERA_ROLES = ("entrance", "exit")
 STREAM_FRAMES = {role: None for role in CAMERA_ROLES}
+# When the frame behind each published JPEG was decoded (for latency metrics).
+STREAM_FRAME_TIMES = {role: 0.0 for role in CAMERA_ROLES}
 STREAM_CONDITION = threading.Condition()
 # Open MJPEG connections per camera. Any page that shows the live view
 # (Station, Gate Monitor, Calibration, Settings › Cameras) counts as a viewer.
 STREAM_CLIENTS = {role: 0 for role in CAMERA_ROLES}
 STREAM_CLIENTS_LOCK = threading.Lock()
 RTSP_DIAGNOSIS = RtspDiagnosis()
+# Full-resolution frames from the snapshot (main) stream, only around triggers.
+HIRES = {}
+
+
+def hires_grabber(role):
+    if role not in HIRES:
+        HIRES[role] = HiResGrabber(
+            role,
+            lambda camera_config: build_connection_source(camera_config, camera_config["snapshot_source_value"]),
+        )
+    return HIRES[role]
 RESOLVED_OVERLAY_HOLD_SECONDS = 1.25
 RESOLVED_DETECTION_COOLDOWN_SECONDS = 1.5
 GUEST_TRACK_COOLDOWN_SECONDS = 10.0
@@ -141,6 +157,7 @@ class MjpegStreamHandler(BaseHTTPRequestHandler):
                 continue
 
             last_frame_id = id(frame)
+            frame_time = STREAM_FRAME_TIMES.get(role, 0.0)
 
             try:
                 self.wfile.write(b"--frame\r\n")
@@ -151,6 +168,9 @@ class MjpegStreamHandler(BaseHTTPRequestHandler):
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
                 return
+            metrics.rate(role, "stream_sent")
+            if frame_time:
+                metrics.timing(role, "pipeline", (time.monotonic() - frame_time) * 1000.0)
 
     def log_message(self, format, *args):
         return
@@ -334,38 +354,62 @@ def maybe_save_latest_frame(role, frame, state, now_monotonic):
     return saved
 
 
-def publish_stream_frame(role, frame):
+def publish_due(state, perf):
+    """
+    Live view rate cap (stream_fps): skip encoding frames nobody would see.
+    A running schedule keeps the average at stream_fps even when the camera's
+    frame rate is not a multiple of it (e.g. 15 of 25 fps).
+    """
+    now = time.monotonic()
+    interval = 1.0 / max(1.0, float(perf.get("stream_fps", 15.0)))
+    due = state.get("next_publish_at", 0.0)
+    if now < due:
+        return False
+    state["next_publish_at"] = max(due + interval, now - interval)
+    return True
+
+
+def publish_stream_frame(role, frame, frame_time=None, perf=None):
     """
     Publish one live frame to connected MJPEG clients without saving it to disk.
+
+    Encoded once per frame; every viewer of this camera gets the same JPEG.
     """
-    frame = resize_frame_for_stream(frame)
-    encoded, buffer = cv2.imencode(
-        ".jpg",
-        frame,
-        [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY],
-    )
+    width = int((perf or {}).get("stream_width", STREAM_FRAME_MAX_WIDTH))
+    quality = int((perf or {}).get("jpeg_quality", JPEG_QUALITY))
+    with metrics.timed(role, "resize"):
+        frame = resize_frame_for_stream(frame, width)
+    with metrics.timed(role, "encode"):
+        encoded, buffer = cv2.imencode(
+            ".jpg",
+            frame,
+            [cv2.IMWRITE_JPEG_QUALITY, quality],
+        )
 
     if not encoded:
         return False
 
+    metrics.rate(role, "stream_published")
+    metrics.value(role, "jpeg_kb", round(len(buffer) / 1024, 1))
     with STREAM_CONDITION:
         STREAM_FRAMES[role] = buffer.tobytes()
+        STREAM_FRAME_TIMES[role] = frame_time or time.monotonic()
         STREAM_CONDITION.notify_all()
 
     return True
 
 
-def resize_frame_for_stream(frame):
+def resize_frame_for_stream(frame, max_width=STREAM_FRAME_MAX_WIDTH):
     """
     Bound MJPEG frame size so browser display stays responsive on low-end CPUs.
     """
     height, width = frame.shape[:2]
 
-    if STREAM_FRAME_MAX_WIDTH <= 0 or width <= STREAM_FRAME_MAX_WIDTH:
+    if max_width <= 0 or width <= max_width:
         return frame
 
-    scale = STREAM_FRAME_MAX_WIDTH / float(width)
-    target_size = (STREAM_FRAME_MAX_WIDTH, max(1, int(height * scale)))
+    scale = max_width / float(width)
+    target_size = (max_width, max(1, int(height * scale)))
 
     return cv2.resize(frame, target_size, interpolation=cv2.INTER_AREA)
 
@@ -519,7 +563,7 @@ def resolve_allowed_vehicle_classes(model):
     return supported
 
 
-def build_capture(source_type, capture_source):
+def build_capture(source_type, capture_source, decoder_threads=0):
     """
     Use the most practical OpenCV backend for the configured source.
     """
@@ -527,6 +571,11 @@ def build_capture(source_type, capture_source):
         configure_network_capture_options(source_type)
 
         if hasattr(cv2, "CAP_FFMPEG"):
+            # Live latency: FFmpeg's default frame threading holds ~9 frames
+            # back (~350 ms measured on the VIGI sub stream). One decoder
+            # thread is enough for a sub stream and delivers each frame at once.
+            if decoder_threads > 0 and hasattr(cv2, "CAP_PROP_N_THREADS"):
+                return cv2.VideoCapture(capture_source, cv2.CAP_FFMPEG, [cv2.CAP_PROP_N_THREADS, int(decoder_threads)])
             return cv2.VideoCapture(capture_source, cv2.CAP_FFMPEG)
 
         return cv2.VideoCapture(capture_source)
@@ -553,15 +602,17 @@ def configure_network_capture_options(source_type):
     if os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS"):
         return
 
-    # Low latency: nobuffer/low_delay stop FFmpeg from holding extra frames, and
-    # max_delay/reorder_queue_size 0 remove the RTSP jitter buffer. "timeout"
-    # is the newer FFmpeg name for "stimeout"; the unused one is ignored.
+    # Measured on the VIGI C240 (single-thread decoder, identical frames
+    # compared between two connections): fflags=nobuffer, flags=low_delay,
+    # max_delay=0 and reorder_queue_size=0 gave 0 ms less delay, but made the
+    # first frame take 2.4 s (sub) to 12.4 s (main) instead of 0.7 s. The low
+    # delay comes from the one-thread decoder (see build_capture), so only TCP,
+    # timeouts and a short stream probe are set here. "timeout" is the newer
+    # FFmpeg name for "stimeout"; the unused one is ignored.
     os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
         "rtsp_transport;tcp"
-        "|fflags;nobuffer"
-        "|flags;low_delay"
-        "|max_delay;0"
-        "|reorder_queue_size;0"
+        "|probesize;500000"
+        "|analyzeduration;500000"
         "|stimeout;5000000"
         "|timeout;5000000"
     )
@@ -657,8 +708,15 @@ class LatestFrameReader:
     real time. Reading non-stop here means old frames are simply overwritten.
     """
 
-    def __init__(self, capture):
+    def __init__(self, capture, role=None, decoder_threads=0):
         self.capture = capture
+        self.role = role
+        self.decoder_threads = decoder_threads
+        # Set when one decoder thread cannot keep up (e.g. a manual 4K source):
+        # the stream worker then reconnects with FFmpeg's own threading.
+        self.too_slow = False
+        self.frame_time = 0.0
+        self._clock_start = None
         self.condition = threading.Condition()
         self.frame = None
         self.sequence = 0
@@ -674,10 +732,13 @@ class LatestFrameReader:
     def _run(self):
         try:
             while not self.stop_event.is_set():
+                started = time.perf_counter()
                 try:
                     has_frame, frame = self.capture.read()
                 except Exception:
                     has_frame, frame = False, None
+                if has_frame and frame is not None and self.role:
+                    self._measure(started, frame)
 
                 if not has_frame or frame is None:
                     with self.condition:
@@ -695,6 +756,26 @@ class LatestFrameReader:
             # capture to this thread: free it only now, after read() is done.
             if self.stop_event.is_set():
                 self._release_capture()
+
+    def _measure(self, started, frame):
+        """Read time, capture FPS and decoder backlog against the stream clock."""
+        now = time.monotonic()
+        metrics.timing(self.role, "read", (time.perf_counter() - started) * 1000.0)
+        metrics.rate(self.role, "capture")
+        try:
+            position = float(self.capture.get(cv2.CAP_PROP_POS_MSEC))
+        except Exception:
+            position = 0.0
+        if position > 0:
+            if self._clock_start is None or position < self._clock_start[1]:
+                self._clock_start = (now, position)
+            backlog = (now - self._clock_start[0]) * 1000.0 - (position - self._clock_start[1])
+            metrics.value(self.role, "decode_backlog_ms", round(backlog))
+            if backlog > 1500 and self.decoder_threads == 1 and now - self._clock_start[0] > 3:
+                self.too_slow = True
+        metrics.value(self.role, "resolution", f"{frame.shape[1]}x{frame.shape[0]}")
+        metrics.value(self.role, "decoder_threads", self.decoder_threads or "auto")
+        self.frame_time = now
 
     def isOpened(self):
         return not self.failed and self.capture.isOpened()
@@ -751,13 +832,14 @@ class LatestFrameReader:
         self.capture.release()
 
 
-def open_capture(camera_config):
+def open_capture(camera_config, decoder_threads=None):
     """
     Open one configured camera source.
     """
     capture_source = resolve_capture_source(camera_config)
     connection_source = build_connection_source(camera_config, capture_source)
-    capture = build_capture(camera_config["source_type"], connection_source)
+    threads = camera_config.get("decoder_threads", 1) if decoder_threads is None else decoder_threads
+    capture = build_capture(camera_config["source_type"], connection_source, threads)
 
     try:
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -767,7 +849,7 @@ def open_capture(camera_config):
     # Low latency: wrap the opened capture so a background thread always holds
     # the newest frame.
     if capture.isOpened():
-        capture = LatestFrameReader(capture)
+        capture = LatestFrameReader(capture, camera_config.get("camera_role"), threads)
 
     return capture, capture_source
 
@@ -854,11 +936,19 @@ def ensure_capture(camera_config, state):
     if state["capture"] is None and now_monotonic < state.get("retry_after", 0.0):
         return None, capture_source
 
-    if state["capture"] is not None and state["signature"] == signature and state["capture"].isOpened():
-        return state["capture"], capture_source
+    current = state["capture"]
+    if current is not None and getattr(current, "too_slow", False):
+        # One decoder thread fell behind this source: use FFmpeg threading for it.
+        state.setdefault("decoder_threads_override", {})[signature] = 0
+        print(f"{camera_config['camera_role']}: single-thread decoding too slow for this source; using FFmpeg threads.", flush=True)
+        release_capture(state)
+        current = None
+
+    if current is not None and state["signature"] == signature and current.isOpened():
+        return current, capture_source
 
     release_capture(state)
-    capture, capture_source = open_capture(camera_config)
+    capture, capture_source = open_capture(camera_config, state.get("decoder_threads_override", {}).get(signature))
     state["capture"] = capture
     state["signature"] = signature
 
@@ -909,6 +999,8 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
         "station_activity": station_activity,
         "camera_power_mode": "active" if station_activity["active"] else "standby",
         "pid": os.getpid(),
+        "metrics": metrics.snapshot(),
+        "cpu": metrics.cpu_percent(),
         "stream_server": {
             "bind_host": MJPEG_STREAM_BIND_HOST,
             "host": MJPEG_STREAM_HOST,
@@ -1760,6 +1852,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             for analysis_frame, analysis_xyxy in window.get("analysis_frames", [])
             if analysis_frame is not None
         ]
+        window_started_at = window.get("started_at", now_monotonic)
         window_payload = {
             "event_key": window["event_key"],
             "camera_id": window.get("camera_id"),
@@ -1793,6 +1886,18 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
         with state["lock"]:
             state["last_error"] = f"{role.capitalize()} vehicle had no pass read, but no snapshot frame was available."
         return
+
+    # A full-resolution frame from the moment of the crossing, when available:
+    # sharper snapshot and plate reading than the small live-stream frame.
+    hires_frame = HIRES[role].frame_near(window_started_at) if role in HIRES else None
+    if hires_frame is not None:
+        hires_box = scale_box(window_payload["xyxy"], snapshot_frame.shape, hires_frame.shape)
+        analysis_frames = [(hires_frame, hires_box)] + analysis_frames
+        snapshot_frame = hires_frame
+        # Live-frame box kept for matching later live detections of this car.
+        window_payload["live_xyxy"] = window_payload["xyxy"]
+        window_payload["xyxy"] = hires_box
+        metrics.rate(role, "hires_used")
 
     snapshot = encode_frame_snapshot(
         role,
@@ -1831,7 +1936,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
 
     with state["lock"]:
         state["track_overlays"][track_id] = initial_result.get("overlay") or state["track_overlays"].get(track_id) or default_overlay()
-        remember_recent_resolution_locked(state, track_id, window_payload["xyxy"], state["track_overlays"][track_id], time.monotonic())
+        remember_recent_resolution_locked(state, track_id, window_payload.get("live_xyxy", window_payload["xyxy"]), state["track_overlays"][track_id], time.monotonic())
 
         if initial_result.get("accepted"):
             if initial_result.get("created"):
@@ -1862,7 +1967,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
 
         with state["lock"]:
             state["track_overlays"][track_id] = color_result.get("overlay") or state["track_overlays"].get(track_id) or default_overlay()
-            remember_recent_resolution_locked(state, track_id, window_payload["xyxy"], state["track_overlays"][track_id], time.monotonic())
+            remember_recent_resolution_locked(state, track_id, window_payload.get("live_xyxy", window_payload["xyxy"]), state["track_overlays"][track_id], time.monotonic())
 
             if not color_result.get("accepted"):
                 state["last_error"] = color_result.get("message", "Guest vehicle color could not be saved.")
@@ -1897,7 +2002,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
 
     with state["lock"]:
         state["track_overlays"][track_id] = result.get("overlay") or state["track_overlays"].get(track_id) or default_overlay()
-        remember_recent_resolution_locked(state, track_id, window_payload["xyxy"], state["track_overlays"][track_id], time.monotonic())
+        remember_recent_resolution_locked(state, track_id, window_payload.get("live_xyxy", window_payload["xyxy"]), state["track_overlays"][track_id], time.monotonic())
 
         if not result.get("accepted"):
             state["last_error"] = result.get("message", "No-pass alert could not be saved.")
@@ -2215,6 +2320,7 @@ def camera_stream_worker(role, state, model_info, stop_event):
         try:
             runtime_config = load_runtime_config()
             camera_config = runtime_config["cameras"][role]
+            perf = performance_settings(runtime_config)
 
             # Phase 1: the camera is no longer released when no Station page is
             # open. Capture keeps running so vehicle detection never stops;
@@ -2246,8 +2352,10 @@ def camera_stream_worker(role, state, model_info, stop_event):
                     success = False
                 else:
                     now_monotonic = time.monotonic()
+                    frame_time = getattr(capture, "frame_time", 0.0) or now_monotonic
 
                     with state["lock"]:
+                        state["latest_frame_at"] = frame_time
                         state["camera_running"] = True
                         state["error_code"] = None
                         state["last_capture_time"] = datetime.now().astimezone().isoformat()
@@ -2255,7 +2363,8 @@ def camera_stream_worker(role, state, model_info, stop_event):
                         state["latest_frame"] = frame
                         state["latest_camera_config"] = camera_config.copy()
                         state["latest_frame_version"] += 1
-                        maybe_save_latest_frame(role, frame, state, now_monotonic)
+                        with metrics.timed(role, "save"):
+                            maybe_save_latest_frame(role, frame, state, now_monotonic)
 
                     vehicle_labels = model_info.get("vehicle_labels", {})
 
@@ -2265,8 +2374,8 @@ def camera_stream_worker(role, state, model_info, stop_event):
                         state["detection_ready"] = False
                         state["retry_count"] = 0
                         state["last_error"] = "Calibration ROI mask and trigger line are required before auto logging starts."
-                        if viewer_active:
-                            publish_stream_frame(role, frame)
+                        if viewer_active and publish_due(state, perf):
+                            publish_stream_frame(role, frame, frame_time, perf)
                     elif not vehicle_labels:
                         state["detection_ready"] = False
                         state["retry_count"] = 0
@@ -2275,13 +2384,16 @@ def camera_stream_worker(role, state, model_info, stop_event):
                             if model_info.get("model") is None
                             else "The current detector model does not expose any supported vehicle classes."
                         )
-                        if viewer_active:
-                            publish_stream_frame(role, frame)
+                        if viewer_active and publish_due(state, perf):
+                            publish_stream_frame(role, frame, frame_time, perf)
                     else:
                         refresh_pending_window_snapshots(frame, state)
-                        if viewer_active:
-                            live_frame = render_annotated_frame(role, frame, None, camera_config, state, vehicle_labels)
-                            publish_stream_frame(role, live_frame)
+                        # The live view gets the newest frame plus the last
+                        # detection boxes, at its own rate; it never waits for YOLO.
+                        if viewer_active and publish_due(state, perf):
+                            with metrics.timed(role, "overlay"):
+                                live_frame = render_annotated_frame(role, frame, None, camera_config, state, vehicle_labels)
+                            publish_stream_frame(role, live_frame, frame_time, perf)
 
                     success = True
         except Exception as error:
@@ -2303,9 +2415,10 @@ def camera_stream_worker(role, state, model_info, stop_event):
     release_capture(state)
 
 
-def next_detection_frame(state):
+def next_detection_frame(state, min_interval=None):
     """
-    Return the latest frame only when enough new stream frames have arrived.
+    Return the newest frame when detection is due (its own rate, detection_fps),
+    skipping frames in between. The live view never waits for this.
     """
     with state["lock"]:
         latest_frame = state.get("latest_frame")
@@ -2316,11 +2429,99 @@ def next_detection_frame(state):
         if latest_frame is None or camera_config is None:
             return None, None
 
-        if latest_frame_version - last_detected_frame_version < DETECTION_FRAME_INTERVAL:
+        if min_interval is None:
+            if latest_frame_version - last_detected_frame_version < DETECTION_FRAME_INTERVAL:
+                return None, None
+        elif latest_frame_version == last_detected_frame_version or \
+                time.monotonic() - state.get("last_detection_at", 0.0) < min_interval:
             return None, None
 
         state["last_detected_frame_version"] = latest_frame_version
+        state["last_detection_at"] = time.monotonic()
         return latest_frame.copy(), camera_config.copy()
+
+
+_YOLO_DEVICE = {"resolved": None}
+
+
+def yolo_device(setting):
+    """
+    auto: NVIDIA GPU (cuda), then Apple Silicon GPU (mps), else CPU (e.g. Windows without CUDA).
+    """
+    if setting and setting != "auto":
+        return setting
+    if _YOLO_DEVICE["resolved"] is None:
+        device = "cpu"
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                device = "cuda:0"
+            elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                device = "mps"
+        except Exception:
+            pass
+        _YOLO_DEVICE["resolved"] = device
+        print(f"YOLO device: {device}", flush=True)
+    return _YOLO_DEVICE["resolved"]
+
+
+def roi_crop_box(camera_config, frame, enabled):
+    """
+    Pixel box around the calibrated zone (+8% margin) when it is clearly
+    smaller than the frame, else None. YOLO then sees the zone at a higher
+    effective resolution and does less work.
+    """
+    if not enabled:
+        return None
+    height, width = frame.shape[:2]
+    polygon = normalized_polygon_to_pixels(camera_config.get("calibration_mask"), width, height)
+    if not polygon:
+        return None
+    xs = [point[0] for point in polygon]
+    ys = [point[1] for point in polygon]
+    margin_x, margin_y = int(width * 0.08), int(height * 0.08)
+    x1, y1 = max(0, int(min(xs)) - margin_x), max(0, int(min(ys)) - margin_y)
+    x2, y2 = min(width, int(max(xs)) + margin_x), min(height, int(max(ys)) + margin_y)
+    if x2 - x1 < 32 or y2 - y1 < 32 or (x2 - x1) * (y2 - y1) > 0.8 * width * height:
+        return None
+    return x1, y1, x2, y2
+
+
+def offset_results(results, x1, y1):
+    """Move boxes found in a crop back to full-frame pixel coordinates."""
+    boxes = getattr(results, "boxes", None)
+    if boxes is None or boxes.data is None or len(boxes.data) == 0:
+        return results
+    data = boxes.data
+    data[:, 0] += x1
+    data[:, 2] += x1
+    data[:, 1] += y1
+    data[:, 3] += y1
+    return results
+
+
+def vehicle_in_zone(results, camera_config, frame, vehicle_labels):
+    boxes = getattr(results, "boxes", None)
+    if boxes is None or boxes.cls is None or len(boxes) == 0:
+        return False
+    mask = normalized_polygon_to_pixels(camera_config.get("calibration_mask"), frame.shape[1], frame.shape[0])
+    for class_id, xyxy in zip(boxes.cls.int().cpu().tolist(), boxes.xyxy.cpu().tolist()):
+        if class_id in vehicle_labels and bbox_inside_roi(xyxy, mask):
+            return True
+    return False
+
+
+def reset_tracker(model_info):
+    """Drop ByteTrack state (new track ids from here on)."""
+    model = model_info.get("model")
+    predictor = getattr(model, "predictor", None)
+    if predictor is not None and getattr(predictor, "trackers", None):
+        for tracker in predictor.trackers:
+            try:
+                tracker.reset()
+            except Exception:
+                pass
 
 
 def camera_detection_worker(role, state, model_info, stop_event):
@@ -2330,10 +2531,11 @@ def camera_detection_worker(role, state, model_info, stop_event):
     while not stop_event.is_set():
         # Phase 1: removed the "no Station page open" gate. Detection runs
         # whenever the detector is on.
-        frame, camera_config = next_detection_frame(state)
+        perf = performance_settings(load_runtime_config())
+        frame, camera_config = next_detection_frame(state, 1.0 / max(0.5, perf["detection_fps"]))
 
         if frame is None:
-            stop_event.wait(CAPTURE_INTERVAL_SECONDS)
+            stop_event.wait(0.01)
             continue
 
         if not calibration_ready(camera_config):
@@ -2348,18 +2550,42 @@ def camera_detection_worker(role, state, model_info, stop_event):
         runtime_config = load_runtime_config()
         laravel_client = LaravelEventClient(runtime_config)
 
+        with state["lock"]:
+            frame_time = state.get("latest_frame_at") or time.monotonic()
+        crop = roi_crop_box(camera_config, frame, perf["roi_crop"])
+        # The tracker must always see the same kind of input: when the zone
+        # (or the crop decision) changes, start tracking fresh.
+        crop_key = (crop, frame.shape[:2])
+        if state.get("crop_key") != crop_key:
+            if state.get("crop_key") is not None:
+                reset_tracker(model_info)
+            state["crop_key"] = crop_key
+        detect_input = frame if crop is None else frame[crop[1]:crop[3], crop[0]:crop[2]]
+        device = yolo_device(perf["yolo_device"])
         try:
-            results = model_info["model"].track(
-                frame,
-                persist=True,
-                verbose=False,
-                tracker=TRACKER_CONFIG,
-                conf=DETECTION_CONFIDENCE_THRESHOLD,
-                iou=DETECTION_IOU_THRESHOLD,
-                classes=sorted(vehicle_labels.keys()),
-                imgsz=YOLO_IMAGE_SIZE,
-            )[0]
+            with metrics.timed(role, "yolo"):
+                results = model_info["model"].track(
+                    detect_input,
+                    persist=True,
+                    verbose=False,
+                    tracker=TRACKER_CONFIG,
+                    conf=DETECTION_CONFIDENCE_THRESHOLD,
+                    iou=DETECTION_IOU_THRESHOLD,
+                    classes=sorted(vehicle_labels.keys()),
+                    imgsz=int(perf["yolo_imgsz"]),
+                    device=device,
+                )[0]
+            if crop is not None:
+                results = offset_results(results, crop[0], crop[1])
+            metrics.value(role, "yolo_device", device)
+            metrics.value(role, "yolo_input", f"{detect_input.shape[1]}x{detect_input.shape[0]}@{int(perf['yolo_imgsz'])}")
         except Exception as error:
+            if device != "cpu" and _YOLO_DEVICE["resolved"] == device:
+                # A GPU backend that fails (driver, unsupported op) falls back to CPU.
+                print(f"YOLO on {device} failed ({error}); using CPU.", flush=True)
+                _YOLO_DEVICE["resolved"] = "cpu"
+                reset_tracker(model_info)
+                continue
             state["detection_ready"] = False
             state["retry_count"] += 1
             state["last_error"] = f"Detection failed: {error}"
@@ -2369,9 +2595,13 @@ def camera_detection_worker(role, state, model_info, stop_event):
         state["detection_ready"] = True
         state["retry_count"] = 0
         state["last_error"] = ""
-        process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels)
-
-        stop_event.wait(CAPTURE_INTERVAL_SECONDS)
+        with metrics.timed(role, "process"):
+            process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels)
+        # A vehicle in the zone: have full-resolution frames ready for its snapshot.
+        if perf["hires_on_trigger"] and camera_config.get("snapshot_source_value") and vehicle_in_zone(results, camera_config, frame, vehicle_labels):
+            hires_grabber(role).trigger(camera_config)
+        metrics.rate(role, "detection")
+        metrics.timing(role, "detection_age", (time.monotonic() - frame_time) * 1000.0)
 
 
 def run_detector_loop():
@@ -2423,6 +2653,7 @@ def run_detector_loop():
             detection_worker.start()
             workers.extend([stream_worker, detection_worker])
 
+        last_metrics_log = time.monotonic()
         while True:
             runtime_config = load_runtime_config()
             write_status(
@@ -2432,6 +2663,9 @@ def run_detector_loop():
                 service_running=True,
                 service_message="Dual-camera detector running.",
             )
+            if time.monotonic() - last_metrics_log >= 30:
+                last_metrics_log = time.monotonic()
+                print("METRICS " + metrics.summary_line(metrics.snapshot(), metrics.cpu_percent()), flush=True)
             time.sleep(STATUS_WRITE_INTERVAL_SECONDS)
     except KeyboardInterrupt:
         if 'stop_event' in locals():

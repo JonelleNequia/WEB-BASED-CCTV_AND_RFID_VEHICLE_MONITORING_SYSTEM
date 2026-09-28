@@ -50,6 +50,7 @@ class DeviceController extends Controller
             'station' => ['required', Rule::in(DeviceAssignment::STATIONS)],
             'role' => ['required', Rule::in([DeviceAssignment::ROLE_CAMERA, DeviceAssignment::ROLE_READER])],
             'stream' => ['nullable', 'in:main,sub'],
+            'snapshots' => ['nullable', 'boolean'],
             'username' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'max:255'],
             'port' => ['nullable', 'integer', 'between:1,65535'],
@@ -75,6 +76,25 @@ class DeviceController extends Controller
             'message' => ucfirst($validated['station']).' '.$validated['role'].' unassigned.',
             'devices' => $registry->panelPayload(),
         ]);
+    }
+
+    /**
+     * Live-latency work: camera encoder settings, current vs recommended.
+     */
+    public function encoderPreview(string $station, \App\Services\CameraEncoderService $encoders): JsonResponse
+    {
+        abort_unless(in_array($station, DeviceAssignment::STATIONS, true), 404);
+        $result = $encoders->preview($station);
+
+        return response()->json($result, $result['ok'] ? 200 : 422);
+    }
+
+    public function encoderOptimize(string $station, \App\Services\CameraEncoderService $encoders): JsonResponse
+    {
+        abort_unless(in_array($station, DeviceAssignment::STATIONS, true), 404);
+        $result = $encoders->optimize($station);
+
+        return response()->json($result, $result['ok'] ? 200 : 422);
     }
 
     public function acknowledge(DeviceRegistryService $registry): JsonResponse

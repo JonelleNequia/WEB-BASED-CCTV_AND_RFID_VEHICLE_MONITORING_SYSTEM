@@ -59,6 +59,21 @@ CAMERA_RETRY_DELAY_SECONDS = 2.0
 STATION_VIEWER_IDLE_AFTER_SECONDS = 10.0
 STATION_IDLE_POLL_SECONDS = 1.0
 
+# Live-latency defaults; Laravel exports the values set in Settings › Cameras.
+PERFORMANCE_DEFAULTS = {
+    "stream_fps": 15.0,        # JPEGs per second sent to the live views
+    "stream_width": 960,       # live view width in pixels (resized before encoding)
+    "jpeg_quality": 70,
+    "detection_fps": 8.0,      # YOLO runs per second per camera
+    "yolo_imgsz": 480,         # YOLO input size
+    "yolo_device": "auto",     # auto = cuda, then Apple mps, then cpu
+    "roi_crop": 1,             # run YOLO only on the calibrated zone when it is smaller than the frame
+    "hires_on_trigger": 1,     # fetch a full-resolution frame from the snapshot stream on each trigger
+}
+# The full-resolution stream is decoded with more threads, which delays it by
+# about this much against the low-delay live stream (measured on the VIGI C240).
+HIRES_DECODE_DELAY_SECONDS = 0.35
+
 # Detection settings.
 MODEL_PATH = "yolov8n.pt"
 
@@ -161,6 +176,13 @@ def normalize_camera_config(role, loaded_config):
     config["source_type"] = source_type
     config["source_username"] = str(config.get("source_username", "") or "").strip()
     config["source_password"] = str(config.get("source_password", "") or "").strip()
+    # Live-latency work: full-resolution stream used only for trigger snapshots,
+    # and the decoder thread hint (1 = lowest delay, 0 = let FFmpeg decide).
+    config["snapshot_source_value"] = str(config.get("snapshot_source_value", "") or "").strip()
+    try:
+        config["decoder_threads"] = int(config.get("decoder_threads", 1))
+    except (TypeError, ValueError):
+        config["decoder_threads"] = 1
     config["browser_device_id"] = config.get("browser_device_id")
     config["browser_label"] = config.get("browser_label")
     config["calibration_mask"] = config.get("calibration_mask")
@@ -177,10 +199,43 @@ def normalize_camera_config(role, loaded_config):
     return config
 
 
+_RUNTIME_CACHE = {"mtime": None, "config": None}
+
+
 def load_runtime_config():
     """
     Load the dual-camera config exported by Laravel.
+
+    Live-latency work: the stream workers call this for every frame; the file
+    is parsed again only when Laravel rewrote it.
     """
+    try:
+        mtime = RUNTIME_CONFIG_PATH.stat().st_mtime_ns
+    except OSError:
+        mtime = None
+    cached = _RUNTIME_CACHE["config"]
+    if cached is not None and mtime is not None and mtime == _RUNTIME_CACHE["mtime"]:
+        return json.loads(json.dumps(cached))
+    config = _load_runtime_config_file()
+    _RUNTIME_CACHE.update({"mtime": mtime, "config": config})
+    return json.loads(json.dumps(config))
+
+
+def performance_settings(runtime_config):
+    """
+    Live view and detection tuning (Settings › Cameras › Live view performance).
+    """
+    settings = dict(PERFORMANCE_DEFAULTS)
+    exported = (runtime_config.get("system_settings") or {}).get("performance") or {}
+    for key, default in PERFORMANCE_DEFAULTS.items():
+        try:
+            settings[key] = type(default)(exported.get(key, default)) if not isinstance(default, str) else str(exported.get(key, default))
+        except (TypeError, ValueError):
+            settings[key] = default
+    return settings
+
+
+def _load_runtime_config_file():
     config = json.loads(json.dumps(DEFAULT_RUNTIME_CONFIG))
 
     if not RUNTIME_CONFIG_PATH.exists():

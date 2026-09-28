@@ -139,7 +139,9 @@ class PlugAndDetectDevicesTest extends TestCase
         $summary = $registry->ingestScan($this->scan('192.0.2.'));
 
         $this->assertSame(2, $summary['moved']);
-        $this->assertSame('rtsp://192.0.2.20:554/stream1', Camera::query()->forRole('entrance')->value('source_value'));
+        // Live view on the sub stream (default); the main stream only for trigger snapshots.
+        $this->assertSame('rtsp://192.0.2.20:554/stream2', Camera::query()->forRole('entrance')->value('source_value'));
+        $this->assertSame('rtsp://192.0.2.20:554/stream1', Camera::query()->forRole('entrance')->value('snapshot_source_value'));
         $this->assertSame(1, DeviceAssignment::query()->where('station', 'entrance')->where('role', 'camera')->count());
         $this->assertSame($camera->id, DeviceAssignment::query()->where('station', 'entrance')->where('role', 'camera')->value('network_device_id'));
 

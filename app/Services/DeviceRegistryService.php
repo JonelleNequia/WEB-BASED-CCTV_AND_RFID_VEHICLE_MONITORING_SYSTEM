@@ -198,7 +198,9 @@ class DeviceRegistryService
     protected function assignCamera(NetworkDevice $device, string $station, array $input): array
     {
         $camera = Camera::query()->forRole($station)->firstOrFail();
-        $stream = ($input['stream'] ?? 'main') === 'sub' ? 'sub' : 'main';
+        // Live-latency work: the sub stream is the default live/detection stream;
+        // the main stream is used for full-resolution snapshots on a trigger.
+        $stream = ($input['stream'] ?? 'sub') === 'main' ? 'main' : 'sub';
         $typed = filled($input['username'] ?? null);
 
         // Try the login typed now, else the one saved for this station, else the other station's.
@@ -240,6 +242,9 @@ class DeviceRegistryService
                 'stream' => $stream,
                 'rtsp_port' => $resolved['port'],
                 'path' => $resolved['path'],
+                'snapshots' => (bool) ($input['snapshots'] ?? true),
+                'snapshot_path' => $this->vendorPaths($device->cameraDetails())['main'] ?? null,
+                'paths' => $this->vendorPaths($device->cameraDetails()),
             ]]
         );
 
@@ -413,6 +418,36 @@ class DeviceRegistryService
         return $result;
     }
 
+    /**
+     * Settings › Cameras: which stream feeds the live view/detection, and
+     * whether full-resolution snapshots come from the main stream.
+     */
+    public function updateCameraStreams(string $station, string $stream, bool $snapshots): void
+    {
+        $assignment = DeviceAssignment::query()->with('device')
+            ->where('station', $station)->where('role', DeviceAssignment::ROLE_CAMERA)->first();
+
+        if (! $assignment?->device) {
+            return;
+        }
+
+        $options = (array) $assignment->options;
+        $paths = (array) ($options['paths'] ?? $this->vendorPaths($assignment->device->cameraDetails()));
+        $stream = $stream === 'main' ? 'main' : 'sub';
+
+        $assignment->options = [
+            ...$options,
+            'stream' => $stream,
+            'path' => $paths[$stream] ?? ($options['path'] ?? '/'),
+            'snapshots' => $snapshots,
+            'snapshot_path' => $paths['main'] ?? ($options['snapshot_path'] ?? null),
+            'paths' => $paths,
+        ];
+        $assignment->save();
+
+        $this->syncAssignments(force: true);
+    }
+
     public function unassign(string $station, string $role): void
     {
         DeviceAssignment::query()->where('station', $station)->where('role', $role)->delete();
@@ -461,9 +496,15 @@ class DeviceRegistryService
 
                 $options = (array) $assignment->options;
                 $url = CameraSource::rtspUrl((string) $device->ip, $options['rtsp_port'] ?? null, $options['path'] ?? '/');
+                // Full-resolution main stream for trigger snapshots, only when the
+                // live stream is not already the main stream.
+                $snapshot = ($options['snapshots'] ?? false) && filled($options['snapshot_path'] ?? null)
+                    && ($options['snapshot_path'] ?? null) !== ($options['path'] ?? null)
+                    ? CameraSource::rtspUrl((string) $device->ip, $options['rtsp_port'] ?? null, $options['snapshot_path'])
+                    : null;
 
-                if ($camera->source_type !== 'rtsp' || $camera->source_value !== $url) {
-                    $camera->forceFill(['source_type' => 'rtsp', 'source_value' => $url])->save();
+                if ($camera->source_type !== 'rtsp' || $camera->source_value !== $url || $camera->snapshot_source_value !== $snapshot) {
+                    $camera->forceFill(['source_type' => 'rtsp', 'source_value' => $url, 'snapshot_source_value' => $snapshot])->save();
                     $cameraChanged = true;
                 }
             });

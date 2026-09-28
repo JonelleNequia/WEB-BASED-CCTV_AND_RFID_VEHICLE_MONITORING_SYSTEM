@@ -24,6 +24,7 @@ class Camera extends Model
         'camera_role',
         'source_type',
         'source_value',
+        'snapshot_source_value',
         'source_username',
         'source_password',
         'browser_device_id',

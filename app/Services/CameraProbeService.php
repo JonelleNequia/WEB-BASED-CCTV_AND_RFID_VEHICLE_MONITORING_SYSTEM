@@ -219,6 +219,90 @@ class CameraProbeService
     }
 
     /**
+     * Live-latency work: the camera's video encoder settings over ONVIF.
+     *
+     * @return array{result: string, message: string, media_url?: string, encoders: list<array<string, mixed>>}
+     */
+    public function encoderConfigurations(string $deviceServiceUrl, string $username, string $password): array
+    {
+        try {
+            $mediaUrl = $this->mediaUrl($deviceServiceUrl, $username, $password);
+            $response = $this->soap($mediaUrl, '<GetVideoEncoderConfigurations xmlns="http://www.onvif.org/ver10/media/wsdl"/>', $username, $password);
+        } catch (Throwable) {
+            return ['result' => self::UNREACHABLE, 'message' => 'The camera ONVIF service did not answer.', 'encoders' => []];
+        }
+
+        if ($this->soapUnauthorized($response)) {
+            return ['result' => self::UNAUTHORIZED, 'message' => 'The camera rejected the username or password.', 'encoders' => []];
+        }
+
+        preg_match_all('#<(\w+:)?Configurations\s[^>]*token="([^"]+)"[^>]*>(.*?)</\1?Configurations>#s', $response['body'], $blocks, PREG_SET_ORDER);
+
+        $encoders = [];
+        foreach ($blocks as $block) {
+            $inner = $block[3];
+            $get = function (string $tag) use ($inner): ?string {
+                return preg_match('#<(?:\w+:)?'.$tag.'>([^<]*)<#', $inner, $match) ? trim($match[1]) : null;
+            };
+            $encoders[] = [
+                'token' => $block[2],
+                'name' => $get('Name'),
+                'encoding' => $get('Encoding'),
+                'width' => (int) $get('Width'),
+                'height' => (int) $get('Height'),
+                'fps' => (int) $get('FrameRateLimit'),
+                'bitrate' => (int) $get('BitrateLimit'),
+                'gov' => $get('GovLength') !== null ? (int) $get('GovLength') : null,
+                'profile' => $get('H264Profile'),
+                'xml' => $inner,
+            ];
+        }
+
+        return ['result' => self::OK, 'message' => 'Encoder settings read.', 'media_url' => $mediaUrl, 'encoders' => $encoders];
+    }
+
+    /**
+     * Write one encoder configuration back with some values changed.
+     *
+     * @param  array<string, mixed>  $encoder  from encoderConfigurations()
+     * @param  array{fps?: int, gov?: int, bitrate?: int}  $changes
+     */
+    public function setEncoderConfiguration(string $mediaUrl, array $encoder, array $changes, string $username, string $password): bool
+    {
+        $xml = (string) $encoder['xml'];
+        $replace = function (string $tag, int $value) use (&$xml): void {
+            $xml = (string) preg_replace('#(<(?:\w+:)?'.$tag.'>)[^<]*(<)#', '${1}'.$value.'${2}', $xml, 1);
+        };
+
+        foreach (['fps' => 'FrameRateLimit', 'gov' => 'GovLength', 'bitrate' => 'BitrateLimit'] as $key => $tag) {
+            if (isset($changes[$key])) {
+                $replace($tag, (int) $changes[$key]);
+            }
+        }
+
+        $body = '<SetVideoEncoderConfiguration xmlns="http://www.onvif.org/ver10/media/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">'
+            .'<Configuration token="'.htmlspecialchars((string) $encoder['token']).'">'.$xml.'</Configuration>'
+            .'<ForcePersistence>true</ForcePersistence></SetVideoEncoderConfiguration>';
+
+        try {
+            $response = $this->soap($mediaUrl, $body, $username, $password);
+        } catch (Throwable) {
+            return false;
+        }
+
+        return $response['status'] === 200 && ! str_contains($response['body'], 'Fault>');
+    }
+
+    protected function mediaUrl(string $deviceServiceUrl, string $username, string $password): string
+    {
+        $capabilities = $this->soap($deviceServiceUrl, '<GetCapabilities xmlns="http://www.onvif.org/ver10/device/wsdl"><Category>Media</Category></GetCapabilities>', $username, $password);
+
+        return preg_match('#<(?:\w+:)?Media>.*?<(?:\w+:)?XAddr>([^<]+)<#s', $capabilities['body'], $match)
+            ? trim($match[1])
+            : $deviceServiceUrl;
+    }
+
+    /**
      * @return array{status: int, body: string}
      */
     protected function soap(string $url, string $body, string $username, string $password): array

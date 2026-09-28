@@ -164,6 +164,11 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         Route::get('/settings/devices', [DeviceController::class, 'index'])->name('settings.devices.index');
         Route::post('/settings/devices/scan', [DeviceController::class, 'scan'])->name('settings.devices.scan');
         Route::post('/settings/devices/identify', [DeviceController::class, 'identify'])->name('settings.devices.identify');
+        Route::get('/settings/cameras/{station}/encoder', [DeviceController::class, 'encoderPreview'])
+            ->whereIn('station', ['entrance', 'exit'])->name('settings.cameras.encoder');
+        Route::post('/settings/cameras/{station}/encoder/optimize', [DeviceController::class, 'encoderOptimize'])
+            ->whereIn('station', ['entrance', 'exit'])->name('settings.cameras.encoder.optimize');
+        Route::get('/settings/status/metrics', [\App\Http\Controllers\SystemStatusController::class, 'metrics'])->name('settings.status.metrics');
         Route::post('/settings/devices/unassign', [DeviceController::class, 'unassign'])->name('settings.devices.unassign');
         Route::post('/settings/devices/acknowledge', [DeviceController::class, 'acknowledge'])->name('settings.devices.acknowledge');
         Route::post('/settings/devices/{networkDevice}/assign', [DeviceController::class, 'assign'])

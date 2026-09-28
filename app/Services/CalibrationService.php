@@ -142,8 +142,10 @@ class CalibrationService
         // Plug-and-detect: pages and page JSON never get the camera password
         // or credentials embedded in the URL; only the Python export does.
         $secrets = $withSecrets
-            ? ['source_value' => $sourceValue, 'source_password' => $camera->source_password ?? '']
-            : ['source_value' => CameraSource::withoutCredentials($sourceValue)];
+            ? ['source_value' => $sourceValue, 'source_password' => $camera->source_password ?? '',
+                'snapshot_source_value' => (string) ($camera->snapshot_source_value ?? '')]
+            : ['source_value' => CameraSource::withoutCredentials($sourceValue),
+                'snapshot_source_value' => CameraSource::withoutCredentials((string) ($camera->snapshot_source_value ?? ''))];
 
         return [
             'id' => $camera->id,

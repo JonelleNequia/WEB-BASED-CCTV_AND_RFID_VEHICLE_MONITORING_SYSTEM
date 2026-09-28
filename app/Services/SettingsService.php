@@ -54,6 +54,15 @@ class SettingsService
             'exit_reader_manual' => '0',
             'entrance_reader_transport' => 'tcp',
             'exit_reader_transport' => 'tcp',
+            // Live-latency work: live view and detection tuning (Settings › Cameras).
+            'perf_stream_fps' => '15',
+            'perf_stream_width' => '960',
+            'perf_jpeg_quality' => '70',
+            'perf_detection_fps' => '8',
+            'perf_yolo_imgsz' => '480',
+            'perf_yolo_device' => 'auto',
+            'perf_roi_crop' => '1',
+            'perf_hires_on_trigger' => '1',
         ];
     }
 
@@ -174,6 +183,7 @@ class SettingsService
                 'cctv_simulation_mode' => $settings['cctv_simulation_mode'] ?? 'enabled',
                 'rfid_simulation_mode' => $settings['rfid_simulation_mode'] ?? 'enabled',
                 'python_api_key' => $this->detectorApiKey(),
+                'performance' => $this->performanceSettings($settings),
                 'stream_host' => (string) config('monitoring.stream.host'),
                 'stream_port' => (int) config('monitoring.stream.port'),
                 'app_url' => $integrationBaseUrl,
@@ -248,6 +258,9 @@ class SettingsService
                 $camera->fill([
                     'source_type' => (string) ($cameraData['source_type'] ?? 'webcam'),
                     'source_value' => (string) ($cameraData['source_value'] ?? '0'),
+                    // Optional full-resolution stream for trigger snapshots (manual sources).
+                    'snapshot_source_value' => filled($cameraData['snapshot_source_value'] ?? null)
+                        ? (string) $cameraData['snapshot_source_value'] : null,
                 ]);
             }
 
@@ -301,10 +314,34 @@ class SettingsService
      * @param  array<string, mixed>  $cameraConfiguration
      * @return array<string, mixed>
      */
+    /**
+     * @param  array<string, string>  $settings
+     * @return array<string, int|float|string>
+     */
+    public function performanceSettings(array $settings): array
+    {
+        return [
+            'stream_fps' => (float) ($settings['perf_stream_fps'] ?? 15),
+            'stream_width' => (int) ($settings['perf_stream_width'] ?? 960),
+            'jpeg_quality' => (int) ($settings['perf_jpeg_quality'] ?? 70),
+            'detection_fps' => (float) ($settings['perf_detection_fps'] ?? 8),
+            'yolo_imgsz' => (int) ($settings['perf_yolo_imgsz'] ?? 480),
+            'yolo_device' => (string) ($settings['perf_yolo_device'] ?? 'auto'),
+            'roi_crop' => (int) ($settings['perf_roi_crop'] ?? 1),
+            'hires_on_trigger' => (int) ($settings['perf_hires_on_trigger'] ?? 1),
+        ];
+    }
+
     protected function runtimeCameraPayload(array $cameraConfiguration): array
     {
         $sourceType = (string) ($cameraConfiguration['source_type'] ?? 'webcam');
         $sourceValue = $cameraConfiguration['source_value'] ?? '0';
+        // One decoder thread (lowest delay) unless the live source is a camera's
+        // full-resolution main stream, which needs FFmpeg's threading to keep up.
+        $liveStream = data_get(DeviceAssignment::query()
+            ->where('station', $cameraConfiguration['camera_role'])
+            ->where('role', DeviceAssignment::ROLE_CAMERA)
+            ->first()?->options, 'stream');
 
         return [
             'camera_id' => $cameraConfiguration['id'],
@@ -317,6 +354,8 @@ class SettingsService
                 : (string) $sourceValue,
             'source_username' => (string) ($cameraConfiguration['source_username'] ?? ''),
             'source_password' => (string) ($cameraConfiguration['source_password'] ?? ''),
+            'snapshot_source_value' => (string) ($cameraConfiguration['snapshot_source_value'] ?? ''),
+            'decoder_threads' => $liveStream === 'main' ? 0 : 1,
             'browser_device_id' => $cameraConfiguration['browser_device_id'],
             'browser_label' => $cameraConfiguration['browser_label'],
             'calibration_mask' => $cameraConfiguration['calibration_mask'],

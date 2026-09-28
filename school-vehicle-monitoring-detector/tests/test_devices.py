@@ -382,3 +382,44 @@ class DetectorReleaseTests(unittest.TestCase):
         self.assertNotIn("released", events)  # not freed while read() runs
         reader.thread.join(timeout=5)
         self.assertEqual(events, ["read-returned", "released"])
+
+
+class LiveLatencyTests(unittest.TestCase):
+    """Live view rate, detection crop and full-resolution box mapping."""
+
+    def test_live_view_keeps_15_fps_from_a_25_fps_camera(self):
+        import detector_service as detector
+
+        state = {}
+        clock = [100.0]
+        with mock.patch.object(detector.time, "monotonic", lambda: clock[0]):
+            published = 0
+            for _ in range(250):  # 10 seconds of 25 fps frames
+                published += detector.publish_due(state, {"stream_fps": 15})
+                clock[0] += 0.04
+        self.assertTrue(148 <= published <= 152, published)
+
+    def test_detection_crop_maps_boxes_back_to_the_full_frame(self):
+        import numpy as np
+        import torch
+        import detector_service as detector
+
+        frame = np.zeros((416, 736, 3), dtype=np.uint8)
+        zone = {"calibration_mask": [{"x": 0.4, "y": 0.4}, {"x": 0.6, "y": 0.4}, {"x": 0.6, "y": 0.6}, {"x": 0.4, "y": 0.6}]}
+        crop = detector.roi_crop_box(zone, frame, True)
+        self.assertIsNotNone(crop)
+        self.assertIsNone(detector.roi_crop_box(zone, frame, False))
+        full = {"calibration_mask": [{"x": 0.01, "y": 0.01}, {"x": 0.99, "y": 0.01}, {"x": 0.99, "y": 0.99}, {"x": 0.01, "y": 0.99}]}
+        self.assertIsNone(detector.roi_crop_box(full, frame, True))  # zone ~ whole frame: no crop
+
+        boxes = mock.Mock()
+        boxes.data = torch.tensor([[10.0, 20.0, 30.0, 40.0, 1.0, 0.9, 2.0]])
+        results = mock.Mock(boxes=boxes)
+        detector.offset_results(results, crop[0], crop[1])
+        self.assertEqual(boxes.data[0, :4].tolist(), [10.0 + crop[0], 20.0 + crop[1], 30.0 + crop[0], 40.0 + crop[1]])
+
+    def test_live_box_scales_to_the_full_resolution_frame(self):
+        from hires import scale_box
+
+        box = scale_box((100, 100, 200, 150), (416, 736, 3), (1440, 2560, 3), pad=0)
+        self.assertEqual(box, (347, 346, 695, 519))

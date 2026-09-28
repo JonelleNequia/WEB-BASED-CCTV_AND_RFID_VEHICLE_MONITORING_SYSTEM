@@ -74,6 +74,17 @@ class SettingsController extends Controller
     {
         $settingsService->save($request->validated());
 
+        // Live-latency work: stream roles of assigned cameras (Settings › Cameras).
+        foreach ((array) $request->validated('camera_streams', []) as $station => $choice) {
+            if (in_array($station, DeviceAssignment::STATIONS, true)) {
+                app(DeviceRegistryService::class)->updateCameraStreams(
+                    $station,
+                    (string) ($choice['stream'] ?? 'sub'),
+                    ($choice['snapshots'] ?? '0') === '1',
+                );
+            }
+        }
+
         // Plug-and-detect: a manual reader address or label change goes to Python.
         app(DeviceRegistryService::class)->exportRuntimeConfig();
 

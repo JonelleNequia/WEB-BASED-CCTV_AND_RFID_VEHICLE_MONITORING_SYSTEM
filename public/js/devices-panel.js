@@ -536,7 +536,7 @@
         const select = el('select');
         select.id = 'device-stream';
         select.name = 'stream';
-        [['main', 'Main (best quality)'], ['sub', 'Sub (lighter, for a slow PC)']].forEach(function ([value, label]) {
+        [['sub', 'Sub stream (low delay, recommended)'], ['main', 'Main stream (sharper, about 0.4 s more delay)']].forEach(function ([value, label]) {
             const option = el('option', null, label);
             option.value = value;
             select.append(option);
@@ -547,9 +547,9 @@
         // One camera for both stations (testing): the other station gets the other stream.
         const cameraUse = (device.assigned || []).find((item) => item.role === 'camera');
         if (device.kind === 'camera' && cameraUse) {
-            select.value = cameraUse.stream === 'sub' ? 'main' : 'sub';
-            streams.append(el('span', 'field-help', `Already the ${capitalize(cameraUse.station)} camera (${cameraUse.stream === 'sub' ? 'sub' : 'main'} stream). You can use it for the other station too; it will show as the same device.`));
+            streams.append(el('span', 'field-help', `Already the ${capitalize(cameraUse.station)} camera. You can use it for the other station too; it will show as the same device.`));
         }
+        streams.append(el('span', 'field-help', 'Snapshots and plate reading still use the full-resolution main stream when a vehicle is detected.'));
 
         // Asked only when the saved login does not work (needs_credentials).
         const login = el('fieldset', 'devices-login');
