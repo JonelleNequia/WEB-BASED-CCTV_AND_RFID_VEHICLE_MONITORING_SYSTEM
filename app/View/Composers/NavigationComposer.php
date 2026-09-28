@@ -47,6 +47,22 @@ class NavigationComposer
         $camerasOnline = $cameras->filter(fn ($camera): bool => (bool) ($camera['camera_running'] ?? false))->count();
         $detectorOnline = (bool) ($runtime['service_running'] ?? false);
 
+        // Plug-and-detect: say why cameras are not live instead of "Standby".
+        $cameraReason = null;
+        if (! $detectorOnline) {
+            $cameraReason = 'Detector off';
+        } elseif ($camerasOnline < 2) {
+            $codes = $cameras->reject(fn ($camera): bool => (bool) ($camera['camera_running'] ?? false))
+                ->pluck('error_code')->filter();
+            $cameraReason = match ($codes->first()) {
+                'unauthorized' => 'Login rejected',
+                'not_found' => 'Wrong stream path',
+                'unreachable', 'timeout' => 'Camera unreachable',
+                'invalid_source' => 'Not set up',
+                default => null,
+            };
+        }
+
         // NFC readers type into the Station page and the RFID Desk simulates.
         // Plug-and-detect: a UHF reader is ready when the device service is
         // connected to it.
@@ -72,8 +88,8 @@ class NavigationComposer
         $readersReady = $readerProblems->isEmpty();
 
         return [
-            ['label' => 'Detector', 'ok' => $detectorOnline, 'detail' => $detectorOnline ? 'Running' : 'Standby'],
-            ['label' => 'Cameras', 'ok' => $camerasOnline === 2, 'detail' => $camerasOnline.'/2 live'],
+            ['label' => 'Detector', 'ok' => $detectorOnline, 'detail' => $detectorOnline ? 'Running' : $this->detectorRuntimeService->notRunningReason()],
+            ['label' => 'Cameras', 'ok' => $camerasOnline === 2, 'detail' => $camerasOnline.'/2 live'.($cameraReason ? ' · '.$cameraReason : '')],
             ['label' => 'Readers', 'ok' => $readersReady, 'detail' => $readersReady ? 'Ready' : (string) $readerProblems->first()],
         ];
     }

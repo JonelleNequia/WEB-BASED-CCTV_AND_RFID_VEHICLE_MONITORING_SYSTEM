@@ -27,7 +27,7 @@
                 <div class="station-status-stack">
                     <span class="station-clock" data-station-clock>{{ \App\Support\DisplayTime::datetimeSeconds(now()) }}</span>
                     <span class="station-status-chip {{ ($cameraStatus['camera_running'] ?? false) ? 'is-online' : 'is-standby' }}" data-camera-status-chip>
-                        {{ ($cameraStatus['camera_running'] ?? false) ? 'Live' : 'Standby' }}
+                        {{ ($cameraStatus['camera_running'] ?? false) ? 'Live' : 'Offline' }}
                     </span>
                 </div>
             </div>
@@ -39,6 +39,8 @@
                     data-station-frame
                     data-frame-stream="{{ $streamUrl }}"
                 >
+                {{-- Why there is no picture (detector off, camera login, unreachable). --}}
+                <p class="frame-message" data-frame-message role="status" hidden></p>
             </div>
 
             <div class="station-video-footer">
@@ -68,7 +70,7 @@
                     <h2>Recent Activity</h2>
                 </div>
                 <span class="station-status-chip {{ ($detectorStatus['service_running'] ?? false) ? 'is-online' : 'is-standby' }}" data-detector-status-chip>
-                    {{ ($detectorStatus['service_running'] ?? false) ? 'Detector Ready' : 'Detector Standby' }}
+                    {{ ($detectorStatus['service_running'] ?? false) ? 'Detector Ready' : 'Detector Off' }}
                 </span>
             </div>
 

@@ -469,8 +469,15 @@ class DeviceRegistryService
             });
 
         if ($cameraChanged || $force) {
-            // The detector sees the new source and reconnects on its own.
+            // The detector sees the new source and reconnects on its own. If it
+            // is not running (or paused after failed starts), start it now.
             $this->settingsService->exportCameraRuntimeConfig();
+
+            try {
+                app(DetectorRuntimeService::class)->ensureRunning(force: true);
+            } catch (\Throwable) {
+                // Assignment is saved either way; the page check retries the start.
+            }
         }
 
         $this->exportRuntimeConfig();
@@ -479,6 +486,18 @@ class DeviceRegistryService
     // ------------------------------------------------------------------
     // Python runtime config
     // ------------------------------------------------------------------
+
+    /**
+     * "Identify reader": the device service listens to every candidate device
+     * for tag data while someone holds a UHF tag near the reader.
+     */
+    public function requestIdentify(int $seconds): string
+    {
+        $id = (string) Str::uuid();
+        $this->exportRuntimeConfig(null, ['id' => $id, 'seconds' => $seconds, 'requested_at' => now()->toIso8601String()]);
+
+        return $id;
+    }
 
     public function requestScan(): string
     {
@@ -491,7 +510,7 @@ class DeviceRegistryService
     /**
      * @param  array<string, string>|null  $scanRequest
      */
-    public function exportRuntimeConfig(?array $scanRequest = null): void
+    public function exportRuntimeConfig(?array $scanRequest = null, ?array $identifyRequest = null): void
     {
         $path = DeviceFiles::runtimeConfigPath();
         $current = is_file($path) ? (array) json_decode((string) File::get($path), true) : [];
@@ -505,6 +524,7 @@ class DeviceRegistryService
                 'api_key' => $this->settingsService->detectorApiKey(),
             ],
             'scan_request' => $scanRequest ?? ($current['scan_request'] ?? null),
+            'identify_request' => $identifyRequest ?? ($current['identify_request'] ?? null),
             'stations' => collect(DeviceAssignment::STATIONS)->mapWithKeys(fn (string $station): array => [
                 $station => [
                     'label' => $settings["{$station}_portal_label"] ?? ucfirst($station),
@@ -608,6 +628,7 @@ class DeviceRegistryService
     public function panelPayload(): array
     {
         $status = $this->runtime->readStatus();
+        $this->detectorStatus = null;
         $assignments = DeviceAssignment::query()->with('device')->get();
         $suggestions = collect((array) ($status['temporary_ip_suggestions'] ?? []))->keyBy('device_ip');
         $interfaces = (array) data_get($status, 'network.interfaces', []);
@@ -650,6 +671,7 @@ class DeviceRegistryService
                 'error' => data_get($status, 'scan.error') ?: data_get($status, 'scan.post_error'),
             ],
             'diagnostics' => $this->diagnostics($status),
+            'identify' => $this->identifyPayload($status),
             'stations' => collect(DeviceAssignment::STATIONS)->mapWithKeys(fn (string $station): array => [
                 $station => [
                     'label' => ucfirst($station),
@@ -709,8 +731,28 @@ class DeviceRegistryService
         ];
     }
 
+    /**
+     * @param  array<string, mixed>  $status
+     * @return array<string, mixed>|null
+     */
+    protected function identifyPayload(array $status): ?array
+    {
+        $identify = $status['identify'] ?? null;
+
+        if (! is_array($identify)) {
+            return null;
+        }
+
+        return Arr::only($identify, [
+            'running', 'started_at', 'finished_at', 'seconds', 'phase', 'message', 'candidates', 'open_ports', 'found', 'unknown_data',
+        ]);
+    }
+
     /** @var list<int> */
     protected array $liveReaderIds = [];
+
+    /** @var array<string, mixed>|null Detector status, read once per payload. */
+    protected ?array $detectorStatus = null;
 
     protected function effectiveStatus(NetworkDevice $device): string
     {
@@ -757,7 +799,9 @@ class DeviceRegistryService
             'assigned' => $device->assignments->map(fn (DeviceAssignment $assignment): array => [
                 'station' => $assignment->station,
                 'role' => $assignment->role,
-                'label' => ucfirst($assignment->station).' '.($assignment->role === 'camera' ? 'camera' : 'reader'),
+                'stream' => data_get($assignment->options, 'stream'),
+                'label' => ucfirst($assignment->station).' '.($assignment->role === 'camera' ? 'camera' : 'reader')
+                    .($assignment->role === 'camera' && data_get($assignment->options, 'stream') === 'sub' ? ' (sub)' : ''),
             ])->values()->all(),
             'camera' => $camera ? Arr::only($camera, ['rtsp_port', 'onvif_xaddr', 'vendor_profile']) + [
                 'streams' => array_keys((array) ($camera['rtsp_paths'] ?? [])) ?: ['main', 'sub'],
@@ -812,6 +856,24 @@ class DeviceRegistryService
             'status' => $this->effectiveStatus($device),
             'options' => (array) $assignment->options,
         ];
+
+        if ($role === DeviceAssignment::ROLE_CAMERA) {
+            // What the detector reports for this station's camera (live, or why not).
+            $detector = $this->detectorStatus ??= app(DetectorRuntimeService::class)->readStatus();
+            $camera = (array) data_get($detector, "cameras.$station", []);
+            $payload['assign_url'] = route('settings.devices.assign', $device);
+            $payload['detector_running'] = (bool) ($detector['service_running'] ?? false);
+            $payload['camera_running'] = (bool) ($camera['camera_running'] ?? false);
+            $payload['camera_error'] = ($camera['camera_running'] ?? false) ? null : ($camera['last_error'] ?? null);
+            $payload['error_code'] = ($camera['camera_running'] ?? false) ? null : ($camera['error_code'] ?? null);
+            // One physical camera used by both stations (testing with one camera).
+            $other = $assignments->first(fn (DeviceAssignment $item): bool => $item->station !== $station
+                && $item->role === DeviceAssignment::ROLE_CAMERA && $item->network_device_id === $device->id);
+            $payload['shared_with'] = $other ? [
+                'station' => $other->station,
+                'stream' => data_get($other->options, 'stream', 'main'),
+            ] : null;
+        }
 
         if ($role === DeviceAssignment::ROLE_READER) {
             $link = (array) data_get($status, "readers.$station", []);

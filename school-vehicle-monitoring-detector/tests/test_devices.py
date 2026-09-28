@@ -300,3 +300,85 @@ class DiagnosticsTests(unittest.TestCase):
         blocked = self.build([self.lan()], {}, arp_stats={"sent": 253, "errors": {"No route to host": 253}})
         self.assertIn("sends_failed", self.codes(blocked))
         self.assertIn("firewall_block_all", self.codes(self.build([self.lan()], {}, firewall={"enabled": True, "block_all": True})))
+
+
+class IdentifyReaderTests(unittest.TestCase):
+    """Identify mode finds the device that sends tag data (answer-mode reader)."""
+
+    def test_answer_mode_reader_is_identified_by_its_tags(self):
+        from devices.identify import ReaderIdentifier
+
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(4)
+        port = server.getsockname()[1]
+        inventory = uhf.build_command("chafon", "01")
+
+        def serve():
+            while True:
+                try:
+                    connection, _ = server.accept()
+                except OSError:
+                    return
+                def handle(conn):
+                    conn.settimeout(5)
+                    try:
+                        while True:
+                            data = conn.recv(256)
+                            if not data:
+                                return
+                            if inventory in data:
+                                conn.sendall(chafon_active_frame())
+                    except OSError:
+                        return
+                threading.Thread(target=handle, args=(connection,), daemon=True).start()
+
+        threading.Thread(target=serve, daemon=True).start()
+        profiles = load_profiles()
+        profiles["uhf_reader"]["tcp_ports"] = []
+        profiles["uhf_reader"]["udp_ports"] = []
+        profiles["uhf_reader"]["identify_port_ranges"] = [[port, port]]
+        identifier = ReaderIdentifier(profiles, [{"ip": "127.0.0.1", "mac": None}], 6, lambda message: None)
+        result = identifier.run()
+        server.close()
+
+        self.assertFalse(result["running"])
+        self.assertEqual(result["open_ports"]["127.0.0.1"], [port])
+        self.assertEqual(result["found"][0]["port"], port)
+        self.assertEqual(result["found"][0]["tags"], [EPC])
+        self.assertIn("Reader found", result["message"])
+
+
+class DetectorReleaseTests(unittest.TestCase):
+    """A capture is never freed while read() is still running (FFmpeg crash)."""
+
+    def test_release_waits_for_a_blocked_read(self):
+        import importlib
+        detector = importlib.import_module("detector_service")
+
+        events = []
+
+        class SlowCapture:
+            def __init__(self):
+                self.calls = 0
+
+            def read(self):
+                self.calls += 1
+                if self.calls > 1:
+                    time.sleep(3.0)  # a network read that outlives the 2 s join
+                    events.append("read-returned")
+                return True, object()
+
+            def isOpened(self):
+                return True
+
+            def release(self):
+                events.append("released")
+
+        import time
+        reader = detector.LatestFrameReader(SlowCapture())
+        time.sleep(0.2)
+        reader.release()
+        self.assertNotIn("released", events)  # not freed while read() runs
+        reader.thread.join(timeout=5)
+        self.assertEqual(events, ["read-returned", "released"])

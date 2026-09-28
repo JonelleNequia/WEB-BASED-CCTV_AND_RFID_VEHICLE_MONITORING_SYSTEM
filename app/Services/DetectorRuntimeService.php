@@ -25,7 +25,7 @@ class DetectorRuntimeService
      *
      * @return array<string, mixed>
      */
-    public function ensureRunning(): array
+    public function ensureRunning(bool $force = false): array
     {
         $this->settingsService->ensureCameraRuntimeConfigExists();
 
@@ -54,6 +54,12 @@ class DetectorRuntimeService
         // Phase 1: removed the "standby until a Station page is open" gate.
         // Vehicle detection must run whenever the system is on; only the live
         // MJPEG stream idles when nobody is watching (handled in Python).
+
+        // A camera was just assigned or moved: try now, even during the
+        // cool-down that follows failed starts.
+        if ($force) {
+            $this->writeLaunchState(['last_attempt_at' => null, 'failed_attempts' => 0, 'lock_until' => null]);
+        }
 
         if (! $this->canAttemptLaunch()) {
             return [
@@ -145,7 +151,7 @@ class DetectorRuntimeService
 
     public function stationActivityPath(): string
     {
-        return storage_path('app/camera/station_activity.json');
+        return CameraFiles::path('station_activity.json');
     }
 
     /**
@@ -200,6 +206,20 @@ class DetectorRuntimeService
      * Plug-and-detect: the stream host/port come from config/monitoring.php
      * (DETECTOR_STREAM_HOST / DETECTOR_STREAM_PORT), not from the code.
      */
+    /**
+     * Short reason for the sidebar and pages when the detector is not running.
+     */
+    public function notRunningReason(): string
+    {
+        $state = $this->readLaunchState();
+
+        if ($this->isFuture($state['lock_until'] ?? null)) {
+            return 'Paused after failed starts';
+        }
+
+        return $this->isRecent($state['last_attempt_at'] ?? null, self::LAUNCH_COOLDOWN_SECONDS) ? 'Starting…' : 'Not running';
+    }
+
     public function defaultStreamUrl(string $role): string
     {
         $host = (string) config('monitoring.stream.host', 'localhost');
@@ -442,7 +462,7 @@ class DetectorRuntimeService
 
     protected function launchStatePath(): string
     {
-        return storage_path('app/camera/detector_launch_state.json');
+        return CameraFiles::path('detector_launch_state.json');
     }
 
     protected function canAttemptLaunch(): bool

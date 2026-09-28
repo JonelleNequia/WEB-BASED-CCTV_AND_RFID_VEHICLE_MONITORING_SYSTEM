@@ -90,7 +90,7 @@
 
             const body = await response.json();
             const detector = document.querySelector('[data-gate-detector]');
-            detector?.replaceChildren(badge(body.detector_running ? 'success' : 'warning', body.detector_running ? 'Detector running' : 'Detector standby'));
+            detector?.replaceChildren(badge(body.detector_running ? 'success' : 'warning', body.detector_running ? 'Detector running' : 'Detector not running'));
 
             Object.entries(body.gates || {}).forEach(function ([location, gate]) {
                 const card = document.querySelector(`[data-gate="${location}"]`);
@@ -99,13 +99,21 @@
                 }
 
                 card.querySelector('[data-gate-camera]')?.replaceChildren(
-                    badge(gate.camera_running ? 'success' : 'warning', gate.camera_running ? 'Live' : 'Standby')
+                    badge(gate.camera_running ? 'success' : 'warning', gate.camera_running ? 'Live' : 'Offline')
                 );
 
+                // Why there is no picture, and retry a feed that failed to load.
+                const fallback = card.querySelector('.gate-feed-fallback');
+                if (fallback) {
+                    fallback.textContent = !body.detector_running
+                        ? 'Detector not running. It starts by itself.'
+                        : (!gate.camera_running && gate.camera_error ? gate.camera_error : 'Waiting for camera…');
+                }
                 const feed = card.querySelector('[data-gate-feed]');
-                if (feed && gate.stream_url && feed.dataset.stream !== gate.stream_url) {
+                const offline = feed?.closest('.gate-feed')?.classList.contains('is-offline');
+                if (feed && gate.stream_url && (feed.dataset.stream !== gate.stream_url || (offline && body.detector_running))) {
                     feed.dataset.stream = gate.stream_url;
-                    feed.src = gate.stream_url;
+                    feed.src = gate.stream_url + (offline ? (gate.stream_url.includes('?') ? '&' : '?') + 'retry=' + Date.now() : '');
                 }
 
                 renderLatest(card, gate.latest_scan);

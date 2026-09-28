@@ -37,6 +37,20 @@
                                 @endif
                             </div>
 
+                            {{-- Live preview with the detector's own reason when there is no video. --}}
+                            @php
+                                $live = $cameraLive['cameras'][$role] ?? [];
+                                $liveReason = ! ($cameraLive['service_running'] ?? false)
+                                    ? 'Detector not running yet. It starts by itself.'
+                                    : (($live['camera_running'] ?? false) ? null : ($live['last_error'] ?? 'Connecting to the camera…'));
+                            @endphp
+                            <div class="camera-preview">
+                                <img src="{{ $live['stream_url'] ?? '' }}" alt="{{ $label }} live preview" data-camera-preview loading="lazy">
+                                @if ($liveReason)
+                                    <p class="frame-message">{{ $liveReason }}</p>
+                                @endif
+                            </div>
+
                             <div class="form-grid">
                                 <div class="field span-full">
                                     <label for="{{ $role }}_camera_name">Camera Label</label>
@@ -127,3 +141,17 @@
         </div>
     </form>
 </section>
+
+@push('scripts')
+    <script>
+        // Retry a preview that failed to load (e.g. while the detector starts).
+        document.querySelectorAll('[data-camera-preview]').forEach(function (img) {
+            const base = img.getAttribute('src');
+            img.addEventListener('error', function () {
+                window.setTimeout(function () {
+                    img.src = base + (base.includes('?') ? '&' : '?') + 'retry=' + Date.now();
+                }, 5000);
+            });
+        });
+    </script>
+@endpush

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Camera;
 use App\Models\DeviceAssignment;
+use App\Support\CameraFiles;
 use App\Models\SystemSetting;
 use Illuminate\Support\Facades\File;
 
@@ -205,7 +206,7 @@ class SettingsService
      */
     public function cameraRuntimeConfigPath(): string
     {
-        return storage_path('app/camera/camera_runtime_config.json');
+        return CameraFiles::path('camera_runtime_config.json');
     }
 
     /**

@@ -22,6 +22,15 @@ final class CameraFiles
         return str_starts_with($path, '/') ? $path : base_path($path);
     }
 
+    /**
+     * Files shared with the Python detector live in the same folder, so tests
+     * (CAMERA_FILES_PATH) never touch the running detector's files.
+     */
+    public static function path(string $name): string
+    {
+        return self::directory().'/'.$name;
+    }
+
     public static function statusPath(): string
     {
         return self::directory().'/camera_status.json';

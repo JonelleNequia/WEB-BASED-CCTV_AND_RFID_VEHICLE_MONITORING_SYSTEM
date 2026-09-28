@@ -6,6 +6,7 @@
 <section class="panel devices-panel" data-devices-panel
          data-index-url="{{ route('settings.devices.index') }}"
          data-scan-url="{{ route('settings.devices.scan') }}"
+         data-identify-url="{{ route('settings.devices.identify') }}"
          data-unassign-url="{{ route('settings.devices.unassign') }}"
          data-acknowledge-url="{{ route('settings.devices.acknowledge') }}">
     <div class="panel-header panel-header-modern">
@@ -15,11 +16,16 @@
         </div>
         <div class="button-row">
             <x-live-indicator />
+            <button type="button" class="button button-secondary button-sm" data-devices-identify
+                    title="Listen to every device while you hold a UHF tag near the reader">Identify reader</button>
             <button type="button" class="button button-secondary button-sm" data-devices-scan>Scan again</button>
         </div>
     </div>
 
     <div class="devices-network" data-devices-network role="status" aria-live="polite"></div>
+
+    {{-- Identify reader: live progress and result. --}}
+    <div class="devices-identify" data-devices-identify-box role="status" aria-live="polite" hidden></div>
 
     <div class="devices-stations" data-devices-stations></div>
 
@@ -33,6 +39,9 @@
 
     <details class="advanced-section devices-other">
         <summary>Other devices on the network (<span data-devices-other-count>0</span>)</summary>
+        <label class="checkbox-row field-help">
+            <input type="checkbox" data-devices-show-old> Also show devices from networks this PC is no longer on (<span data-devices-old-count>0</span>)
+        </label>
         <div data-devices-other></div>
     </details>
 

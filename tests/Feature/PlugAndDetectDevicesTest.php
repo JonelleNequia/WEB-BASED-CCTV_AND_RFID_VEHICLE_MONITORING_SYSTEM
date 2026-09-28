@@ -255,6 +255,59 @@ class PlugAndDetectDevicesTest extends TestCase
             ->assertSee('data-devices-diagnostics', false);
     }
 
+    public function test_one_camera_for_both_stations_and_real_camera_errors(): void
+    {
+        $registry = app(DeviceRegistryService::class);
+        $registry->ingestScan($this->scan());
+        $camera = NetworkDevice::query()->where('mac', '34:F7:16:00:00:01')->firstOrFail();
+        $registry->assign($camera, 'entrance', 'camera', ['username' => 'admin', 'password' => 'secret', 'stream' => 'main']);
+        $registry->assign($camera, 'exit', 'camera', ['stream' => 'sub']);
+
+        // What the detector reports: Entrance live, Exit rejected the login.
+        File::ensureDirectoryExists(\App\Support\CameraFiles::directory());
+        File::put(\App\Support\CameraFiles::statusPath(), json_encode([
+            'service_running' => true,
+            'updated_at' => now()->toIso8601String(),
+            'cameras' => [
+                'entrance' => ['camera_running' => true, 'last_error' => '', 'error_code' => null],
+                'exit' => ['camera_running' => false, 'error_code' => 'unauthorized',
+                    'last_error' => 'Camera login rejected (RTSP 401). Enter the camera username and password in Settings › Stations & Readers › Devices.'],
+            ],
+        ]));
+
+        try {
+            $this->actingAs($this->admin)
+                ->getJson(route('settings.devices.index'))
+                ->assertOk()
+                ->assertJsonPath('stations.entrance.camera.camera_running', true)
+                ->assertJsonPath('stations.entrance.camera.shared_with.station', 'exit')
+                ->assertJsonPath('stations.entrance.camera.shared_with.stream', 'sub')
+                ->assertJsonPath('stations.exit.camera.error_code', 'unauthorized')
+                ->assertJsonPath('stations.exit.camera.camera_error', fn ($error) => str_contains($error, 'RTSP 401'));
+
+            $this->assertSame('rtsp://198.51.100.20:554/stream2', Camera::query()->forRole('exit')->value('source_value'));
+
+            // Sidebar: live count with the reason.
+            $this->actingAs($this->admin)
+                ->get(route('dashboard.index'))
+                ->assertSee('1/2 live · Login rejected');
+        } finally {
+            File::delete(\App\Support\CameraFiles::statusPath());
+        }
+    }
+
+    public function test_identify_reader_request_reaches_the_device_service(): void
+    {
+        $this->actingAs($this->admin)
+            ->postJson(route('settings.devices.identify'))
+            ->assertOk()
+            ->assertJsonPath('seconds', fn ($seconds) => $seconds > 0);
+
+        $config = json_decode(File::get(DeviceFiles::runtimeConfigPath()), true);
+        $this->assertNotEmpty($config['identify_request']['id']);
+        $this->assertGreaterThan(0, $config['identify_request']['seconds']);
+    }
+
     public function test_camera_password_is_never_sent_to_the_pages(): void
     {
         Camera::query()->forRole('entrance')->firstOrFail()

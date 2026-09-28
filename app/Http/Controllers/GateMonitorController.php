@@ -63,6 +63,7 @@ class GateMonitorController extends Controller
             $camera = $runtime['cameras'][$location] ?? [];
             $gates[$location] = [
                 'camera_running' => (bool) ($camera['camera_running'] ?? false),
+                'camera_error' => ($camera['camera_running'] ?? false) ? null : ($camera['last_error'] ?? null),
                 'stream_url' => $camera['stream_url'] ?? $detectorRuntimeService->defaultStreamUrl($location),
                 'latest_scan' => $this->latestScan($location),
                 'logs' => app(RealtimeLogController::class)->gateLogRows($location, 8),

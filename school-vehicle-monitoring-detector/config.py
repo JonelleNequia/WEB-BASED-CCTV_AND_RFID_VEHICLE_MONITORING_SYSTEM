@@ -18,6 +18,9 @@ DETECTED_IMAGE_DIR = PUBLIC_STORAGE_DIR / "detected-vehicle-images"
 CAPTURE_INTERVAL_SECONDS = 0.04
 # Low latency: reconnect when a camera stops delivering new frames for this long.
 CAPTURE_STALL_SECONDS = 5.0
+# The first frame after connecting takes longer (key frame, high-resolution
+# main stream with the low-latency options): allow more time for that one only.
+CAPTURE_FIRST_FRAME_SECONDS = 15.0
 RECONNECT_DELAY_SECONDS = 3.0
 TRACK_STALE_AFTER_SECONDS = 1.5
 STATUS_WRITE_INTERVAL_SECONDS = 1.0

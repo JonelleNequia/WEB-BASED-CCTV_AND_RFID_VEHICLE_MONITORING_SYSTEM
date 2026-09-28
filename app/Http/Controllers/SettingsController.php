@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Concerns\ResolvesTab;
 use App\Http\Requests\SaveSettingsRequest;
 use App\Models\DeviceAssignment;
+use App\Services\DetectorRuntimeService;
 use App\Services\DeviceRegistryService;
 use App\Services\DeviceServiceRuntime;
 use App\Services\SettingsService;
@@ -59,6 +60,10 @@ class SettingsController extends Controller
             'devicesPayload' => $tab === 'stations' ? app(DeviceRegistryService::class)->panelPayload() : null,
             'cameraAssignments' => DeviceAssignment::query()->with('device')
                 ->where('role', DeviceAssignment::ROLE_CAMERA)->get()->keyBy('station'),
+            // Live preview on the Cameras tab (also counts as a viewer).
+            'cameraLive' => $tab === 'cameras'
+                ? app(DetectorRuntimeService::class)->withViewerStreamUrls(app(DetectorRuntimeService::class)->ensureRunning(), request()->getHost())
+                : null,
         ]);
     }
 

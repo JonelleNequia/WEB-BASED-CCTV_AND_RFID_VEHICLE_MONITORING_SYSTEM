@@ -17,6 +17,7 @@ from config import (
     CAPTURE_INTERVAL_SECONDS,
     CAPTURE_DRAIN_FRAMES,
     CAPTURE_STALL_SECONDS,
+    CAPTURE_FIRST_FRAME_SECONDS,
     CAMERA_RETRY_DELAY_SECONDS,
     DETECTED_IMAGE_DIR,
     DETECTION_FRAME_INTERVAL,
@@ -59,10 +60,16 @@ from tracking import (
     point_side_of_line,
 )
 from anpr import detect_vehicle_color, ocr_runtime_status, read_license_plate
+from camera_health import RtspDiagnosis, take_over_stale_detector
 
 CAMERA_ROLES = ("entrance", "exit")
 STREAM_FRAMES = {role: None for role in CAMERA_ROLES}
 STREAM_CONDITION = threading.Condition()
+# Open MJPEG connections per camera. Any page that shows the live view
+# (Station, Gate Monitor, Calibration, Settings › Cameras) counts as a viewer.
+STREAM_CLIENTS = {role: 0 for role in CAMERA_ROLES}
+STREAM_CLIENTS_LOCK = threading.Lock()
+RTSP_DIAGNOSIS = RtspDiagnosis()
 RESOLVED_OVERLAY_HOLD_SECONDS = 1.25
 RESOLVED_DETECTION_COOLDOWN_SECONDS = 1.5
 GUEST_TRACK_COOLDOWN_SECONDS = 10.0
@@ -113,6 +120,15 @@ class MjpegStreamHandler(BaseHTTPRequestHandler):
 
         last_frame_id = None
 
+        with STREAM_CLIENTS_LOCK:
+            STREAM_CLIENTS[role] += 1
+        try:
+            self._send_frames(role, last_frame_id)
+        finally:
+            with STREAM_CLIENTS_LOCK:
+                STREAM_CLIENTS[role] -= 1
+
+    def _send_frames(self, role, last_frame_id):
         while True:
             with STREAM_CONDITION:
                 STREAM_CONDITION.wait_for(
@@ -266,10 +282,15 @@ def _read_station_activity_status(last_good_status=None):
     }
 
 
-def station_viewer_active():
+def station_viewer_active(role=None):
     """
-    Whether at least one station page has checked in recently.
+    Whether someone is watching: a page checked in recently, or a browser
+    has this camera's live stream open right now.
     """
+    if role is not None:
+        with STREAM_CLIENTS_LOCK:
+            if STREAM_CLIENTS.get(role, 0) > 0:
+                return True
     return station_activity_status()["active"]
 
 
@@ -576,8 +597,27 @@ def validate_camera_source(camera_config, capture_source):
 def camera_open_error(camera_config, capture_source, state):
     """
     Build the status message shown in the station stream and Laravel status JSON.
+
+    For RTSP cameras the camera itself is asked why it failed (wrong login,
+    wrong path, unreachable), instead of a generic "could not open".
     """
-    return state.get("source_validation_error") or f"Could not open camera source: {capture_source}"
+    if state.get("source_validation_error"):
+        state["error_code"] = "invalid_source"
+        return state["source_validation_error"]
+
+    if camera_config["source_type"] == "rtsp":
+        diagnosis = RTSP_DIAGNOSIS.get(
+            camera_config["camera_role"],
+            str(capture_source),
+            camera_config["source_username"],
+            camera_config["source_password"],
+        )
+        if diagnosis["code"] != "ok":
+            state["error_code"] = diagnosis["code"]
+            return diagnosis["message"]
+
+    state["error_code"] = "open_failed"
+    return f"Could not open camera source: {capture_source}"
 
 
 def build_connection_source(camera_config, capture_source):
@@ -626,36 +666,46 @@ class LatestFrameReader:
         self.failed = False
         self.last_frame_at = time.monotonic()
         self.stop_event = threading.Event()
+        self.release_lock = threading.Lock()
+        self.released = False
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
     def _run(self):
-        while not self.stop_event.is_set():
-            try:
-                has_frame, frame = self.capture.read()
-            except Exception:
-                has_frame, frame = False, None
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    has_frame, frame = self.capture.read()
+                except Exception:
+                    has_frame, frame = False, None
 
-            if not has_frame or frame is None:
+                if not has_frame or frame is None:
+                    with self.condition:
+                        self.failed = True
+                        self.condition.notify_all()
+                    return
+
                 with self.condition:
-                    self.failed = True
+                    self.frame = frame
+                    self.sequence += 1
+                    self.last_frame_at = time.monotonic()
                     self.condition.notify_all()
-                return
-
-            with self.condition:
-                self.frame = frame
-                self.sequence += 1
-                self.last_frame_at = time.monotonic()
-                self.condition.notify_all()
+        finally:
+            # A release() that could not wait for read() to return left the
+            # capture to this thread: free it only now, after read() is done.
+            if self.stop_event.is_set():
+                self._release_capture()
 
     def isOpened(self):
         return not self.failed and self.capture.isOpened()
 
-    def read_latest(self, timeout=CAPTURE_STALL_SECONDS):
+    def read_latest(self, timeout=None):
         """
         Wait for a frame newer than the last one handed out, then return it.
         Frames that arrived in between are skipped on purpose.
         """
+        if timeout is None:
+            timeout = CAPTURE_FIRST_FRAME_SECONDS if self.sequence == 0 else CAPTURE_STALL_SECONDS
         deadline = time.monotonic() + timeout
 
         with self.condition:
@@ -678,8 +728,26 @@ class LatestFrameReader:
         return self.read_latest()
 
     def release(self):
+        """
+        Stop reading and free the camera connection.
+
+        The capture must never be freed while read() is still running on the
+        reader thread: FFmpeg then logs through a freed decoder context and
+        the whole detector crashes (SIGSEGV in av_log). This happened on every
+        reconnect whose read() took longer than the join timeout, e.g. after a
+        camera IP change or a slow first frame from a high-resolution stream.
+        """
         self.stop_event.set()
         self.thread.join(timeout=2.0)
+        if not self.thread.is_alive():
+            self._release_capture()
+        # Otherwise the reader thread releases it when read() returns.
+
+    def _release_capture(self):
+        with self.release_lock:
+            if self.released:
+                return
+            self.released = True
         self.capture.release()
 
 
@@ -728,6 +796,7 @@ def initial_camera_state():
         "last_capture_time": None,
         "last_error": "Detector service is starting.",
         "source_validation_error": "",
+        "error_code": None,
         "retry_count": 0,
         "processed_frames": 0,
         "latest_frame": None,
@@ -839,6 +908,7 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
         "detector_model_path": MODEL_PATH,
         "station_activity": station_activity,
         "camera_power_mode": "active" if station_activity["active"] else "standby",
+        "pid": os.getpid(),
         "stream_server": {
             "bind_host": MJPEG_STREAM_BIND_HOST,
             "host": MJPEG_STREAM_HOST,
@@ -864,6 +934,8 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
             "supported_vehicle_classes": list(model_info.get("vehicle_labels", {}).values()),
             "last_capture_time": state["last_capture_time"],
             "last_error": state["last_error"],
+            "error_code": state.get("error_code"),
+            "stream_clients": STREAM_CLIENTS.get(role, 0),
             "retry_count": state["retry_count"],
             "processed_frames": state["processed_frames"],
             "detections_seen": state["detections_seen"],
@@ -2147,7 +2219,7 @@ def camera_stream_worker(role, state, model_info, stop_event):
             # Phase 1: the camera is no longer released when no Station page is
             # open. Capture keeps running so vehicle detection never stops;
             # only the MJPEG publishing below is skipped without a viewer.
-            viewer_active = station_viewer_active()
+            viewer_active = station_viewer_active(role)
             capture, capture_source = ensure_capture(camera_config, state)
 
             if capture is None or not capture.isOpened():
@@ -2177,6 +2249,7 @@ def camera_stream_worker(role, state, model_info, stop_event):
 
                     with state["lock"]:
                         state["camera_running"] = True
+                        state["error_code"] = None
                         state["last_capture_time"] = datetime.now().astimezone().isoformat()
                         state["processed_frames"] += 1
                         state["latest_frame"] = frame
@@ -2311,6 +2384,11 @@ def run_detector_loop():
     # Low latency: if the stream port is taken, another detector is already
     # running. Previously this copy kept running headless, reading the same
     # cameras and running YOLO again, which slowed the live view down.
+    if stream_server is None and take_over_stale_detector(
+        MJPEG_STREAM_PORT, STATUS_FILE_PATH, Path(__file__).resolve().parent, log=lambda message: print(message, flush=True)
+    ):
+        stream_server = start_stream_server()
+
     if stream_server is None:
         print("Another detector already owns the stream port. Exiting this duplicate.", flush=True)
         return

@@ -71,14 +71,14 @@ class CalibrationSaveTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
-        File::delete(storage_path('app/camera/station_activity.json'));
+        File::delete(app(\App\Services\DetectorRuntimeService::class)->stationActivityPath());
 
         $this->actingAs($user)
             ->getJson(route('calibration.heartbeat'))
             ->assertOk()
             ->assertJsonPath('runtime.camera_power_mode', 'active');
 
-        $activity = json_decode((string) File::get(storage_path('app/camera/station_activity.json')), true);
+        $activity = json_decode((string) File::get(app(\App\Services\DetectorRuntimeService::class)->stationActivityPath()), true);
 
         $this->assertArrayHasKey('entrance', $activity['locations']);
         $this->assertArrayHasKey('exit', $activity['locations']);

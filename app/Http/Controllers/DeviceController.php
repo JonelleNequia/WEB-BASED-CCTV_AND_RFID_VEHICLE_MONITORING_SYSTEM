@@ -32,6 +32,18 @@ class DeviceController extends Controller
         ]);
     }
 
+    public function identify(DeviceRegistryService $registry, DeviceServiceRuntime $runtime): JsonResponse
+    {
+        $seconds = (int) data_get(\App\Support\DeviceFiles::profiles(), 'uhf_reader.identify_seconds', 45);
+        $registry->requestIdentify($seconds);
+        $runtime->ensureRunning();
+
+        return response()->json([
+            'message' => "Listening for {$seconds} seconds. Hold a UHF tag close to the reader now.",
+            'seconds' => $seconds,
+        ]);
+    }
+
     public function assign(Request $request, NetworkDevice $networkDevice, DeviceRegistryService $registry): JsonResponse
     {
         $validated = $request->validate([

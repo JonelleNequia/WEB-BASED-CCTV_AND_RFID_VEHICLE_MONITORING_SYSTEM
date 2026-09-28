@@ -24,7 +24,7 @@
                     </div>
                     <div class="gate-card-actions">
                         <span data-gate-camera>
-                            <x-badge :status="($gate['camera_status']['camera_running'] ?? false) ? 'online' : 'standby'" :label="($gate['camera_status']['camera_running'] ?? false) ? 'Live' : 'Standby'" />
+                            <x-badge :status="($gate['camera_status']['camera_running'] ?? false) ? 'online' : 'standby'" :label="($gate['camera_status']['camera_running'] ?? false) ? 'Live' : 'Offline'" />
                         </span>
                         <a href="{{ $gate['kiosk_url'] }}" target="_blank" rel="noopener" class="button button-secondary button-sm">Open {{ $gate['short_label'] }} Kiosk</a>
                     </div>

@@ -61,6 +61,7 @@ from devices.paths import (
     load_runtime_config,
     write_json_atomic,
 )
+from devices.identify import ReaderIdentifier
 from devices.reader_link import CaptureLog, ClientModeListener, ReaderLink, TagPoster, utc_now
 from devices.scanner import Scanner
 
@@ -142,6 +143,9 @@ class DeviceService:
         self.pending_post = False
         self.last_post_error = None
         self.handled_request = (self.runtime.get("scan_request") or {}).get("id")
+        self.handled_identify = (self.runtime.get("identify_request") or {}).get("id")
+        self.identifier = None
+        self.identify_last = None
         self.network = netinfo.snapshot(profiles)
         self.pending_network = None
         self.pending_network_at = 0.0
@@ -239,6 +243,65 @@ class DeviceService:
             self.last_post_error = error
         log("Scan results sent to Laravel" if ok else f"Could not send scan results: {error}")
 
+    # -- identify reader --------------------------------------------------
+    def request_identify(self, request):
+        if self.identifier and self.identifier.snapshot().get("running"):
+            return
+        interfaces = [item for item in self.network.get("interfaces", [])]
+        import ipaddress
+
+        def connected(ip):
+            try:
+                address = ipaddress.IPv4Address(ip)
+                return any(address in ipaddress.IPv4Network(item["network"]) for item in interfaces)
+            except ValueError:
+                return False
+
+        devices = [
+            device for device in (self.last_result or {}).get("devices", [])
+            if device.get("reachable", True) and device.get("online", True) and not device.get("is_gateway")
+            and device.get("kind") != "camera" and connected(device.get("ip"))
+        ]
+        # Readers never use a private (randomized) MAC; phones and laptops do.
+        candidates = [{"ip": d["ip"], "mac": d.get("mac")} for d in devices if not d.get("randomized_mac")]
+        seconds = int(request.get("seconds") or self.profiles.get("uhf_reader", {}).get("identify_seconds", 45))
+        log(f"Identify reader: {len(candidates)} candidate(s) {[c['ip'] for c in candidates]} for {seconds}s")
+        self.identifier = ReaderIdentifier(
+            self.profiles, candidates, seconds, log,
+            client_seen=lambda: self.listener.snapshot().get("seen", {}),
+        )
+        self.identify_last = None
+        threading.Thread(target=self._identify, args=(request.get("id"),), daemon=True).start()
+
+    def _identify(self, request_id):
+        result = self.identifier.run()
+        result["request_id"] = request_id
+        self.identify_last = result
+        if not result.get("found"):
+            return
+        # Record the reader so Settings shows it as a confirmed RFID reader.
+        by_ip = {device.get("ip"): device for device in (self.last_result or {}).get("devices", [])}
+        devices = []
+        for found in result["found"]:
+            device = dict(by_ip.get(found["ip"]) or {"ip": found["ip"], "mac": found.get("mac"), "reachable": True, "online": True})
+            device.update({
+                "kind": "rfid_reader", "confidence": "confirmed", "name": "UHF RFID reader",
+                "reader": {
+                    "transport": found["transport"].split("-")[0], "port": found.get("port"), "protocol": found.get("protocol"),
+                    "work_mode": "client" if found["transport"].endswith("client") else "unknown",
+                    "confirmed": True, "sample_tags": found.get("tags", []), "raw_sample_hex": found.get("raw_hex"),
+                },
+            })
+            device["key"] = device.get("mac") or f"ip:{device['ip']}"
+            devices.append(device)
+        ok, error = post_scan({"scan": {"trigger": "identify", "complete": False}, "devices": devices}, self.runtime)
+        log("Identified reader sent to Laravel" if ok else f"Could not send identified reader: {error}")
+
+    def identify_status(self):
+        if self.identifier and self.identifier.snapshot().get("running"):
+            return self.identifier.snapshot()
+        return self.identify_last
+
     def scanning(self):
         return bool(self.scan_thread and self.scan_thread.is_alive())
 
@@ -291,6 +354,7 @@ class DeviceService:
             "handled_scan_request": self.handled_request,
             "temporary_ip_suggestions": result.get("temporary_ip_suggestions", []),
             "diagnostics": result.get("diagnostics"),
+            "identify": self.identify_status(),
         })
 
     # -- main loop ------------------------------------------------------
@@ -333,6 +397,11 @@ class DeviceService:
                     self.pending_network = None
 
             # Scan again requested from Settings.
+            identify = self.runtime.get("identify_request") or {}
+            if identify.get("id") and identify["id"] != self.handled_identify:
+                self.handled_identify = identify["id"]
+                self.request_identify(identify)
+
             request = (self.runtime.get("scan_request") or {}).get("id")
             if request and request != self.handled_request and self.request_scan("manual"):
                 self.handled_request = request

@@ -291,7 +291,20 @@
         return String(uid || '').replace(/\s+/g, '').trim().toUpperCase();
     }
 
-    function startLiveStream(streamUrl) {
+    // The live view retries by itself (it used to stay hidden after one
+    // failed load, e.g. when the page opened before the detector started).
+    let streamBroken = false;
+    let lastStreamRetry = 0;
+    const frameMessage = document.querySelector('[data-frame-message]');
+
+    function showFrameMessage(text) {
+        if (frameMessage) {
+            frameMessage.textContent = text || '';
+            frameMessage.hidden = !text;
+        }
+    }
+
+    function startLiveStream(streamUrl, forceReload) {
         const base = streamUrl || frame?.dataset.frameStream || payload.streamUrl;
 
         if (!frame || !base) {
@@ -299,16 +312,42 @@
         }
 
         frame.onload = function () {
+            streamBroken = false;
             frame.classList.remove('is-hidden');
+            showFrameMessage('');
         };
 
         frame.onerror = function () {
+            streamBroken = true;
             frame.classList.add('is-hidden');
+            showFrameMessage(frameProblem(lastRuntime, lastCamera));
         };
 
-        if (frame.src !== base) {
+        // An error that happened before this script loaded left a broken image.
+        if (!forceReload && frame.src && frame.complete && !frame.naturalWidth) {
+            streamBroken = true;
+            frame.classList.add('is-hidden');
+        }
+
+        if (forceReload) {
+            lastStreamRetry = Date.now();
+            frame.src = base + (base.includes('?') ? '&' : '?') + 'retry=' + lastStreamRetry;
+        } else if (frame.src !== base) {
             frame.src = base;
         }
+    }
+
+    let lastRuntime = payload.detectorStatus || {};
+    let lastCamera = payload.cameraStatus || {};
+
+    function frameProblem(runtime, camera) {
+        if (!runtime?.service_running) {
+            return 'Detector not running. It starts by itself; the live view appears when it is ready.';
+        }
+        if (camera && !camera.camera_running && camera.last_error) {
+            return camera.last_error;
+        }
+        return streamBroken ? 'Live view not loaded yet. Retrying…' : '';
     }
 
     function stationLogKey(log) {
@@ -438,8 +477,24 @@
         const detectorOnline = Boolean(runtime.service_running);
         const cameraOnline = Boolean(camera.camera_running);
 
-        setStatusChip(detectorChip, detectorOnline, 'Detector Ready', 'Detector Standby');
-        setStatusChip(cameraChip, cameraOnline, 'Live', 'Standby');
+        setStatusChip(detectorChip, detectorOnline, 'Detector Ready', 'Detector Off');
+        setStatusChip(cameraChip, cameraOnline, 'Live', 'Offline');
+        if (cameraChip) {
+            cameraChip.title = cameraOnline ? '' : (camera.last_error || '');
+        }
+
+        lastRuntime = runtime;
+        lastCamera = camera;
+        if (streamBroken) {
+            showFrameMessage(frameProblem(runtime, camera));
+            if (detectorOnline && Date.now() - lastStreamRetry > 5000) {
+                startLiveStream(body?.stream_url || null, true);
+            }
+        } else if (!cameraOnline && camera.last_error) {
+            showFrameMessage(camera.last_error);
+        } else {
+            showFrameMessage('');
+        }
 
         if (cameraFrames) {
             cameraFrames.textContent = `${camera.processed_frames ?? 0} frames`;

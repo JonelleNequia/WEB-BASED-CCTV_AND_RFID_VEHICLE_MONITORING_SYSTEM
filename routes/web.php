@@ -163,6 +163,7 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         // Plug-and-detect: Settings › Stations & Readers › Devices.
         Route::get('/settings/devices', [DeviceController::class, 'index'])->name('settings.devices.index');
         Route::post('/settings/devices/scan', [DeviceController::class, 'scan'])->name('settings.devices.scan');
+        Route::post('/settings/devices/identify', [DeviceController::class, 'identify'])->name('settings.devices.identify');
         Route::post('/settings/devices/unassign', [DeviceController::class, 'unassign'])->name('settings.devices.unassign');
         Route::post('/settings/devices/acknowledge', [DeviceController::class, 'acknowledge'])->name('settings.devices.acknowledge');
         Route::post('/settings/devices/{networkDevice}/assign', [DeviceController::class, 'assign'])

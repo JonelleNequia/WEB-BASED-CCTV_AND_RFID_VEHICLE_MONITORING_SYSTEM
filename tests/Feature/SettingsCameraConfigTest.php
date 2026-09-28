@@ -20,7 +20,7 @@ class SettingsCameraConfigTest extends TestCase
     {
         $this->seed(DatabaseSeeder::class);
 
-        $configPath = storage_path('app/camera/camera_runtime_config.json');
+        $configPath = app(\App\Services\SettingsService::class)->cameraRuntimeConfigPath();
         $configDir = dirname($configPath);
         File::ensureDirectoryExists($configDir);
         $originalContents = File::exists($configPath) ? File::get($configPath) : null;

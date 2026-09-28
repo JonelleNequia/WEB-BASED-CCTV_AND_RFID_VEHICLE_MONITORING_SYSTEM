@@ -170,12 +170,82 @@
                 body.append(el('span', 'field-help', link.last_error));
             }
         }
-        if (role === 'camera' && assigned.options && assigned.options.stream) {
-            body.append(el('span', 'field-help', `${assigned.options.stream === 'sub' ? 'Sub' : 'Main'} stream · the live view follows this camera when its IP changes`));
+        if (role === 'camera') {
+            const stream = (assigned.options || {}).stream === 'sub' ? 'Sub' : 'Main';
+            const shared = assigned.shared_with
+                ? ` · same physical camera as the ${capitalize(assigned.shared_with.station)} (${assigned.shared_with.stream === 'sub' ? 'sub' : 'main'} stream)`
+                : '';
+            body.append(el('span', 'field-help', `${stream} stream${shared}`));
+
+            // Live state from the detector, with the real reason when there is no video.
+            if (assigned.camera_running) {
+                body.append(el('span', 'devices-link devices-link-ok', 'Live video'));
+            } else if (!assigned.detector_running) {
+                body.append(el('span', 'devices-link', 'No video: the detector is not running yet (it starts by itself).'));
+            } else if (assigned.camera_error) {
+                body.append(el('span', 'devices-link', `No video: ${assigned.camera_error}`));
+            }
+            body.append(cameraLoginForm(station, assigned));
         }
 
         row.append(body, button('Unassign', 'button button-secondary button-sm', () => unassign(station, role)));
         return row;
+    }
+
+    function capitalize(text) {
+        return String(text || '').charAt(0).toUpperCase() + String(text || '').slice(1);
+    }
+
+    // Camera login: opened by itself when the camera rejects the saved one.
+    function cameraLoginForm(station, assigned) {
+        const details = el('details', 'devices-login-inline');
+        details.open = assigned.error_code === 'unauthorized';
+        details.append(el('summary', null, assigned.error_code === 'unauthorized' ? 'Enter the camera login' : 'Change camera login'));
+        const form = el('form', 'devices-login-form');
+        form.noValidate = true;
+        form.append(
+            field(`login-${station}-user`, 'username', 'Username', 'text', 'off'),
+            field(`login-${station}-pass`, 'password', 'Password', 'password', 'new-password')
+        );
+        const message = el('p', 'devices-assign-message');
+        const submit = el('button', 'button button-primary button-sm', 'Save and retry');
+        submit.type = 'submit';
+        form.append(message, submit);
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            const username = form.querySelector('[name="username"]').value.trim();
+            if (!username) {
+                message.textContent = 'Enter the camera username.';
+                message.dataset.state = 'error';
+                return;
+            }
+            submit.disabled = true;
+            message.textContent = 'Checking the camera…';
+            message.dataset.state = 'pending';
+            try {
+                const result = await post(assigned.assign_url, {
+                    station: station,
+                    role: 'camera',
+                    stream: (assigned.options || {}).stream || 'main',
+                    username: username,
+                    password: form.querySelector('[name="password"]').value,
+                });
+                if (!result.ok) {
+                    message.textContent = result.json.message || 'The camera rejected this login.';
+                    message.dataset.state = 'error';
+                    return;
+                }
+                window.ui.toast('Camera login saved (encrypted). Connecting…', 'success');
+                apply(result.json.devices);
+            } catch (error) {
+                message.textContent = error.message;
+                message.dataset.state = 'error';
+            } finally {
+                submit.disabled = false;
+            }
+        });
+        details.append(form);
+        return details;
     }
 
     /* ---------- device tables ---------- */
@@ -271,6 +341,14 @@
         const main = devices.filter((device) => ['camera', 'rfid_reader'].includes(device.kind));
         const other = devices.filter((device) => !['camera', 'rfid_reader'].includes(device.kind));
 
+        // "Other" devices: only the networks this PC is on now, unless asked.
+        const networks = ((data.network || {}).interfaces || []).map((item) => item.network);
+        const onCurrentNetwork = (device) => device.status === 'online' || networks.includes(device.subnet);
+        const showOld = panel.querySelector('[data-devices-show-old]')?.checked;
+        const oldCount = other.filter((device) => !onCurrentNetwork(device)).length;
+        panel.querySelector('[data-devices-old-count]').textContent = oldCount;
+        const otherShown = showOld ? other : other.filter(onCurrentNetwork);
+
         const list = panel.querySelector('[data-devices-list]');
         if (!main.length) {
             const empty = el('div', 'empty-block');
@@ -284,8 +362,8 @@
             list.replaceChildren(table(main));
         }
 
-        panel.querySelector('[data-devices-other-count]').textContent = other.length;
-        panel.querySelector('[data-devices-other]').replaceChildren(other.length ? table(other) : el('p', 'text-muted', 'None.'));
+        panel.querySelector('[data-devices-other-count]').textContent = otherShown.length;
+        panel.querySelector('[data-devices-other]').replaceChildren(otherShown.length ? table(otherShown) : el('p', 'text-muted', 'None on the current network.'));
     }
 
     function table(devices) {
@@ -293,7 +371,7 @@
         const tableNode = el('table', 'devices-table');
         const head = el('thead');
         const headRow = el('tr');
-        ['Type', 'Device', 'IP address', 'MAC address', 'Status', 'Station', ''].forEach((label) => headRow.append(el('th', null, label)));
+        ['Type', 'Device', 'IP address', 'MAC address', 'Maker', 'Open ports', 'Status', 'Station', ''].forEach((label) => headRow.append(el('th', null, label)));
         head.append(headRow);
 
         const body = el('tbody');
@@ -337,7 +415,12 @@
             const actions = el('td', 'row-actions');
             actions.append(button('Manage', 'button button-secondary button-sm', () => openDevice(device.id)));
 
-            tr.append(type, name, ip, el('td', 'nowrap mono', device.mac || '—'), status, station, actions);
+            tr.append(
+                type, name, ip, el('td', 'nowrap mono', device.mac || '—'),
+                el('td', null, device.vendor || '—'),
+                el('td', 'mono', (device.open_ports || []).join(', ') || '—'),
+                status, station, actions
+            );
             tr.addEventListener('click', function (event) {
                 if (!event.target.closest('button')) {
                     openDevice(device.id);
@@ -444,7 +527,8 @@
         form.append(radioGroup('role', 'Use as', roles, defaultRole));
 
         const taken = (device.assigned || [])[0];
-        form.append(radioGroup('station', 'Station', [['entrance', 'Entrance'], ['exit', 'Exit']], taken ? taken.station : 'entrance'));
+        const freeStation = taken ? (taken.station === 'entrance' ? 'exit' : 'entrance') : 'entrance';
+        form.append(radioGroup('station', 'Station', [['entrance', 'Entrance'], ['exit', 'Exit']], freeStation));
 
         const streams = el('div', 'field devices-camera-only');
         const streamLabel = el('label', null, 'Video stream');
@@ -459,6 +543,13 @@
         });
         streams.append(streamLabel, select);
         form.append(streams);
+
+        // One camera for both stations (testing): the other station gets the other stream.
+        const cameraUse = (device.assigned || []).find((item) => item.role === 'camera');
+        if (device.kind === 'camera' && cameraUse) {
+            select.value = cameraUse.stream === 'sub' ? 'main' : 'sub';
+            streams.append(el('span', 'field-help', `Already the ${capitalize(cameraUse.station)} camera (${cameraUse.stream === 'sub' ? 'sub' : 'main'} stream). You can use it for the other station too; it will show as the same device.`));
+        }
 
         // Asked only when the saved login does not work (needs_credentials).
         const login = el('fieldset', 'devices-login');
@@ -605,9 +696,13 @@
         // Re-render a part only when it changed, so keyboard focus and
         // scrolling are not reset by every poll.
         renderIfChanged('network', [data.service, data.network, data.scan, data.counts], renderNetwork);
-        renderIfChanged('stations', data.stations, renderStations);
+        // Do not redraw the station cards while someone types a camera login there.
+        if (!panel.querySelector('[data-devices-stations]').contains(document.activeElement)) {
+            renderIfChanged('stations', data.stations, renderStations);
+        }
         renderIfChanged('devices', data.devices, renderLists);
         renderIfChanged('diagnostics', data.diagnostics, renderDiagnostics);
+        renderIdentify();
         announceNewDevices();
     }
 
@@ -672,8 +767,76 @@
         } catch (error) {
             // Keep the last list during short hiccups.
         }
-        schedule((data.scan || {}).running ? 2000 : 5000);
+        schedule((data.scan || {}).running || (data.identify || {}).running || identifyPending ? 1500 : 5000);
     }
+
+    /* ---------- identify reader ---------- */
+
+    function renderIdentify() {
+        const box = panel.querySelector('[data-devices-identify-box]');
+        const identify = data.identify;
+        const identifyButton = panel.querySelector('[data-devices-identify]');
+        identifyButton.disabled = !!(identify && identify.running) || identifyPending;
+        if (!identify && !identifyPending) {
+            box.hidden = true;
+            return;
+        }
+        box.hidden = false;
+        const nodes = [];
+        const title = el('div', 'devices-network-head');
+
+        if (identifyPending && !(identify && identify.running)) {
+            title.append(badge('info', 'Identify reader'), el('span', null, 'Starting… Hold a UHF tag close to the reader.'));
+            box.replaceChildren(title);
+            return;
+        }
+
+        if (identify.running) {
+            const ends = new Date(identify.started_at).getTime() + (identify.seconds || 45) * 1000;
+            const left = Math.max(0, Math.round((ends - Date.now()) / 1000));
+            title.append(badge('info', `Listening · ${left}s`), el('strong', null, 'Hold a UHF tag close to the reader now.'));
+            nodes.push(title, el('p', 'field-help', `${identify.phase || ''}. Checking ${(identify.candidates || []).length} device(s): ${(identify.candidates || []).join(', ') || 'none found on this network'}.`));
+        } else if ((identify.found || []).length) {
+            const found = identify.found[0];
+            title.append(badge('success', 'Reader found'), el('strong', null, `${found.ip} · ${String(found.transport).toUpperCase()} port ${found.port || '—'} · format ${found.protocol || '—'}`));
+            nodes.push(title, el('p', 'field-help', `Tag read: ${(found.tags || []).join(', ') || '—'}. It is now listed as an RFID Reader: open it below and assign it to a station.`));
+        } else {
+            title.append(badge('warning', 'No reader found'), el('span', null, identify.message || ''));
+            nodes.push(title);
+            nodes.push(el('p', 'field-help', `Checked: ${(identify.candidates || []).join(', ') || 'no candidate devices on this network'}. If the reader is not in the device list at all, it is not on this network (power, cable, or a fixed IP on another network).`));
+        }
+
+        if ((identify.unknown_data || []).length) {
+            const list = el('ul', 'devices-warnings');
+            identify.unknown_data.forEach(function (item) {
+                const li = el('li');
+                li.append(badge('warning', 'data'), el('span', 'mono', `${item.ip} ${item.transport}/${item.port}: ${item.bytes} bytes in an unknown format: ${item.raw_hex}`));
+                list.append(li);
+            });
+            nodes.push(el('p', 'field-help', 'These ports sent data the system cannot read yet (send this to the developer):'), list);
+        }
+        box.replaceChildren(...nodes);
+    }
+
+    let identifyPending = false;
+    panel.querySelector('[data-devices-identify]').addEventListener('click', async function () {
+        identifyPending = true;
+        renderIdentify();
+        try {
+            const result = await post(panel.dataset.identifyUrl);
+            window.ui.toast(result.json.message, 'info', { timeout: 8000 });
+            schedule(1500);
+        } catch (error) {
+            window.ui.toast(error.message, 'error');
+        } finally {
+            window.setTimeout(function () { identifyPending = false; }, 6000);
+        }
+    });
+
+    panel.querySelector('[data-devices-show-old]')?.addEventListener('change', function () {
+        rendered.devices = null;
+        renderIfChanged('devices', data.devices, renderLists);
+    });
 
     function schedule(delay) {
         window.clearTimeout(pollTimer);

@@ -93,8 +93,10 @@
                 this.render();
             });
             this.video.addEventListener('error', () => {
-                this.showFallback('Stream unavailable', 'Start the Python detector and confirm this camera source is connected.');
-                this.updateConnection('unavailable', 'Not connected', 'Detector MJPEG stream is unavailable.');
+                // Say why, from the detector status, instead of a generic message.
+                const problem = this.streamProblem();
+                this.showFallback(problem.title, problem.detail);
+                this.updateConnection('unavailable', 'Not connected', problem.detail);
                 this.syncState();
             });
 
@@ -102,6 +104,22 @@
                 this.resizeCanvas();
                 this.render();
             });
+        }
+
+        streamProblem() {
+            const detector = this.detectorState || {};
+            const camera = detector.camera || this.camera.detector_status || {};
+
+            if (detector.running === false || (!detector.running && !camera.camera_running && !camera.last_capture_time)) {
+                return {
+                    title: 'Detector not running',
+                    detail: detector.message || 'The vehicle detector is starting. This view connects by itself when it is ready.',
+                };
+            }
+            if (camera.last_error && !camera.camera_running) {
+                return { title: 'Camera not connected', detail: camera.last_error };
+            }
+            return { title: 'Stream unavailable', detail: 'The live view could not be loaded. Retrying…' };
         }
 
         setAvailableDevices(devices, preferredDevice) {
@@ -532,6 +550,13 @@
             const cameras = body.runtime?.cameras || {};
 
             for (const [role, cameraStatus] of Object.entries(cameras)) {
+                if (cards[role]) {
+                    cards[role].detectorState = {
+                        running: !!body.runtime?.service_running,
+                        message: body.runtime?.service_message,
+                        camera: cameraStatus,
+                    };
+                }
                 if (cards[role] && cameraStatus.stream_url) {
                     cards[role].streamUrl = cameraStatus.stream_url;
 

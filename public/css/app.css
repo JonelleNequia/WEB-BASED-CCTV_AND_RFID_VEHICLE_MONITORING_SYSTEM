@@ -6089,3 +6089,63 @@ button[aria-busy="true"] {
 .devices-diagnostics .table-subtext.mono {
     white-space: pre-line;
 }
+
+/* Live view: say why there is no picture (Station page). */
+.frame-message {
+    position: absolute;
+    inset: auto 1rem 1rem;
+    margin: 0;
+    padding: 0.7rem 0.9rem;
+    border-radius: 10px;
+    background: rgba(17, 12, 34, 0.82);
+    color: #fff;
+    font-size: 0.95rem;
+    line-height: 1.4;
+    text-align: center;
+}
+
+.frame-message[hidden] {
+    display: none;
+}
+
+.devices-login-inline > summary {
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--purple);
+}
+
+.devices-login-form {
+    display: grid;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    max-width: 22rem;
+}
+
+/* Settings › Cameras live preview */
+.camera-preview {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: #05040a;
+}
+
+.camera-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.devices-identify {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0.8rem 0.9rem;
+    border: 1px solid #bfdbfe;
+    border-radius: var(--radius-md);
+    background: #eff6ff;
+}
+
+.devices-identify .field-help {
+    margin: 0;
+}
