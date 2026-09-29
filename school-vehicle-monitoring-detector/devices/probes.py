@@ -237,6 +237,7 @@ def _reader_result(transport, port, protocol, mode, frames, raw):
         "protocol": protocol,
         "work_mode": mode,
         "confirmed": True,
+        "confirmed_by": "tag" if tags else "frame",
         "sample_tags": tags[:5],
         "raw_sample_hex": raw[:64].hex(" ").upper(),
     }

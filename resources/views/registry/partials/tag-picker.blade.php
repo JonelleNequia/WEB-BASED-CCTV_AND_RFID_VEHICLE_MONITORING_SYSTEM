@@ -1,6 +1,7 @@
 {{--
     UI Phase 3: scan a tag (NFC/USB reader types into the focused field) or
     pick an available one. A new UID is added to the inventory on save.
+    UHF: "Read with UHF reader" takes the next EPC the network reader reads.
 --}}
 @php($useOld = $useOld ?? false)
 <fieldset class="tag-picker" data-tag-picker data-lookup-url="{{ route('registry.tags.lookup') }}" @isset($vehicleId) data-vehicle-id="{{ $vehicleId }}" @endisset>
@@ -10,6 +11,10 @@
         <label for="{{ $prefix }}_scan">Scan tag</label>
         <input id="{{ $prefix }}_scan" type="text" autocomplete="off" placeholder="Focus here and tap the tag on the reader" data-tag-scan autofocus value="{{ $useOld ? old('rfid_uid') : '' }}">
         <input type="hidden" name="rfid_uid" value="{{ $useOld ? old('rfid_uid') : '' }}" data-tag-uid>
+        <div class="tag-picker-uhf">
+            <button type="button" class="button button-secondary button-sm" data-uhf-read="{{ route('registry.tags.uhf-reads') }}">Read with UHF reader</button>
+            <span class="field-help">NFC: tap the tag. UHF: press the button, then hold the tag near the UHF reader.</span>
+        </div>
         <p class="tag-picker-result" data-tag-result role="status" aria-live="polite">Waiting for a tag…</p>
         @if ($useOld)
             @error('rfid_uid')<span class="field-error">{{ $message }}</span>@enderror

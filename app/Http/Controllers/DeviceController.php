@@ -105,6 +105,24 @@ class DeviceController extends Controller
         return response()->json($result, $result['ok'] ? 200 : 422);
     }
 
+    /**
+     * Sidebar: UHF reader connection and last tag (polled).
+     */
+    public function uhfStatus(DeviceServiceRuntime $runtime): JsonResponse
+    {
+        return response()->json(['readers' => $runtime->uhfReaders()])->header('Cache-Control', 'no-store, max-age=0');
+    }
+
+    /**
+     * Registry: tags read by the UHF readers since `after` (Unix seconds).
+     */
+    public function uhfReads(Request $request, DeviceServiceRuntime $runtime): JsonResponse
+    {
+        $after = (float) $request->validate(['after' => ['required', 'numeric']])['after'];
+
+        return response()->json($runtime->recentUhfReads($after))->header('Cache-Control', 'no-store, max-age=0');
+    }
+
     public function acknowledge(DeviceRegistryService $registry): JsonResponse
     {
         $registry->acknowledge();

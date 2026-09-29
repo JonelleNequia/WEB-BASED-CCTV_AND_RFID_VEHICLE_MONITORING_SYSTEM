@@ -21,6 +21,10 @@ SCAN_RESULT_PATH = DEVICE_FILES_DIR / "last_scan.json"
 RUNTIME_CONFIG_PATH = Path(os.environ.get("DEVICE_RUNTIME_CONFIG_PATH") or (DEVICE_FILES_DIR / "device_runtime_config.json"))
 LOCK_PATH = DEVICE_FILES_DIR / "device_service.pid"
 CAPTURE_LOG_PATH = DEVICE_FILES_DIR / "reader_capture.log"
+# Raw hex dump while `devices:rawdump` runs (the reader takes one TCP client,
+# so the running service copies what it receives instead of a second connection).
+RAW_TAP_REQUEST_PATH = DEVICE_FILES_DIR / "raw_tap_request.json"
+RAW_TAP_LOG_PATH = DEVICE_FILES_DIR / "raw_tap.log"
 SERVICE_LOG_PATH = PROJECT_ROOT / "storage" / "logs" / "device-service.log"
 
 PROFILES_PATH = Path(os.environ.get("DEVICE_PROFILES_PATH") or (MODULE_ROOT / "data" / "discovery_profiles.json"))

@@ -78,7 +78,7 @@
 
     <div class="sidebar-footer">
         {{-- UI Phase 2: small system status (green = OK, red = needs attention). --}}
-        <ul class="sidebar-health" aria-label="System status">
+        <ul class="sidebar-health" aria-label="System status" @if (! empty($navUhf)) data-uhf-status="{{ route('devices.uhf-status') }}" @endif>
             @foreach ($navHealth ?? [] as $health)
                 <li title="{{ $health['label'] }}: {{ $health['detail'] }}">
                     <span class="health-dot {{ $health['ok'] ? 'is-ok' : 'is-down' }}" aria-hidden="true"></span>
@@ -86,7 +86,21 @@
                     <small>{{ $health['detail'] }}</small>
                 </li>
             @endforeach
+            {{-- UHF readers: connection and the last tag read (EPC, RSSI, time); refreshed every few seconds. --}}
+            @foreach ($navUhf ?? [] as $reader)
+                <li class="health-uhf" data-uhf-station="{{ $reader['station'] }}" title="{{ $reader['label'] }}: {{ $reader['detail'] }}{{ $reader['epc'] ? ' · last tag '.$reader['epc'] : '' }}">
+                    <span class="health-dot {{ $reader['ok'] ? 'is-ok' : 'is-down' }}" aria-hidden="true"></span>
+                    <span>{{ $reader['label'] }}</span>
+                    <small data-uhf-state>{{ $reader['detail'] }}</small>
+                    <small class="health-extra" data-uhf-tag>{{ $reader['tag_line'] }}</small>
+                </li>
+            @endforeach
         </ul>
+        @if (! empty($navUhf))
+            @push('scripts')
+                <script src="{{ asset('js/sidebar-uhf.js') }}"></script>
+            @endpush
+        @endif
 
         <div class="sidebar-account">
             <strong>{{ auth()->user()->name ?? 'System User' }}</strong>

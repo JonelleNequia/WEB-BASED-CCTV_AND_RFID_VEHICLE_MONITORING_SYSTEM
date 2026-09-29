@@ -147,7 +147,7 @@ class RfidScanLog extends Model
     public function getSourceModeLabelAttribute(): string
     {
         return match ($this->source_mode) {
-            'hardware_placeholder' => 'Future Hardware',
+            'hardware_placeholder' => 'Hardware Reader',
             default => ucfirst(str_replace('_', ' ', $this->source_mode)),
         };
     }

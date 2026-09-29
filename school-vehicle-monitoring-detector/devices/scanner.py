@@ -8,7 +8,10 @@ Order of work:
    ONVIF multicast and reader-module broadcasts run in parallel. These two
    also reach devices on a different subnet on the same cable.
 3. Probe live hosts: RTSP, HTTP banner, UHF reader ports (TCP and UDP),
-   confirming a reader only by a valid protocol frame or real tag data.
+   confirming a reader by a valid protocol frame, real tag data, or a known
+   signature (maker OUI + reader port, from the profiles).
+   A reader the service is already connected to is not probed: many readers
+   accept a single TCP client, so a probe would fail and mark it offline.
 4. Optionally reach other-subnet devices through a temporary address.
 """
 
@@ -63,10 +66,12 @@ class Scanner:
         self.progress = progress or (lambda message: None)
 
     # ------------------------------------------------------------------
-    def run(self, trigger="manual", targets=None, known=None, light=False, allow_temp_ip=None):
+    def run(self, trigger="manual", targets=None, known=None, light=False, allow_temp_ip=None, busy=None):
         started = time.monotonic()
         started_at = utc_now()
         known = known or {}
+        # {ip: mac} of readers the service holds a connection to right now.
+        busy = dict(busy or {})
         targets = [target for target in (targets or []) if target]
 
         self.progress("Reading network interfaces")
@@ -142,6 +147,9 @@ class Scanner:
                 if ip in targets or live.get(ip) not in known or (known.get(live.get(ip)) or {}).get("ip") != ip
             }
             self.log(f"Light scan: probing {len(candidates)} new or moved host(s)")
+        if busy and candidates & set(busy):
+            self.log(f"Not probing {sorted(candidates & set(busy))}: the reader link is connected there")
+        candidates -= set(busy)
 
         self.progress(f"Probing {len(candidates)} host(s)")
         details = self._probe_hosts(sorted(candidates))
@@ -150,7 +158,11 @@ class Scanner:
         # quick service-port check so a switched-off device reads as offline.
         carried = {}
         if light:
-            carried = self._recheck_known(known, live)
+            carried = self._recheck_known(known, live, busy)
+        for ip, mac in busy.items():
+            mac = live.get(ip) or mac
+            if mac in known and mac not in carried:
+                carried[mac] = {**known[mac], "ip": ip, "online": True, "reachable": True}
 
         # 4. Other-subnet devices (multicast/broadcast replies we cannot reach).
         unreachable = set(
@@ -171,7 +183,7 @@ class Scanner:
         devices = self._build_devices(
             live, onvif, modules, details, temp_results, interfaces, gateway_ips, targets
         )
-        if light:
+        if carried:
             # Hosts a light scan did not probe keep their earlier details.
             devices = [
                 item for item in devices
@@ -254,7 +266,7 @@ class Scanner:
         results = await asyncio.gather(*(one(host) for host in hosts))
         return {host: info for host, info in results}
 
-    def _recheck_known(self, known, live):
+    def _recheck_known(self, known, live, busy=None):
         """
         For a light scan: known devices keep their classification; online only
         if they are in the ARP cache and (when known) their service port answers.
@@ -270,6 +282,9 @@ class Scanner:
                 device["online"] = False
                 return mac, device
             device["ip"] = ip
+            if ip in (busy or {}):
+                device["online"] = True  # the reader link is connected right now
+                return mac, device
             port = (device.get("reader") or {}).get("port") if (device.get("reader") or {}).get("transport") == "tcp" else None
             port = port or (device.get("camera") or {}).get("rtsp_port")
             device["online"] = await probes.tcp_open(ip, int(port), timeout) if port else True
@@ -383,8 +398,10 @@ class Scanner:
             if module:
                 device["module"] = module
 
+            device["network_warning"] = self._extra_address(interface, interfaces) if interface else None
+
             camera = self._camera_info(info, onvif_info, mac)
-            reader = info.get("reader")
+            reader = self._with_signature(info.get("reader"), mac, info.get("open_tcp", []))
             if camera:
                 device.update({"kind": "camera", "confidence": "confirmed", "camera": camera})
             elif reader and reader.get("confirmed"):
@@ -400,6 +417,57 @@ class Scanner:
             device["key"] = mac or f"ip:{ip}"
             devices.append(device)
         return devices
+
+    def _with_signature(self, reader, mac, open_tcp):
+        """
+        A reader in active mode is silent until a tag is near, so a probe
+        cannot confirm it. A known maker OUI with its reader port open can.
+        A real frame (tag data) always wins over the signature.
+        """
+        if reader and reader.get("confirmed") and reader.get("protocol"):
+            reader.setdefault("confirmed_by", "frame")
+            return reader
+        prefix = (mac or "").upper()[:8]
+        for signature in self.profiles.get("uhf_reader", {}).get("signatures", []):
+            ouis = [str(item).upper() for item in signature.get("oui", [])]
+            port = int(signature.get("tcp_port") or 0)
+            if prefix and prefix in ouis and port in [int(item) for item in open_tcp]:
+                self.log(f"{mac}: matches reader signature '{signature.get('name')}' (TCP {port} open)")
+                return {
+                    **(reader or {}),
+                    "transport": signature.get("transport", "tcp"),
+                    "port": port,
+                    "protocol": signature.get("protocol"),
+                    "work_mode": signature.get("work_mode", "unknown"),
+                    "confirmed": True,
+                    "confirmed_by": "signature",
+                    "signature": signature.get("name"),
+                }
+        return reader
+
+    @staticmethod
+    def _extra_address(interface, interfaces):
+        """
+        The device is reached only through an extra address on this PC's
+        network card (a second IP next to the router/DHCP one, or next to a
+        169.254 address when there is no DHCP). That address is manual: it
+        is gone after a restart and on another PC, so warn and explain.
+        """
+        others = [item for item in interfaces if item["name"] == interface["name"] and item["ip"] != interface["ip"]]
+        if not others or interface.get("gateway"):
+            return None
+        lan = next((item for item in others if item.get("gateway")), None) \
+            or next((item for item in others if not item.get("link_local")), None)
+        return {
+            "pc_ip": interface["ip"],
+            "network": interface["network"],
+            "interface": interface["name"],
+            "interface_label": interface.get("label"),
+            "lan_network": lan["network"] if lan else None,
+            "lan_gateway": lan.get("gateway") if lan else None,
+            "lan_ip": lan["ip"] if lan else None,
+            "no_dhcp": lan is None,
+        }
 
     def _camera_info(self, info, onvif_info, mac):
         rtsp = info.get("rtsp")

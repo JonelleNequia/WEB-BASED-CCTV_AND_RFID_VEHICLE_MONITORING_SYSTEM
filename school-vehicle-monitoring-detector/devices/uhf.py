@@ -8,6 +8,10 @@ the checksum is right (random bytes do not pass):
 - r2000:  Impinj R2000 style. A0 Len Addr Cmd Data.. Check (two's complement sum)
 - chafon: Chafon / "UHFReader18/288" style. Len Addr Cmd [Status] Data.. CRC16 (LSB first)
 - bb7e:   Magic RF M100 / QM100 style. BB Type Cmd PL(2) Payload.. Sum 7E
+- cc:     CC Addr(2) Cmd Flag Len Payload.. Check, where the sum of every byte
+          including Check is 0 (mod 256). Tag report (Cmd 20):
+          Status(1) PC(2) EPC(PC bits 15-11 words) RSSI(1, signed dBm).
+          Seen on readers with a WCH Ethernet module in TCP server mode.
 - text:   plain ASCII lines with the EPC in hex (readers in "active" output mode)
 
 Which protocol a reader uses is learned from the first valid frame and
@@ -17,12 +21,14 @@ remembered in the device record (never assumed from a fixed port).
 import re
 import time
 
-PROTOCOLS = ("r2000", "chafon", "bb7e", "text")
+PROTOCOLS = ("r2000", "chafon", "bb7e", "cc", "text")
 
 # Command bytes that carry tag data in each protocol.
 R2000_TAG_COMMANDS = {0x80, 0x89, 0x8A, 0x8B, 0x90, 0xB0}
 CHAFON_TAG_COMMANDS = {0x01, 0xEE}
 BB7E_TAG_COMMANDS = {0x22, 0x27}
+CC_TAG_COMMANDS = {0x20}
+CC_HEADER_BYTES = 6
 
 MIN_EPC_BYTES = 4
 MAX_EPC_BYTES = 62
@@ -51,6 +57,11 @@ def bb7e_checksum(data):
     return sum(data) & 0xFF
 
 
+def cc_checksum(data):
+    """Two's complement: the whole frame, checksum included, sums to 0."""
+    return (-sum(data)) & 0xFF
+
+
 # ---------------------------------------------------------------------------
 # Command builders (used by discovery probes and by the reader link polling)
 # ---------------------------------------------------------------------------
@@ -71,6 +82,10 @@ def build_command(protocol, command, data=b"", address=0xFF):
     if protocol == "bb7e":
         body = bytes([0x00, command, (len(data) >> 8) & 0xFF, len(data) & 0xFF]) + data
         return bytes([0xBB]) + body + bytes([bb7e_checksum(body), 0x7E])
+
+    if protocol == "cc":
+        body = bytes([0xCC, 0xFF, 0xFF, command, 0x00, len(data)]) + data
+        return body + bytes([cc_checksum(body)])
 
     raise ValueError(f"Unknown protocol {protocol}")
 
@@ -228,6 +243,33 @@ def _bb7e(buffer, start):
     return end, Frame("bb7e", "reply", command, raw=frame)
 
 
+def _cc(buffer, start):
+    if buffer[start] != 0xCC:
+        return None
+    if len(buffer) - start < CC_HEADER_BYTES:
+        return "more"
+    length = buffer[start + 5]
+    end = start + CC_HEADER_BYTES + length + 1
+    if end > len(buffer):
+        return "more"
+    frame = buffer[start:end]
+    if sum(frame) & 0xFF:
+        return None
+    command = frame[3]
+    payload = frame[CC_HEADER_BYTES:-1]
+    if command in CC_TAG_COMMANDS and len(payload) >= 1 + 2 + MIN_EPC_BYTES:
+        pc = (payload[1] << 8) | payload[2]
+        epc_len = (pc >> 11) * 2
+        # EPC length comes from the PC word, never a fixed 12 bytes.
+        if epc_len and 3 + epc_len <= len(payload):
+            epc = payload[3:3 + epc_len]
+            rest = payload[3 + epc_len:]
+            if _valid_epc(epc):
+                rssi = (rest[0] - 256 if rest[0] > 127 else rest[0]) if rest else None
+                return end, Frame("cc", "tag", command, epc.hex().upper(), rssi=rssi, raw=frame)
+    return end, Frame("cc", "reply", command, raw=frame)
+
+
 def _printable(chunk):
     return all(32 <= byte < 127 or byte in (9, 10, 13) for byte in chunk)
 
@@ -250,7 +292,9 @@ def epcs_from_text(line):
     return found
 
 
-BINARY_PARSERS = (("r2000", _r2000), ("bb7e", _bb7e), ("chafon", _chafon))
+# Headed formats first: a headerless chafon length byte matches almost anything.
+BINARY_PARSERS = (("cc", _cc), ("r2000", _r2000), ("bb7e", _bb7e), ("chafon", _chafon))
+HEADED_PARSERS = {0xA0: ("r2000", _r2000), 0xBB: ("bb7e", _bb7e), 0xCC: ("cc", _cc)}
 
 
 class StreamDecoder:
@@ -265,6 +309,9 @@ class StreamDecoder:
         self.protocol = protocol if protocol in PROTOCOLS else None
         self.buffer = bytearray()
         self.last_data_at = 0.0
+        # Bytes skipped because they were not part of a valid frame (bad
+        # checksum, unknown format). Kept for the unknown-data log.
+        self.discarded = bytearray()
 
     def feed(self, data):
         self.buffer.extend(data)
@@ -322,24 +369,35 @@ class StreamDecoder:
                 index += 1  # line break between text lines
                 continue
             if waiting and not final:
-                # A headerless (chafon) length byte may just be noise: if a
+                # A length byte may just be noise (or a broken frame): if a
                 # complete headed frame follows, skip ahead to it.
                 ahead = self._complete_headed_frame_after(buffer, index)
                 if ahead is None:
                     break
+                self._discard(buffer[index:ahead])
                 index = ahead
                 continue
+            self._discard(buffer[index:index + 1])
             index += 1
 
         del buffer[:index]
         return frames
 
+    def _discard(self, chunk):
+        if len(self.discarded) < 1024:
+            self.discarded.extend(chunk[:1024 - len(self.discarded)])
+
+    def take_discarded(self):
+        """Bytes dropped since the last call (for logging unknown data)."""
+        data, self.discarded = bytes(self.discarded), bytearray()
+        return data
+
     def _complete_headed_frame_after(self, buffer, index):
-        if self.protocol not in (None, "r2000", "bb7e"):
+        if self.protocol not in (None, "r2000", "bb7e", "cc"):
             return None
         for position in range(index + 1, len(buffer)):
-            parser = {0xA0: _r2000, 0xBB: _bb7e}.get(buffer[position])
-            if parser and self.protocol in (None, "r2000" if parser is _r2000 else "bb7e"):
+            name, parser = HEADED_PARSERS.get(buffer[position], (None, None))
+            if parser and self.protocol in (None, name):
                 if isinstance(parser(buffer, position), tuple):
                     return position
         return None

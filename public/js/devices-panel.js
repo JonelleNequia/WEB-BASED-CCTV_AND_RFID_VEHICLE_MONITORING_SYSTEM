@@ -159,15 +159,37 @@
             const link = assigned.link;
             const state = LINK_LABEL[link.state] || link.state || 'Starting…';
             const parts = [state];
+            if (link.state === 'connected' && link.ip) {
+                parts.push(`${String(link.transport || 'tcp').toUpperCase()} ${link.ip}:${link.port}`);
+            }
             if (link.protocol) {
                 parts.push(`format ${link.protocol}`);
             }
-            if (link.last_tag) {
-                parts.push(`last tag ${link.last_tag} · ${link.last_tag_display || ''}`);
-            }
             body.append(el('span', link.state === 'connected' ? 'devices-link devices-link-ok' : 'devices-link', parts.join(' · ')));
+            if (link.last_tag) {
+                const tag = el('div', 'devices-last-tag');
+                tag.append(el('span', 'text-muted', 'Last tag '), el('code', null, link.last_tag));
+                const extra = [];
+                if (link.last_rssi !== null && link.last_rssi !== undefined) {
+                    extra.push(`RSSI ${link.last_rssi} dBm`);
+                }
+                if (link.last_tag_display) {
+                    extra.push(link.last_tag_display);
+                }
+                extra.push(`${link.events_sent || 0} event(s) from ${link.tags_read || 0} read(s)`);
+                tag.append(el('span', 'field-help', extra.join(' · ')));
+                body.append(tag);
+            } else if (link.state === 'connected') {
+                body.append(el('span', 'field-help', 'No tag read yet. Hold a UHF tag near the reader.'));
+            }
+            if (link.unknown_frames) {
+                body.append(el('span', 'field-help', `${link.unknown_frames} unknown frame(s), last: ${link.last_unknown_hex || '—'} (see php artisan devices:rawdump)`));
+            }
             if (link.last_error && link.state !== 'connected') {
                 body.append(el('span', 'field-help', link.last_error));
+            }
+            if (assigned.network_warning) {
+                body.append(networkWarning(assigned.network_warning));
             }
         }
         if (role === 'camera') {
@@ -190,6 +212,15 @@
 
         row.append(body, button('Unassign', 'button button-secondary button-sm', () => unassign(station, role)));
         return row;
+    }
+
+    function networkWarning(warning) {
+        const box = el('div', 'devices-guidance devices-guidance-warning');
+        box.append(el('strong', null, warning.title), el('p', null, warning.text));
+        const steps = el('ol');
+        (warning.steps || []).forEach((step) => steps.append(el('li', null, step)));
+        box.append(steps);
+        return box;
     }
 
     function capitalize(text) {
@@ -404,6 +435,8 @@
             status.append(badge(STATUS_TONE[device.status] || 'neutral', device.status_label));
             if (device.guidance) {
                 status.append(el('div', 'table-subtext', 'other subnet'));
+            } else if (device.network_warning) {
+                status.append(el('div', 'table-subtext', 'other subnet (extra address)'));
             }
 
             const station = el('td');
@@ -472,6 +505,9 @@
             const r = device.reader;
             rows.push(['Connection', r.port ? `${String(r.transport || 'tcp').toUpperCase()} port ${r.port}` : 'Unknown']);
             rows.push(['Data format', r.protocol || 'Not known yet (learned from the first tag)']);
+            if (r.confirmed) {
+                rows.push(['Confirmed by', r.confirmed_by === 'signature' ? `Maker + port (${r.signature || 'known reader'})` : (r.confirmed_by === 'tag' ? 'Tag data' : 'Reader reply')]);
+            }
             rows.push(['Work mode', { active: 'Active (sends tags by itself)', answer: 'Answer (polled by this PC)', client: 'Client (connects to this PC)' }[r.work_mode] || 'Unknown']);
             if (r.sample_tags && r.sample_tags.length) {
                 rows.push(['Tags seen', r.sample_tags.join(', ')]);
@@ -487,6 +523,9 @@
         });
         nodes.push(dl);
 
+        if (device.network_warning) {
+            nodes.push(networkWarning(device.network_warning));
+        }
         if (device.guidance) {
             const box = el('div', 'devices-guidance');
             box.append(el('strong', null, 'Found, but not reachable from this PC'), el('p', null, device.guidance.text));

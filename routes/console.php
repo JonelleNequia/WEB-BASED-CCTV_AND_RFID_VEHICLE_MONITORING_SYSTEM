@@ -98,6 +98,16 @@ Artisan::command('devices:listen {address : Reader IP:PORT} {--udp : Use UDP ins
     return $runDeviceTool($arguments, fn (string $buffer) => $this->output->write($buffer));
 })->purpose('Print the raw data a UHF reader sends (hold a tag near it)');
 
+// Raw hex dump from a UHF reader (troubleshooting an unknown data format).
+// When the background service is connected to the reader, it copies what it
+// receives: the reader accepts only one TCP client. Nothing is sent to it.
+Artisan::command('devices:rawdump {target? : entrance, exit or IP:PORT (default: the assigned reader)} {--seconds=30}', function () use ($runDeviceTool) {
+    $target = (string) ($this->argument('target') ?: 'auto');
+    $arguments = ['--dump', $target, '--seconds', (string) max(1, (int) $this->option('seconds'))];
+
+    return $runDeviceTool($arguments, fn (string $buffer) => $this->output->write($buffer));
+})->purpose('Print the raw bytes (hex) a UHF reader sends, with the decoded tags');
+
 // Find my reader in the terminal. Passive listening (readers on another
 // network) needs admin rights: on macOS/Linux this asks for your password.
 Artisan::command('devices:find {--seconds=90} {--no-passive : Skip raw packet listening (no password needed)}', function () {

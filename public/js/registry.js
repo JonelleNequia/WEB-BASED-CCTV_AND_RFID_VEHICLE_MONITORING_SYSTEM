@@ -101,6 +101,32 @@
             lookup(picker, scan.value);
         });
 
+        // UHF: take the next EPC the network reader reads.
+        const uhf = picker.querySelector('[data-uhf-read]');
+        let stopUhf = null;
+        uhf?.addEventListener('click', function () {
+            if (stopUhf) {
+                stopUhf();
+                return;
+            }
+            uhf.textContent = 'Stop listening';
+            stopUhf = window.uhfTagReader.listen(uhf.dataset.uhfRead, {
+                seconds: 30,
+                onStatus: (text, state) => setResult(picker, text, state),
+                onRead: function (read) {
+                    stopUhf?.();
+                    scan.value = read.epc;
+                    lookup(picker, read.epc);
+                },
+                onEnd: function () {
+                    stopUhf = null;
+                    uhf.textContent = 'Read with UHF reader';
+                },
+            });
+        });
+
+        picker.closest('.drawer')?.addEventListener('drawer:close', () => stopUhf?.());
+
         select?.addEventListener('change', function () {
             if (select.value) {
                 scan.value = '';

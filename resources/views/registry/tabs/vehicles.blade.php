@@ -198,5 +198,6 @@
 ], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 
 @push('scripts')
+    <script src="{{ asset('js/uhf-tag-reader.js') }}"></script>
     <script src="{{ asset('js/registry.js') }}"></script>
 @endpush

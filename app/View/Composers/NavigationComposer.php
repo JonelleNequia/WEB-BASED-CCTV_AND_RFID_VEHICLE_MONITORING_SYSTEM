@@ -29,7 +29,22 @@ class NavigationComposer
         return $view->with([
             'navAlertCount' => $isAdmin ? $this->alertSummaryService->counts()['total'] : 0,
             'navHealth' => $this->health(),
+            'navUhf' => $this->uhfReaders(),
         ]);
+    }
+
+    /**
+     * Assigned UHF readers: connected or not, last EPC, RSSI and time.
+     *
+     * @return list<array<string, mixed>>
+     */
+    protected function uhfReaders(): array
+    {
+        try {
+            return $this->deviceServiceRuntime->uhfReaders();
+        } catch (Throwable) {
+            return [];
+        }
     }
 
     /**

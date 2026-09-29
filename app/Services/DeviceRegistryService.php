@@ -108,7 +108,7 @@ class DeviceRegistryService
 
         $details = array_replace(
             (array) ($device->details ?? []),
-            Arr::only($data, ['camera', 'reader', 'http', 'module', 'open_ports', 'discovered_by', 'via_temporary_ip', 'randomized_mac', 'is_gateway'])
+            Arr::only($data, ['camera', 'reader', 'http', 'module', 'open_ports', 'discovered_by', 'via_temporary_ip', 'randomized_mac', 'is_gateway', 'network_warning'])
         );
 
         $newIp = (string) $data['ip'];
@@ -610,6 +610,8 @@ class DeviceRegistryService
     protected function readerTarget(string $station, array $settings): ?array
     {
         $readerName = $settings["{$station}_rfid_reader_name"] ?? ucfirst($station).' UHF Reader';
+        // Debounce in the reader link: one event per EPC within the RFID cooldown (Settings).
+        $cooldown = max(0, (int) ($settings['rfid_cooldown_seconds'] ?? 60));
 
         // Settings › Advanced: manual address wins only when switched on.
         if (($settings["{$station}_reader_manual"] ?? '0') === '1'
@@ -624,6 +626,7 @@ class DeviceRegistryService
                 'protocol' => null,
                 'work_mode' => null,
                 'reader_name' => $readerName,
+                'cooldown_seconds' => $cooldown,
             ];
         }
 
@@ -648,6 +651,7 @@ class DeviceRegistryService
             'protocol' => $reader['protocol'] ?? ($options['protocol'] ?? null),
             'work_mode' => $reader['work_mode'] ?? ($options['work_mode'] ?? null),
             'reader_name' => $readerName,
+            'cooldown_seconds' => $cooldown,
         ];
     }
 
@@ -863,12 +867,53 @@ class DeviceRegistryService
             'camera' => $camera ? Arr::only($camera, ['rtsp_port', 'onvif_xaddr', 'vendor_profile']) + [
                 'streams' => array_keys((array) ($camera['rtsp_paths'] ?? [])) ?: ['main', 'sub'],
             ] : null,
-            'reader' => $reader ? Arr::only($reader, ['transport', 'port', 'protocol', 'work_mode', 'confirmed', 'sample_tags']) : null,
+            'reader' => $reader ? Arr::only($reader, ['transport', 'port', 'protocol', 'work_mode', 'confirmed', 'confirmed_by', 'signature', 'sample_tags']) : null,
             'open_ports' => (array) data_get($details, 'open_ports.tcp', []),
+            'network_warning' => $this->networkWarning($device),
             'guidance' => $device->status === NetworkDevice::STATUS_UNREACHABLE
                 ? $this->unreachableGuidance($device, $suggestions->get($device->ip), $interfaces)
                 : null,
             'assign_url' => route('settings.devices.assign', $device),
+        ];
+    }
+
+    /**
+     * The device answers only because this PC has an extra, manually added
+     * address on its network (see scanner._extra_address): it stops working
+     * after a restart and on the deployment PC. Explain how to fix it for good.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function networkWarning(NetworkDevice $device): ?array
+    {
+        $warning = data_get($device->details, 'network_warning');
+
+        if (! is_array($warning) || empty($warning['network'])) {
+            return null;
+        }
+
+        $what = $device->kind === NetworkDevice::KIND_CAMERA ? 'camera' : 'reader';
+        $lan = $warning['lan_network'] ?? null;
+        $steps = $lan
+            ? [
+                "Open the {$what}'s network settings (its web page or setup tool) and give it a free address in {$lan}"
+                    .(filled($warning['lan_gateway'] ?? null) ? " with gateway {$warning['lan_gateway']}" : '')
+                    .', or switch it to DHCP (automatic).',
+                'Keep the same work mode and port, then press Scan again: the system finds it by its MAC address.',
+            ]
+            : [
+                'This network card has no DHCP address (169.254.x.x): there is no router on this cable, or it is off.',
+                "Connect the PC and the {$what} to the router, then give the {$what} an address in the router's network or switch it to DHCP.",
+                'Keep the same work mode and port, then press Scan again: the system finds it by its MAC address.',
+            ];
+
+        return [
+            'title' => 'Different network: works only through an extra address',
+            'text' => "This {$what} ({$device->ip}) is on {$warning['network']}, not on this PC's LAN"
+                .($lan ? " ({$lan})" : '').". It answers only because this PC has the extra address {$warning['pc_ip']} on "
+                .($warning['interface_label'] ?? $warning['interface'] ?? 'its network card')
+                .'. That address is lost after a restart and does not exist on another PC.',
+            'steps' => $steps,
         ];
     }
 
@@ -934,8 +979,12 @@ class DeviceRegistryService
 
         if ($role === DeviceAssignment::ROLE_READER) {
             $link = (array) data_get($status, "readers.$station", []);
-            $payload['link'] = Arr::only($link, ['state', 'protocol', 'work_mode', 'last_tag', 'last_tag_at', 'tags_read', 'last_error', 'transport']);
+            $payload['link'] = Arr::only($link, [
+                'state', 'protocol', 'work_mode', 'last_tag', 'last_tag_at', 'last_rssi', 'tags_read', 'events_sent',
+                'unknown_frames', 'last_unknown_hex', 'last_error', 'transport', 'ip', 'port',
+            ]);
             $payload['link']['last_tag_display'] = filled($link['last_tag_at'] ?? null) ? DisplayTime::datetime($link['last_tag_at']) : null;
+            $payload['network_warning'] = $this->networkWarning($device);
         }
 
         return $payload;

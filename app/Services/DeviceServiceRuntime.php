@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Support\DeviceFiles;
+use App\Support\DisplayTime;
 use App\Support\PythonLauncher;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -79,6 +80,92 @@ class DeviceServiceRuntime
         PythonLauncher::rotateLog($this->logPath());
 
         return PythonLauncher::launch('device_service.py', $this->logPath());
+    }
+
+    /**
+     * UHF readers assigned to a station: connected or not, and the last tag
+     * read (EPC, RSSI, time). Shown in the sidebar and polled by it.
+     *
+     * @return list<array{station: string, label: string, ok: bool, state: string, detail: string, epc: ?string, rssi: mixed, read_at: ?string, read_display: ?string, tag_line: string}>
+     */
+    public function uhfReaders(): array
+    {
+        $status = $this->readStatus();
+        $running = (bool) ($status['service_running'] ?? false);
+        $rows = [];
+
+        foreach (['entrance', 'exit'] as $station) {
+            $link = (array) data_get($status, "readers.$station", []);
+
+            if (empty($link['target'])) {
+                continue;
+            }
+
+            $connected = $running && ($link['state'] ?? null) === 'connected';
+            $rows[] = [
+                'station' => $station,
+                'label' => ucfirst($station).' UHF',
+                'ok' => $connected,
+                'state' => $running ? (string) ($link['state'] ?? 'connecting') : 'stopped',
+                'detail' => match (true) {
+                    ! $running => 'Service off',
+                    $connected => 'Connected',
+                    ($link['state'] ?? null) === 'connecting' => 'Connecting…',
+                    default => 'Offline',
+                },
+                'epc' => $link['last_tag'] ?? null,
+                'rssi' => $link['last_rssi'] ?? null,
+                'read_at' => $link['last_tag_at'] ?? null,
+                'read_display' => filled($link['last_tag_at'] ?? null) ? DisplayTime::time($link['last_tag_at']) : null,
+            ];
+            $last = end($rows);
+            $rows[key($rows)]['tag_line'] = $last['epc']
+                ? implode(' · ', array_filter([
+                    '…'.substr((string) $last['epc'], -8),
+                    $last['rssi'] !== null ? $last['rssi'].' dBm' : null,
+                    $last['read_display'],
+                ]))
+                : 'No tag read yet';
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Distinct tags the UHF readers read after a moment (Unix seconds), newest
+     * first: Registry "Read with UHF reader" fills the tag field from these.
+     *
+     * @return array{connected: bool, reads: list<array{epc: string, rssi: mixed, station: string, epoch: float}>, now: float}
+     */
+    public function recentUhfReads(float $after): array
+    {
+        $status = $this->readStatus();
+        $running = (bool) ($status['service_running'] ?? false);
+        $reads = [];
+        $connected = false;
+
+        foreach ((array) ($status['readers'] ?? []) as $station => $link) {
+            if (! is_array($link)) {
+                continue;
+            }
+            $connected = $connected || ($running && ($link['state'] ?? null) === 'connected');
+
+            foreach ((array) ($link['recent_tags'] ?? []) as $read) {
+                if (is_array($read) && filled($read['epc'] ?? null) && (float) ($read['epoch'] ?? 0) > $after) {
+                    $reads[] = [
+                        'epc' => strtoupper((string) $read['epc']),
+                        'rssi' => $read['rssi'] ?? null,
+                        'station' => (string) $station,
+                        'epoch' => (float) $read['epoch'],
+                    ];
+                }
+            }
+        }
+
+        usort($reads, fn (array $a, array $b): int => $b['epoch'] <=> $a['epoch']);
+
+        // The service writes its own clock; the browser may be on another PC.
+        return ['connected' => $connected, 'reads' => $reads, 'now' => microtime(true)];
     }
 
     public function logPath(): string

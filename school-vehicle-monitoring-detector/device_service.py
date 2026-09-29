@@ -12,6 +12,7 @@ Service mode (started by Laravel, like the detector):
 Diagnostics:
     python device_service.py --scan-once --verbose [--target IP] [--post]
     python device_service.py --listen IP:PORT [--transport udp] [--seconds 30]
+    python device_service.py --dump [entrance|exit|IP:PORT] [--seconds 30]
 """
 
 import os
@@ -54,6 +55,8 @@ import requests
 from devices import netinfo, uhf
 from devices.paths import (
     LOCK_PATH,
+    RAW_TAP_LOG_PATH,
+    RAW_TAP_REQUEST_PATH,
     SCAN_RESULT_PATH,
     SERVICE_LOG_PATH,
     STATUS_PATH,
@@ -175,6 +178,15 @@ class DeviceService:
         device = self.devices_by_mac().get(mac) if mac else None
         return device.get("ip") if device and device.get("reachable", True) else None
 
+    def busy_readers(self):
+        """{ip: mac} of readers a link is connected to (not probed by scans)."""
+        busy = {}
+        for link in self.links.values():
+            state = link.snapshot()
+            if state.get("state") == "connected" and state.get("ip"):
+                busy[state["ip"]] = (link.target or {}).get("mac")
+        return busy
+
     def route_client(self, ip):
         mac = netinfo.arp_table().get(ip)
         for link in self.links.values():
@@ -216,7 +228,7 @@ class DeviceService:
     def _scan(self, trigger, light):
         try:
             scanner = Scanner(self.profiles, log=log, progress=self._progress)
-            result = scanner.run(trigger=trigger, known=self.devices_by_mac(), light=light)
+            result = scanner.run(trigger=trigger, known=self.devices_by_mac(), light=light, busy=self.busy_readers())
             write_json_atomic(SCAN_RESULT_PATH, result)
             with self.lock:
                 self.last_result = result
@@ -633,6 +645,126 @@ def listen(args, profiles):
     return 0
 
 
+def _print_chunk(stamp, data, frames, discarded=b""):
+    clock = time.strftime("%H:%M:%S", time.localtime(stamp)) + f".{int(stamp * 1000) % 1000:03d}"
+    print(f"{clock} {len(data):>4}B  {data.hex(' ').upper()}", flush=True)
+    for frame in frames:
+        if frame.kind == "tag":
+            print(f"             -> {frame.protocol} tag  EPC {frame.epc}  RSSI {frame.rssi} dBm", flush=True)
+        else:
+            print(f"             -> {frame.protocol} frame, unknown command 0x{frame.command:02X}", flush=True)
+    if discarded:
+        print(f"             !! {len(discarded)} byte(s) not in a valid frame: {discarded[:64].hex(' ').upper()}", flush=True)
+
+
+def _service_status():
+    try:
+        status = json.loads(STATUS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    from datetime import datetime
+
+    try:
+        age = time.time() - datetime.fromisoformat(status.get("updated_at")).timestamp()
+    except (TypeError, ValueError):
+        return {}
+    return status if status.get("service_running") and age < 15 else {}
+
+
+def dump(args, profiles):
+    """
+    Raw hex dump of what a reader sends (troubleshooting). Sends nothing.
+
+    Many readers accept one TCP client only, so when the background service is
+    connected to the reader, it copies what it receives (raw tap) instead of
+    this command opening a second connection that the reader would refuse.
+    """
+    target = args.dump
+    runtime = load_runtime_config()
+    status = _service_status()
+    stations = [target] if target in STATIONS else ([] if ":" in target else list(STATIONS))
+
+    connected = [station for station in stations
+                 if (status.get("readers", {}).get(station) or {}).get("state") == "connected"]
+    if connected:
+        station = connected[0] if target in STATIONS else None
+        link = status["readers"][connected[0]]
+        print(f"The device service is connected to the {connected[0]} reader ({link.get('ip')}:{link.get('port')}); "
+              f"showing what it receives for {args.seconds}s. Hold a tag near the reader. Ctrl+C stops.", flush=True)
+        start = RAW_TAP_LOG_PATH.stat().st_size if RAW_TAP_LOG_PATH.exists() else 0
+        write_json_atomic(RAW_TAP_REQUEST_PATH, {"station": station, "until": time.time() + args.seconds})
+        lines = 0
+        try:
+            with open(RAW_TAP_LOG_PATH, "a+", encoding="utf-8") as handle:
+                handle.seek(start)
+                end = time.monotonic() + args.seconds
+                while time.monotonic() < end:
+                    line = handle.readline()
+                    if not line:
+                        time.sleep(0.2)
+                        continue
+                    lines += 1
+                    stamp, station_name, source, size, rest = (line.rstrip("\n").split(" ", 4) + [""] * 5)[:5]
+                    hex_part, _, decoded = rest.partition(" | ")
+                    print(f"{time.strftime('%H:%M:%S', time.localtime(float(stamp)))} {station_name} {source} {size}  {hex_part}", flush=True)
+                    for item in filter(None, decoded.split(", ")):
+                        print(f"             -> {item}", flush=True)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            RAW_TAP_REQUEST_PATH.unlink(missing_ok=True)
+        print(f"Done: {lines} chunk(s) received." if lines else "Nothing received. No tag in range, or the reader is not in active mode.")
+        return 0
+
+    # Direct connection: an address was given, or the service is not connected.
+    if ":" in target:
+        host, _, port = target.rpartition(":")
+        address = (host, int(port)) if port.isdigit() else None
+    else:
+        reader = next(((runtime.get("stations") or {}).get(station, {}).get("reader") for station in stations
+                       if (runtime.get("stations") or {}).get(station, {}).get("reader")), None)
+        device = known_devices(load_last_scan()).get((reader or {}).get("mac")) if reader else None
+        host = (device or {}).get("ip") or (reader or {}).get("ip")
+        address = (host, int(reader["port"])) if host and (reader or {}).get("port") else None
+    if not address:
+        print("No reader address. Use: --dump IP:PORT, or assign a reader to a station first.", file=sys.stderr)
+        return 2
+
+    print(f"Connecting to {address[0]}:{address[1]} (TCP)...", flush=True)
+    try:
+        sock = socket.create_connection(address, timeout=5)
+    except OSError as error:
+        print(f"Could not connect: {error or error.__class__.__name__}.")
+        print("This reader accepts one TCP client at a time: close its vendor tool or any other program connected to it.")
+        return 1
+    sock.settimeout(0.3)
+    print(f"Connected. Hold a tag near the reader. Listening {args.seconds}s (nothing is sent)...", flush=True)
+    decoder = uhf.StreamDecoder()
+    tags = {}
+    end = time.monotonic() + args.seconds
+    try:
+        while time.monotonic() < end:
+            try:
+                data = sock.recv(4096)
+            except (socket.timeout, TimeoutError):
+                continue
+            if not data:
+                print("Reader closed the connection.")
+                break
+            frames = decoder.feed(data)
+            _print_chunk(time.time(), data, frames, decoder.take_discarded())
+            for frame in frames:
+                if frame.epc:
+                    tags[frame.epc] = tags.get(frame.epc, 0) + 1
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sock.close()
+    print(f"Format: {decoder.protocol or 'unknown'}")
+    print("Tags: " + (", ".join(f"{epc} x{count}" for epc, count in tags.items()) or "none"))
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="PHILCST camera and UHF reader detection")
     parser.add_argument("--scan-once", action="store_true", help="scan once and exit")
@@ -644,6 +776,7 @@ def main():
     parser.add_argument("--find", action="store_true", help="Find my reader: baseline, plug in, watch for new devices")
     parser.add_argument("--no-passive", action="store_true", help="do not capture raw packets")
     parser.add_argument("--listen", help="IP:PORT of a reader to listen to")
+    parser.add_argument("--dump", nargs="?", const="auto", help="raw hex dump: entrance, exit or IP:PORT")
     parser.add_argument("--transport", choices=["tcp", "udp"], default="tcp")
     parser.add_argument("--seconds", type=int, default=30)
     args = parser.parse_args()
@@ -651,9 +784,11 @@ def main():
     # Diagnostics print to the console only (they may run with sudo, and a
     # root-owned log file would block the background service).
     setup_logging(args.verbose or args.scan_once or bool(args.listen) or args.find,
-                  to_file=not (args.scan_once or args.listen or args.find))
+                  to_file=not (args.scan_once or args.listen or args.find or args.dump))
     profiles = load_profiles()
 
+    if args.dump:
+        return dump(args, profiles)
     if args.find:
         return find(args, profiles)
     if args.listen:

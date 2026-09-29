@@ -7,22 +7,27 @@ Live connection from this PC to the UHF reader assigned to each station.
   detected protocol is sent every poll interval ("answer" mode).
 - Each tag is sent to Laravel's existing RFID ingest API with the station, so
   the normal RFID / guest pass rules apply unchanged.
-- A tag that stays in the field is sent once; it is sent again only after it
-  was absent for a while (Laravel's cooldown still applies on top).
+- Debounce: one event per EPC per reader. A tag that stays in the field is
+  sent once; after it left, it is sent again only when the cooldown (the RFID
+  cooldown from Settings) has passed. Laravel's cooldown still applies on top.
+- Frames in an unknown format or with an unknown command are logged in hex
+  (rate-limited) and never stop the link.
 - Readers in "TCP client" mode connect to this PC instead (ClientModeListener).
 """
 
+import json
 import queue
 import select
 import socket
 import threading
 import time
+from collections import deque
 from datetime import datetime, timezone
 
 import requests
 
 from . import uhf
-from .paths import CAPTURE_LOG_PATH
+from .paths import CAPTURE_LOG_PATH, RAW_TAP_LOG_PATH, RAW_TAP_REQUEST_PATH
 
 
 def utc_now():
@@ -91,20 +96,103 @@ class CaptureLog:
 
 
 class TagFilter:
-    """Send a tag when it appears, not on every read while it stays in range."""
+    """
+    One event per EPC per reader.
 
-    def __init__(self, absent_seconds):
+    - Read again within `absent_seconds`: the tag never left; no new event.
+    - After it left: a new event only when `cooldown_seconds` passed since
+      its last event.
+    """
+
+    def __init__(self, cooldown_seconds, absent_seconds):
+        self.cooldown_seconds = float(cooldown_seconds)
         self.absent_seconds = float(absent_seconds)
-        self.last_seen = {}
+        self.last_read = {}
+        self.last_event = {}
 
-    def should_send(self, epc):
+    def configure(self, cooldown_seconds):
+        if cooldown_seconds is not None:
+            self.cooldown_seconds = max(0.0, float(cooldown_seconds))
+
+    def should_send(self, epc, now=None):
+        now = time.monotonic() if now is None else now
+        last_read = self.last_read.get(epc)
+        last_event = self.last_event.get(epc)
+        self.last_read[epc] = now
+        if len(self.last_read) > 2000:
+            keep = max(self.cooldown_seconds, self.absent_seconds)
+            self.last_read = {key: value for key, value in self.last_read.items() if now - value <= keep}
+            self.last_event = {key: value for key, value in self.last_event.items() if now - value <= keep}
+        left = last_read is None or now - last_read > self.absent_seconds
+        if last_event is None or (left and now - last_event >= self.cooldown_seconds):
+            self.last_event[epc] = now
+            return True
+        return False
+
+
+def enable_keepalive(sock, idle, interval, count):
+    """
+    Notice a pulled cable or a powered-off reader within seconds instead of
+    the OS default of about two hours (an active-mode reader is silent while
+    no tag is near, so silence alone means nothing).
+    """
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    idle_option = getattr(socket, "TCP_KEEPIDLE", None) or getattr(socket, "TCP_KEEPALIVE", None)
+    for option, value in ((idle_option, idle), (getattr(socket, "TCP_KEEPINTVL", None), interval),
+                          (getattr(socket, "TCP_KEEPCNT", None), count)):
+        if option is None:
+            continue
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, option, int(value))
+        except OSError:
+            pass
+    if hasattr(socket, "SIO_KEEPALIVE_VALS") and idle_option is None:
+        try:
+            sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, int(idle * 1000), int(interval * 1000)))
+        except (OSError, ValueError):
+            pass
+
+
+class RawTap:
+    """
+    Copies every chunk a reader sends to raw_tap.log while `devices:rawdump`
+    asks for it (raw_tap_request.json with an end time). Checked at most once
+    a second, so it costs nothing when unused.
+    """
+
+    def __init__(self):
+        self.checked_at = 0.0
+        self.request = None
+        self.lock = threading.Lock()
+
+    def active_for(self, station):
         now = time.monotonic()
-        previous = self.last_seen.get(epc)
-        self.last_seen[epc] = now
-        if len(self.last_seen) > 2000:
-            cutoff = now - self.absent_seconds
-            self.last_seen = {key: value for key, value in self.last_seen.items() if value >= cutoff}
-        return previous is None or now - previous > self.absent_seconds
+        if now - self.checked_at >= 1.0:
+            self.checked_at = now
+            try:
+                self.request = json.loads(RAW_TAP_REQUEST_PATH.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                self.request = None
+        request = self.request or {}
+        if float(request.get("until") or 0) < time.time():
+            return False
+        return request.get("station") in (None, "", station)
+
+    def write(self, station, source, data, frames):
+        line = f"{time.time():.3f} {station} {source} {len(data)}B {data.hex(' ').upper()}"
+        if frames:
+            line += " | " + ", ".join(
+                f"{frame.protocol}:{frame.kind}:cmd={frame.command}:epc={frame.epc}:rssi={frame.rssi}" for frame in frames[:8]
+            )
+        with self.lock:
+            try:
+                with open(RAW_TAP_LOG_PATH, "a", encoding="utf-8") as handle:
+                    handle.write(line + "\n")
+            except OSError:
+                pass
+
+
+RAW_TAP = RawTap()
 
 
 class ReaderLink(threading.Thread):
@@ -120,14 +208,17 @@ class ReaderLink(threading.Thread):
         self.target = None
         self.target_version = 0
         self.lock = threading.Lock()
-        self.filter = TagFilter(self.settings.get("repeat_after_absent_seconds", 5))
+        self.filter = TagFilter(self.settings.get("cooldown_seconds", 60), self.settings.get("repeat_after_absent_seconds", 5))
         self.failures = 0
         self.lost = False
         self.status = {"state": "unassigned"}
+        self.recent = deque(maxlen=int(self.settings.get("recent_tags", 20)))
+        self.unknown_logged = 0
 
     # ------------------------------------------------------------------
     def set_target(self, target):
         """target: dict from device_runtime_config stations.<station>.reader, or None."""
+        self.filter.configure((target or {}).get("cooldown_seconds"))
         with self.lock:
             if _target_key(target) != _target_key(self.target):
                 self.target = target
@@ -138,7 +229,7 @@ class ReaderLink(threading.Thread):
 
     def snapshot(self):
         with self.lock:
-            return dict(self.status)
+            return {**self.status, "recent_tags": list(self.recent)}
 
     def _set(self, **values):
         with self.lock:
@@ -193,7 +284,9 @@ class ReaderLink(threading.Thread):
             sock.connect((ip, port))
         else:
             sock = socket.create_connection((ip, port), timeout=timeout)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            enable_keepalive(sock, float(self.settings.get("keepalive_idle_seconds", 5)),
+                             float(self.settings.get("keepalive_interval_seconds", 2)),
+                             int(self.settings.get("keepalive_count", 3)))
         sock.setblocking(False)
 
         decoder = uhf.StreamDecoder(target.get("protocol"))
@@ -207,6 +300,7 @@ class ReaderLink(threading.Thread):
         work_mode = target.get("work_mode") or "unknown"
         probe_cycle = []
         undecoded = 0
+        self.unknown_logged = 0
 
         with self.lock:
             self.failures = 0
@@ -236,6 +330,9 @@ class ReaderLink(threading.Thread):
                     if captured < capture_limit:
                         self.capture.write(f"{self.station} {ip}:{port}", data, frames)
                         captured += 1
+                    if RAW_TAP.active_for(self.station):
+                        RAW_TAP.write(self.station, f"{ip}:{port}", data, frames)
+                    self._log_unknown(frames, decoder.take_discarded())
                     self._handle(frames, ip, target)
                     if frames and work_mode == "unknown":
                         work_mode = "answer" if last_poll else "active"
@@ -254,6 +351,24 @@ class ReaderLink(threading.Thread):
         finally:
             sock.close()
 
+    def _log_unknown(self, frames, discarded):
+        """Unknown commands and bytes that are not a valid frame, in hex, for analysis."""
+        unknown = [frame for frame in frames if frame.kind == "reply"]
+        if not unknown and not discarded:
+            return
+        with self.lock:
+            self.status["unknown_frames"] = self.status.get("unknown_frames", 0) + len(unknown) + (1 if discarded else 0)
+            self.status["last_unknown_hex"] = (unknown[-1].raw if unknown else discarded)[:64].hex(" ").upper()
+            self.status["last_unknown_at"] = utc_now()
+        limit = int(self.settings.get("unknown_log_per_session", 20))
+        for frame in unknown:
+            if self.unknown_logged < limit:
+                self.unknown_logged += 1
+                self.log(f"{self.station} reader: unknown {frame.protocol} frame cmd=0x{frame.command:02X}: {frame.raw[:64].hex(' ').upper()}")
+        if discarded and self.unknown_logged < limit:
+            self.unknown_logged += 1
+            self.log(f"{self.station} reader: {len(discarded)} byte(s) not in a valid frame (bad checksum or unknown format): {discarded[:64].hex(' ').upper()}")
+
     def _poll_command(self, protocol, cycle):
         if protocol and protocol != "text":
             commands = uhf.probe_commands(self.profiles, "inventory", protocol)
@@ -271,9 +386,22 @@ class ReaderLink(threading.Thread):
         for frame in frames:
             if frame.kind != "tag" or not frame.epc:
                 continue
-            self._set(last_tag=frame.epc, last_tag_at=utc_now(), tags_read=self.snapshot().get("tags_read", 0) + 1)
-            if not self.filter.should_send(frame.epc):
+            now = utc_now()
+            sent = self.filter.should_send(frame.epc)
+            with self.lock:
+                self.status.update(last_tag=frame.epc, last_tag_at=now, last_rssi=frame.rssi,
+                                   tags_read=self.status.get("tags_read", 0) + 1)
+                if sent:
+                    self.status["events_sent"] = self.status.get("events_sent", 0) + 1
+                # Distinct recent reads, newest first (Registry "Read with UHF reader").
+                previous = next((item for item in self.recent if item["epc"] == frame.epc), None)
+                if previous:
+                    self.recent.remove(previous)
+                self.recent.appendleft({"epc": frame.epc, "rssi": frame.rssi, "at": now, "epoch": time.time(),
+                                        "reads": (previous or {}).get("reads", 0) + 1})
+            if not sent:
                 continue
+            self.log(f"{self.station} reader: tag {frame.epc} rssi {frame.rssi} -> event")
             self.poster.post({
                 "tag_uid": frame.epc,
                 "scan_location": self.station,

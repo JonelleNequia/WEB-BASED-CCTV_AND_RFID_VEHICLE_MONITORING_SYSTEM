@@ -82,6 +82,7 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         ->name('guest-passes.visits.card-returned');
 
     // UI Phase 2: Gate Monitor shows Entrance and Exit side by side (all signed-in users).
+    Route::get('/devices/uhf-status', [DeviceController::class, 'uhfStatus'])->name('devices.uhf-status');
     Route::get('/gates', [GateMonitorController::class, 'index'])->name('gates.index');
     Route::get('/gates/state', [GateMonitorController::class, 'state'])->name('gates.state');
     Route::get('/monitoring', fn () => redirect()->route('gates.index'))->name('monitoring.index');
@@ -123,6 +124,7 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
             ->whereNumber('vehicle')
             ->name('registry.vehicles.status');
         Route::post('/registry/tags/lookup', [VehicleRegistryController::class, 'lookupTag'])->name('registry.tags.lookup');
+        Route::get('/registry/tags/uhf-reads', [DeviceController::class, 'uhfReads'])->name('registry.tags.uhf-reads');
         Route::post('/registry/tags/{rfidTag}/status', [VehicleRegistryController::class, 'updateTagStatus'])
             ->whereNumber('rfidTag')
             ->name('registry.tags.status');

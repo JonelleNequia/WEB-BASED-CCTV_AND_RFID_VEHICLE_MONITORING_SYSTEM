@@ -19,6 +19,11 @@
             <span class="field-help">Tag numbers are assigned automatically, starting at #<span data-bulk-next>{{ $nextTagNumber }}</span>.</span>
         </div>
 
+        <div class="tag-picker-uhf">
+            <button type="button" class="button button-secondary button-sm" data-bulk-uhf="{{ route('registry.tags.uhf-reads') }}" aria-pressed="false">Listen to UHF reader</button>
+            <span class="field-help">UHF tags: turn this on, then hold each tag near the UHF reader one at a time.</span>
+        </div>
+
         <p class="text-muted" data-bulk-summary role="status" aria-live="polite">No tags added yet.</p>
         <ul class="bulk-scan-list" data-bulk-list></ul>
 
@@ -31,6 +36,7 @@
 
 @once
     @push('scripts')
+        <script src="{{ asset('js/uhf-tag-reader.js') }}"></script>
         <script src="{{ asset('js/registry-tags.js') }}"></script>
     @endpush
 @endonce

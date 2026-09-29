@@ -536,3 +536,137 @@ class FindMyReaderTests(unittest.TestCase):
             patch.start()
         self.addCleanup(lambda: [patch.stop() for patch in self._patches])
         return wizard
+
+
+# Real frames from the entrance reader (WCH module, TCP server port from the profiles).
+CC_SAMPLES = [
+    "CCFFFF200510003000E280689400005031D6458CE8BAA9",
+    "CCFFFF200510003000E280689400005031D6458CE8BEA5",
+    "CCFFFF200510003000E280689400005031D6458CE8BFA4",
+]
+CC_EPC = "E280689400005031D6458CE8"
+
+
+def cc_frame(command, payload, flag=0x05):
+    body = bytes([0xCC, 0xFF, 0xFF, command, flag, len(payload)]) + bytes(payload)
+    return body + bytes([(-sum(body)) & 0xFF])
+
+
+class CcReaderTests(unittest.TestCase):
+    """CC FF FF readers: parser, debounce, signature and the station link."""
+
+    def test_real_samples_split_into_single_bytes(self):
+        data = b"".join(bytes.fromhex(item) for item in CC_SAMPLES)
+        decoder = uhf.StreamDecoder()
+        frames = []
+        for index in range(len(data)):
+            frames += decoder.feed(data[index:index + 1])
+        self.assertEqual([frame.epc for frame in frames], [CC_EPC] * 3)
+        self.assertEqual([frame.rssi for frame in frames], [-70, -66, -65])
+        self.assertEqual(decoder.protocol, "cc")
+        self.assertEqual(decoder.take_discarded(), b"")
+
+    def test_epc_length_comes_from_the_pc_word(self):
+        epc = bytes.fromhex("3005FB63AC1F3841")  # 4 words
+        frame = cc_frame(0x20, bytes([0x00, 0x20, 0x00]) + epc + bytes([0xC4]))
+        frames, protocol = uhf.decode_once(frame)
+        self.assertEqual((protocol, frames[0].epc, frames[0].rssi), ("cc", epc.hex().upper(), -60))
+
+    def test_broken_frame_is_discarded_and_the_next_one_still_decodes(self):
+        broken = bytearray(bytes.fromhex(CC_SAMPLES[0]))
+        broken[12] ^= 0x01
+        decoder = uhf.StreamDecoder()
+        frames = decoder.feed(b"\x00\x13" + bytes(broken) + bytes.fromhex(CC_SAMPLES[1]))
+        self.assertEqual([(frame.epc, frame.rssi) for frame in frames], [(CC_EPC, -66)])
+        self.assertTrue(decoder.take_discarded().startswith(b"\x00\x13\xCC\xFF\xFF"))
+
+    def test_unknown_command_is_a_reply_not_a_tag(self):
+        frames, _ = uhf.decode_once(cc_frame(0x21, b"\x01\x02"))
+        self.assertEqual((frames[0].kind, frames[0].command), ("reply", 0x21))
+
+    def test_debounce_one_event_per_cooldown_and_never_while_the_tag_stays(self):
+        from devices.reader_link import TagFilter
+
+        tags = TagFilter(cooldown_seconds=60, absent_seconds=5)
+        self.assertTrue(tags.should_send(CC_EPC, now=0))
+        # Read continuously for two minutes: still one event.
+        self.assertFalse(any(tags.should_send(CC_EPC, now=second) for second in range(1, 120)))
+        # Left at 119 s, back at 130 s: more than 60 s since the event.
+        self.assertTrue(tags.should_send(CC_EPC, now=130))
+        # Left and back within the cooldown: no new event.
+        self.assertFalse(tags.should_send(CC_EPC, now=150))
+        self.assertTrue(tags.should_send("E2000000000000000000AAAA", now=150))
+
+    def test_signature_confirms_a_silent_active_reader(self):
+        scan = scanner.Scanner(load_profiles())
+        port = load_profiles()["uhf_reader"]["signatures"][0]["tcp_port"]
+        reader = scan._with_signature({"port": port, "confirmed": False}, "70:19:88:BF:D6:51", [port])
+        self.assertEqual((reader["protocol"], reader["work_mode"], reader["confirmed"], reader["confirmed_by"]),
+                         ("cc", "active", True, "signature"))
+        self.assertIsNone(scan._with_signature(None, "70:19:88:BF:D6:51", []))
+        self.assertIsNone(scan._with_signature(None, "00:11:22:33:44:55", [port]))
+        tag = {"port": port, "protocol": "cc", "confirmed": True, "sample_tags": [CC_EPC]}
+        self.assertEqual(scan._with_signature(tag, "70:19:88:BF:D6:51", [port])["confirmed_by"], "frame")
+
+    def test_reader_behind_an_extra_address_gets_a_warning(self):
+        link_local = {"name": "en7", "label": "USB LAN", "ip": "169.254.9.9", "network": "169.254.0.0/16", "gateway": None, "link_local": True}
+        extra = {"name": "en7", "label": "USB LAN", "ip": "198.51.100.1", "network": "198.51.100.0/24", "gateway": None, "link_local": False}
+        dhcp = {"name": "en7", "label": "USB LAN", "ip": "203.0.113.5", "network": "203.0.113.0/24", "gateway": "203.0.113.1", "link_local": False}
+        warning = scanner.Scanner._extra_address(extra, [link_local, extra])
+        self.assertEqual((warning["pc_ip"], warning["no_dhcp"]), ("198.51.100.1", True))
+        warning = scanner.Scanner._extra_address(extra, [dhcp, extra])
+        self.assertEqual((warning["lan_network"], warning["lan_gateway"], warning["no_dhcp"]), ("203.0.113.0/24", "203.0.113.1", False))
+        self.assertIsNone(scanner.Scanner._extra_address(extra, [extra]))
+        self.assertIsNone(scanner.Scanner._extra_address(dhcp, [dhcp, extra]))
+
+    def test_light_scan_does_not_probe_a_reader_the_link_holds(self):
+        scan = scanner.Scanner(load_profiles())
+        known = {"70:19:88:BF:D6:51": {"mac": "70:19:88:BF:D6:51", "ip": "198.51.100.116", "reader": {"transport": "tcp", "port": 49152}}}
+        with mock.patch.object(probes, "tcp_open", mock.AsyncMock(return_value=False)) as tcp_open:
+            carried = scan._recheck_known(known, {"198.51.100.116": "70:19:88:BF:D6:51"}, {"198.51.100.116": "70:19:88:BF:D6:51"})
+        self.assertTrue(carried["70:19:88:BF:D6:51"]["online"])
+        tcp_open.assert_not_called()
+
+    def test_station_link_posts_the_epc_once_and_logs_unknown_frames(self):
+        import time as time_module
+
+        from devices.reader_link import CaptureLog, ReaderLink
+
+        data = b"".join(bytes.fromhex(item) for item in CC_SAMPLES) * 3 + cc_frame(0x21, b"\x01")
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+
+        def serve():
+            connection, _ = server.accept()
+            # Odd chunk sizes: frames never line up with socket reads.
+            for index in range(0, len(data), 7):
+                connection.sendall(data[index:index + 7])
+                time_module.sleep(0.01)
+            time_module.sleep(1.5)
+            connection.close()
+
+        threading.Thread(target=serve, daemon=True).start()
+        posted, logs = [], []
+        poster = mock.Mock()
+        poster.post.side_effect = posted.append
+        link = ReaderLink("entrance", poster, load_profiles(), mock.Mock(spec=CaptureLog), lambda target: None, logs.append)
+        link.set_target({"ip": "127.0.0.1", "port": port, "transport": "tcp", "mac": "70:19:88:BF:D6:51",
+                         "protocol": "cc", "work_mode": "active", "cooldown_seconds": 60})
+        link.start()
+
+        deadline = time_module.monotonic() + 4
+        while time_module.monotonic() < deadline and link.snapshot().get("tags_read", 0) < 9:
+            time_module.sleep(0.05)
+        time_module.sleep(0.3)
+
+        snap = link.snapshot()
+        self.assertEqual([item["tag_uid"] for item in posted], [CC_EPC])
+        self.assertEqual(posted[0]["scan_location"], "entrance")
+        self.assertEqual(posted[0]["payload_json"]["rssi"], -70)
+        self.assertEqual((snap["state"], snap["tags_read"], snap["events_sent"], snap["last_tag"], snap["last_rssi"]),
+                         ("connected", 9, 1, CC_EPC, -65))
+        self.assertEqual(snap["recent_tags"][0]["epc"], CC_EPC)
+        self.assertEqual(snap["unknown_frames"], 1)
+        self.assertTrue(any("unknown cc frame cmd=0x21" in line for line in logs))

@@ -73,11 +73,49 @@
         busy = busy.then(() => register(value));
     });
 
+    // UHF: every new EPC the network reader reads is registered, once.
+    const uhf = box.querySelector('[data-bulk-uhf]');
+    const seen = new Set();
+    let stopUhf = null;
+    uhf?.addEventListener('click', function () {
+        if (stopUhf) {
+            stopUhf();
+            return;
+        }
+        uhf.textContent = 'Stop listening';
+        uhf.setAttribute('aria-pressed', 'true');
+        stopUhf = window.uhfTagReader.listen(uhf.dataset.bulkUhf, {
+            seconds: 600,
+            onStatus: function (text, state) {
+                if (state === 'error') {
+                    addRow('error', 'UHF reader', text);
+                } else {
+                    summary.textContent = text;
+                }
+            },
+            onRead: function (read) {
+                if (seen.has(read.epc)) {
+                    return;
+                }
+                seen.add(read.epc);
+                busy = busy.then(() => register(read.epc));
+            },
+            onEnd: function () {
+                stopUhf = null;
+                uhf.textContent = 'Listen to UHF reader';
+                uhf.setAttribute('aria-pressed', 'false');
+            },
+        });
+    });
+
     box.querySelector('[data-bulk-done]').addEventListener('click', function () {
         window.location.reload();
     });
 
     document.getElementById('register-tag-drawer')?.addEventListener('drawer:open', function () {
         scan.focus({ preventScroll: true });
+    });
+    document.getElementById('register-tag-drawer')?.addEventListener('drawer:close', function () {
+        stopUhf?.();
     });
 })();
