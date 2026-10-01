@@ -38,6 +38,7 @@ class DryRunClient:
         self.alerts = []
         self.events = []
         self.crossings = []
+        self.visitor_plates = []
 
     def check_rfid_match(self, camera_role, event_time, window_seconds=4, lookback_seconds=10, event_key=None):
         with self.lock:
@@ -53,6 +54,11 @@ class DryRunClient:
         with self.lock:
             self.crossings.append({key: payload.get(key) for key in ("track_id", "direction", "direction_reason", "detected_vehicle_type")})
         return {"accepted": True, "created": True, "message": "Dry run.", "body": {}}
+
+    def submit_visitor_plate(self, payload, image_bytes=None, filename=None):
+        with self.lock:
+            self.visitor_plates.append({key: payload.get(key) for key in ("external_event_key", "plate_number", "plate_status", "plate_confidence", "best_guess")})
+        return {"accepted": True, "message": "Dry run.", "body": {}}
 
     def submit_event(self, payload):
         with self.lock:
@@ -189,6 +195,15 @@ def run(args):
     deadline = time.monotonic() + detector.RFID_DETECTION_WINDOW_SECONDS + 30
     while (state["pending_windows"] or state["open_crossings"]) and time.monotonic() < deadline:
         time.sleep(0.2)
+    # Phase 5: plate OCR runs after each no-pass alert; wait for every vote.
+    if not args.post:
+        while time.monotonic() < deadline + 60:
+            with client.lock:
+                alerted = {item["event_key"] for item in client.alerts}
+                voted = {item["external_event_key"] for item in client.visitor_plates}
+            if alerted <= voted:
+                break
+            time.sleep(0.5)
 
     summary = {
         "frames": frame_index,
@@ -202,6 +217,8 @@ def run(args):
         # Phase 2: the direction each crossing was finally sent with.
         "directions": dict(state["direction_counts"]),
         "crossings_sent": getattr(client, "crossings", None) if not args.post else "sent to Laravel",
+        # Phase 5: plate vote of each vehicle with no pass.
+        "visitor_plates": getattr(client, "visitor_plates", None) if not args.post else "sent to Laravel",
         "rfid_checks": getattr(client, "rfid_checks", None),
         # One alert per vehicle (sent as snapshot, then color, then plate updates).
         "no_pass_vehicles": len({item["event_key"] for item in getattr(client, "alerts", [])}) if not args.post else "sent to Laravel",

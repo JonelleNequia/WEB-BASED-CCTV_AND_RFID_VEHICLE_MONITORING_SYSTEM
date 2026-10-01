@@ -28,6 +28,10 @@ class LaravelEventClient:
         self.crossing_url = str(system_settings.get("crossing_url", "")).strip() or (
             self.event_ingest_url.rsplit("/", 1)[0] + "/crossings" if self.event_ingest_url else ""
         )
+        # Phase 5: the plate (or "unreadable") of an Unregistered Visitor record.
+        self.visitor_plate_url = str(system_settings.get("visitor_plate_url", "")).strip() or (
+            self.event_ingest_url.rsplit("/", 1)[0] + "/visitor-plates" if self.event_ingest_url else ""
+        )
         self.api_key = str(system_settings.get("python_api_key", "")).strip()
 
     def integration_headers(self, include_json=False):
@@ -254,6 +258,36 @@ class LaravelEventClient:
         return {
             "accepted": response.status_code in {200, 201},
             "created": response.status_code == 201,
+            "message": body.get("message", response.text),
+            "body": body,
+        }
+
+    def submit_visitor_plate(self, payload, image_bytes=None, filename=None):
+        """
+        Phase 5: the plate vote of one no-pass crossing (plate or "unreadable",
+        confidence, vote details) and the plate image.
+        """
+        if not self.visitor_plate_url:
+            return {"accepted": False, "message": "Laravel visitor plate endpoint is not configured."}
+
+        try:
+            response = requests.post(
+                self.visitor_plate_url,
+                data=self.multipart_payload(payload),
+                files={"plate_image": (filename or "plate.jpg", image_bytes, "image/jpeg")} if image_bytes else None,
+                headers=self.integration_headers(),
+                timeout=API_TIMEOUT_SECONDS,
+            )
+        except requests.RequestException as error:
+            return {"accepted": False, "message": f"Could not submit visitor plate: {error}"}
+
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+
+        return {
+            "accepted": response.status_code in {200, 201},
             "message": body.get("message", response.text),
             "body": body,
         }

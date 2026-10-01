@@ -40,7 +40,8 @@ class RfidCameraFusionService
     public function __construct(
         protected SettingsService $settingsService,
         protected DetectorRuntimeService $detectorRuntimeService,
-        protected EventService $eventService
+        protected EventService $eventService,
+        protected VisitorRecordService $visitorRecordService
     ) {
     }
 
@@ -281,6 +282,12 @@ class RfidCameraFusionService
             ])->save();
 
             $crossing?->forceFill(['rfid_scan_log_id' => $scan->id])->save();
+
+            // Phase 5: a crossing recorded as an Unregistered Visitor had a
+            // registered tag after all (read late).
+            if ($crossing) {
+                $this->visitorRecordService->dismissForCrossing($crossing, 'Registered tag read for '.$vehicle->plate_number.'.');
+            }
 
             $event = $this->eventService->createFromRfidScan($scan, $transition);
             $scan->forceFill(['correlated_vehicle_event_id' => $event?->id])->save();

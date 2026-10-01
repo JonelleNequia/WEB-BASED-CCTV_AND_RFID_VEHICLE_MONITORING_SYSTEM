@@ -66,7 +66,8 @@ from tracking import (
     point_side_of_line,
     trail_direction,
 )
-from anpr import detect_vehicle_color, ocr_runtime_status, read_license_plate
+from anpr import detect_vehicle_color, ocr_runtime_status, read_license_plate_details
+from plate_voting import frames_agree, vote_plate
 from camera_health import RtspDiagnosis, take_over_stale_detector
 import metrics
 from hires import HiResGrabber, scale_box
@@ -99,7 +100,9 @@ GUEST_TRACK_COOLDOWN_SECONDS = 10.0
 DUPLICATE_TRACK_IOU_THRESHOLD = 0.18
 DUPLICATE_TRACK_CENTER_DISTANCE_RATIO = 0.28
 MAX_GUEST_ANALYSIS_FRAMES = 5
-MAX_GUEST_OCR_ANALYSIS_FRAMES = 2
+MAX_GUEST_OCR_ANALYSIS_FRAMES = 4
+# Phase 5: OCR of one vehicle stops after this long (it runs after the alert is sent).
+PLATE_OCR_BUDGET_SECONDS = 12.0
 MAX_GUEST_COLOR_ANALYSIS_FRAMES = 3
 GUEST_ANALYSIS_FRAME_INTERVAL_SECONDS = 0.45
 LATEST_FRAME_SAVE_INTERVAL_SECONDS = 0.20
@@ -2081,24 +2084,31 @@ def analyze_guest_vehicle_color(analysis_frames):
     }
 
 
-def analyze_guest_vehicle_details(analysis_frames):
+def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None):
     """
-    Run plate/color analysis across several YOLO-aligned frames from one window.
+    Phase 5 (visitor model): read the plate on up to MAX_GUEST_OCR_ANALYSIS_FRAMES
+    frames (full-resolution first) and vote (plate_voting.vote_plate); stop
+    early once two frames agree. Returns (vote, color, ocr runtime, details,
+    plate crop image or None).
     """
-    plate_numbers = []
     vehicle_colors = []
+    frame_reads = []
+    crops = {}
     runtime_status = ocr_runtime_status()
     frame_results = []
     started_at = time.monotonic()
 
     for index, (frame, xyxy) in enumerate(analysis_frames[:MAX_GUEST_OCR_ANALYSIS_FRAMES]):
+        if index and time.monotonic() - started_at >= PLATE_OCR_BUDGET_SECONDS:
+            break
+
         plate_error = None
         color_error = None
 
         try:
-            plate_number = read_license_plate(frame, xyxy)
+            read = read_license_plate_details(frame, xyxy)
         except Exception as error:
-            plate_number = None
+            read = {"plate": None, "score": 0.0, "crop": None}
             plate_error = str(error)
 
         try:
@@ -2107,30 +2117,43 @@ def analyze_guest_vehicle_details(analysis_frames):
             vehicle_color = None
             color_error = str(error)
 
-        if plate_number:
-            plate_numbers.append(plate_number)
+        if read["plate"] and read.get("crop") is not None:
+            if read["score"] > crops.get(read["plate"], (-1.0, None))[0]:
+                crops[read["plate"]] = (read["score"], read["crop"])
 
         if vehicle_color:
             vehicle_colors.append(vehicle_color)
 
+        frame_reads.append({"plate": read["plate"], "score": read["score"]})
         frame_results.append({
             "index": index,
+            "frame_size": [int(frame.shape[1]), int(frame.shape[0])],
             "bbox_xyxy": [float(value) for value in xyxy],
-            "plate_number": plate_number,
+            "plate_number": read["plate"],
+            "plate_score": read["score"],
             "vehicle_color": vehicle_color,
             "plate_error": plate_error,
             "color_error": color_error,
         })
 
+        if frames_agree(frame_reads):
+            break
+
+    vote = vote_plate(frame_reads, vehicle_type)
+    crop = crops.get(vote["plate"] or vote["best_guess"] or "", (0.0, None))[1]
+
     return (
-        most_common_value(plate_numbers),
+        vote,
         most_common_color(vehicle_colors),
         runtime_status,
         {
             "frames_checked": len(frame_results),
             "elapsed_seconds": round(time.monotonic() - started_at, 3),
             "frame_results": frame_results,
+            "vote": {key: value for key, value in vote.items() if key != "candidates"},
+            "candidates": vote["candidates"],
         },
+        crop,
     )
 
 
@@ -2158,6 +2181,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             if analysis_frame is not None
         ]
         window_started_at = window.get("started_at", now_monotonic)
+        hires_analysis_frames = list(window.get("hires_frames", []))
         window_payload = {
             "event_key": window["event_key"],
             "camera_id": window.get("camera_id"),
@@ -2205,6 +2229,9 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
         window_payload["live_xyxy"] = window_payload["xyxy"]
         window_payload["xyxy"] = hires_box
         metrics.rate(role, "hires_used")
+
+    # Phase 5: sharp frames first for the plate vote, then the live frames.
+    analysis_frames = hires_analysis_frames + analysis_frames
 
     snapshot = encode_frame_snapshot(
         role,
@@ -2279,16 +2306,43 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             if not color_result.get("accepted"):
                 state["last_error"] = color_result.get("message", "Guest vehicle color could not be saved.")
 
-    plate_number, detailed_vehicle_color, ocr_status, analysis_details = analyze_guest_vehicle_details(analysis_frames)
+    vote, detailed_vehicle_color, ocr_status, analysis_details, plate_crop = analyze_guest_vehicle_details(analysis_frames, window_payload["detected_vehicle_type"])
+    plate_number = vote["plate"]
     vehicle_color = reconcile_guest_vehicle_color(vehicle_color, detailed_vehicle_color)
 
     print(
         f"{role.capitalize()} no-pass alert analysis {window_payload['event_key']}: "
-        f"plate={plate_number or 'None'} color={vehicle_color or 'None'} "
+        f"plate={plate_number or 'unreadable'} (best guess {vote['best_guess'] or '-'}, {vote['reason']}) "
+        f"color={vehicle_color or 'None'} "
         f"ocr_frames={analysis_details['frames_checked']} "
         f"ocr_elapsed={analysis_details['elapsed_seconds']}s",
         flush=True,
     )
+
+    # Phase 5: the Unregistered Visitor record of this crossing gets the plate
+    # (or "plate unreadable"), the plate image and the vote.
+    submit_visitor_plate = getattr(laravel_client, "submit_visitor_plate", None)
+    if submit_visitor_plate is not None:
+        plate_image = encode_frame_snapshot(role, plate_crop, f"plate-{window_payload['event_key']}") if plate_crop is not None else None
+        visitor_result = submit_visitor_plate(
+            {
+                "external_event_key": window_payload["event_key"],
+                "camera_role": role,
+                "event_time": window_payload["event_time"],
+                "plate_number": plate_number,
+                "plate_status": vote["status"],
+                "plate_confidence": vote["confidence"],
+                "best_guess": vote["best_guess"],
+                "vehicle_color": vehicle_color,
+                "detected_vehicle_type": window_payload["detected_vehicle_type"],
+                "ocr_details": analysis_details,
+            },
+            plate_image["bytes"] if plate_image else None,
+            plate_image["filename"] if plate_image else None,
+        )
+        if not visitor_result.get("accepted"):
+            with state["lock"]:
+                state["last_error"] = visitor_result.get("message", "Visitor plate could not be saved.")
 
     guest_payload = {
         **base_payload,
@@ -2342,6 +2396,14 @@ def update_detection_windows(role, frame, results, state, laravel_client):
                     analysis_frames.append((frame.copy(), tuple(visible_box["xyxy"])))
                     del analysis_frames[:-MAX_GUEST_ANALYSIS_FRAMES]
                     window["last_analysis_frame_at"] = now_monotonic
+                    # Phase 5: the full-resolution frame of the same moment, for
+                    # plate voting over several sharp frames (the grabber only
+                    # keeps the last ~1.6 s, so it is taken now).
+                    hires_frame = HIRES[role].frame_near(now_monotonic) if role in HIRES else None
+                    if hires_frame is not None:
+                        hires_frames = window.setdefault("hires_frames", [])
+                        hires_frames.append((hires_frame, scale_box(visible_box["xyxy"], frame.shape, hires_frame.shape)))
+                        del hires_frames[:-MAX_GUEST_ANALYSIS_FRAMES]
             elif window.get("snapshot_frame") is None:
                 window["snapshot_frame"] = frame.copy()
 

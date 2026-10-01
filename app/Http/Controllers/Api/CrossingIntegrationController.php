@@ -10,6 +10,7 @@ use App\Models\VehicleCrossing;
 use App\Rules\ValidGate;
 use App\Services\RfidCameraFusionService;
 use App\Services\SettingsService;
+use App\Services\VisitorRecordService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -23,7 +24,12 @@ class CrossingIntegrationController extends Controller
 {
     use AuthorizesIntegration;
 
-    public function store(Request $request, SettingsService $settingsService, RfidCameraFusionService $fusionService): JsonResponse
+    public function store(
+        Request $request,
+        SettingsService $settingsService,
+        RfidCameraFusionService $fusionService,
+        VisitorRecordService $visitorRecordService
+    ): JsonResponse
     {
         if ($denied = $this->authorizeIntegrationRequest($request, $settingsService)) {
             return $denied;
@@ -80,6 +86,8 @@ class CrossingIntegrationController extends Controller
 
         // Phase 3: the registered tag read of this vehicle takes this direction.
         $scan = $fusionService->attachCrossing($crossing);
+        // Phase 5: no registered tag read -> an Unregistered Visitor record.
+        $visitor = $scan ? null : $visitorRecordService->createFromCrossing($crossing->fresh());
 
         return response()->json([
             'message' => 'Crossing stored.',
@@ -92,6 +100,7 @@ class CrossingIntegrationController extends Controller
                 'resulting_state' => $scan->resulting_state,
                 'anomaly_reason' => $scan->anomaly_reason,
             ] : null,
+            'visitor_record_id' => $visitor?->id,
         ], 201);
     }
 

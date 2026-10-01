@@ -541,8 +541,17 @@ def select_consensus_plate(candidates: List[Tuple[str, float]]) -> Optional[str]
     Prefer plates repeated across OCR variants; avoid saving one-off low-confidence
     misreads such as C/D or 8/B swaps.
     """
+    return select_consensus_plate_scored(candidates)[0]
+
+
+def select_consensus_plate_scored(candidates: List[Tuple[str, float]]) -> Tuple[Optional[str], float]:
+    """
+    The consensus plate of one frame and its score (0-1): the summed OCR
+    confidence of the reads that agree, capped at 1. (None, score) when no
+    read is strong enough.
+    """
     if not candidates:
-        return None
+        return None, 0.0
 
     scores: Dict[str, float] = {}
     counts: Dict[str, int] = {}
@@ -558,21 +567,15 @@ def select_consensus_plate(candidates: List[Tuple[str, float]]) -> Optional[str]
     )
     best = ranked[0]
     best_score = scores[best]
-    best_count = counts[best]
+    score = round(min(best_score, 1.0), 3)
 
     if re.match(r"^[A-Z]{3}-\d{3,4}$", best) and best_score >= 0.42:
-        return best
-
-    if best_score >= 0.70:
-        return best
-
-    if best_count >= 2 and best_score >= 0.55:
-        return best
+        return best, score
 
     if best_score >= 0.55:
-        return best
+        return best, score
 
-    return None
+    return None, score
 
 
 def plate_layout_rank(plate: str) -> int:
@@ -595,6 +598,15 @@ def read_license_plate(frame, bounding_box) -> Optional[str]:
     """
     Attempt to read a plate number from the detected vehicle crop.
     """
+    return read_license_plate_details(frame, bounding_box)["plate"]
+
+
+def read_license_plate_details(frame, bounding_box) -> Dict[str, object]:
+    """
+    Phase 5 (visitor model): the plate of one frame with its score and the
+    image region it was read from (for the visitor record and the guard).
+    {"plate": "ABC-1234" | None, "score": 0-1, "crop": image | None}
+    """
     crop = crop_vehicle(frame, bounding_box)
     candidates = (
         plate_like_crops(crop)
@@ -604,7 +616,13 @@ def read_license_plate(frame, bounding_box) -> Optional[str]:
     seen_shapes = set()
 
     ocr_candidates = []
+    best_region: Dict[str, Tuple[float, object]] = {}
     started_at = time.monotonic()
+
+    def result():
+        plate, score = select_consensus_plate_scored(ocr_candidates)
+        region = best_region.get(plate) if plate else None
+        return {"plate": plate, "score": score, "crop": region[1] if region else None}
 
     for candidate in candidates[:MAX_OCR_CANDIDATES]:
         shape_key = crop_signature(candidate)
@@ -615,18 +633,21 @@ def read_license_plate(frame, bounding_box) -> Optional[str]:
         seen_shapes.add(shape_key)
 
         for prepared in preprocess_variants_for_ocr(candidate)[:MAX_OCR_VARIANTS_PER_CANDIDATE]:
-            ocr_candidates.extend(read_with_easyocr_candidates(prepared))
-            ocr_candidates.extend(read_with_tesseract_candidates(prepared))
+            reads = read_with_easyocr_candidates(prepared) + read_with_tesseract_candidates(prepared)
+            ocr_candidates.extend(reads)
+            for plate, confidence in reads:
+                if confidence > best_region.get(plate, (-1.0, None))[0]:
+                    best_region[plate] = (confidence, candidate)
 
-        selected_plate = select_consensus_plate(ocr_candidates)
+        details = result()
 
-        if selected_plate and re.match(r"^[A-Z]{3}-\d{3,4}$", selected_plate):
-            return selected_plate
+        if details["plate"] and re.match(r"^[A-Z]{3}-\d{3,4}$", details["plate"]):
+            return details
 
         if time.monotonic() - started_at >= OCR_TIME_BUDGET_SECONDS:
             break
 
-    return select_consensus_plate(ocr_candidates)
+    return result()
 
 
 def dominant_neutral_color(black_ratio, white_ratio, silver_ratio, gray_ratio) -> Optional[str]:

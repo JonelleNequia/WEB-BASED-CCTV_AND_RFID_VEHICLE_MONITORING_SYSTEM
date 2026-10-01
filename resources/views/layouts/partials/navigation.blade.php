@@ -21,7 +21,13 @@
             'active' => request()->routeIs('registry.*', 'vehicle-registry.*'),
             'icon' => 'vehicle',
         ] : null,
-        // Phase 0: "Guests" (guest passes) removed; the Visitors page replaces it later.
+        // Phase 5 (visitor model): Unregistered Visitors and plate profiles (guards too).
+        [
+            'label' => 'Visitors',
+            'route' => route('visitors.index'),
+            'active' => request()->routeIs('visitors.*'),
+            'icon' => 'guest',
+        ],
         $isAdmin ? [
             'label' => 'Activity Logs',
             'route' => route('logs.index'),

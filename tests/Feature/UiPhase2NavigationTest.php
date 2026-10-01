@@ -36,15 +36,15 @@ class UiPhase2NavigationTest extends TestCase
         ]);
     }
 
-    public function test_admin_sidebar_has_five_items_and_no_station_links(): void
+    public function test_admin_sidebar_has_six_items_and_no_station_links(): void
     {
         $html = $this->actingAs($this->admin)->get(route('dashboard.index'))->assertOk()->getContent();
 
-        // Phase 0: "Guests" (guest passes) was removed.
+        // Phase 0: "Guests" (guest passes) was removed; Phase 5 (visitor model) added "Visitors".
         preg_match_all('/class="nav-link[^"]*"/', $html, $links);
-        $this->assertCount(5, $links[0]);
+        $this->assertCount(6, $links[0]);
 
-        foreach (['Dashboard', 'Gate Monitor', 'Registry', 'Activity Logs', 'Settings'] as $label) {
+        foreach (['Dashboard', 'Gate Monitor', 'Visitors', 'Registry', 'Activity Logs', 'Settings'] as $label) {
             $this->assertStringContainsString('<span class="nav-label">'.$label.'</span>', $html);
         }
 
@@ -57,13 +57,15 @@ class UiPhase2NavigationTest extends TestCase
         $this->assertStringContainsString('Readers', $html);
     }
 
-    public function test_guard_sees_only_the_gate_monitor(): void
+    public function test_guard_sees_only_the_gate_monitor_and_visitors(): void
     {
         $this->actingAs($this->guard)->get('/')->assertRedirect(route('gates.index'));
 
         $html = $this->actingAs($this->guard)->get(route('gates.index'))->assertOk()->getContent();
         preg_match_all('/class="nav-link[^"]*"/', $html, $links);
-        $this->assertCount(1, $links[0]);
+        // Phase 5 (visitor model): guards correct visitor plates too.
+        $this->assertCount(2, $links[0]);
+        $this->assertStringContainsString('<span class="nav-label">Visitors</span>', $html);
 
         $this->actingAs($this->guard)->get(route('registry.index'))->assertForbidden();
     }

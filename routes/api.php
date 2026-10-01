@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\CrossingIntegrationController;
 use App\Http\Controllers\Api\DeviceIntegrationController;
 use App\Http\Controllers\Api\FutureIntegrationController;
 use App\Http\Controllers\Api\RealtimeLogController;
+use App\Http\Controllers\Api\VisitorIntegrationController;
 use App\Http\Controllers\GuestObservationController;
 use Illuminate\Support\Facades\Route;
 
@@ -41,6 +42,8 @@ Route::prefix('v1/integration')
         Route::post('/rfid-scans', [FutureIntegrationController::class, 'receiveRfidScan'])->name('rfid-scans');
         // Phase 2: every trigger-line crossing with its CCTV direction.
         Route::post('/crossings', [CrossingIntegrationController::class, 'store'])->name('crossings');
+        // Phase 5: plate vote of an Unregistered Visitor record.
+        Route::post('/visitor-plates', [VisitorIntegrationController::class, 'storePlate'])->name('visitor-plates');
         // Plug-and-detect: scan results from the device service.
         Route::post('/devices', [DeviceIntegrationController::class, 'store'])->name('devices');
     });

@@ -14,6 +14,7 @@ use App\Http\Controllers\RfidScanController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\StationController;
 use App\Http\Controllers\VehicleRegistryController;
+use App\Http\Controllers\VisitorController;
 use App\Http\Controllers\VehicleEventController;
 use App\Support\CameraFiles;
 use Illuminate\Http\Request;
@@ -81,6 +82,17 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
     Route::get('/portals/{location}', fn () => redirect()->route('gates.index'))
         ->where('location', '[a-z0-9-]+')
         ->name('portals.show');
+
+    // Phase 5 (visitor model): Unregistered Visitor records and plate profiles.
+    // Guards correct plates and keep notes; merging plates is for admins.
+    Route::get('/visitors', [VisitorController::class, 'index'])->name('visitors.index');
+    Route::get('/visitors/plates/{plateProfile}', [VisitorController::class, 'showProfile'])->name('visitors.profiles.show');
+    Route::patch('/visitors/records/{visitorRecord}/plate', [VisitorController::class, 'correctPlate'])->name('visitors.records.plate');
+    Route::patch('/visitors/records/{visitorRecord}/dismiss', [VisitorController::class, 'dismiss'])->name('visitors.records.dismiss');
+    Route::patch('/visitors/plates/{plateProfile}/note', [VisitorController::class, 'updateNote'])->name('visitors.profiles.note');
+    Route::post('/visitors/plates/{plateProfile}/merge', [VisitorController::class, 'merge'])
+        ->middleware('admin')
+        ->name('visitors.profiles.merge');
 
     Route::middleware('admin')->group(function () use ($legacyRedirect): void {
         Route::get('/admin', [DashboardController::class, 'index'])->name('dashboard.index');

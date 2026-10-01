@@ -6132,3 +6132,22 @@ button[aria-busy="true"] {
     flex-basis: 100%;
     margin: 0;
 }
+
+/* Phase 5 (visitor model): inline correct / dismiss forms in visitor tables. */
+.inline-action {
+    margin-bottom: 0.35rem;
+}
+
+.inline-action > summary {
+    list-style: none;
+    cursor: pointer;
+}
+
+.inline-action > summary::-webkit-details-marker {
+    display: none;
+}
+
+.inline-action[open] > form {
+    margin-top: 0.4rem;
+    min-width: 14rem;
+}
