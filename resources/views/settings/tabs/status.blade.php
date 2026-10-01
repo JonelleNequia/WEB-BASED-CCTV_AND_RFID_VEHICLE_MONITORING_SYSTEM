@@ -48,6 +48,25 @@
                         <span>Last Capture</span>
                         <strong><x-datetime :value="$cameraStatus['last_capture_time'] ?? null" format="seconds" fallback="No capture yet" /></strong>
                     </div>
+                    @php($detection = $cameraStatus['detection'] ?? [])
+                    <div>
+                        <span>Detection runs</span>
+                        <strong>{{ isset($detection['detection_fps']) ? $detection['detection_fps'].' per second on '.($detection['device'] ?? '—') : 'Not running' }}</strong>
+                    </div>
+                    <div>
+                        <span>Last run: raw / vehicles / in zone</span>
+                        <strong>{{ $detection['last_raw_detections'] ?? '—' }} / {{ $detection['last_vehicles'] ?? '—' }} / {{ $detection['last_in_zone'] ?? '—' }}</strong>
+                    </div>
+                    <div>
+                        <span>Line crossings</span>
+                        <strong>{{ $detection['line_crossings'] ?? 0 }}</strong>
+                    </div>
+                    @if (! empty($detection['last_error']))
+                        <div class="span-full">
+                            <span>Last detection error</span>
+                            <strong>{{ $detection['last_error'] }}</strong>
+                        </div>
+                    @endif
                     <div class="span-full">
                         <span>Message</span>
                         <strong>{{ $cameraStatus['last_error'] ?: 'No additional message.' }}</strong>

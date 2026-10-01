@@ -1,0 +1,15 @@
+# ByteTrack for the gate detector (Ultralytics defaults except match_thresh).
+#
+# Detection runs only 7-8 times per second (fewer on a CPU-only PC), so a
+# moving vehicle overlaps its previous box less than in a 30 fps video. The
+# default match_thresh 0.8 then starts a new track ID, and the crossing test
+# has no previous position. Measured on a 21 s traffic clip (8 vehicles over
+# the line): 0.9 gives 4 crossings instead of 3 at 2 detections/s, the same
+# at 3 and 8 per second, and fewer duplicate IDs; 0.95 is worse.
+tracker_type: bytetrack
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 30
+match_thresh: 0.9
+fuse_score: True

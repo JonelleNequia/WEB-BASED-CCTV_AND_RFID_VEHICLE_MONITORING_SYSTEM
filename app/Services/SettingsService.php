@@ -63,6 +63,8 @@ class SettingsService
             'perf_yolo_device' => 'auto',
             'perf_roi_crop' => '1',
             'perf_hires_on_trigger' => '1',
+            // Detector debug view (Settings › Calibration): raw detections on the live view.
+            'detector_debug_overlay' => '0',
         ];
     }
 
@@ -329,6 +331,7 @@ class SettingsService
             'yolo_device' => (string) ($settings['perf_yolo_device'] ?? 'auto'),
             'roi_crop' => (int) ($settings['perf_roi_crop'] ?? 1),
             'hires_on_trigger' => (int) ($settings['perf_hires_on_trigger'] ?? 1),
+            'debug_overlay' => (int) ($settings['detector_debug_overlay'] ?? 0),
         ];
     }
 

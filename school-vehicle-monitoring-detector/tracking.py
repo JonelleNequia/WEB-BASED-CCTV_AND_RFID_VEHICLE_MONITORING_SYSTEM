@@ -230,6 +230,34 @@ def crossed_line(previous_side, current_side):
     return previous_side != current_side
 
 
+def path_crosses_line(previous_point, current_point, line):
+    """
+    Did the track's path from its previous to its current position cross the
+    trigger line SEGMENT? Returns +1 / -1 (the side it moved to) or 0.
+
+    A fast vehicle at 7-8 detections per second can jump over the line
+    between two frames: the segment test still counts it, while a
+    "point is on the line" test misses it. Movement beyond the ends of the
+    drawn line does not count.
+    """
+    if not line or previous_point is None or current_point is None:
+        return 0
+
+    start = (line["x1"], line["y1"])
+    end = (line["x2"], line["y2"])
+    before = point_side_of_line(previous_point, line)
+    after = point_side_of_line(current_point, line)
+
+    if before == after or after == 0:
+        # Same side, or stopped exactly on the line: counted on the next move.
+        return 0
+
+    if not _segments_intersect(tuple(previous_point), tuple(current_point), start, end):
+        return 0
+
+    return after
+
+
 def calibration_ready(camera_config):
     """
     Auto logging requires both an ROI mask and a trigger line.

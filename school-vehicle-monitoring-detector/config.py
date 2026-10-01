@@ -69,6 +69,7 @@ PERFORMANCE_DEFAULTS = {
     "yolo_device": "auto",     # auto = cuda, then Apple mps, then cpu
     "roi_crop": 1,             # run YOLO only on the calibrated zone when it is smaller than the frame
     "hires_on_trigger": 1,     # fetch a full-resolution frame from the snapshot stream on each trigger
+    "debug_overlay": 0,        # draw raw detections, zone, line, tracks and counters on the live view
 }
 # The full-resolution stream is decoded with more threads, which delays it by
 # about this much against the low-delay live stream (measured on the VIGI C240).
@@ -77,8 +78,17 @@ HIRES_DECODE_DELAY_SECONDS = 0.35
 # Detection settings.
 MODEL_PATH = "yolov8n.pt"
 
-TRACKER_CONFIG = "bytetrack.yaml"
+# Tuned for 7-8 detections per second (see the file); overridable for tests.
+TRACKER_CONFIG = os.environ.get("DETECTOR_TRACKER_CONFIG") or str(Path(__file__).resolve().parent / "trackers" / "bytetrack_gate.yaml")
 DETECTION_CONFIDENCE_THRESHOLD = 0.35
+# YOLO reports every class down to this score; the detector then keeps
+# vehicle classes at DETECTION_CONFIDENCE_THRESHOLD (a vehicle already being
+# tracked may dip lower for a frame without losing its track). The debug view
+# shows everything YOLO saw, and ByteTrack's second stage gets the low scores
+# it is designed for (fewer lost track IDs at 7-8 detections per second).
+RAW_CONFIDENCE_FLOOR = 0.10
+# Last positions kept per track (line crossing and the debug trail).
+TRACK_TRAIL_POINTS = 12
 DETECTION_IOU_THRESHOLD = 0.45
 
 # Allow all practical road or campus vehicle names that may appear in the

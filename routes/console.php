@@ -98,6 +98,35 @@ Artisan::command('devices:listen {address : Reader IP:PORT} {--udp : Use UDP ins
     return $runDeviceTool($arguments, fn (string $buffer) => $this->output->write($buffer));
 })->purpose('Print the raw data a UHF reader sends (hold a tag near it)');
 
+// Detector test without a camera or a real vehicle: the same pipeline
+// (detection -> zone -> line crossing -> RFID window -> alert) on a video file.
+Artisan::command('detector:test-video {file : Video file (e.g. a clip of vehicles passing)}
+    {--role=entrance : Station whose settings (and, with --use-calibration, zone and line) to use}
+    {--use-calibration : Use the station\'s saved zone and trigger line}
+    {--roi= : Zone polygon, normalized "x,y x,y x,y ..."}
+    {--line= : Trigger line, normalized "x1,y1,x2,y2"}
+    {--post : Send events and alerts to Laravel for real (default: dry run)}
+    {--app-url= : With --post, send to this Laravel instead (e.g. a test copy)}
+    {--out= : Write the video with the debug overlay here}
+    {--fast : Do not wait for real time}', function () {
+    $arguments = [PythonLauncher::pythonExecutable(), 'detector_service.py', '--video', (string) realpath((string) $this->argument('file')) ?: (string) $this->argument('file'), '--role', (string) $this->option('role')];
+    foreach (['roi', 'line', 'app-url', 'out'] as $option) {
+        if (filled($this->option($option))) {
+            $arguments[] = '--'.$option;
+            $arguments[] = (string) $this->option($option);
+        }
+    }
+    foreach (['use-calibration', 'post', 'fast'] as $flag) {
+        if ($this->option($flag)) {
+            $arguments[] = '--'.$flag;
+        }
+    }
+
+    $process = new Process($arguments, PythonLauncher::directory(), ['PYTHONUNBUFFERED' => '1'], null, 3600);
+
+    return $process->run(fn (string $type, string $buffer) => $this->output->write($buffer));
+})->purpose('Run the vehicle detector on a video file and count line crossings');
+
 // Raw hex dump from a UHF reader (troubleshooting an unknown data format).
 // When the background service is connected to the reader, it copies what it
 // receives: the reader accepts only one TCP client. Nothing is sent to it.

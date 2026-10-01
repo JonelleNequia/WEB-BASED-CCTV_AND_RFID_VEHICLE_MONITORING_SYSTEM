@@ -34,6 +34,7 @@ from config import (
     RFID_LOOKBACK_SECONDS,
     RFID_MATCH_TIMEOUT_SECONDS,
     RFID_POLL_INTERVAL_SECONDS,
+    RAW_CONFIDENCE_FLOOR,
     SNAPSHOTS_DIR,
     STATION_ACTIVITY_PATH,
     STATION_VIEWER_IDLE_AFTER_SECONDS,
@@ -41,6 +42,7 @@ from config import (
     STATUS_WRITE_INTERVAL_SECONDS,
     STREAM_FRAME_MAX_WIDTH,
     TRACK_STALE_AFTER_SECONDS,
+    TRACK_TRAIL_POINTS,
     TRACKER_CONFIG,
     YOLO_IMAGE_SIZE,
     annotated_frame_path,
@@ -54,9 +56,9 @@ from tracking import (
     bbox_intersects_line,
     bbox_center,
     calibration_ready,
-    crossed_line,
     normalized_line_to_pixels,
     normalized_polygon_to_pixels,
+    path_crosses_line,
     point_in_polygon,
     point_side_of_line,
 )
@@ -444,7 +446,9 @@ def publish_status_frame(role, title, detail):
     )
 
     y = 315
-    for line in str(detail or "").split(". "):
+    # OpenCV draws ASCII only ("Settings › Devices" came out as "Settings ??? Devices").
+    detail = str(detail or "").replace("›", ">").replace("’", "'").replace("…", "...")
+    for line in detail.split(". "):
         cv2.putText(
             frame,
             line[:78],
@@ -899,6 +903,15 @@ def initial_camera_state():
         "track_overlays": {},
         "pending_windows": {},
         "recent_resolutions": [],
+        # Last positions per track: kept through a missed detection (unlike
+        # the ROI overlays), so a crossing between two frames is not lost.
+        "track_points": {},
+        "confirmed_tracks": {},
+        "line_crossings": 0,
+        "detection_times": [],
+        "debug": None,
+        "debug_enabled": False,
+        "last_detection_error": "",
         "lock": threading.Lock(),
     }
 
@@ -1033,9 +1046,26 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
             "detections_seen": state["detections_seen"],
             "active_detections": state.get("active_detections", 0),
             "crossings_logged": state["crossings_logged"],
+            # Debug counters (also drawn on the live view in debug mode).
+            "detection": detection_counters(state),
         }
 
     return payload
+
+
+def detection_counters(state):
+    debug = state.get("debug") or {}
+    return {
+        "line_crossings": int(state.get("line_crossings", 0)),
+        "last_raw_detections": debug.get("raw_count"),
+        "last_vehicles": debug.get("vehicle_count"),
+        "last_in_zone": debug.get("in_roi"),
+        "detection_fps": debug.get("detection_fps"),
+        "device": debug.get("device"),
+        "seconds_since_detection": round(time.monotonic() - debug["at"], 1) if debug.get("at") else None,
+        "last_error": state.get("last_detection_error") or None,
+        "debug_overlay": bool(state.get("debug_enabled")),
+    }
 
 
 def write_status(runtime_config, camera_states, detector_models, service_running=True, service_message=""):
@@ -1492,7 +1522,92 @@ def render_annotated_frame(role, frame, results, camera_config, state, vehicle_l
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
         draw_label(annotated, label, x1, y1, color)
 
+    if state.get("debug_enabled"):
+        draw_debug_overlay(annotated, camera_config, state)
+
     return annotated
+
+
+DEBUG_COLORS = {
+    "zone": (255, 255, 0),       # cyan
+    "line": (255, 0, 255),       # magenta
+    "crop": (160, 160, 160),
+    "vehicle": (0, 220, 0),
+    "low confidence": (0, 215, 255),
+    "not a vehicle": (150, 150, 150),
+    "track": (0, 140, 255),
+}
+
+
+def draw_debug_panel(frame, lines, color=(255, 255, 255)):
+    scale = max(0.45, frame.shape[1] / 1600.0)
+    height = int(22 * scale / 0.5)
+    width = int(max(len(text) for text in lines) * 10 * scale / 0.5) + 16
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, 0), (min(frame.shape[1], width), height * len(lines) + 10), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+    for index, text in enumerate(lines):
+        cv2.putText(frame, text, (8, height * (index + 1)), cv2.FONT_HERSHEY_SIMPLEX, scale, color, 1, cv2.LINE_AA)
+
+
+def draw_debug_overlay(frame, camera_config, state, message=None):
+    """
+    Debug view (Settings > Calibration): every raw YOLO detection before any
+    filter, the zone and trigger line as the detector uses them (scaled to
+    this frame), the crop YOLO saw, track IDs with their last positions, and
+    counters. Drawn only while the debug switch is on.
+    """
+    height, width = frame.shape[:2]
+    thickness = max(1, width // 640)
+    polygon = normalized_polygon_to_pixels(camera_config.get("calibration_mask"), width, height)
+    line = normalized_line_to_pixels(camera_config.get("calibration_line"), width, height)
+
+    if polygon:
+        cv2.polylines(frame, [np.array(polygon, dtype=np.int32)], True, DEBUG_COLORS["zone"], thickness + 1)
+    if line:
+        cv2.line(frame, (line["x1"], line["y1"]), (line["x2"], line["y2"]), DEBUG_COLORS["line"], thickness + 2)
+        for x, y in ((line["x1"], line["y1"]), (line["x2"], line["y2"])):
+            cv2.circle(frame, (x, y), thickness * 4, DEBUG_COLORS["line"], -1)
+
+    with state["lock"]:
+        debug = dict(state.get("debug") or {})
+
+    if message or not debug:
+        draw_debug_panel(frame, ["DEBUG", message or "No detection has run yet."], (0, 215, 255))
+        return
+
+    source = debug.get("frame_size") or [width, height]
+    sx, sy = width / float(source[0] or width), height / float(source[1] or height)
+
+    def point(x, y):
+        return int(x * sx), int(y * sy)
+
+    if debug.get("crop"):
+        x1, y1, x2, y2 = debug["crop"]
+        cv2.rectangle(frame, point(x1, y1), point(x2, y2), DEBUG_COLORS["crop"], 1)
+
+    for item in debug.get("raw", []):
+        x1, y1, x2, y2 = item["xyxy"]
+        color = DEBUG_COLORS.get(item["reason"], DEBUG_COLORS["not a vehicle"])
+        cv2.rectangle(frame, point(x1, y1), point(x2, y2), color, thickness)
+        label = f"{item['name']} {item['confidence']:.2f}" + (f" #{item['track_id']}" if item.get("track_id") is not None else "")
+        cv2.putText(frame, label, (point(x1, y1)[0], max(12, point(x1, y1)[1] - 4)), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.4 * max(1, thickness), color, 1, cv2.LINE_AA)
+
+    for track_id, points in (debug.get("tracks") or {}).items():
+        path = [point(x, y) for x, y in points]
+        if len(path) > 1:
+            cv2.polylines(frame, [np.array(path, dtype=np.int32)], False, DEBUG_COLORS["track"], thickness)
+        cv2.circle(frame, path[-1], thickness * 3, DEBUG_COLORS["track"], -1)
+        cv2.putText(frame, f"ID {track_id}", (path[-1][0] + 6, path[-1][1] + 4), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45 * max(1, thickness), DEBUG_COLORS["track"], 1, cv2.LINE_AA)
+
+    age = time.monotonic() - float(debug.get("at") or 0)
+    draw_debug_panel(frame, [
+        f"DEBUG  detections/frame {debug.get('raw_count', 0)}  vehicles {debug.get('vehicle_count', 0)}  in zone {debug.get('in_roi', 0)}",
+        f"line crossings {debug.get('line_crossings', 0)}  detection {debug.get('detection_fps', 0)} fps  on {debug.get('device') or '-'} @{debug.get('imgsz')}",
+        f"frame {source[0]}x{source[1]}  last detection {age:.1f}s ago" + (f"  ERROR {state.get('last_detection_error')}" if state.get("last_detection_error") else ""),
+    ])
 
 
 def current_track_boxes(results):
@@ -2032,6 +2147,36 @@ def update_detection_windows(role, frame, results, state, laravel_client):
                 window["snapshot_frame"] = frame.copy()
 
 
+def remember_track_point(state, track_id, point):
+    """
+    Store the track's newest position; return its previous one when it is
+    recent enough to trust (a lost-and-found track does not jump the line).
+    """
+    now_monotonic = time.monotonic()
+
+    with state["lock"]:
+        entry = state["track_points"].get(track_id)
+        previous = None
+
+        if entry and now_monotonic - entry["last_seen"] <= TRACK_STALE_AFTER_SECONDS:
+            previous = entry["points"][-1]
+        elif entry:
+            entry["points"] = []
+
+        entry = entry or {"points": []}
+        entry["points"].append((float(point[0]), float(point[1])))
+        del entry["points"][:-TRACK_TRAIL_POINTS]
+        entry["last_seen"] = now_monotonic
+        state["track_points"][track_id] = entry
+
+        for stale_id, stale in list(state["track_points"].items()):
+            if now_monotonic - stale["last_seen"] > max(TRACK_STALE_AFTER_SECONDS * 4, 6.0):
+                state["track_points"].pop(stale_id, None)
+                state["confirmed_tracks"].pop(stale_id, None)
+
+    return previous
+
+
 def process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels):
     """
     Filter detections to supported vehicle classes, track them, and log one
@@ -2066,6 +2211,10 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
         if class_id not in vehicle_labels:
             continue
 
+        # Where the track was at its previous detection (inside the zone or
+        # not), then remember where it is now.
+        center_point = bbox_center(xyxy)
+        previous_point = remember_track_point(state, track_id, center_point)
         inside_roi = bbox_inside_roi(xyxy, mask_polygon)
 
         if not inside_roi:
@@ -2088,21 +2237,23 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
             }
             state["track_overlays"].setdefault(track_id, detection_overlay())
 
-        center_point = bbox_center(xyxy)
-
         with state["lock"]:
             if track_is_processed_as_guest_locked(state, track_id, inside_roi, now_monotonic):
                 state["track_overlays"][track_id] = state["track_overlays"].get(track_id) or default_overlay()
                 continue
 
         current_side = point_side_of_line(center_point, line)
+        previous_side = point_side_of_line(previous_point, line) if previous_point is not None else None
 
         with state["lock"]:
-            previous_side = state["track_sides"].get(track_id)
             state["track_sides"][track_id] = current_side
 
+        # The path from the previous to the current position crosses the
+        # line segment (also when the vehicle jumped over it between frames),
+        # or the box touches the line (a track that starts on the line).
+        crossed = path_crosses_line(previous_point, center_point, line)
         line_touched = bbox_intersects_line(xyxy, line)
-        triggered = crossed_line(previous_side, current_side) or line_touched
+        triggered = bool(crossed) or line_touched
 
         if not triggered:
             continue
@@ -2121,6 +2272,9 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
 
         if already_handled:
             continue
+
+        with state["lock"]:
+            state["line_crossings"] += 1
 
         if previous_side is not None and current_side is not None:
             if previous_side < 0 and current_side > 0:
@@ -2375,6 +2529,9 @@ def camera_stream_worker(role, state, model_info, stop_event):
                         state["retry_count"] = 0
                         state["last_error"] = "Calibration ROI mask and trigger line are required before auto logging starts."
                         if viewer_active and publish_due(state, perf):
+                            if perf.get("debug_overlay"):
+                                frame = frame.copy()
+                                draw_debug_overlay(frame, camera_config, state, "No detection: draw the zone AND the trigger line in Calibration.")
                             publish_stream_frame(role, frame, frame_time, perf)
                     elif not vehicle_labels:
                         state["detection_ready"] = False
@@ -2488,17 +2645,70 @@ def roi_crop_box(camera_config, frame, enabled):
     return x1, y1, x2, y2
 
 
-def offset_results(results, x1, y1):
-    """Move boxes found in a crop back to full-frame pixel coordinates."""
+def offset_results(results, x1, y1, full_shape=None):
+    """
+    Move boxes found in a crop back to full-frame pixel coordinates.
+
+    YOLO returns inference-mode tensors that cannot be changed in place: the
+    old in-place "+=" raised on EVERY frame with a vehicle, and that error
+    was taken for a GPU failure. The boxes are rebuilt from a copy instead.
+    """
     boxes = getattr(results, "boxes", None)
     if boxes is None or boxes.data is None or len(boxes.data) == 0:
         return results
-    data = boxes.data
-    data[:, 0] += x1
-    data[:, 2] += x1
-    data[:, 1] += y1
-    data[:, 3] += y1
+    from ultralytics.engine.results import Boxes
+
+    data = boxes.data.clone()
+    data[:, [0, 2]] += x1
+    data[:, [1, 3]] += y1
+    shape = tuple(full_shape[:2]) if full_shape is not None else tuple(boxes.orig_shape)
+    results.boxes = Boxes(data, shape)
+    results.orig_shape = shape
     return results
+
+
+def split_raw_detections(results, state, vehicle_labels):
+    """
+    YOLO reports every class down to RAW_CONFIDENCE_FLOOR. Keep vehicle
+    classes at DETECTION_CONFIDENCE_THRESHOLD, or lower for a track that
+    already passed it (one weak frame does not drop a vehicle). Returns the
+    raw list for the debug view; `results.boxes` keeps only the vehicles.
+    """
+    boxes = getattr(results, "boxes", None)
+    if boxes is None or boxes.data is None or len(boxes.data) == 0:
+        return []
+    from ultralytics.engine.results import Boxes
+
+    names = getattr(results, "names", {}) or {}
+    ids = boxes.id.int().cpu().tolist() if boxes.id is not None else [None] * len(boxes)
+    classes = boxes.cls.int().cpu().tolist()
+    confidences = boxes.conf.cpu().tolist()
+    coordinates = boxes.xyxy.cpu().tolist()
+    now_monotonic = time.monotonic()
+    raw, keep = [], []
+
+    with state["lock"]:
+        confirmed = state["confirmed_tracks"]
+        for index, (track_id, class_id, confidence, xyxy) in enumerate(zip(ids, classes, confidences, coordinates)):
+            vehicle = class_id in vehicle_labels
+            if vehicle and confidence >= DETECTION_CONFIDENCE_THRESHOLD and track_id is not None:
+                confirmed[track_id] = now_monotonic
+            kept = vehicle and (confidence >= DETECTION_CONFIDENCE_THRESHOLD or track_id in confirmed)
+            if kept:
+                keep.append(index)
+            raw.append({
+                "track_id": track_id,
+                "class_id": class_id,
+                "name": str(names.get(class_id, class_id)),
+                "confidence": round(float(confidence), 3),
+                "xyxy": [round(float(value), 1) for value in xyxy],
+                "kept": kept,
+                "reason": "vehicle" if kept else ("low confidence" if vehicle else "not a vehicle"),
+            })
+
+    if len(keep) != len(boxes.data):
+        results.boxes = Boxes(boxes.data[keep].clone(), tuple(boxes.orig_shape))
+    return raw
 
 
 def vehicle_in_zone(results, camera_config, frame, vehicle_labels):
@@ -2524,6 +2734,90 @@ def reset_tracker(model_info):
                 pass
 
 
+def run_yolo(role, model_info, frame, camera_config, perf, state):
+    """
+    YOLO + ByteTrack on the frame (or on the calibrated zone). Raises only
+    when the model itself fails, so a GPU problem can fall back to CPU.
+    Returns (results in full-frame pixels, crop box or None, input shape).
+    """
+    crop = roi_crop_box(camera_config, frame, perf["roi_crop"])
+    # The tracker must always see the same kind of input: when the zone
+    # (or the crop decision) changes, start tracking fresh.
+    crop_key = (crop, frame.shape[:2])
+    if state.get("crop_key") != crop_key:
+        if state.get("crop_key") is not None:
+            reset_tracker(model_info)
+        state["crop_key"] = crop_key
+    detect_input = frame if crop is None else frame[crop[1]:crop[3], crop[0]:crop[2]]
+    device = yolo_device(perf["yolo_device"])
+    with metrics.timed(role, "yolo"):
+        results = model_info["model"].track(
+            detect_input,
+            persist=True,
+            verbose=False,
+            tracker=TRACKER_CONFIG,
+            conf=RAW_CONFIDENCE_FLOOR,
+            iou=DETECTION_IOU_THRESHOLD,
+            imgsz=int(perf["yolo_imgsz"]),
+            device=device,
+        )[0]
+    metrics.value(role, "yolo_device", device)
+    metrics.value(role, "yolo_input", f"{detect_input.shape[1]}x{detect_input.shape[0]}@{int(perf['yolo_imgsz'])}")
+    return results, crop, detect_input.shape, device
+
+
+def handle_detection(role, frame, results, crop, camera_config, perf, state, laravel_client, vehicle_labels, device=None):
+    """
+    Everything after YOLO, shared by the live worker and the video test:
+    crop offset, vehicle filter, zone + line crossing, debug counters.
+    """
+    if crop is not None:
+        results = offset_results(results, crop[0], crop[1], frame.shape)
+    raw = split_raw_detections(results, state, vehicle_labels)
+    crossings_before = state["line_crossings"]
+
+    with metrics.timed(role, "process"):
+        process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels)
+
+    now_monotonic = time.monotonic()
+    with state["lock"]:
+        times = state["detection_times"]
+        times.append(now_monotonic)
+        del times[:-40]
+        recent = [value for value in times if now_monotonic - value <= 5.0]
+        fps = (len(recent) - 1) / (recent[-1] - recent[0]) if len(recent) > 1 and recent[-1] > recent[0] else 0.0
+        state["debug"] = {
+            "at": now_monotonic,
+            "frame_size": [int(frame.shape[1]), int(frame.shape[0])],
+            "crop": list(crop) if crop is not None else None,
+            "raw": raw,
+            "raw_count": len(raw),
+            "vehicle_count": sum(1 for item in raw if item["kept"]),
+            "in_roi": int(state.get("active_detections", 0)),
+            "line_crossings": int(state["line_crossings"]),
+            "new_crossings": int(state["line_crossings"] - crossings_before),
+            "detection_fps": round(fps, 1),
+            "device": device,
+            "imgsz": int(perf["yolo_imgsz"]),
+            "tracks": {
+                str(track_id): [list(point) for point in entry["points"]]
+                for track_id, entry in state["track_points"].items()
+                if now_monotonic - entry["last_seen"] <= TRACK_STALE_AFTER_SECONDS
+            },
+        }
+    return results
+
+
+def log_detection_error(state, message):
+    """Detection errors go to the log (at most once a minute per message), not only the status."""
+    now_monotonic = time.monotonic()
+    last = state.get("logged_errors", {})
+    if now_monotonic - last.get(message, -1e9) >= 60:
+        print(f"Detection error: {message}", flush=True)
+        last[message] = now_monotonic
+        state["logged_errors"] = last
+
+
 def camera_detection_worker(role, state, model_info, stop_event):
     """
     Run YOLO tracking in a separate worker so live MJPEG publishing stays smooth.
@@ -2532,6 +2826,7 @@ def camera_detection_worker(role, state, model_info, stop_event):
         # Phase 1: removed the "no Station page open" gate. Detection runs
         # whenever the detector is on.
         perf = performance_settings(load_runtime_config())
+        state["debug_enabled"] = bool(perf.get("debug_overlay"))
         frame, camera_config = next_detection_frame(state, 1.0 / max(0.5, perf["detection_fps"]))
 
         if frame is None:
@@ -2552,35 +2847,11 @@ def camera_detection_worker(role, state, model_info, stop_event):
 
         with state["lock"]:
             frame_time = state.get("latest_frame_at") or time.monotonic()
-        crop = roi_crop_box(camera_config, frame, perf["roi_crop"])
-        # The tracker must always see the same kind of input: when the zone
-        # (or the crop decision) changes, start tracking fresh.
-        crop_key = (crop, frame.shape[:2])
-        if state.get("crop_key") != crop_key:
-            if state.get("crop_key") is not None:
-                reset_tracker(model_info)
-            state["crop_key"] = crop_key
-        detect_input = frame if crop is None else frame[crop[1]:crop[3], crop[0]:crop[2]]
-        device = yolo_device(perf["yolo_device"])
         try:
-            with metrics.timed(role, "yolo"):
-                results = model_info["model"].track(
-                    detect_input,
-                    persist=True,
-                    verbose=False,
-                    tracker=TRACKER_CONFIG,
-                    conf=DETECTION_CONFIDENCE_THRESHOLD,
-                    iou=DETECTION_IOU_THRESHOLD,
-                    classes=sorted(vehicle_labels.keys()),
-                    imgsz=int(perf["yolo_imgsz"]),
-                    device=device,
-                )[0]
-            if crop is not None:
-                results = offset_results(results, crop[0], crop[1])
-            metrics.value(role, "yolo_device", device)
-            metrics.value(role, "yolo_input", f"{detect_input.shape[1]}x{detect_input.shape[0]}@{int(perf['yolo_imgsz'])}")
+            results, crop, _shape, device = run_yolo(role, model_info, frame, camera_config, perf, state)
         except Exception as error:
-            if device != "cpu" and _YOLO_DEVICE["resolved"] == device:
+            device = _YOLO_DEVICE["resolved"]
+            if device not in (None, "cpu") and perf["yolo_device"] == "auto":
                 # A GPU backend that fails (driver, unsupported op) falls back to CPU.
                 print(f"YOLO on {device} failed ({error}); using CPU.", flush=True)
                 _YOLO_DEVICE["resolved"] = "cpu"
@@ -2589,14 +2860,24 @@ def camera_detection_worker(role, state, model_info, stop_event):
             state["detection_ready"] = False
             state["retry_count"] += 1
             state["last_error"] = f"Detection failed: {error}"
+            state["last_detection_error"] = state["last_error"]
+            log_detection_error(state, state["last_error"])
             stop_event.wait(RECONNECT_DELAY_SECONDS)
+            continue
+
+        try:
+            results = handle_detection(role, frame, results, crop, camera_config, perf, state, laravel_client, vehicle_labels, device)
+        except Exception as error:
+            # Never silent: the zone/line/event step failed for this frame.
+            state["last_error"] = f"Detection processing failed: {error}"
+            state["last_detection_error"] = state["last_error"]
+            log_detection_error(state, state["last_error"])
+            stop_event.wait(0.2)
             continue
 
         state["detection_ready"] = True
         state["retry_count"] = 0
         state["last_error"] = ""
-        with metrics.timed(role, "process"):
-            process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels)
         # A vehicle in the zone: have full-resolution frames ready for its snapshot.
         if perf["hires_on_trigger"] and camera_config.get("snapshot_source_value") and vehicle_in_zone(results, camera_config, frame, vehicle_labels):
             hires_grabber(role).trigger(camera_config)
@@ -2708,5 +2989,29 @@ def run_detector_loop():
         raise
 
 
-if __name__ == "__main__":
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="PHILCST dual-camera vehicle detector")
+    parser.add_argument("--video", help="run the detection pipeline on a video file instead of the cameras")
+    parser.add_argument("--role", choices=CAMERA_ROLES, default="entrance")
+    parser.add_argument("--use-calibration", action="store_true", help="use the station's saved zone and line")
+    parser.add_argument("--roi", help='zone polygon, normalized: "x,y x,y x,y ..."')
+    parser.add_argument("--line", help='trigger line, normalized: "x1,y1,x2,y2"')
+    parser.add_argument("--detection-fps", type=float)
+    parser.add_argument("--imgsz", type=int)
+    parser.add_argument("--post", action="store_true", help="send events and alerts to Laravel (default: dry run)")
+    parser.add_argument("--app-url", help="with --post: send to this Laravel instead (e.g. a test copy)")
+    parser.add_argument("--out", help="write the annotated video (debug overlay) here")
+    parser.add_argument("--fast", action="store_true", help="do not wait for real time")
+    args = parser.parse_args()
+
+    if args.video:
+        import video_test
+
+        raise SystemExit(video_test.run(args))
     run_detector_loop()
+
+
+if __name__ == "__main__":
+    main()

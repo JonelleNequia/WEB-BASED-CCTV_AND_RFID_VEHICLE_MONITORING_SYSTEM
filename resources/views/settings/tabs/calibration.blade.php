@@ -2,6 +2,19 @@
 
     <p class="field-help">Pick a camera, click point by point to draw the detection zone, then draw the trigger line, then save. The detector logs a vehicle when it crosses the line inside the zone.</p>
 
+    {{-- Detector debug view: raw detections, zone/line as used, track IDs, counters. --}}
+    <form method="POST" action="{{ route('calibration.debug') }}" class="calibration-debug-toggle">
+        @csrf
+        <input type="hidden" name="enabled" value="{{ ($debugOverlay ?? false) ? '0' : '1' }}">
+        <div>
+            <strong>Detector debug view</strong>
+            <span class="field-help">Shows every raw detection (class, confidence, box), the zone and trigger line as the detector uses them, track IDs with their last positions, and counters (detections per frame, in zone, line crossings, detection FPS) on the live video. Turn it off after checking.</span>
+        </div>
+        <button type="submit" class="button {{ ($debugOverlay ?? false) ? 'button-primary' : 'button-secondary' }} button-sm" aria-pressed="{{ ($debugOverlay ?? false) ? 'true' : 'false' }}">
+            {{ ($debugOverlay ?? false) ? 'Debug view is ON · Turn off' : 'Turn on debug view' }}
+        </button>
+    </form>
+
     <div class="camera-grid">
         @foreach ($cameras as $role => $camera)
             <article class="camera-card camera-card-calibration" data-calibration-camera data-role="{{ $role }}">

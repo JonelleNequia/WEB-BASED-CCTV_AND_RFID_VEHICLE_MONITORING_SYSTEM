@@ -831,6 +831,33 @@ class DetectedEventIngestionTest extends TestCase
             ->count());
     }
 
+    public function test_consecutive_vehicles_without_a_pass_at_one_station_each_get_an_alert(): void
+    {
+        Storage::fake('public');
+        $this->seed(DatabaseSeeder::class);
+
+        $headers = ['X-Api-Key' => 'test-detector-key', 'X-Source-Name' => 'phpunit-detector'];
+        $start = now();
+        $send = fn (string $key, int $seconds, int $trackId, array $box) => $this->withHeaders($headers)->post(route('api.guest-observation'), [
+            'external_event_key' => $key,
+            'camera_role' => 'entrance',
+            'detected_vehicle_type' => 'Car',
+            'event_time' => $start->copy()->addSeconds($seconds)->toIso8601String(),
+            'snapshot' => UploadedFile::fake()->image($key.'.jpg', 640, 480),
+            'detection_metadata' => json_encode(['track_id' => $trackId, 'bbox_xyxy' => $box]),
+        ]);
+
+        // Car A, then the same car again 2 s later under a new track ID: one alert.
+        $send('queue-a', 0, 501, [100, 200, 300, 380])->assertCreated();
+        $send('queue-a-again', 2, 502, [104, 204, 306, 384])->assertOk()->assertJsonPath('duplicate', true);
+        // A second car at the same spot 12 s later, and a third car side by side
+        // with it in another lane: both are new alerts.
+        $send('queue-b', 12, 503, [102, 198, 302, 378])->assertCreated()->assertJsonPath('duplicate', false);
+        $send('queue-c', 12, 504, [420, 200, 600, 380])->assertCreated()->assertJsonPath('duplicate', false);
+
+        $this->assertSame(3, GuestVehicleObservation::query()->where('external_event_key', 'like', 'queue-%')->count());
+    }
+
     public function test_detector_guest_observation_duplicate_updates_late_ocr_details(): void
     {
         Storage::fake('public');

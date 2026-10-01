@@ -231,6 +231,64 @@
             this.canvas.height = height;
         }
 
+        /*
+         * Where the camera image really is inside the canvas. The stream is
+         * shown with object-fit (cover crops, contain letterboxes), so a
+         * stream whose shape differs from the 16:9 box is not the whole
+         * canvas. Saved points are normalized (0-1) to the IMAGE, the same
+         * frame the detector scales them to.
+         */
+        contentRect() {
+            const width = this.canvas.width;
+            const height = this.canvas.height;
+            const naturalWidth = this.video.naturalWidth || this.video.videoWidth || 0;
+            const naturalHeight = this.video.naturalHeight || this.video.videoHeight || 0;
+            const fit = window.getComputedStyle(this.video).objectFit;
+
+            if (!naturalWidth || !naturalHeight || !width || !height || fit === 'fill') {
+                return { x: 0, y: 0, width: width, height: height };
+            }
+
+            const scale = fit === 'contain'
+                ? Math.min(width / naturalWidth, height / naturalHeight)
+                : Math.max(width / naturalWidth, height / naturalHeight);
+            const shownWidth = naturalWidth * scale;
+            const shownHeight = naturalHeight * scale;
+
+            return { x: (width - shownWidth) / 2, y: (height - shownHeight) / 2, width: shownWidth, height: shownHeight };
+        }
+
+        toImagePolygon(points) {
+            const rect = this.contentRect();
+            const shifted = (points || []).map((point) => ({ x: point.x - rect.x, y: point.y - rect.y }));
+
+            return cameraApi.normalisePolygon(shifted, rect.width, rect.height);
+        }
+
+        toCanvasPolygon(shape) {
+            const rect = this.contentRect();
+            const points = cameraApi.denormalisePolygon(shape, rect.width, rect.height);
+
+            return points ? points.map((point) => ({ x: point.x + rect.x, y: point.y + rect.y })) : null;
+        }
+
+        toImageLine(line) {
+            const rect = this.contentRect();
+
+            return line ? cameraApi.normaliseLine({
+                x1: line.x1 - rect.x, y1: line.y1 - rect.y, x2: line.x2 - rect.x, y2: line.y2 - rect.y,
+            }, rect.width, rect.height) : null;
+        }
+
+        toCanvasLine(line) {
+            const rect = this.contentRect();
+            const scaled = cameraApi.denormaliseLine(line, rect.width, rect.height);
+
+            return scaled ? {
+                x1: scaled.x1 + rect.x, y1: scaled.y1 + rect.y, x2: scaled.x2 + rect.x, y2: scaled.y2 + rect.y,
+            } : null;
+        }
+
         getCanvasPoint(event) {
             const bounds = this.canvas.getBoundingClientRect();
 
@@ -286,11 +344,9 @@
             }
 
             event.preventDefault();
-            const width = this.canvas.width;
-            const height = this.canvas.height;
 
             if (this.draftShape.type === 'line') {
-                this.lineShape = cameraApi.normaliseLine(this.draftShape.value, width, height);
+                this.lineShape = this.toImageLine(this.draftShape.value);
             }
 
             this.pointerStart = null;
@@ -300,14 +356,12 @@
         }
 
         addPolygonPoint(point) {
-            const width = this.canvas.width;
-            const height = this.canvas.height;
-            const points = cameraApi.denormalisePolygon(this.maskShape, width, height) || this.maskDraftPoints;
+            const points = this.toCanvasPolygon(this.maskShape) || this.maskDraftPoints;
 
             points.push(point);
             this.maskDraftPoints = points;
             this.maskShape = points.length >= 3
-                ? cameraApi.normalisePolygon(points, width, height)
+                ? this.toImagePolygon(points)
                 : null;
             this.updateCalibrationSummary();
             this.render();
@@ -333,8 +387,7 @@
 
         async saveCalibration() {
             if (this.maskShape && !Array.isArray(this.maskShape)) {
-                const points = cameraApi.denormalisePolygon(this.maskShape, this.canvas.width, this.canvas.height);
-                this.maskShape = cameraApi.normalisePolygon(points, this.canvas.width, this.canvas.height);
+                this.maskShape = this.toImagePolygon(this.toCanvasPolygon(this.maskShape));
             }
 
             if (!this.maskShape && this.maskDraftPoints.length > 0) {
@@ -449,8 +502,8 @@
         render() {
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-            const savedMask = cameraApi.denormalisePolygon(this.maskShape, this.canvas.width, this.canvas.height);
-            const savedLine = cameraApi.denormaliseLine(this.lineShape, this.canvas.width, this.canvas.height);
+            const savedMask = this.toCanvasPolygon(this.maskShape);
+            const savedLine = this.toCanvasLine(this.lineShape);
 
             if (savedMask) {
                 this.drawPolygon(savedMask);

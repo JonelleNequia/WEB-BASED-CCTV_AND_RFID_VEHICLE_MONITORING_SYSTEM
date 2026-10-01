@@ -412,11 +412,15 @@ class LiveLatencyTests(unittest.TestCase):
         full = {"calibration_mask": [{"x": 0.01, "y": 0.01}, {"x": 0.99, "y": 0.01}, {"x": 0.99, "y": 0.99}, {"x": 0.01, "y": 0.99}]}
         self.assertIsNone(detector.roi_crop_box(full, frame, True))  # zone ~ whole frame: no crop
 
-        boxes = mock.Mock()
-        boxes.data = torch.tensor([[10.0, 20.0, 30.0, 40.0, 1.0, 0.9, 2.0]])
-        results = mock.Mock(boxes=boxes)
-        detector.offset_results(results, crop[0], crop[1])
-        self.assertEqual(boxes.data[0, :4].tolist(), [10.0 + crop[0], 20.0 + crop[1], 30.0 + crop[0], 40.0 + crop[1]])
+        # A real inference-mode tensor, like YOLO returns (a plain tensor here
+        # hid the "Inplace update to inference tensor" crash before).
+        from ultralytics.engine.results import Boxes
+
+        with torch.inference_mode():
+            data = torch.tensor([[10.0, 20.0, 30.0, 40.0, 1.0, 0.9, 2.0]])
+        results = mock.Mock(boxes=Boxes(data, (crop[3] - crop[1], crop[2] - crop[0])))
+        detector.offset_results(results, crop[0], crop[1], frame.shape)
+        self.assertEqual(results.boxes.data[0, :4].tolist(), [10.0 + crop[0], 20.0 + crop[1], 30.0 + crop[0], 40.0 + crop[1]])
 
     def test_live_box_scales_to_the_full_resolution_frame(self):
         from hires import scale_box

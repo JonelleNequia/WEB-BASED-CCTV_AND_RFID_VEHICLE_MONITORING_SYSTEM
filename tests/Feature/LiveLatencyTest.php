@@ -124,6 +124,34 @@ class LiveLatencyTest extends TestCase
             ->assertOk()->assertSee('Live view performance')->assertSee('Optimize camera settings');
     }
 
+    public function test_detector_debug_view_switch_is_exported_and_counters_are_shown(): void
+    {
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'calibration']))
+            ->assertOk()->assertSee('Turn on debug view');
+
+        $this->actingAs($this->admin)->post(route('calibration.debug'), ['enabled' => 1])->assertRedirect();
+        $config = json_decode(File::get(CameraFiles::path('camera_runtime_config.json')), true);
+        $this->assertSame(1, $config['system_settings']['performance']['debug_overlay']);
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'calibration']))
+            ->assertOk()->assertSee('Debug view is ON');
+
+        $this->actingAs($this->admin)->postJson(route('calibration.debug'), ['enabled' => 0])->assertOk()->assertJsonPath('enabled', false);
+        $config = json_decode(File::get(CameraFiles::path('camera_runtime_config.json')), true);
+        $this->assertSame(0, $config['system_settings']['performance']['debug_overlay']);
+
+        File::ensureDirectoryExists(CameraFiles::directory());
+        File::put(CameraFiles::statusPath(), json_encode([
+            'service_running' => true,
+            'updated_at' => now()->toIso8601String(),
+            'cameras' => ['entrance' => [
+                'camera_running' => true, 'detection_ready' => true, 'last_error' => '',
+                'detection' => ['detection_fps' => 7.8, 'device' => 'mps', 'last_raw_detections' => 4, 'last_vehicles' => 3, 'last_in_zone' => 2, 'line_crossings' => 5],
+            ]],
+        ]));
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'status']))
+            ->assertOk()->assertSee('7.8 per second on mps')->assertSee('4 / 3 / 2');
+    }
+
     public function test_status_page_shows_the_measured_pipeline(): void
     {
         File::ensureDirectoryExists(CameraFiles::directory());

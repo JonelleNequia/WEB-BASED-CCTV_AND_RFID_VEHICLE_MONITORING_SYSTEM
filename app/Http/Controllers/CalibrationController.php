@@ -39,7 +39,23 @@ class CalibrationController extends Controller
             'tab' => 'calibration',
             'cameras' => $cameras,
             'detectorStatus' => $detectorStatus,
+            'debugOverlay' => $settingsService->get('detector_debug_overlay', '0') === '1',
         ]);
+    }
+
+    /**
+     * Detector debug view on/off: the live view then shows every raw YOLO
+     * detection, the zone and line as the detector uses them, track IDs and
+     * counters. The detector picks it up within a second.
+     */
+    public function debugOverlay(Request $request, SettingsService $settingsService): JsonResponse|RedirectResponse
+    {
+        $enabled = $request->boolean('enabled');
+        $settingsService->save(['detector_debug_overlay' => $enabled ? '1' : '0']);
+
+        return $request->expectsJson()
+            ? response()->json(['enabled' => $enabled])
+            : back()->with('status', $enabled ? 'Detector debug view is on.' : 'Detector debug view is off.');
     }
 
     public function heartbeat(DetectorRuntimeService $detectorRuntimeService): JsonResponse

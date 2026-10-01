@@ -37,6 +37,16 @@ class GuestObservationController extends Controller
 
     protected const DETECTOR_SHARED_SOURCE_MIN_IOU = 0.30;
 
+    /**
+     * Same station, no plate read: the same vehicle sent again (a new track
+     * ID for the same car) arrives within seconds. It used to be 30 s with no
+     * other check, so every other vehicle without a pass in those 30 s was
+     * merged into the first alert and never logged (measured: 5 different
+     * vehicles in 20 s became one alert). The detector itself already stops
+     * the same car from triggering twice.
+     */
+    protected const DETECTOR_SAME_STATION_UNPLATED_WINDOW_SECONDS = 5;
+
     /** Phase 5: a pass read this long after the crossing still cancels the alert. */
     protected const DETECTOR_LATE_SCAN_SECONDS = 8;
 
@@ -734,14 +744,7 @@ class GuestObservationController extends Controller
             return null;
         }
 
-        $sameStationUnidentifiedDuplicate = $this->recentDetectorGuestObservationQuery(
-            $eventTime,
-            self::DETECTOR_SHORT_DUPLICATE_WINDOW_SECONDS
-        )
-            ->whereNull('plate_number')
-            ->where('location', $cameraRole)
-            ->latest('created_at')
-            ->first();
+        $sameStationUnidentifiedDuplicate = $this->sameStationUnplatedDuplicate($eventTime, $cameraRole, $metadata);
 
         if ($sameStationUnidentifiedDuplicate) {
             return $sameStationUnidentifiedDuplicate;
@@ -754,7 +757,8 @@ class GuestObservationController extends Controller
             ),
             $cameraId,
             null,
-            $metadata
+            $metadata,
+            $cameraRole
         );
 
         if ($sharedSceneDuplicate) {
@@ -780,6 +784,42 @@ class GuestObservationController extends Controller
             });
     }
 
+    /**
+     * A no-plate alert at the same station counts as the same vehicle only
+     * within a few seconds, and not when both boxes are known and far apart
+     * (two vehicles side by side in different lanes).
+     */
+    protected function sameStationUnplatedDuplicate(Carbon $eventTime, string $cameraRole, array $metadata = []): ?GuestVehicleObservation
+    {
+        $window = self::DETECTOR_SAME_STATION_UNPLATED_WINDOW_SECONDS;
+        $requestBox = $this->metadataBoundingBox($metadata);
+        $trackId = $metadata['track_id'] ?? null;
+
+        $candidates = GuestVehicleObservation::query()
+            ->where('observation_source', 'cctv')
+            ->where('status', 'pending_review')
+            ->whereNull('plate_number')
+            ->where('location', $cameraRole)
+            ->whereBetween('observed_at', [$eventTime->copy()->subSeconds($window), $eventTime->copy()->addSeconds($window)])
+            ->latest('created_at')
+            ->limit(10)
+            ->get();
+
+        foreach ($candidates as $candidate) {
+            $candidateBox = $this->metadataBoundingBox($candidate->detection_metadata_json ?? []);
+            $sameTrack = $trackId !== null && (string) data_get($candidate->detection_metadata_json, 'track_id') === (string) $trackId;
+
+            if (! $sameTrack && $requestBox !== null && $candidateBox !== null
+                && $this->boundingBoxIou($requestBox, $candidateBox) < self::DETECTOR_SHARED_SOURCE_MIN_IOU) {
+                continue;
+            }
+
+            return $candidate;
+        }
+
+        return null;
+    }
+
     protected function recentUnidentifiedDetectorDuplicate(
         Carbon $eventTime,
         string $cameraRole,
@@ -789,16 +829,13 @@ class GuestObservationController extends Controller
         $query = $this->recentDetectorGuestObservationQuery($eventTime, self::DETECTOR_SHORT_DUPLICATE_WINDOW_SECONDS)
             ->whereNull('plate_number');
 
-        $sameStationDuplicate = (clone $query)
-            ->where('location', $cameraRole)
-            ->latest('created_at')
-            ->first();
+        $sameStationDuplicate = $this->sameStationUnplatedDuplicate($eventTime, $cameraRole, $metadata);
 
         if ($sameStationDuplicate) {
             return $sameStationDuplicate;
         }
 
-        return $this->latestSharedSourceDetectorDuplicate($query, $cameraId, null, $metadata);
+        return $this->latestSharedSourceDetectorDuplicate($query, $cameraId, null, $metadata, $cameraRole);
     }
 
     protected function latestPlateDetectorDuplicate(
@@ -877,7 +914,8 @@ class GuestObservationController extends Controller
         Builder $query,
         ?int $cameraId,
         ?string $plateNumber = null,
-        array $metadata = []
+        array $metadata = [],
+        ?string $otherStationThan = null
     ): ?GuestVehicleObservation {
         if ($cameraId === null) {
             return null;
@@ -895,6 +933,11 @@ class GuestObservationController extends Controller
             ->get();
 
         foreach ($candidates as $candidate) {
+            // Same station without a plate: sameStationUnplatedDuplicate() decides.
+            if ($otherStationThan !== null && $candidate->location === $otherStationThan) {
+                continue;
+            }
+
             if ($plateFingerprint !== null
                 && $this->plateFingerprint($candidate->plate_number ?: $candidate->plate_text) !== $plateFingerprint) {
                 continue;

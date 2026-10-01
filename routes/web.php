@@ -179,6 +179,7 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
             ->name('settings.devices.assign');
         Route::get('/camera-calibration/heartbeat', [CalibrationController::class, 'heartbeat'])->name('calibration.heartbeat');
         Route::put('/calibration', [CalibrationController::class, 'update'])->name('calibration.update');
+        Route::post('/calibration/debug', [CalibrationController::class, 'debugOverlay'])->name('calibration.debug');
         Route::put('/camera-browser/state', [CalibrationController::class, 'syncState'])->name('camera-browser.state');
         Route::get('/evidence/rfid-scans/{rfidScanLog}/payload', [EvidenceController::class, 'downloadRfidPayload'])
             ->name('evidence.rfid.payload');
