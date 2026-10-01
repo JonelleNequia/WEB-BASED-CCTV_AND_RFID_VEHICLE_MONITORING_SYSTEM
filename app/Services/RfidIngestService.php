@@ -6,7 +6,6 @@ use App\Models\Gate;
 use App\Models\RfidScanLog;
 use App\Models\RfidTag;
 use App\Models\Vehicle;
-use App\Support\PhilippineTime;
 use App\Support\RfidIngestResult;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -18,10 +17,14 @@ use Illuminate\Validation\ValidationException;
  * Moved out of RfidService::ingest() so the Station page, the RFID Desk, the
  * hardware API and the future UHF TCP listener all share the same rules:
  *
- * - Phase 1 (gates): every gate records IN and OUT, so the vehicle's state
- *   decides the direction (OUTSIDE -> ENTRY, INSIDE -> EXIT) until the camera
- *   gives the direction of the crossing (Phase 3).
- * - Cooldown per tag + gate (setting rfid_cooldown_seconds, default 60).
+ * - Phase 1 (gates): every gate records IN and OUT.
+ * - Phase 3 (visitor model): a registered read takes its direction from the
+ *   camera's crossing (RfidCameraFusionService); the vehicle's state decides
+ *   only when the camera cannot.
+ * - Cooldown per tag + gate (setting rfid_cooldown_seconds, default 60, at
+ *   least 10): also one "Unknown tag" event per cooldown.
+ * - An unknown tag is never a visitor record: it is flagged with "Register
+ *   this tag".
  *
  * Guest passes were removed (Phase 0 of the visitor model): every tag is a
  * vehicle tag; vehicles without a tag are handled by the camera.
@@ -29,8 +32,8 @@ use Illuminate\Validation\ValidationException;
 class RfidIngestService
 {
     /**
-     * A gate reader. Phase 1: gates have no fixed direction, so this is the
-     * same as the toggle until the camera gives the direction (Phase 3).
+     * A gate reader. Gates have no fixed direction: the camera (Phase 3), or
+     * the vehicle's state, gives it. Kept for existing callers.
      */
     public const DIRECTION_STATION = 'station';
 
@@ -42,7 +45,8 @@ class RfidIngestService
         protected LocalStorageService $localStorageService,
         protected VehicleRegistryService $vehicleRegistryService,
         protected EventService $eventService,
-        protected GuestObservationService $guestObservationService
+        protected GuestObservationService $guestObservationService,
+        protected RfidCameraFusionService $fusionService
     ) {
     }
 
@@ -83,9 +87,12 @@ class RfidIngestService
         });
     }
 
+    /** Phase 3: never below 10 s (0 recorded every read of a tag again). */
+    public const MIN_COOLDOWN_SECONDS = 10;
+
     public function cooldownSeconds(): int
     {
-        return max(0, $this->settingsService->getInt('rfid_cooldown_seconds', 60));
+        return max(self::MIN_COOLDOWN_SECONDS, $this->settingsService->getInt('rfid_cooldown_seconds', 60));
     }
 
     /**
@@ -103,36 +110,51 @@ class RfidIngestService
     ): RfidIngestResult {
         $vehicle = $tag?->vehicle;
         $verificationStatus = $this->resolveVerificationStatus($tag, $vehicle);
-        $transition = $verificationStatus === 'verified' && $vehicle
-            ? $this->resolveStateTransition($vehicle, $scanLocation, $directionMode, $scanTime)
-            : null;
 
-        $anomalyReason = $transition['anomaly_reason'] ?? $this->tagAnomalyReason($tag, $verificationStatus, $scanLocation);
-        // No movement (unknown or flagged tag): no direction either.
-        $eventType = $transition['event_type'] ?? null;
+        if ($verificationStatus === 'verified' && $vehicle) {
+            // Phase 3: no movement yet; the camera's crossing (or the
+            // vehicle's state) gives the direction.
+            $scanLog = $this->createScanLog($data, $sourceMode, $scanLocation, $scanTime, $tag, [
+                'vehicle' => $vehicle,
+                'verification_status' => $verificationStatus,
+                'resolved_event_type' => null,
+                'resulting_state' => $vehicle->current_state ?: null,
+                'anomaly_reason' => null,
+            ]);
+            $outcome = $this->fusionService->registerScan($scanLog);
+            $scanLog->refresh();
+            $plate = $vehicle->plate_number;
 
+            $message = match ($outcome) {
+                RfidIngestResult::PENDING => "Tag read for {$plate}. Waiting for the camera to see the vehicle cross.",
+                RfidIngestResult::ANOMALY => "{$scanLog->resolved_event_type} recorded for {$plate}, flagged for review: {$scanLog->anomaly_reason}",
+                default => "{$scanLog->resolved_event_type} recorded for {$plate}.",
+            };
+
+            return $this->result($scanLog, $outcome, $message);
+        }
+
+        if ($verificationStatus === 'unknown_tag') {
+            $reason = $tag
+                ? ($tag->label ?? 'Tag')." ({$tag->uid}) is not assigned to a vehicle. Register this tag."
+                : 'Unknown tag '.$this->requestedUid($data).' is not in the registry. Register this tag.';
+            $scanLog = $this->createScanLog($data, $sourceMode, $scanLocation, $scanTime, $tag, [
+                'verification_status' => $verificationStatus,
+                'anomaly_reason' => $reason,
+                'outcome' => RfidIngestResult::UNKNOWN_TAG,
+            ]);
+
+            return $this->result($scanLog, RfidIngestResult::UNKNOWN_TAG, $reason);
+        }
+
+        $anomalyReason = $this->tagAnomalyReason($tag, $verificationStatus, $scanLocation);
         $scanLog = $this->createScanLog($data, $sourceMode, $scanLocation, $scanTime, $tag, [
             'vehicle' => $vehicle,
             'verification_status' => $verificationStatus,
-            'resolved_event_type' => $eventType,
-            'resulting_state' => $transition['resulting_state'] ?? ($vehicle?->current_state ?: null),
+            'resolved_event_type' => null,
+            'resulting_state' => $vehicle?->current_state ?: null,
             'anomaly_reason' => $anomalyReason,
         ]);
-
-        if ($transition !== null) {
-            $event = $this->eventService->createFromRfidScan($scanLog, $transition);
-            $scanLog->forceFill([
-                'correlated_vehicle_event_id' => $event?->id,
-                'outcome' => $anomalyReason ? RfidIngestResult::ANOMALY : RfidIngestResult::RECORDED,
-            ])->save();
-
-            $plate = $vehicle->plate_number;
-            $message = $anomalyReason
-                ? "{$eventType} recorded for {$plate}, flagged for review: {$anomalyReason}"
-                : "{$eventType} recorded for {$plate}.";
-
-            return $this->result($scanLog, $anomalyReason ? RfidIngestResult::ANOMALY : RfidIngestResult::RECORDED, $message);
-        }
 
         if (in_array($verificationStatus, ['guest', 'non_recurring_category'], true)) {
             $observation = $this->guestObservationService->createFromUnrecognizedRfidScan($scanLog);
@@ -141,57 +163,13 @@ class RfidIngestService
                 'outcome' => RfidIngestResult::GUEST,
             ])->save();
 
-            return $this->result($scanLog, RfidIngestResult::GUEST, 'Unknown tag recorded as GUEST. A guest observation was created.');
+            return $this->result($scanLog, RfidIngestResult::GUEST, 'Guest vehicle tag recorded as GUEST. A guest observation was created.');
         }
 
         $outcome = in_array($verificationStatus, ['inactive_tag'], true) ? RfidIngestResult::ALERT : RfidIngestResult::ANOMALY;
         $scanLog->forceFill(['outcome' => $outcome])->save();
 
         return $this->result($scanLog, $outcome, (string) $anomalyReason);
-    }
-
-    /**
-     * Resolve ENTRY/EXIT for a verified vehicle and update its state.
-     *
-     * @return array{event_type: string, resulting_state: string, daily_entries_count: int, daily_exits_count: int, anomaly_reason: string|null}
-     */
-    protected function resolveStateTransition(Vehicle $vehicle, string $scanLocation, string $directionMode, Carbon $scanTime): array
-    {
-        $vehicle = Vehicle::query()->whereKey($vehicle->id)->lockForUpdate()->firstOrFail();
-
-        $this->resetDailyCountersIfNeeded($vehicle, $scanTime);
-        $currentState = $this->normalizeVehicleState($vehicle->current_state);
-        $anomalyReason = null;
-
-        // Phase 1: both modes toggle (gates record IN and OUT). Phase 3 adds
-        // the camera's direction, with this as the fallback.
-        $eventType = $currentState === Vehicle::STATE_INSIDE ? 'EXIT' : 'ENTRY';
-
-        $updates = [
-            'current_state' => $eventType === 'ENTRY' ? Vehicle::STATE_INSIDE : Vehicle::STATE_OUTSIDE,
-            'last_seen_at' => $scanTime,
-            'daily_count_date' => PhilippineTime::localDateString($scanTime),
-        ];
-
-        if ($eventType === 'ENTRY') {
-            $updates['entries_today_count'] = ((int) $vehicle->entries_today_count) + 1;
-            $updates['last_entry_at'] = $scanTime;
-            $updates['first_entry_today_at'] = $vehicle->first_entry_today_at ?: $scanTime;
-        } else {
-            $updates['exits_today_count'] = ((int) $vehicle->exits_today_count) + 1;
-            $updates['last_exit_at'] = $scanTime;
-            $updates['last_exit_today_at'] = $scanTime;
-        }
-
-        $vehicle->forceFill($updates)->save();
-
-        return [
-            'event_type' => $eventType,
-            'resulting_state' => $vehicle->current_state,
-            'daily_entries_count' => (int) $vehicle->entries_today_count,
-            'daily_exits_count' => (int) $vehicle->exits_today_count,
-            'anomaly_reason' => $anomalyReason,
-        ];
     }
 
     /**
@@ -408,8 +386,9 @@ class RfidIngestService
             return 'inactive_tag';
         }
 
+        // Phase 3: not in the registry, or an inventory tag with no vehicle.
         if (! $tag || ! $vehicle) {
-            return 'guest';
+            return 'unknown_tag';
         }
 
         if ($tag->status !== RfidTag::STATUS_ASSIGNED) {
@@ -433,7 +412,7 @@ class RfidIngestService
 
     protected function tagAnomalyReason(?RfidTag $tag, string $verificationStatus, string $scanLocation): ?string
     {
-        $station = ucfirst($scanLocation);
+        $station = Gate::labelFor($scanLocation);
 
         return match ($verificationStatus) {
             'inactive_tag' => ($tag?->label ?? 'Tag').' is '.strtoupper((string) $tag?->status)." but was scanned at the {$station}.",
@@ -441,30 +420,6 @@ class RfidIngestService
             'inactive_vehicle' => "The vehicle for this tag is inactive but was scanned at the {$station}.",
             default => null,
         };
-    }
-
-    protected function resetDailyCountersIfNeeded(Vehicle $vehicle, Carbon $scanTime): void
-    {
-        $scanDate = PhilippineTime::localDateString($scanTime);
-
-        if ($vehicle->daily_count_date?->toDateString() === $scanDate) {
-            return;
-        }
-
-        $vehicle->fill([
-            'daily_count_date' => $scanDate,
-            'entries_today_count' => 0,
-            'exits_today_count' => 0,
-            'first_entry_today_at' => null,
-            'last_exit_today_at' => null,
-        ]);
-    }
-
-    protected function normalizeVehicleState(?string $state): string
-    {
-        return strtoupper(trim((string) $state)) === Vehicle::STATE_INSIDE
-            ? Vehicle::STATE_INSIDE
-            : Vehicle::STATE_OUTSIDE;
     }
 
     protected function defaultReaderName(string $scanLocation): string

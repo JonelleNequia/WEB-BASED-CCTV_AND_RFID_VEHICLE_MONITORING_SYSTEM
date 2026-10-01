@@ -1,19 +1,21 @@
 {{--
-    UI Phase 3: scan a tag (NFC/USB reader types into the focused field) or
+    UI Phase 3: read a tag with the UHF reader, type or paste its UID, or
     pick an available one. A new UID is added to the inventory on save.
-    UHF: "Read with UHF reader" takes the next EPC the network reader reads.
+    Phase 3 (visitor model): "Register this tag" (an unknown tag read at a
+    gate) opens Add Vehicle with that UID filled in ($prefillUid).
 --}}
 @php($useOld = $useOld ?? false)
-<fieldset class="tag-picker" data-tag-picker data-lookup-url="{{ route('registry.tags.lookup') }}" @isset($vehicleId) data-vehicle-id="{{ $vehicleId }}" @endisset>
+@php($prefillUid = $useOld ? null : ($prefillUid ?? null))
+<fieldset class="tag-picker" data-tag-picker @if ($prefillUid) data-prefill="1" @endif data-lookup-url="{{ route('registry.tags.lookup') }}" @isset($vehicleId) data-vehicle-id="{{ $vehicleId }}" @endisset>
     <legend>{{ $legend ?? 'RFID Tag' }}</legend>
 
     <div class="field">
         <label for="{{ $prefix }}_scan">Scan tag</label>
-        <input id="{{ $prefix }}_scan" type="text" autocomplete="off" placeholder="Focus here and tap the tag on the reader" data-tag-scan autofocus value="{{ $useOld ? old('rfid_uid') : '' }}">
+        <input id="{{ $prefix }}_scan" type="text" autocomplete="off" placeholder="Type or paste the tag UID, or use the UHF reader" data-tag-scan autofocus value="{{ $useOld ? old('rfid_uid') : ($prefillUid ?? '') }}">
         <input type="hidden" name="rfid_uid" value="{{ $useOld ? old('rfid_uid') : '' }}" data-tag-uid>
         <div class="tag-picker-uhf">
             <button type="button" class="button button-secondary button-sm" data-uhf-read="{{ route('registry.tags.uhf-reads') }}">Read with UHF reader</button>
-            <span class="field-help">NFC: tap the tag. UHF: press the button, then hold the tag near the UHF reader.</span>
+            <span class="field-help">Press the button, then hold the tag near the UHF reader.</span>
         </div>
         <p class="tag-picker-result" data-tag-result role="status" aria-live="polite">Waiting for a tag…</p>
         @if ($useOld)

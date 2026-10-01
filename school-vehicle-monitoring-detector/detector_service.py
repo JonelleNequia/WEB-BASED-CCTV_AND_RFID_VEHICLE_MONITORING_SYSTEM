@@ -1697,6 +1697,18 @@ def refresh_pending_window_snapshots(frame, state):
                 window["snapshot_frame"] = frame.copy()
 
 
+def rfid_seconds(camera_config, key, default):
+    """
+    Phase 3: an RFID window length from the exported gate settings, or the
+    built-in default for older exports.
+    """
+    try:
+        value = float((camera_config or {}).get(key) or default)
+    except (TypeError, ValueError):
+        return default
+    return max(1.0, min(15.0, value))
+
+
 def start_detection_window(
     role,
     frame,
@@ -1721,6 +1733,7 @@ def start_detection_window(
         direction = {"direction": direction, "reason": "crossed the line" if direction else None}
 
     now_monotonic = time.monotonic()
+    window_seconds = rfid_seconds(camera_config, "rfid_window_seconds", RFID_DETECTION_WINDOW_SECONDS)
     event_key = f"{role}-track-{track_id}-{int(time.time() * 1000)}"
     event_time = datetime.now().astimezone().isoformat()
     display_label = vehicle_labels[class_id]
@@ -1753,7 +1766,10 @@ def start_detection_window(
             "trail_length": int(direction.get("trail_length") or 0),
             "event_time": event_time,
             "started_at": now_monotonic,
-            "deadline_at": now_monotonic + RFID_DETECTION_WINDOW_SECONDS,
+            # Phase 3: Settings > Gates & Readers (tag read after / before the crossing).
+            "window_seconds": window_seconds,
+            "lookback_seconds": rfid_seconds(camera_config, "rfid_lookback_seconds", RFID_LOOKBACK_SECONDS),
+            "deadline_at": now_monotonic + window_seconds,
             "snapshot_frame": frame.copy(),
             "last_snapshot_refresh_at": now_monotonic,
             "analysis_frames": [(frame.copy(), tuple(xyxy))],
@@ -1846,6 +1862,8 @@ def wait_for_rfid_match(role, state, track_id, laravel_client):
             event_time = window["event_time"]
             event_key = window["event_key"]
             deadline_at = window["deadline_at"]
+            window_seconds = window.get("window_seconds", RFID_DETECTION_WINDOW_SECONDS)
+            lookback_seconds = window.get("lookback_seconds", RFID_LOOKBACK_SECONDS)
 
         remaining = deadline_at - time.monotonic()
         if remaining <= 0:
@@ -1858,8 +1876,8 @@ def wait_for_rfid_match(role, state, track_id, laravel_client):
         match = laravel_client.check_rfid_match(
             role,
             event_time,
-            RFID_DETECTION_WINDOW_SECONDS,
-            RFID_LOOKBACK_SECONDS,
+            window_seconds,
+            lookback_seconds,
             event_key,
         )
 
@@ -2148,6 +2166,8 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             "xyxy": tuple(window["xyxy"]),
             "confidence": window["confidence"],
             "direction": window["direction"],
+            "window_seconds": window.get("window_seconds", RFID_DETECTION_WINDOW_SECONDS),
+            "lookback_seconds": window.get("lookback_seconds", RFID_LOOKBACK_SECONDS),
         }
         tracked = ensure_tracked_vehicle_locked(state, track_id, now_monotonic)
 
@@ -2202,8 +2222,8 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
         "confidence": window_payload["confidence"],
         "direction": window_payload["direction"],
         "bbox_xyxy": list(window_payload["xyxy"]),
-        "rfid_window_seconds": RFID_DETECTION_WINDOW_SECONDS,
-        "rfid_lookback_seconds": RFID_LOOKBACK_SECONDS,
+        "rfid_window_seconds": window_payload["window_seconds"],
+        "rfid_lookback_seconds": window_payload["lookback_seconds"],
         "alert_type": "no_pass",
         "analysis_status": "pending",
     }

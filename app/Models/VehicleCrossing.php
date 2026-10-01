@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\StoresLocalTime;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -15,6 +16,9 @@ use Illuminate\Support\Facades\Storage;
  */
 class VehicleCrossing extends Model
 {
+    // Phase 3: same timezone as rfid_scan_logs.scan_time (compared for fusion).
+    use StoresLocalTime;
+
     public const DIRECTION_IN = 'IN';
 
     public const DIRECTION_OUT = 'OUT';
@@ -26,6 +30,7 @@ class VehicleCrossing extends Model
     protected $fillable = [
         'gate',
         'camera_id',
+        'rfid_scan_log_id',
         'direction',
         'direction_reason',
         'crossed_at',
@@ -50,6 +55,14 @@ class VehicleCrossing extends Model
     public function camera(): BelongsTo
     {
         return $this->belongsTo(Camera::class);
+    }
+
+    /**
+     * Phase 3: the registered tag read this crossing gave its direction to.
+     */
+    public function rfidScanLog(): BelongsTo
+    {
+        return $this->belongsTo(RfidScanLog::class);
     }
 
     public function scopeAtGate(Builder $query, string $gate): Builder

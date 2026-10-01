@@ -108,7 +108,9 @@
 </x-table>
 
 {{-- Add Vehicle: 1. scan tag, 2. details, 3. save. --}}
-<x-drawer id="add-vehicle-drawer" title="Add Vehicle" :open="$failedForm === 'add'">
+{{-- Phase 3: "Register this tag" from an unknown-tag read opens this with the UID. --}}
+@php($registerTag = $failedForm === 'add' ? null : (string) request('register_tag', ''))
+<x-drawer id="add-vehicle-drawer" title="Add Vehicle" :open="$failedForm === 'add' || $registerTag !== ''">
     <form method="POST" action="{{ route('vehicle-registry.store') }}" class="stack-form" data-vehicle-form="add">
         @csrf
         <input type="hidden" name="_form" value="add">
@@ -119,7 +121,7 @@
         @enderror
 
         <span class="step-label">1 · Tag</span>
-        @include('registry.partials.tag-picker', ['prefix' => 'add', 'useOld' => $failedForm === 'add', 'legend' => 'RFID Tag'])
+        @include('registry.partials.tag-picker', ['prefix' => 'add', 'useOld' => $failedForm === 'add', 'legend' => 'RFID Tag', 'prefillUid' => $registerTag ?: null])
 
         <span class="step-label">2 · Vehicle details</span>
         @include('registry.partials.vehicle-fields', ['prefix' => 'add', 'useOld' => $failedForm === 'add'])

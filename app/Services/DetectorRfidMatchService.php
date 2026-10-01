@@ -59,6 +59,12 @@ class DetectorRfidMatchService
 
         foreach ($candidates as $scan) {
             if ($this->claim($scan, $eventKey, $eventTime)) {
+                // Phase 3: this detector window's crossing gives the read its
+                // direction (the first window that claimed it).
+                if (filled($eventKey) && blank($scan->detector_event_key) && $scan->scan_location === $cameraRole) {
+                    $scan->forceFill(['detector_event_key' => $eventKey])->saveQuietly();
+                }
+
                 return $scan;
             }
         }

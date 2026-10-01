@@ -2,14 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Models\GuestVehicleObservation;
 use App\Models\RfidScanLog;
 use App\Models\RfidTag;
 use App\Models\User;
 use App\Models\Vehicle;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class RfidSimulationTest extends TestCase
@@ -126,39 +125,28 @@ class RfidSimulationTest extends TestCase
         ]);
     }
 
-    public function test_guest_rfid_scan_copies_latest_camera_frame_for_review(): void
+    public function test_unknown_tag_is_flagged_for_registration_and_never_a_guest_record(): void
     {
-        Storage::fake('public');
+        // Phase 3 (visitor model): an unknown tag no longer creates a guest
+        // observation (one tag used to create a new record on every read).
         $this->seed(DatabaseSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
-        $sourcePath = \App\Support\CameraFiles::framePath('gate-1');
 
-        File::ensureDirectoryExists(dirname($sourcePath));
-        File::put($sourcePath, 'guest-frame');
+        $this->actingAs($user)
+            ->postJson(route('rfid-scans.store'), [
+                'tag_uid' => 'UNKNOWN-GUEST-1001',
+                'scan_location' => 'gate-1',
+                'reader_name' => 'Entrance RFID Reader',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('scan.verification_status', 'unknown_tag');
 
-        try {
-            $this->actingAs($user)
-                ->postJson(route('rfid-scans.store'), [
-                    'tag_uid' => 'UNKNOWN-GUEST-1001',
-                    'scan_location' => 'gate-1',
-                    'reader_name' => 'Entrance RFID Reader',
-                ])
-                ->assertCreated()
-                ->assertJsonPath('scan.verification_status', 'guest');
-
-            $scanLog = RfidScanLog::query()
-                ->with('guestVehicleObservation')
-                ->latest('id')
-                ->firstOrFail();
-            $observation = $scanLog->guestVehicleObservation;
-
-            $this->assertNotNull($observation);
-            $this->assertNotNull($observation->snapshot_path);
-            Storage::disk('public')->assertExists($observation->snapshot_path);
-        } finally {
-            File::delete($sourcePath);
-        }
+        $scanLog = RfidScanLog::query()->latest('id')->firstOrFail();
+        $this->assertNull($scanLog->guest_vehicle_observation_id);
+        $this->assertTrue($scanLog->is_anomaly);
+        $this->assertStringContainsString('Register this tag', (string) $scanLog->anomaly_reason);
+        $this->assertSame(0, GuestVehicleObservation::query()->count());
     }
 
     /**

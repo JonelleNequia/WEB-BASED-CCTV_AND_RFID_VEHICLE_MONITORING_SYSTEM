@@ -153,7 +153,7 @@ class PlugAndDetectDevicesTest extends TestCase
         $this->assertStringEndsWith('/api/v1/integration/rfid-scans', $config['app']['rfid_ingest_url']);
     }
 
-    public function test_one_reader_per_station_and_unassign_returns_to_nfc(): void
+    public function test_one_reader_per_station_and_unassign_keeps_a_uhf_gate(): void
     {
         $registry = app(DeviceRegistryService::class);
         $scan = $this->scan();
@@ -177,7 +177,8 @@ class PlugAndDetectDevicesTest extends TestCase
             ->postJson(route('settings.devices.unassign'), ['station' => 'gate-1', 'role' => 'reader'])->assertOk();
 
         $this->assertSame(0, DeviceAssignment::query()->count());
-        $this->assertSame('nfc', \App\Models\Gate::query()->where('code', 'gate-1')->value('reader_type'));
+        // Phase 3 (visitor model): gates are UHF only; it waits for another reader.
+        $this->assertSame('uhf_ethernet', \App\Models\Gate::query()->where('code', 'gate-1')->value('reader_type'));
         $config = json_decode(File::get(DeviceFiles::runtimeConfigPath()), true);
         $this->assertNull($config['stations']['gate-1']['reader']);
     }

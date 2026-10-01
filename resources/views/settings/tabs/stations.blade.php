@@ -50,11 +50,8 @@
                                                 <x-badge tone="warning" label="Pick a reader in Devices" />
                                             @endif
                                             @break
-                                        @case('simulated')
-                                            <x-badge tone="neutral" label="Test Scan simulation" />
-                                            @break
                                         @default
-                                            <x-badge tone="success" label="NFC at the kiosk" />
+                                            <x-badge tone="neutral" label="Test Scan simulation" />
                                     @endswitch
                                 @endif
                             </div>
@@ -118,11 +115,24 @@
                 <div class="form-grid">
                     <div class="field">
                         <label for="rfid_cooldown_seconds">Same-tag Cooldown (seconds)</label>
-                        <input id="rfid_cooldown_seconds" type="number" name="rfid_cooldown_seconds" value="{{ old('rfid_cooldown_seconds', $settings['rfid_cooldown_seconds'] ?? 60) }}" min="0" max="3600">
-                        <span class="field-help">Repeat reads of the same tag at the same gate are ignored for this long.</span>
+                        <input id="rfid_cooldown_seconds" type="number" name="rfid_cooldown_seconds" value="{{ old('rfid_cooldown_seconds', $settings['rfid_cooldown_seconds'] ?? 60) }}" min="10" max="3600">
+                        <span class="field-help">Repeat reads of the same tag at the same gate are ignored for this long (at least 10 s). An unknown tag is reported once per cooldown.</span>
                         @error('rfid_cooldown_seconds')
                             <span class="field-error">{{ $message }}</span>
                         @enderror
+                    </div>
+                    {{-- Phase 3: RFID + camera fusion window. --}}
+                    <div class="field">
+                        <label for="rfid_lookback_seconds">Tag read before the crossing (seconds)</label>
+                        <input id="rfid_lookback_seconds" type="number" name="rfid_lookback_seconds" value="{{ old('rfid_lookback_seconds', $settings['rfid_lookback_seconds'] ?? 10) }}" min="1" max="15">
+                        <span class="field-help">The UHF reader reads the tag while the vehicle approaches. A read this long before the camera sees the vehicle cross still belongs to it.</span>
+                        @error('rfid_lookback_seconds')<span class="field-error">{{ $message }}</span>@enderror
+                    </div>
+                    <div class="field">
+                        <label for="rfid_lookahead_seconds">Tag read after the crossing (seconds)</label>
+                        <input id="rfid_lookahead_seconds" type="number" name="rfid_lookahead_seconds" value="{{ old('rfid_lookahead_seconds', $settings['rfid_lookahead_seconds'] ?? 4) }}" min="1" max="10">
+                        <span class="field-help">How long the camera waits for a tag read after the crossing before it reports a vehicle with no pass.</span>
+                        @error('rfid_lookahead_seconds')<span class="field-error">{{ $message }}</span>@enderror
                     </div>
                 </div>
             </section>

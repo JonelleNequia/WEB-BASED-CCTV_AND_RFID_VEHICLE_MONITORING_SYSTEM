@@ -20,10 +20,10 @@ class Gate extends Model
     /** Old station value => gate code (data before Phase 1, old clients and links). */
     public const LEGACY_CODES = ['entrance' => 'gate-1', 'exit' => 'gate-2'];
 
+    /** Phase 3 (visitor model): gates use UHF readers only (NFC was dropped). */
     public const READER_TYPES = [
         'uhf_ethernet' => 'UHF (network reader)',
-        'nfc' => 'NFC (desk reader at the kiosk)',
-        'simulated' => 'Simulated',
+        'simulated' => 'Simulated (Test Scan only)',
     ];
 
     protected $fillable = [

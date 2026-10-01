@@ -36,6 +36,10 @@ class SettingsService
             // Phase 3: RFID cooldown (guest pass rules removed in Phase 0).
             // Phase 1 (gates): names and readers are per gate in the gates table.
             'rfid_cooldown_seconds' => '60',
+            // Phase 3 (visitor model): a tag read belongs to a camera crossing
+            // from this long before it to this long after it.
+            'rfid_lookback_seconds' => '10',
+            'rfid_lookahead_seconds' => '4',
             // Live-latency work: live view and detection tuning (Settings › Cameras).
             'perf_stream_fps' => '15',
             'perf_stream_width' => '960',
@@ -161,7 +165,7 @@ class SettingsService
                 : $gate->name.' '.match ($type) {
                     'uhf_ethernet' => 'UHF Reader',
                     'simulated' => 'Reader (Simulated)',
-                    default => 'NFC Reader',
+                    default => 'Reader',
                 };
             $gate->save();
         }
@@ -391,6 +395,10 @@ class SettingsService
             'browser_label' => $cameraConfiguration['browser_label'],
             'calibration_mask' => $cameraConfiguration['calibration_mask'],
             'calibration_line' => $cameraConfiguration['calibration_line'],
+            // Phase 3: how long the detector waits for a tag read after a
+            // crossing, and how far back a read still counts.
+            'rfid_window_seconds' => max(1, min(10, $this->getInt('rfid_lookahead_seconds', 4))),
+            'rfid_lookback_seconds' => max(1, min(15, $this->getInt('rfid_lookback_seconds', 10))),
         ];
     }
 }

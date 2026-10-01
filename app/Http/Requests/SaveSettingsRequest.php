@@ -46,6 +46,8 @@ class SaveSettingsRequest extends FormRequest
         'stations' => [
             'gates',
             'rfid_cooldown_seconds',
+            'rfid_lookback_seconds',
+            'rfid_lookahead_seconds',
         ],
         'cameras' => [
             'camera_configs', 'camera_source_placeholder', 'camera_streams',
@@ -79,7 +81,10 @@ class SaveSettingsRequest extends FormRequest
             'gates.*.reader_ip' => ['nullable', 'required_if:gates.*.reader_manual,1', 'ipv4', $this->localAddressRule()],
             'gates.*.reader_port' => ['nullable', 'required_if:gates.*.reader_manual,1', 'integer', 'between:1,65535'],
             'gates.*.is_active' => ['sometimes', 'in:0,1'],
-            'rfid_cooldown_seconds' => ['sometimes', 'integer', 'min:0', 'max:3600'],
+            // Phase 3: at least 10 s (0 recorded every read of a tag again).
+            'rfid_cooldown_seconds' => ['sometimes', 'integer', 'min:10', 'max:3600'],
+            'rfid_lookback_seconds' => ['sometimes', 'integer', 'min:1', 'max:15'],
+            'rfid_lookahead_seconds' => ['sometimes', 'integer', 'min:1', 'max:10'],
             // Cameras tab: one camera per gate (keys = gate codes).
             'camera_configs' => ['required', 'array'],
             'camera_configs.*.camera_name' => ['required', 'string', 'max:100'],
@@ -146,6 +151,10 @@ class SaveSettingsRequest extends FormRequest
             foreach ($gates as $code => $values) {
                 if (! array_key_exists('name', (array) $values)) {
                     $gates[$code]['name'] = Gate::query()->where('code', $code)->value('name') ?? '';
+                }
+                // Phase 3: NFC was dropped; a gate is a UHF gate.
+                if (($values['reader_type'] ?? null) === 'nfc') {
+                    $gates[$code]['reader_type'] = 'uhf_ethernet';
                 }
             }
             $this->merge(['gates' => $gates]);

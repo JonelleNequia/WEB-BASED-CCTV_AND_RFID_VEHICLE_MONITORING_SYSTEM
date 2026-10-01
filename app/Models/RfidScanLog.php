@@ -40,7 +40,24 @@ class RfidScanLog extends Model
         'anomaly_reason',
         'outcome',
         'guest_visit_id',
+        // Phase 3 (visitor model): RFID + camera fusion.
+        'vehicle_crossing_id',
+        'fusion_status',
+        'fusion_note',
+        'detector_event_key',
     ];
+
+    /** Phase 3: waiting for the camera's crossing (no movement recorded yet). */
+    public const FUSION_PENDING = 'pending';
+
+    /** Direction from the camera's crossing. */
+    public const FUSION_CAMERA = 'camera';
+
+    /** Direction from the vehicle's state (no camera, camera offline, direction unknown). */
+    public const FUSION_TOGGLE = 'toggle';
+
+    /** The camera was watching but saw no crossing: no movement recorded. */
+    public const FUSION_SCAN_ONLY = 'scan_only';
 
     /**
      * Attribute casting.
@@ -81,6 +98,38 @@ class RfidScanLog extends Model
     }
 
     /**
+     * Phase 3: the camera crossing that gave this scan its direction.
+     */
+    public function vehicleCrossing(): BelongsTo
+    {
+        return $this->belongsTo(VehicleCrossing::class);
+    }
+
+    /**
+     * Phase 3: where the direction of this scan came from.
+     */
+    public function getFusionLabelAttribute(): ?string
+    {
+        return match ($this->fusion_status) {
+            self::FUSION_PENDING => 'Waiting for the camera',
+            self::FUSION_CAMERA => 'Direction from camera',
+            self::FUSION_TOGGLE => 'Direction from vehicle state',
+            self::FUSION_SCAN_ONLY => 'Scan only (no crossing seen)',
+            default => null,
+        };
+    }
+
+    /**
+     * Phase 3: an unknown tag (not in the registry): one event per cooldown,
+     * with "Register this tag". Older scans stored it as "guest" with no tag.
+     */
+    public function isUnknownTag(): bool
+    {
+        return $this->verification_status === 'unknown_tag'
+            || ($this->verification_status === 'guest' && $this->vehicle_rfid_tag_id === null && $this->vehicle_id === null);
+    }
+
+    /**
      * Guest observation created when a guest tag needs CCTV review.
      */
     public function guestVehicleObservation(): BelongsTo
@@ -103,6 +152,10 @@ class RfidScanLog extends Model
     {
         if ($this->verification_status === 'verified') {
             return 'Registered';
+        }
+
+        if ($this->isUnknownTag()) {
+            return 'Unknown tag';
         }
 
         if ($this->verification_status === 'guest') {
@@ -135,7 +188,7 @@ class RfidScanLog extends Model
     {
         return match ($this->verification_status) {
             'verified', 'guest_pass_entry', 'guest_pass_exit' => 'matched',
-            'guest', 'inactive_tag', 'inactive_vehicle', 'non_recurring_category', 'unassigned_tag',
+            'guest', 'unknown_tag', 'inactive_tag', 'inactive_vehicle', 'non_recurring_category', 'unassigned_tag',
             'guest_pass_available', 'guest_pass_duplicate' => 'manual-review',
             default => 'unmatched',
         };
@@ -173,7 +226,16 @@ class RfidScanLog extends Model
      */
     public function getResolvedEventTypeLabelAttribute(): string
     {
-        return $this->resolved_event_type ?: strtoupper($this->scan_direction ?: 'N/A');
+        if ($this->resolved_event_type) {
+            return $this->resolved_event_type;
+        }
+
+        // Phase 3: no movement (waiting, scan only, unknown tag): scan_direction is only a placeholder.
+        if ($this->fusion_status !== null || $this->verification_status === 'unknown_tag') {
+            return 'No IN/OUT';
+        }
+
+        return strtoupper($this->scan_direction ?: 'N/A');
     }
 
     /**

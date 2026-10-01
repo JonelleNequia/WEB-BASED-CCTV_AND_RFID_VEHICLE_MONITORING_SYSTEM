@@ -131,7 +131,13 @@ class RfidService
                     return;
                 }
 
-                $query->where('verification_status', $filters['verification_status']);
+                // Phase 3: fusion results, and unknown tags (stored as "guest" before).
+                match ($filters['verification_status']) {
+                    'pending', 'scan_only' => $query->where('fusion_status', $filters['verification_status']),
+                    'unknown_tag' => $query->where(fn ($inner) => $inner->where('verification_status', 'unknown_tag')
+                        ->orWhere(fn ($legacy) => $legacy->where('verification_status', 'guest')->whereNull('vehicle_id')->whereNull('vehicle_rfid_tag_id'))),
+                    default => $query->where('verification_status', $filters['verification_status']),
+                };
             })
             ->orderByDesc('scan_time')
             ->paginate($perPage)

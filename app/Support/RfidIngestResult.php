@@ -23,8 +23,14 @@ final class RfidIngestResult
     /** Lost or disabled tag: shown as an alert on the dashboard. */
     public const ALERT = 'alert';
 
-    /** Unknown tag or non-recurring vehicle: handled as a guest observation. */
+    /** Guest-category vehicle: handled as a guest observation. */
     public const GUEST = 'guest';
+
+    /** Phase 3: registered tag read, waiting for the camera's crossing. */
+    public const PENDING = 'pending';
+
+    /** Phase 3: a tag that is not in the registry (never a visitor record). */
+    public const UNKNOWN_TAG = 'unknown_tag';
 
     public function __construct(
         public readonly RfidScanLog $scanLog,

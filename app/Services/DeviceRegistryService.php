@@ -458,7 +458,8 @@ class DeviceRegistryService
 
         $gate = Gate::query()->where('code', $station)->first();
         if ($role === DeviceAssignment::ROLE_READER && $gate && ! $gate->reader_manual) {
-            $gate->forceFill(['reader_type' => 'nfc', 'reader_name' => $gate->name.' NFC Reader'])->save();
+            // Phase 3: still a UHF gate, waiting for another reader.
+            $gate->forceFill(['reader_type' => 'uhf_ethernet', 'reader_name' => $gate->name.' UHF Reader'])->save();
         }
 
         // An unassigned camera keeps its last address as a manual source

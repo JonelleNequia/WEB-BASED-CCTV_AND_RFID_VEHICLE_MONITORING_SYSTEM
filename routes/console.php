@@ -21,6 +21,12 @@ Artisan::command('detector:start', function (DetectorRuntimeService $detectorRun
     $this->line('Service running: '.(($status['service_running'] ?? false) ? 'yes' : 'no'));
 })->purpose('Start the Python vehicle detector in the background');
 
+// Phase 3 (visitor model): close tag reads whose camera crossing never came
+// (also done on every web request; this is for a scheduler or a manual run).
+Artisan::command('rfid:finalize-pending', function (\App\Services\RfidCameraFusionService $fusionService) {
+    $this->info($fusionService->finalizeExpired().' waiting tag read(s) closed.');
+})->purpose('Close RFID reads that waited too long for the camera crossing');
+
 /*
  * Plug-and-detect diagnostics. Both run the Python device service code
  * directly, so they work even when the background service is stopped.

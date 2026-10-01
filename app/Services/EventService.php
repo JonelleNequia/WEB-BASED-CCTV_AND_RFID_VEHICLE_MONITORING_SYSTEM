@@ -191,7 +191,8 @@ class EventService
                 'vehicle_category' => $vehicle->category,
                 'camera_id' => $cameraId,
                 'roi_name' => Gate::labelFor($scanLog->scan_location).' Reader',
-                'event_time' => $scanLog->scan_time,
+                // Phase 3: the moment the camera saw the crossing, when it did.
+                'event_time' => $transition['event_time'] ?? $scanLog->scan_time,
                 'vehicle_image_path' => null,
                 'plate_image_path' => null,
                 'match_status' => $eventType === 'ENTRY' ? 'open' : 'closed',

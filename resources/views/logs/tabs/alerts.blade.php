@@ -28,7 +28,12 @@
                     </td>
                     <td>{{ \App\Models\Gate::labelFor($scan->scan_location) }}</td>
                     <td><x-badge status="anomaly" :label="$scan->verificationLabel" /></td>
-                    <td>{{ $scan->anomaly_reason ?: '—' }}</td>
+                    <td>
+                        {{ $scan->anomaly_reason ?: '—' }}
+                        @if ($scan->isUnknownTag() && auth()->user()?->isAdmin())
+                            <div class="table-subtext"><a href="{{ route('registry.index', ['tab' => 'vehicles', 'register_tag' => $scan->tag_uid]) }}">Register this tag</a></div>
+                        @endif
+                    </td>
                 </tr>
             @endforeach
         </tbody>

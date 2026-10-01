@@ -21,6 +21,10 @@ return Application::configure(basePath: dirname(__DIR__))
             // Phase 1: added
             'detector' => \App\Http\Middleware\EnsureDetectorRunning::class,
         ]);
+
+        // Phase 3 (visitor model): close tag reads whose camera crossing never came.
+        $middleware->appendToGroup('web', \App\Http\Middleware\FinalizePendingScans::class);
+        $middleware->appendToGroup('api', \App\Http\Middleware\FinalizePendingScans::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

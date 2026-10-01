@@ -98,14 +98,17 @@ class Phase3RfidLogicTest extends TestCase
         $this->assertFalse($this->scan('CDN-TAG-4', 'gate-1')->isDuplicate());
     }
 
-    public function test_cooldown_is_configurable(): void
+    public function test_cooldown_is_configurable_with_a_10_second_minimum(): void
     {
+        // Phase 3 (visitor model): below 10 s counts as 10 s.
         SystemSetting::query()->updateOrCreate(['setting_key' => 'rfid_cooldown_seconds'], ['setting_value' => '5']);
         $this->registeredVehicle('CFG 5005', 'CFG-TAG-5');
 
         $this->scan('CFG-TAG-5', 'gate-1');
         $this->travel(6)->seconds();
+        $this->assertTrue($this->scan('CFG-TAG-5', 'gate-1')->isDuplicate());
 
+        $this->travel(5)->seconds();
         $this->assertFalse($this->scan('CFG-TAG-5', 'gate-1')->isDuplicate());
     }
 

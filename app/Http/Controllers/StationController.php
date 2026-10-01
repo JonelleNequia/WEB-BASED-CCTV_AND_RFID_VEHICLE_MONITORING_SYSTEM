@@ -206,8 +206,44 @@ class StationController extends Controller
                 ];
             });
 
+        // Phase 3: tag reads with no IN/OUT (yet): waiting for the camera,
+        // scan only, and unknown tags.
+        $scanLogs = RfidScanLog::query()
+            ->with('vehicle')
+            ->where(function ($query): void {
+                $query->whereIn('fusion_status', [RfidScanLog::FUSION_PENDING, RfidScanLog::FUSION_SCAN_ONLY])
+                    ->orWhere('verification_status', 'unknown_tag');
+            })
+            ->latest('created_at')
+            ->limit($limit)
+            ->get()
+            ->map(function (RfidScanLog $scan): array {
+                $unknown = $scan->verification_status === 'unknown_tag';
+
+                return [
+                    'id' => 'scan-'.$scan->id,
+                    'record_type' => 'rfid_scan',
+                    'event_type' => $unknown ? 'UNKNOWN TAG' : ($scan->fusion_status === RfidScanLog::FUSION_PENDING ? 'WAITING' : 'SCAN ONLY'),
+                    'plate_number' => $scan->vehicle?->plate_number ?: $scan->tag_uid,
+                    'owner_name' => $scan->vehicle?->owner_name ?: 'N/A',
+                    'vehicle_type' => $scan->vehicle?->vehicle_type ?: 'Vehicle',
+                    'camera_role' => null,
+                    'scan_location' => $scan->scan_location,
+                    'verification_label' => $unknown ? 'Unknown tag' : $scan->fusionLabel,
+                    'resulting_state' => $scan->resulting_state ?: 'N/A',
+                    'entries_today_count' => (int) ($scan->vehicle?->entries_today_count ?? 0),
+                    'exits_today_count' => (int) ($scan->vehicle?->exits_today_count ?? 0),
+                    'event_time' => $scan->scan_time?->toIso8601String(),
+                    'display_time' => DisplayTime::datetimeSeconds($scan->scan_time),
+                    'status' => $unknown ? 'Unknown tag' : $scan->fusionLabel,
+                    'unknown_tag' => $unknown,
+                    'sort_time' => $this->sortTimestamp($scan->created_at, $scan->scan_time),
+                ];
+            });
+
         return $eventLogs
             ->concat($guestLogs)
+            ->concat($scanLogs)
             ->sortByDesc('sort_time')
             ->take($limit)
             ->map(function (array $log): array {

@@ -111,6 +111,13 @@
         if (body.outcome === 'recorded') {
             return ['verified', plate, [body.action_taken, body.vehicle?.owner_name].filter(Boolean).join(' · ')];
         }
+        // Phase 3: registered, but the camera gives IN or OUT.
+        if (body.outcome === 'pending') {
+            return ['verified', plate, ['Waiting for the camera', body.vehicle?.owner_name].filter(Boolean).join(' · ')];
+        }
+        if (body.outcome === 'unknown_tag') {
+            return ['denied', `Unknown tag ${tag || ''}`.trim(), 'Not in the registry. Ask the admin to register this tag.'];
+        }
         if (['guest', 'inactive_vehicle', 'unassigned_tag', 'non_recurring_category'].includes(status)) {
             return ['denied', plate || `Tag ${tag}`, body.anomaly_reason || body.message];
         }

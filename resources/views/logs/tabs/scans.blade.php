@@ -27,7 +27,7 @@
                 <label for="verification_status">Result</label>
                 <select id="verification_status" name="verification_status">
                     <option value="">All</option>
-                    @foreach (['anomaly' => 'Needs attention (flagged)', 'verified' => 'Registered', 'guest' => 'Unknown tag', 'inactive_tag' => 'Inactive Tag', 'unassigned_tag' => 'Unassigned Tag', 'inactive_vehicle' => 'Inactive Vehicle', 'non_recurring_category' => 'Manual Review'] as $value => $label)
+                    @foreach (['anomaly' => 'Needs attention (flagged)', 'verified' => 'Registered', 'pending' => 'Waiting for the camera', 'scan_only' => 'Scan only (no crossing)', 'unknown_tag' => 'Unknown tag', 'inactive_tag' => 'Inactive Tag', 'unassigned_tag' => 'Unassigned Tag', 'inactive_vehicle' => 'Inactive Vehicle', 'non_recurring_category' => 'Manual Review'] as $value => $label)
                         <option value="{{ $value }}" @selected(($filters['verification_status'] ?? '') === $value)>{{ $label }}</option>
                     @endforeach
                 </select>
@@ -59,8 +59,16 @@
                             <td><x-datetime :value="$scan->scan_time" /></td>
                             <td><strong>{{ $scan->tag_uid }}</strong></td>
                             <td>
-                                <strong>{{ $scan->vehicle?->plate_number ?? 'GUEST' }}</strong>
-                                <div class="table-subtext">{{ $scan->vehicle ? $scan->vehicle->vehicle_type.' · '.ucfirst(str_replace('_', ' ', (string) $scan->vehicle->category)) : 'Guest record' }}</div>
+                                @if ($scan->isUnknownTag())
+                                    {{-- Phase 3: unknown tags are never visitor records. --}}
+                                    <strong>Unknown tag</strong>
+                                    @if (auth()->user()?->isAdmin())
+                                        <div class="table-subtext"><a href="{{ route('registry.index', ['tab' => 'vehicles', 'register_tag' => $scan->tag_uid]) }}">Register this tag</a></div>
+                                    @endif
+                                @else
+                                    <strong>{{ $scan->vehicle?->plate_number ?? 'GUEST' }}</strong>
+                                    <div class="table-subtext">{{ $scan->vehicle ? $scan->vehicle->vehicle_type.' · '.ucfirst(str_replace('_', ' ', (string) $scan->vehicle->category)) : 'Guest record' }}</div>
+                                @endif
                                 @if ($scan->guestVehicleObservation)
                                     <div class="table-subtext">Guest observation #{{ $scan->guestVehicleObservation->id }}</div>
                                 @endif
@@ -72,6 +80,9 @@
                             <td>
                                 {{ $scan->resolvedEventTypeLabel }}
                                 <div class="table-subtext">{{ $scan->resultingStateLabel }}</div>
+                                @if ($scan->fusionLabel)
+                                    <div class="table-subtext" title="{{ $scan->fusion_note }}">{{ $scan->fusionLabel }}</div>
+                                @endif
                             </td>
                             <td>
                                 <span class="badge badge-{{ $scan->verificationBadgeClass }}">{{ $scan->verificationLabel }}</span>

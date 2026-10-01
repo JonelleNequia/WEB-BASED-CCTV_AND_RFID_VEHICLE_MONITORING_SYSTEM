@@ -1,6 +1,6 @@
 /*
- * UHF tags in the Registry: the network UHF reader is not a keyboard like the
- * NFC reader, so "Read with UHF reader" asks the server for the tags the
+ * UHF tags in the Registry: the network UHF reader does not type into the
+ * page like a keyboard, so "Read with UHF reader" asks the server for the tags the
  * reader read after the button was pressed (EPC, uppercase hex).
  *
  * window.uhfTagReader.listen(url, { seconds, onRead(read), onStatus(text, state), onEnd() }) -> stop()

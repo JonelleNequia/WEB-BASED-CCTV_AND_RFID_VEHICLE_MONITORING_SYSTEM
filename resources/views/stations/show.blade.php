@@ -58,7 +58,7 @@
                 <span class="scan-result-icon" data-scan-icon aria-hidden="true">•</span>
                 <div class="scan-result-body">
                     <strong class="scan-result-word" data-scan-word>READY</strong>
-                    <span class="scan-result-title" data-scan-title>Tap a tag on the reader</span>
+                    <span class="scan-result-title" data-scan-title>Waiting for a tag at the UHF reader</span>
                     <span class="scan-result-detail" data-scan-detail></span>
                 </div>
                 <time class="scan-result-time" data-scan-time></time>

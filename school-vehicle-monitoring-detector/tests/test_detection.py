@@ -222,5 +222,25 @@ class DirectionTests(unittest.TestCase):
         self.assertNotIn(7, self.state["open_crossings"])
 
 
+class FusionWindowTests(unittest.TestCase):
+    """Phase 3: the RFID window follows Settings > Gates & Readers."""
+
+    def test_window_lengths_come_from_the_exported_gate_settings(self):
+        state = detector.initial_camera_state()
+        frame = np.zeros((416, 736, 3), dtype=np.uint8)
+        camera = {**CAMERA, "rfid_window_seconds": 6, "rfid_lookback_seconds": 12}
+        line_y = 0.6 * 416
+        for top in (line_y - 90, line_y + 30):
+            detector.handle_detection("gate-1", frame, tracked_results([[300, top, 380, top + 60, 7, 0.9, 2]]), None, camera,
+                                      {"yolo_imgsz": 480}, state, FakeClient(), {2: "Car"}, "cpu")
+        window = state["pending_windows"][7]
+        self.assertEqual((window["window_seconds"], window["lookback_seconds"]), (6.0, 12.0))
+        self.assertAlmostEqual(window["deadline_at"] - window["started_at"], 6.0, places=3)
+        state["pending_windows"].clear()
+
+        self.assertEqual(detector.rfid_seconds({}, "rfid_window_seconds", 4.0), 4.0)  # older export
+        self.assertEqual(detector.rfid_seconds({"rfid_window_seconds": 99}, "rfid_window_seconds", 4.0), 15.0)
+
+
 if __name__ == "__main__":
     unittest.main()

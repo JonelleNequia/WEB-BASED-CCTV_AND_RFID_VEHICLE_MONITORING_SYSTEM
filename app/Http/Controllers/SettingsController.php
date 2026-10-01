@@ -111,8 +111,8 @@ class SettingsController extends Controller
             'name' => $name,
             'sort_order' => ((int) Gate::query()->max('sort_order')) + 1,
             'is_active' => true,
-            'reader_type' => 'nfc',
-            'reader_name' => $name.' NFC Reader',
+            'reader_type' => 'uhf_ethernet',
+            'reader_name' => $name.' UHF Reader',
         ]);
 
         $settingsService->ensureCameraRuntimeConfigExists();

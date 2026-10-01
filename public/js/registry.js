@@ -1,6 +1,6 @@
 /*
  * UI Phase 3: Registry › Vehicles.
- * - Tag picker: scan (USB/NFC reader types + Enter) or choose an available tag.
+ * - Tag picker: UHF read, type/paste a UID (+ Enter), or choose an available tag.
  * - Row click: side panel with details and the last 10 movements.
  * - Edit / Replace Tag drawers filled from the same JSON.
  */
@@ -126,6 +126,11 @@
         });
 
         picker.closest('.drawer')?.addEventListener('drawer:close', () => stopUhf?.());
+
+        // Phase 3: "Register this tag" filled the UID in; check it right away.
+        if (picker.dataset.prefill && scan?.value) {
+            lookup(picker, scan.value);
+        }
 
         select?.addEventListener('change', function () {
             if (select.value) {

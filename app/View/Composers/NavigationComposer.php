@@ -82,7 +82,7 @@ class NavigationComposer
             };
         }
 
-        // NFC readers type into the Station page and the RFID Desk simulates.
+        // Simulated gates use the Test Scan.
         // Plug-and-detect: a UHF reader is ready when the device service is
         // connected to it.
         try {

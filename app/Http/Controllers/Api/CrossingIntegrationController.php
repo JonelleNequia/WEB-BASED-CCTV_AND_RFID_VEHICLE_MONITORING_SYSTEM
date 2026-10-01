@@ -8,6 +8,7 @@ use App\Models\Camera;
 use App\Models\Gate;
 use App\Models\VehicleCrossing;
 use App\Rules\ValidGate;
+use App\Services\RfidCameraFusionService;
 use App\Services\SettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,7 +23,7 @@ class CrossingIntegrationController extends Controller
 {
     use AuthorizesIntegration;
 
-    public function store(Request $request, SettingsService $settingsService): JsonResponse
+    public function store(Request $request, SettingsService $settingsService, RfidCameraFusionService $fusionService): JsonResponse
     {
         if ($denied = $this->authorizeIntegrationRequest($request, $settingsService)) {
             return $denied;
@@ -77,10 +78,20 @@ class CrossingIntegrationController extends Controller
             'detection_metadata_json' => $validated['detection_metadata'] ?? null,
         ]);
 
+        // Phase 3: the registered tag read of this vehicle takes this direction.
+        $scan = $fusionService->attachCrossing($crossing);
+
         return response()->json([
             'message' => 'Crossing stored.',
             'duplicate' => false,
-            'crossing' => $this->payload($crossing),
+            'crossing' => $this->payload($crossing->fresh()),
+            'rfid_scan' => $scan ? [
+                'id' => $scan->id,
+                'plate_number' => $scan->vehicle?->plate_number,
+                'event_type' => $scan->resolved_event_type,
+                'resulting_state' => $scan->resulting_state,
+                'anomaly_reason' => $scan->anomaly_reason,
+            ] : null,
         ], 201);
     }
 
@@ -95,6 +106,7 @@ class CrossingIntegrationController extends Controller
             'direction' => $crossing->direction,
             'crossed_at' => $crossing->crossed_at?->toIso8601String(),
             'snapshot_path' => $crossing->snapshot_path,
+            'rfid_scan_log_id' => $crossing->rfid_scan_log_id,
         ];
     }
 }
