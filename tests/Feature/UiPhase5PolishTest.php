@@ -52,8 +52,8 @@ class UiPhase5PolishTest extends TestCase
     public function test_previously_unlabeled_inputs_have_labels(): void
     {
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'cameras']))
-            ->assertSee('for="entrance_browser_device"', false)
-            ->assertSee('id="entrance_browser_device"', false);
+            ->assertSee('for="gate-1_browser_device"', false)
+            ->assertSee('id="gate-1_browser_device"', false);
 
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'test-scan']))
             ->assertSee('<label for="registered_tag_search">', false);

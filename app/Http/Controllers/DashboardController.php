@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\GuestVehicleObservation;
+use App\Models\Gate;
 use App\Models\RfidScanLog;
 use App\Models\Vehicle;
 use App\Models\VehicleEvent;
@@ -189,8 +190,11 @@ class DashboardController extends Controller
 
         $this->unmirroredGuestObservationsQuery()
             ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['observed_at']))
-            ->get(['location', 'observed_at'])
-            ->each(fn (GuestVehicleObservation $observation) => $bump($observation->observed_at, $observation->location === 'exit' ? 'exits' : 'entries'));
+            ->get(['location', 'observed_at', 'detection_metadata_json'])
+            ->each(fn (GuestVehicleObservation $observation) => $bump(
+                $observation->observed_at,
+                VehicleEvent::eventTypeForDirection(data_get($observation->detection_metadata_json, 'direction')) === 'EXIT' ? 'exits' : 'entries'
+            ));
 
         return collect($hours)
             ->map(fn (array $counts, int $hour) => [
@@ -263,32 +267,32 @@ class DashboardController extends Controller
             ->where(fn ($query) => PhilippineTime::constrainPeriodAny($query, ['event_time', 'created_at'], $period))
             ->count();
 
+        // Phase 1 (gates): camera captures count by the crossing direction,
+        // not by the gate (every gate records IN and OUT). A read of an
+        // unknown tag is not a movement and is no longer counted.
+        $guests = $this->guestTrafficByDirection($period);
+
         return [
-            'entries' => (int) $registeredEntries
-                + $this->guestTrafficCount('entrance', $period)
-                + $this->unlinkedGuestRfidTrafficCount('entrance', $period),
-            'exits' => (int) $registeredExits
-                + $this->guestTrafficCount('exit', $period)
-                + $this->unlinkedGuestRfidTrafficCount('exit', $period),
+            'entries' => (int) $registeredEntries + $guests['ENTRY'],
+            'exits' => (int) $registeredExits + $guests['EXIT'],
         ];
     }
 
-    protected function guestTrafficCount(string $location, string $period = 'today'): int
+    /**
+     * @return array{ENTRY: int, EXIT: int}
+     */
+    protected function guestTrafficByDirection(string $period = 'today'): array
     {
-        return GuestVehicleObservation::query()
-            ->where('location', $location)
-            ->where(fn ($query) => PhilippineTime::constrainPeriodAny($query, ['observed_at', 'created_at'], $period))
-            ->count();
-    }
+        $counts = ['ENTRY' => 0, 'EXIT' => 0];
 
-    protected function unlinkedGuestRfidTrafficCount(string $location, string $period = 'today'): int
-    {
-        return RfidScanLog::query()
-            ->where('verification_status', 'guest')
-            ->where('scan_location', $location)
-            ->whereNull('guest_vehicle_observation_id')
-            ->where(fn ($query) => PhilippineTime::constrainPeriodAny($query, ['scan_time', 'created_at'], $period))
-            ->count();
+        GuestVehicleObservation::query()
+            ->where(fn ($query) => PhilippineTime::constrainPeriodAny($query, ['observed_at', 'created_at'], $period))
+            ->get(['detection_metadata_json'])
+            ->each(function (GuestVehicleObservation $observation) use (&$counts): void {
+                $counts[VehicleEvent::eventTypeForDirection(data_get($observation->detection_metadata_json, 'direction'))]++;
+            });
+
+        return $counts;
     }
 
     protected function registeredScanCount(string $period): int
@@ -396,11 +400,11 @@ class DashboardController extends Controller
             ->get()
             ->map(function (GuestVehicleObservation $observation): array {
                 $time = $observation->observed_at;
-                $eventType = $observation->location === 'exit' ? 'EXIT' : 'ENTRY';
+                $eventType = VehicleEvent::eventTypeForDirection(data_get($observation->detection_metadata_json, 'direction'));
 
                 return [
                     'title' => $eventType.' • '.$this->guestDisplayPlate($observation),
-                    'summary' => 'Guest Observation #'.$observation->id.' • '.ucfirst((string) $observation->location).' Station',
+                    'summary' => 'Guest Observation #'.$observation->id.' • '.Gate::labelFor($observation->location),
                     'display_time' => DisplayTime::datetime($time, 'No time'),
                     'badge_label' => $eventType === 'EXIT' ? 'Exit' : 'Entry',
                     'badge_class' => 'secondary',

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Camera;
 use App\Models\DeviceAssignment;
+use App\Models\Gate;
 use App\Support\CameraFiles;
 use App\Models\SystemSetting;
 use Illuminate\Support\Facades\File;
@@ -32,25 +33,9 @@ class SettingsService
             'rfid_simulation_mode' => 'enabled',
             'camera_source_placeholder' => 'rtsp://future-camera-source',
             'retention_days' => '30',
-            'entrance_portal_label' => 'PHILCST Entrance Portal',
-            'exit_portal_label' => 'PHILCST Exit Portal',
-            'entrance_rfid_reader_name' => 'Entrance RFID Reader (Simulated)',
-            'exit_rfid_reader_name' => 'Exit RFID Reader (Simulated)',
             // Phase 3: RFID cooldown (guest pass rules removed in Phase 0).
+            // Phase 1 (gates): names and readers are per gate in the gates table.
             'rfid_cooldown_seconds' => '60',
-            // Phase 4: reader configuration per station (UHF is config only for now).
-            'entrance_reader_type' => 'nfc',
-            'entrance_reader_ip' => '',
-            'entrance_reader_port' => '',
-            'exit_reader_type' => 'nfc',
-            'exit_reader_ip' => '',
-            'exit_reader_port' => '',
-            // Plug-and-detect: the manual address is used only when this is '1'
-            // (otherwise the reader assigned in Settings › Devices is used).
-            'entrance_reader_manual' => '0',
-            'exit_reader_manual' => '0',
-            'entrance_reader_transport' => 'tcp',
-            'exit_reader_transport' => 'tcp',
             // Live-latency work: live view and detection tuning (Settings › Cameras).
             'perf_stream_fps' => '15',
             'perf_stream_width' => '960',
@@ -134,8 +119,57 @@ class SettingsService
             );
         }
 
+        $this->saveGates($values['gates'] ?? []);
         $this->saveCameraConfigurations($values['camera_configs'] ?? []);
         $this->exportCameraRuntimeConfig($this->all());
+    }
+
+    /**
+     * Phase 1: gate names, reader type and manual reader address
+     * (Settings › Gates & Readers), keyed by gate code.
+     *
+     * @param  array<string, array<string, mixed>>  $gates
+     */
+    protected function saveGates(array $gates): void
+    {
+        foreach ($gates as $code => $values) {
+            $gate = Gate::query()->where('code', $code)->first();
+
+            if (! $gate || ! is_array($values)) {
+                continue;
+            }
+
+            $type = (string) ($values['reader_type'] ?? $gate->reader_type);
+            $gate->fill(array_filter([
+                'name' => isset($values['name']) ? trim((string) $values['name']) : null,
+                'reader_type' => $type,
+                'reader_manual' => array_key_exists('reader_manual', $values) ? (string) $values['reader_manual'] === '1' : null,
+                'reader_transport' => $values['reader_transport'] ?? null,
+                'is_active' => array_key_exists('is_active', $values) ? (string) $values['is_active'] === '1' : null,
+            ], fn ($value): bool => $value !== null && $value !== ''));
+
+            if (array_key_exists('reader_ip', $values)) {
+                $gate->reader_ip = filled($values['reader_ip']) ? (string) $values['reader_ip'] : null;
+            }
+            if (array_key_exists('reader_port', $values)) {
+                $gate->reader_port = filled($values['reader_port']) ? (int) $values['reader_port'] : null;
+            }
+
+            // The name shown in logs follows the gate name and reader type.
+            $gate->reader_name = filled($values['reader_name'] ?? null)
+                ? (string) $values['reader_name']
+                : $gate->name.' '.match ($type) {
+                    'uhf_ethernet' => 'UHF Reader',
+                    'simulated' => 'Reader (Simulated)',
+                    default => 'NFC Reader',
+                };
+            $gate->save();
+        }
+
+        if ($gates !== []) {
+            // A renamed or (de)activated gate: camera rows follow.
+            $this->calibrationService->ensureRequiredCameras();
+        }
     }
 
     /**
@@ -149,18 +183,13 @@ class SettingsService
     }
 
     /**
-     * Get the current entrance and exit camera configuration for the settings page.
+     * Phase 1: camera configuration of every active gate, keyed by gate code.
      *
      * @return array<string, array<string, mixed>>
      */
     public function cameraConfigurations(): array
     {
-        $cameras = $this->calibrationService->cameraPayload(withSecrets: true);
-
-        return [
-            'entrance' => $cameras['entrance'],
-            'exit' => $cameras['exit'],
-        ];
+        return $this->calibrationService->cameraPayload(withSecrets: true);
     }
 
     /**
@@ -191,16 +220,17 @@ class SettingsService
                 'rfid_match_url' => $integrationBaseUrl.'/api/latest-scan',
                 'status_url' => $integrationBaseUrl.'/api/v1/integration/status',
                 'rfid_ingest_url' => $integrationBaseUrl.'/api/v1/integration/rfid-scans',
-                'entrance_portal_label' => $settings['entrance_portal_label'] ?? 'PHILCST Entrance Portal',
-                'exit_portal_label' => $settings['exit_portal_label'] ?? 'PHILCST Exit Portal',
-                'entrance_rfid_reader_name' => $settings['entrance_rfid_reader_name'] ?? 'Entrance RFID Reader (Simulated)',
-                'exit_rfid_reader_name' => $settings['exit_rfid_reader_name'] ?? 'Exit RFID Reader (Simulated)',
             ],
+            // Phase 1: the detector runs one camera per gate, in this order.
+            'gates' => Gate::ordered()->map(fn (Gate $gate): array => [
+                'code' => $gate->code,
+                'name' => $gate->name,
+                'reader_name' => $gate->readerDisplayName(),
+            ])->values()->all(),
             'storage' => $this->localStorageService->storageSummary(),
-            'cameras' => [
-                'entrance' => $this->runtimeCameraPayload($cameraConfigurations['entrance']),
-                'exit' => $this->runtimeCameraPayload($cameraConfigurations['exit']),
-            ],
+            'cameras' => collect($cameraConfigurations)
+                ->map(fn (array $camera): array => $this->runtimeCameraPayload($camera))
+                ->all(),
         ];
 
         File::ensureDirectoryExists(dirname($this->cameraRuntimeConfigPath()));
@@ -227,7 +257,7 @@ class SettingsService
     {
         $this->calibrationService->ensureRequiredCameras();
 
-        foreach (['entrance', 'exit'] as $role) {
+        foreach (Gate::codes() as $role) {
             if (! isset($cameraConfigurations[$role])) {
                 continue;
             }
@@ -241,7 +271,7 @@ class SettingsService
             }
 
             $camera->fill([
-                'camera_name' => (string) ($cameraData['camera_name'] ?? ($role === 'entrance' ? 'PHILCST Entrance Camera' : 'PHILCST Exit Camera')),
+                'camera_name' => (string) ($cameraData['camera_name'] ?? $camera->camera_name),
                 'source_username' => (string) ($cameraData['source_username'] ?? ''),
                 'status' => 'active',
             ]);

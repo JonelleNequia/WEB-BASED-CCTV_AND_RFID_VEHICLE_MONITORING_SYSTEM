@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\GuestVehicleObservation;
 use App\Models\Camera;
+use App\Models\Gate;
 use App\Models\RfidScanLog;
 use App\Support\PlateNumber;
 use App\Support\PhilippineTime;
@@ -35,7 +36,7 @@ class GuestObservationService
                 'plate_number' => $plateNumber,
                 'vehicle_type' => $data['vehicle_type'] ?? null,
                 'vehicle_color' => $data['vehicle_color'] ?? null,
-                'location' => $this->normalizeLocation($data['location'] ?? 'entrance'),
+                'location' => $this->normalizeLocation($data['location'] ?? ''),
                 'observation_source' => $data['observation_source'] ?? 'manual',
                 'observed_at' => isset($data['observed_at'])
                     ? Carbon::parse((string) $data['observed_at'])
@@ -164,9 +165,12 @@ class GuestObservationService
         return PlateNumber::normalize($plate);
     }
 
+    /**
+     * Phase 1: a gate code; the old "entrance"/"exit" mean Gate 1 / Gate 2.
+     */
     protected function normalizeLocation(mixed $location): string
     {
-        return (string) $location === 'exit' ? 'exit' : 'entrance';
+        return Gate::normalizeCode((string) $location);
     }
 
     /**

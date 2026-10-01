@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Gate;
 use App\Models\RfidScanLog;
 use App\Models\RfidTag;
 use App\Models\Vehicle;
@@ -17,20 +18,23 @@ use Illuminate\Validation\ValidationException;
  * Moved out of RfidService::ingest() so the Station page, the RFID Desk, the
  * hardware API and the future UHF TCP listener all share the same rules:
  *
- * - The STATION decides the direction: Entrance = ENTRY, Exit = EXIT. A read
- *   that does not match the vehicle's current state is still recorded but
- *   flagged as an anomaly. Only the RFID Desk keeps the old toggle.
- * - Cooldown per tag + station (setting rfid_cooldown_seconds, default 60).
+ * - Phase 1 (gates): every gate records IN and OUT, so the vehicle's state
+ *   decides the direction (OUTSIDE -> ENTRY, INSIDE -> EXIT) until the camera
+ *   gives the direction of the crossing (Phase 3).
+ * - Cooldown per tag + gate (setting rfid_cooldown_seconds, default 60).
  *
  * Guest passes were removed (Phase 0 of the visitor model): every tag is a
  * vehicle tag; vehicles without a tag are handled by the camera.
  */
 class RfidIngestService
 {
-    /** Entrance = ENTRY, Exit = EXIT. */
+    /**
+     * A gate reader. Phase 1: gates have no fixed direction, so this is the
+     * same as the toggle until the camera gives the direction (Phase 3).
+     */
     public const DIRECTION_STATION = 'station';
 
-    /** INSIDE -> EXIT, OUTSIDE -> ENTRY (RFID Desk only). */
+    /** INSIDE -> EXIT, OUTSIDE -> ENTRY. */
     public const DIRECTION_TOGGLE = 'toggle';
 
     public function __construct(
@@ -54,7 +58,7 @@ class RfidIngestService
     ): RfidIngestResult {
         $this->localStorageService->ensureBaseDirectories();
 
-        $scanLocation = $this->normalizeLocation((string) ($data['scan_location'] ?? 'entrance'));
+        $scanLocation = $this->normalizeLocation((string) ($data['scan_location'] ?? ''));
         $scanTime = isset($data['scan_time']) ? Carbon::parse((string) $data['scan_time']) : now();
         $requestedUid = $this->requestedUid($data);
 
@@ -104,7 +108,8 @@ class RfidIngestService
             : null;
 
         $anomalyReason = $transition['anomaly_reason'] ?? $this->tagAnomalyReason($tag, $verificationStatus, $scanLocation);
-        $eventType = $transition['event_type'] ?? ($scanLocation === 'exit' ? 'EXIT' : 'ENTRY');
+        // No movement (unknown or flagged tag): no direction either.
+        $eventType = $transition['event_type'] ?? null;
 
         $scanLog = $this->createScanLog($data, $sourceMode, $scanLocation, $scanTime, $tag, [
             'vehicle' => $vehicle,
@@ -158,17 +163,9 @@ class RfidIngestService
         $currentState = $this->normalizeVehicleState($vehicle->current_state);
         $anomalyReason = null;
 
-        if ($directionMode === self::DIRECTION_TOGGLE) {
-            $eventType = $currentState === Vehicle::STATE_INSIDE ? 'EXIT' : 'ENTRY';
-        } else {
-            $eventType = $scanLocation === 'exit' ? 'EXIT' : 'ENTRY';
-
-            if ($eventType === 'ENTRY' && $currentState === Vehicle::STATE_INSIDE) {
-                $anomalyReason = 'Entry scan while the vehicle is already inside (missed exit scan?).';
-            } elseif ($eventType === 'EXIT' && $currentState === Vehicle::STATE_OUTSIDE) {
-                $anomalyReason = 'Exit scan while the vehicle is already outside (missed entry scan?).';
-            }
-        }
+        // Phase 1: both modes toggle (gates record IN and OUT). Phase 3 adds
+        // the camera's direction, with this as the fallback.
+        $eventType = $currentState === Vehicle::STATE_INSIDE ? 'EXIT' : 'ENTRY';
 
         $updates = [
             'current_state' => $eventType === 'ENTRY' ? Vehicle::STATE_INSIDE : Vehicle::STATE_OUTSIDE,
@@ -212,7 +209,7 @@ class RfidIngestService
         $vehicle = $resolved['vehicle'] ?? null;
         $tagUid = $tag?->uid ?: $this->requestedUid($data);
         $readerName = (string) ($data['reader_name'] ?? $this->defaultReaderName($scanLocation));
-        $scanDirection = $scanLocation === 'exit' ? 'exit' : 'entry';
+        $scanDirection = ($resolved['resolved_event_type'] ?? null) === 'EXIT' ? 'exit' : 'entry';
         $category = $resolved['vehicle_category'] ?? $vehicle?->category;
 
         $payload = [
@@ -472,13 +469,14 @@ class RfidIngestService
 
     protected function defaultReaderName(string $scanLocation): string
     {
-        return $scanLocation === 'exit'
-            ? (string) ($this->settingsService->get('exit_rfid_reader_name', 'Exit RFID Reader') ?? 'Exit RFID Reader')
-            : (string) ($this->settingsService->get('entrance_rfid_reader_name', 'Entrance RFID Reader') ?? 'Entrance RFID Reader');
+        return Gate::query()->where('code', $scanLocation)->first()?->readerDisplayName() ?? 'Gate Reader';
     }
 
+    /**
+     * A gate code; the old "entrance"/"exit" mean Gate 1 / Gate 2.
+     */
     protected function normalizeLocation(string $scanLocation): string
     {
-        return $scanLocation === 'exit' ? 'exit' : 'entrance';
+        return Gate::normalizeCode($scanLocation);
     }
 }

@@ -327,7 +327,7 @@
             'rfid',
             body.recent_rfid_scans || [],
             'No RFID scans yet',
-            'Scans from the Station pages and Settings › Test Scan appear here.'
+            'Scans from the gate kiosks and readers, and Settings › Test Scan, appear here.'
         );
         renderStream(
             'events',

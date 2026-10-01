@@ -217,7 +217,7 @@
 
         item.className = 'station-log-item station-log-compact' + (log.no_pass_alert ? ' is-alert' : '');
         badge.className = 'station-log-badge';
-        badge.textContent = log.event_type || payload.eventType || 'LOG';
+        badge.textContent = log.event_type || 'LOG';
         plate.textContent = log.plate_number || '—';
         type.className = 'station-log-type';
         type.textContent = log.verification_label || '';
@@ -433,7 +433,7 @@
                 },
                 body: JSON.stringify({
                     tag_uid: uid,
-                    reader_name: `${payload.location || 'station'} station RFID reader`,
+                    reader_name: `${document.title.split(' |')[0] || 'Gate'} Kiosk Reader`,
                 }),
             });
 

@@ -29,7 +29,7 @@ class CalibrationController extends Controller
         );
         $cameras = $calibrationService->cameraPayload();
 
-        foreach (['entrance', 'exit'] as $role) {
+        foreach (array_keys($cameras) as $role) {
             $cameras[$role]['stream_url'] = $detectorRuntimeService->streamUrlForRole($role, $detectorStatus, request()->getHost());
             $cameras[$role]['detector_status'] = $detectorStatus['cameras'][$role] ?? [];
         }

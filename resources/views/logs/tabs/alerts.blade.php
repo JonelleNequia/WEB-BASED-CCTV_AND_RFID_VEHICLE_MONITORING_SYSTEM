@@ -13,7 +13,7 @@
             <tr>
                 <th>Time</th>
                 <th>Tag / Vehicle</th>
-                <th>Station</th>
+                <th>Gate</th>
                 <th>Result</th>
                 <th>Reason</th>
             </tr>
@@ -26,7 +26,7 @@
                         <strong>{{ $scan->vehicle?->plate_number ?? $scan->vehicleRfidTag?->label ?? $scan->tag_uid }}</strong>
                         <div class="table-subtext">{{ $scan->tag_uid }}</div>
                     </td>
-                    <td>{{ ucfirst($scan->scan_location) }}</td>
+                    <td>{{ \App\Models\Gate::labelFor($scan->scan_location) }}</td>
                     <td><x-badge status="anomaly" :label="$scan->verificationLabel" /></td>
                     <td>{{ $scan->anomaly_reason ?: '—' }}</td>
                 </tr>
@@ -56,10 +56,10 @@
                     </div>
 
                     <div class="field">
-                        <label for="location">Location</label>
+                        <label for="location">Gate</label>
                         <select id="location" name="location" required>
-                            @foreach (['entrance' => 'Entrance', 'exit' => 'Exit'] as $value => $label)
-                                <option value="{{ $value }}" @selected(old('location', 'entrance') === $value)>{{ $label }}</option>
+                            @foreach (\App\Models\Gate::options() as $value => $label)
+                                <option value="{{ $value }}" @selected(old('location', array_key_first(\App\Models\Gate::options())) === $value)>{{ $label }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -113,7 +113,7 @@
                 <div class="result-card result-card-warning">
                     <div class="result-card-head">
                         <strong>Guest captured</strong>
-                        <x-badge :status="$latestUnregisteredCapture->location === 'exit' ? 'exit' : 'entry'" :label="ucfirst($latestUnregisteredCapture->location)" />
+                        <x-badge status="entry" :label="\App\Models\Gate::labelFor($latestUnregisteredCapture->location)" />
                     </div>
                     <img src="{{ $latestSnapshotUrl }}" alt="Guest vehicle capture" class="capture-preview">
                     <div class="detail-list">
@@ -141,10 +141,10 @@
                 </div>
 
                 <div class="field">
-                    <label for="filter_location">Location</label>
+                    <label for="filter_location">Gate</label>
                     <select id="filter_location" name="location">
                         <option value="">All</option>
-                        @foreach (['entrance' => 'Entrance', 'exit' => 'Exit'] as $value => $label)
+                        @foreach (\App\Models\Gate::options() as $value => $label)
                             <option value="{{ $value }}" @selected(($filters['location'] ?? '') === $value)>{{ $label }}</option>
                         @endforeach
                     </select>
@@ -188,7 +188,7 @@
                         <th>Plate Number</th>
                         <th>Color</th>
                         <th>Vehicle</th>
-                        <th>Location</th>
+                        <th>Gate</th>
                         <th>Type</th>
                         <th>Camera</th>
                         <th>Notes</th>
@@ -204,7 +204,7 @@
                             <td>{{ $observation->plate_number ?: $observation->plate_text ?: 'No plate' }}</td>
                             <td>{{ $observation->vehicle_color ?: 'N/A' }}</td>
                             <td>{{ $observation->vehicle_type ?: 'N/A' }}</td>
-                            <td>{{ ucfirst($observation->location) }}</td>
+                            <td>{{ \App\Models\Gate::labelFor($observation->location) }}</td>
                             <td>
                                 <x-badge status="guest" label="Guest" />
                             </td>
@@ -244,7 +244,7 @@
                         <div><span>Detected Plate</span><strong data-guest-modal-plate>No plate</strong></div>
                         <div><span>Detected Color</span><strong data-guest-modal-color>No color</strong></div>
                         <div><span>Timestamp</span><strong data-guest-modal-time>No time</strong></div>
-                        <div><span>Location</span><strong data-guest-modal-location>No location</strong></div>
+                        <div><span>Gate</span><strong data-guest-modal-location>No gate</strong></div>
                         <div><span>Type</span><strong data-guest-modal-status>Guest</strong></div>
                     </div>
                 </div>
@@ -271,9 +271,9 @@
                         </div>
 
                         <div class="field">
-                            <label for="modal_location">Location</label>
+                            <label for="modal_location">Gate</label>
                             <select id="modal_location" name="location" data-guest-modal-field="location">
-                                @foreach (['entrance' => 'Entrance', 'exit' => 'Exit'] as $value => $label)
+                                @foreach (\App\Models\Gate::options() as $value => $label)
                                     <option value="{{ $value }}">{{ $label }}</option>
                                 @endforeach
                             </select>
@@ -304,6 +304,7 @@
         'vehicle_type' => $observation->vehicle_type,
         'vehicle_color' => $observation->vehicle_color,
         'location' => $observation->location,
+        'location_label' => \App\Models\Gate::labelFor($observation->location),
         'observed_at' => $observation->observed_at?->format('Y-m-d\TH:i'),
         'display_time' => \App\Support\DisplayTime::datetime($observation->observed_at),
         'status' => $observation->status,
@@ -357,7 +358,7 @@
                 plate.textContent = observation.plate_number || 'No plate detected';
                 color.textContent = observation.vehicle_color || 'No color detected';
                 time.textContent = observation.display_time || 'No time';
-                location.textContent = observation.location ? observation.location.charAt(0).toUpperCase() + observation.location.slice(1) : 'No location';
+                location.textContent = observation.location_label || observation.location || 'No gate';
                 status.textContent = observation.status_label || 'Guest';
                 submitButton.textContent = 'Save Guest Details';
 
@@ -404,7 +405,7 @@
                 appendText(row, 'td', observation.plate_number || 'No plate');
                 appendText(row, 'td', observation.vehicle_color || 'N/A');
                 appendText(row, 'td', observation.vehicle_type || 'N/A');
-                appendText(row, 'td', observation.location ? observation.location.charAt(0).toUpperCase() + observation.location.slice(1) : 'N/A');
+                appendText(row, 'td', observation.location_label || observation.location || 'N/A');
 
                 statusBadge.className = `badge ${observation.status_badge_class || 'badge-secondary'}`;
                 statusBadge.textContent = observation.status_label || 'Guest';

@@ -92,21 +92,21 @@ class PlugAndDetectDevicesTest extends TestCase
         $camera = NetworkDevice::query()->where('mac', '34:F7:16:00:00:01')->firstOrFail();
 
         $this->actingAs($this->admin)
-            ->postJson(route('settings.devices.assign', $camera), ['station' => 'entrance', 'role' => 'camera'])
+            ->postJson(route('settings.devices.assign', $camera), ['station' => 'gate-1', 'role' => 'camera'])
             ->assertStatus(422)
             ->assertJsonPath('needs_credentials', true);
 
         $this->actingAs($this->admin)
-            ->postJson(route('settings.devices.assign', $camera), ['station' => 'entrance', 'role' => 'camera', 'username' => 'admin', 'password' => 'wrong'])
+            ->postJson(route('settings.devices.assign', $camera), ['station' => 'gate-1', 'role' => 'camera', 'username' => 'admin', 'password' => 'wrong'])
             ->assertStatus(422)
             ->assertJsonPath('needs_credentials', true);
 
         $this->actingAs($this->admin)
-            ->postJson(route('settings.devices.assign', $camera), ['station' => 'entrance', 'role' => 'camera', 'username' => 'admin', 'password' => 'secret', 'stream' => 'main'])
+            ->postJson(route('settings.devices.assign', $camera), ['station' => 'gate-1', 'role' => 'camera', 'username' => 'admin', 'password' => 'secret', 'stream' => 'main'])
             ->assertOk()
             ->assertJsonPath('ok', true);
 
-        $entrance = Camera::query()->forRole('entrance')->firstOrFail();
+        $entrance = Camera::query()->forRole('gate-1')->firstOrFail();
         $this->assertSame('rtsp', $entrance->source_type);
         $this->assertSame('rtsp://198.51.100.20:554/stream1', $entrance->source_value);
         $this->assertSame('secret', $entrance->source_password);
@@ -116,13 +116,13 @@ class PlugAndDetectDevicesTest extends TestCase
 
         // The exit station reuses the saved login: no question this time.
         $this->actingAs($this->admin)
-            ->postJson(route('settings.devices.assign', $camera), ['station' => 'exit', 'role' => 'camera', 'stream' => 'sub'])
+            ->postJson(route('settings.devices.assign', $camera), ['station' => 'gate-2', 'role' => 'camera', 'stream' => 'sub'])
             ->assertOk();
-        $this->assertSame('rtsp://198.51.100.20:554/stream2', Camera::query()->forRole('exit')->value('source_value'));
+        $this->assertSame('rtsp://198.51.100.20:554/stream2', Camera::query()->forRole('gate-2')->value('source_value'));
 
         // Python still receives the password it needs to connect.
         $runtime = json_decode(File::get(app(\App\Services\SettingsService::class)->cameraRuntimeConfigPath()), true);
-        $this->assertSame('secret', $runtime['cameras']['entrance']['source_password']);
+        $this->assertSame('secret', $runtime['cameras']['gate-1']['source_password']);
     }
 
     public function test_new_ip_for_the_same_mac_keeps_the_station_and_moves_the_stream(): void
@@ -132,24 +132,24 @@ class PlugAndDetectDevicesTest extends TestCase
         $camera = NetworkDevice::query()->where('mac', '34:F7:16:00:00:01')->firstOrFail();
         $reader = NetworkDevice::query()->where('mac', 'D8:A0:1D:00:00:02')->firstOrFail();
 
-        $registry->assign($camera, 'entrance', 'camera', ['username' => 'admin', 'password' => 'secret']);
-        $registry->assign($reader, 'entrance', 'reader');
+        $registry->assign($camera, 'gate-1', 'camera', ['username' => 'admin', 'password' => 'secret']);
+        $registry->assign($reader, 'gate-1', 'reader');
 
         // The network changed (e.g. another router): same MACs, new addresses.
         $summary = $registry->ingestScan($this->scan('192.0.2.'));
 
         $this->assertSame(2, $summary['moved']);
         // Live view on the sub stream (default); the main stream only for trigger snapshots.
-        $this->assertSame('rtsp://192.0.2.20:554/stream2', Camera::query()->forRole('entrance')->value('source_value'));
-        $this->assertSame('rtsp://192.0.2.20:554/stream1', Camera::query()->forRole('entrance')->value('snapshot_source_value'));
-        $this->assertSame(1, DeviceAssignment::query()->where('station', 'entrance')->where('role', 'camera')->count());
-        $this->assertSame($camera->id, DeviceAssignment::query()->where('station', 'entrance')->where('role', 'camera')->value('network_device_id'));
+        $this->assertSame('rtsp://192.0.2.20:554/stream2', Camera::query()->forRole('gate-1')->value('source_value'));
+        $this->assertSame('rtsp://192.0.2.20:554/stream1', Camera::query()->forRole('gate-1')->value('snapshot_source_value'));
+        $this->assertSame(1, DeviceAssignment::query()->where('station', 'gate-1')->where('role', 'camera')->count());
+        $this->assertSame($camera->id, DeviceAssignment::query()->where('station', 'gate-1')->where('role', 'camera')->value('network_device_id'));
 
         $config = json_decode(File::get(DeviceFiles::runtimeConfigPath()), true);
-        $this->assertSame('192.0.2.30', $config['stations']['entrance']['reader']['ip']);
-        $this->assertSame('D8:A0:1D:00:00:02', $config['stations']['entrance']['reader']['mac']);
-        $this->assertSame(6000, $config['stations']['entrance']['reader']['port']);
-        $this->assertSame('r2000', $config['stations']['entrance']['reader']['protocol']);
+        $this->assertSame('192.0.2.30', $config['stations']['gate-1']['reader']['ip']);
+        $this->assertSame('D8:A0:1D:00:00:02', $config['stations']['gate-1']['reader']['mac']);
+        $this->assertSame(6000, $config['stations']['gate-1']['reader']['port']);
+        $this->assertSame('r2000', $config['stations']['gate-1']['reader']['protocol']);
         $this->assertStringEndsWith('/api/v1/integration/rfid-scans', $config['app']['rfid_ingest_url']);
     }
 
@@ -166,20 +166,20 @@ class PlugAndDetectDevicesTest extends TestCase
         $second = NetworkDevice::query()->where('mac', 'D8:A0:1D:00:00:09')->firstOrFail();
 
         $this->actingAs($this->admin)
-            ->postJson(route('settings.devices.assign', $first), ['station' => 'entrance', 'role' => 'reader'])->assertOk();
+            ->postJson(route('settings.devices.assign', $first), ['station' => 'gate-1', 'role' => 'reader'])->assertOk();
         $this->actingAs($this->admin)
-            ->postJson(route('settings.devices.assign', $second), ['station' => 'entrance', 'role' => 'reader'])->assertOk();
+            ->postJson(route('settings.devices.assign', $second), ['station' => 'gate-1', 'role' => 'reader'])->assertOk();
 
-        $this->assertSame([$second->id], DeviceAssignment::query()->where('station', 'entrance')->where('role', 'reader')->pluck('network_device_id')->all());
-        $this->assertSame('uhf_ethernet', SystemSetting::query()->where('setting_key', 'entrance_reader_type')->value('setting_value'));
+        $this->assertSame([$second->id], DeviceAssignment::query()->where('station', 'gate-1')->where('role', 'reader')->pluck('network_device_id')->all());
+        $this->assertSame('uhf_ethernet', \App\Models\Gate::query()->where('code', 'gate-1')->value('reader_type'));
 
         $this->actingAs($this->admin)
-            ->postJson(route('settings.devices.unassign'), ['station' => 'entrance', 'role' => 'reader'])->assertOk();
+            ->postJson(route('settings.devices.unassign'), ['station' => 'gate-1', 'role' => 'reader'])->assertOk();
 
         $this->assertSame(0, DeviceAssignment::query()->count());
-        $this->assertSame('nfc', SystemSetting::query()->where('setting_key', 'entrance_reader_type')->value('setting_value'));
+        $this->assertSame('nfc', \App\Models\Gate::query()->where('code', 'gate-1')->value('reader_type'));
         $config = json_decode(File::get(DeviceFiles::runtimeConfigPath()), true);
-        $this->assertNull($config['stations']['entrance']['reader']);
+        $this->assertNull($config['stations']['gate-1']['reader']);
     }
 
     public function test_a_full_scan_marks_missing_devices_offline_without_losing_them(): void
@@ -262,8 +262,8 @@ class PlugAndDetectDevicesTest extends TestCase
         $registry = app(DeviceRegistryService::class);
         $registry->ingestScan($this->scan());
         $camera = NetworkDevice::query()->where('mac', '34:F7:16:00:00:01')->firstOrFail();
-        $registry->assign($camera, 'entrance', 'camera', ['username' => 'admin', 'password' => 'secret', 'stream' => 'main']);
-        $registry->assign($camera, 'exit', 'camera', ['stream' => 'sub']);
+        $registry->assign($camera, 'gate-1', 'camera', ['username' => 'admin', 'password' => 'secret', 'stream' => 'main']);
+        $registry->assign($camera, 'gate-2', 'camera', ['stream' => 'sub']);
 
         // What the detector reports: Entrance live, Exit rejected the login.
         File::ensureDirectoryExists(\App\Support\CameraFiles::directory());
@@ -271,8 +271,8 @@ class PlugAndDetectDevicesTest extends TestCase
             'service_running' => true,
             'updated_at' => now()->toIso8601String(),
             'cameras' => [
-                'entrance' => ['camera_running' => true, 'last_error' => '', 'error_code' => null],
-                'exit' => ['camera_running' => false, 'error_code' => 'unauthorized',
+                'gate-1' => ['camera_running' => true, 'last_error' => '', 'error_code' => null],
+                'gate-2' => ['camera_running' => false, 'error_code' => 'unauthorized',
                     'last_error' => 'Camera login rejected (RTSP 401). Enter the camera username and password in Settings › Stations & Readers › Devices.'],
             ],
         ]));
@@ -281,13 +281,13 @@ class PlugAndDetectDevicesTest extends TestCase
             $this->actingAs($this->admin)
                 ->getJson(route('settings.devices.index'))
                 ->assertOk()
-                ->assertJsonPath('stations.entrance.camera.camera_running', true)
-                ->assertJsonPath('stations.entrance.camera.shared_with.station', 'exit')
-                ->assertJsonPath('stations.entrance.camera.shared_with.stream', 'sub')
-                ->assertJsonPath('stations.exit.camera.error_code', 'unauthorized')
-                ->assertJsonPath('stations.exit.camera.camera_error', fn ($error) => str_contains($error, 'RTSP 401'));
+                ->assertJsonPath('stations.gate-1.camera.camera_running', true)
+                ->assertJsonPath('stations.gate-1.camera.shared_with.station', 'gate-2')
+                ->assertJsonPath('stations.gate-1.camera.shared_with.stream', 'sub')
+                ->assertJsonPath('stations.gate-2.camera.error_code', 'unauthorized')
+                ->assertJsonPath('stations.gate-2.camera.camera_error', fn ($error) => str_contains($error, 'RTSP 401'));
 
-            $this->assertSame('rtsp://198.51.100.20:554/stream2', Camera::query()->forRole('exit')->value('source_value'));
+            $this->assertSame('rtsp://198.51.100.20:554/stream2', Camera::query()->forRole('gate-2')->value('source_value'));
 
             // Sidebar: live count with the reason.
             $this->actingAs($this->admin)
@@ -340,7 +340,7 @@ class PlugAndDetectDevicesTest extends TestCase
 
     public function test_camera_password_is_never_sent_to_the_pages(): void
     {
-        Camera::query()->forRole('entrance')->firstOrFail()
+        Camera::query()->forRole('gate-1')->firstOrFail()
             ->fill(['source_type' => 'rtsp', 'source_value' => 'rtsp://198.51.100.20:554/stream1', 'source_username' => 'admin', 'source_password' => 'Sup3rSecret'])
             ->save();
 
@@ -351,23 +351,23 @@ class PlugAndDetectDevicesTest extends TestCase
                 ->assertDontSee('Sup3rSecret');
         }
 
-        $this->actingAs($this->admin)->get(route('stations.entrance'))->assertOk()->assertDontSee('Sup3rSecret');
+        $this->actingAs($this->admin)->get(route('gates.kiosk', 'gate-1'))->assertOk()->assertDontSee('Sup3rSecret');
 
         // Blank password on save keeps the saved one.
         $this->actingAs($this->admin)
             ->put(route('settings.update'), [
                 'section' => 'cameras',
                 'camera_configs' => [
-                    'entrance' => ['camera_name' => 'Entrance Camera', 'source_type' => 'rtsp', 'source_value' => 'rtsp://198.51.100.20:554/stream1', 'source_username' => 'admin', 'source_password' => ''],
-                    'exit' => ['camera_name' => 'Exit Camera', 'source_type' => 'webcam', 'source_value' => '0', 'source_username' => '', 'source_password' => ''],
+                    'gate-1' => ['camera_name' => 'Entrance Camera', 'source_type' => 'rtsp', 'source_value' => 'rtsp://198.51.100.20:554/stream1', 'source_username' => 'admin', 'source_password' => ''],
+                    'gate-2' => ['camera_name' => 'Exit Camera', 'source_type' => 'webcam', 'source_value' => '0', 'source_username' => '', 'source_password' => ''],
                 ],
             ])->assertSessionHasNoErrors();
-        $this->assertSame('Sup3rSecret', Camera::query()->forRole('entrance')->firstOrFail()->source_password);
+        $this->assertSame('Sup3rSecret', Camera::query()->forRole('gate-1')->firstOrFail()->source_password);
     }
 
     public function test_plaintext_passwords_are_encrypted_by_the_migration(): void
     {
-        $id = Camera::query()->forRole('exit')->value('id');
+        $id = Camera::query()->forRole('gate-2')->value('id');
         DB::table('cameras')->where('id', $id)->update(['source_password' => 'plain-old']);
 
         $migration = require database_path('migrations/2026_09_27_000002_encrypt_camera_passwords.php');

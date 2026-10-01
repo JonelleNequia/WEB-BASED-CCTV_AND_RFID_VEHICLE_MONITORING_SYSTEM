@@ -146,9 +146,11 @@ DEFAULT_RUNTIME_CONFIG = {
         "rfid_match_url": "",
         "status_url": "",
     },
+    # Phase 1: one camera per gate (keys = gate codes). Laravel exports the
+    # real list; these two are only used before the first export.
     "cameras": {
-        "entrance": default_camera_config("entrance"),
-        "exit": default_camera_config("exit"),
+        "gate-1": default_camera_config("gate-1"),
+        "gate-2": default_camera_config("gate-2"),
     },
 }
 
@@ -265,11 +267,19 @@ def _load_runtime_config_file():
         config["system_settings"].update(loaded["system_settings"])
 
     loaded_cameras = loaded.get("cameras", {})
-    if isinstance(loaded_cameras, dict):
-        for role in ("entrance", "exit"):
-            config["cameras"][role] = normalize_camera_config(role, loaded_cameras.get(role))
+    if isinstance(loaded_cameras, dict) and loaded_cameras:
+        # Gate order from Laravel; any camera without a gate entry goes last.
+        order = [gate.get("code") for gate in loaded.get("gates") or [] if isinstance(gate, dict)]
+        roles = [role for role in order if role in loaded_cameras] + [role for role in loaded_cameras if role not in order]
+        config["cameras"] = {role: normalize_camera_config(role, loaded_cameras.get(role)) for role in roles}
+    config["gates"] = loaded.get("gates") or []
 
     return config
+
+
+def camera_roles(runtime_config):
+    """Gate codes that have a camera, in gate order (Phase 1)."""
+    return list((runtime_config or {}).get("cameras") or {})
 
 
 def resolve_capture_source(camera_config):

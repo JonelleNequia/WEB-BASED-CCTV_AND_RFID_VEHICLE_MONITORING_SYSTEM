@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Camera;
+use App\Models\Gate;
 use App\Support\CameraSource;
 use App\Support\DisplayTime;
 use Illuminate\Support\Collection;
@@ -11,36 +12,22 @@ use Illuminate\Support\Facades\DB;
 class CalibrationService
 {
     /**
-     * Required cameras for the dual-camera browser demo.
-     *
-     * @var array<string, array<string, string>>
-     */
-    protected array $requiredCameras = [
-        'entrance' => [
-            'camera_name' => 'PHILCST Entrance Camera',
-            'source_type' => 'webcam',
-            'source_value' => '0',
-        ],
-        'exit' => [
-            'camera_name' => 'PHILCST Exit Camera',
-            'source_type' => 'webcam',
-            'source_value' => '0',
-        ],
-    ];
-
-    /**
-     * Ensure the required entrance and exit camera records exist.
+     * Phase 1: one camera record per active gate (camera_role = gate code),
+     * in gate order. A new gate gets a webcam placeholder until a camera is
+     * assigned in Settings › Devices.
      */
     public function ensureRequiredCameras(): Collection
     {
-        foreach ($this->requiredCameras as $role => $defaults) {
+        $gates = Gate::ordered();
+
+        foreach ($gates as $gate) {
             Camera::query()->firstOrCreate(
-                ['camera_role' => $role],
+                ['camera_role' => $gate->code],
                 [
-                    'camera_name' => $defaults['camera_name'],
-                    'camera_role' => $role,
-                    'source_type' => $defaults['source_type'],
-                    'source_value' => $defaults['source_value'],
+                    'camera_name' => $gate->name.' Camera',
+                    'camera_role' => $gate->code,
+                    'source_type' => 'webcam',
+                    'source_value' => '0',
                     'status' => 'active',
                     'last_connection_status' => 'unknown',
                     'last_connection_message' => 'Waiting for browser camera access.',
@@ -48,12 +35,13 @@ class CalibrationService
             );
         }
 
-        $roleOrder = array_keys($this->requiredCameras);
+        $order = $gates->pluck('code')->all();
 
         return Camera::query()
-            ->whereIn('camera_role', $roleOrder)
+            ->with('gate')
+            ->whereIn('camera_role', $order)
             ->get()
-            ->sortBy(fn (Camera $camera): int => array_search($camera->camera_role, $roleOrder, true))
+            ->sortBy(fn (Camera $camera): int => array_search($camera->camera_role, $order, true))
             ->values();
     }
 
@@ -151,7 +139,9 @@ class CalibrationService
             'id' => $camera->id,
             'camera_name' => $camera->camera_name,
             'camera_role' => $camera->camera_role,
-            'role_label' => $camera->camera_role === 'entrance' ? 'Entrance Camera' : 'Exit Camera',
+            // Phase 1: the gate's name ("Main Gate").
+            'gate_name' => $camera->gate?->name ?? Gate::labelFor($camera->camera_role),
+            'role_label' => $camera->gate?->name ?? Gate::labelFor($camera->camera_role),
             'source_type' => $sourceType,
             ...$secrets,
             'source_display' => CameraSource::display($sourceType, $sourceValue),

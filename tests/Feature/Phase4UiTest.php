@@ -54,13 +54,13 @@ class Phase4UiTest extends TestCase
     {
         // A tag marked lost is flagged when it is read at a gate.
         RfidTag::query()->create(['uid' => 'SPARE-DESK-1', 'status' => RfidTag::STATUS_LOST]);
-        app(RfidIngestService::class)->ingest(['tag_uid' => 'SPARE-DESK-1', 'scan_location' => 'exit']);
+        app(RfidIngestService::class)->ingest(['tag_uid' => 'SPARE-DESK-1', 'scan_location' => 'gate-2']);
 
         $this->actingAs($this->admin)
             ->get(route('settings.index', ['tab' => 'test-scan']))
             ->assertOk()
             ->assertDontSee('Same station scan can become ENTRY or EXIT')
-            ->assertSee('Station readers decide the direction')
+            ->assertSee('Every gate records IN and OUT')
             ->assertDontSee('Guest Pass')
             ->assertSee('is LOST but was scanned')
             ->assertSee('SPARE-DESK-1');
@@ -75,7 +75,7 @@ class Phase4UiTest extends TestCase
     {
         GuestVehicleObservation::query()->create([
             'vehicle_type' => 'Car',
-            'location' => 'entrance',
+            'location' => 'gate-1',
             'observation_source' => 'cctv',
             'status' => 'pending_review',
             'observed_at' => now(),
@@ -104,7 +104,7 @@ class Phase4UiTest extends TestCase
             ->get(route('settings.index', ['tab' => 'stations']))
             ->assertOk()
             // Plug-and-detect: readers are picked in Devices; the address is under Advanced.
-            ->assertSee('Reader Type')
+            ->assertSee('Reader type')
             ->assertSee('UHF (network reader)')
             ->assertSee('Advanced: manual reader address')
             ->assertDontSee('Entrance Reader Name');
@@ -132,7 +132,8 @@ class Phase4UiTest extends TestCase
         $this->actingAs($this->admin)
             ->from(route('settings.index'))
             ->put(route('settings.update'), $payload)
-            ->assertSessionHasErrors(['entrance_reader_ip', 'entrance_reader_port']);
+            // Phase 1: the old entrance_* fields are Gate 1's fields.
+            ->assertSessionHasErrors(['gates.gate-1.reader_ip', 'gates.gate-1.reader_port']);
 
         // A public internet address (like the old typo) is rejected.
         $this->actingAs($this->admin)
@@ -142,7 +143,7 @@ class Phase4UiTest extends TestCase
                 'entrance_reader_ip' => '8.8.8.8',
                 'entrance_reader_port' => 6000,
             ]))
-            ->assertSessionHasErrors(['entrance_reader_ip']);
+            ->assertSessionHasErrors(['gates.gate-1.reader_ip']);
 
         $this->actingAs($this->admin)
             ->from(route('settings.index'))
@@ -155,10 +156,12 @@ class Phase4UiTest extends TestCase
             ]))
             ->assertSessionHasNoErrors();
 
+        $gate = \App\Models\Gate::query()->where('code', 'gate-1')->firstOrFail();
+        $this->assertSame(['Main Entrance', 'uhf_ethernet', '192.168.100.50', 6000, true, 'Main Entrance UHF Reader'],
+            [$gate->name, $gate->reader_type, $gate->reader_ip, $gate->reader_port, $gate->reader_manual, $gate->reader_name]);
         $settings = SystemSetting::query()->pluck('setting_value', 'setting_key');
-        $this->assertSame('uhf_ethernet', $settings['entrance_reader_type']);
-        $this->assertSame('192.168.100.50', $settings['entrance_reader_ip']);
-        $this->assertSame('Entrance UHF Reader', $settings['entrance_rfid_reader_name']);
+        $this->assertSame('30', $settings['rfid_cooldown_seconds']);
+        $this->assertArrayNotHasKey('entrance_reader_type', $settings->all());
         $this->assertArrayNotHasKey('guest_pass_validity_minutes', $settings->all());
     }
 
@@ -180,8 +183,8 @@ class Phase4UiTest extends TestCase
             'entrance_reader_type' => 'nfc',
             'exit_reader_type' => 'nfc',
             'camera_configs' => [
-                'entrance' => ['camera_name' => 'Entrance Camera', 'source_type' => 'webcam', 'source_value' => '0'],
-                'exit' => ['camera_name' => 'Exit Camera', 'source_type' => 'webcam', 'source_value' => '0'],
+                'gate-1' => ['camera_name' => 'Entrance Camera', 'source_type' => 'webcam', 'source_value' => '0'],
+                'gate-2' => ['camera_name' => 'Exit Camera', 'source_type' => 'webcam', 'source_value' => '0'],
             ],
         ], $overrides);
     }

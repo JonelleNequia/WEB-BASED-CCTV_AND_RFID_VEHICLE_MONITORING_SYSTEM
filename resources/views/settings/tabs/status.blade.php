@@ -5,20 +5,21 @@
                 :tone="($runtime['service_running'] ?? false) ? 'success' : 'warning'"
                 :hint="$runtime['auto_start_message'] ?? $runtime['service_message']" />
         <x-stat label="Last Update" :value="\App\Support\DisplayTime::datetimeSeconds($runtime['updated_at'] ?? null, 'No update yet')" hint="Latest detector heartbeat" />
-        <x-stat label="Entrance Crossings" :value="$runtime['cameras']['entrance']['crossings_logged'] ?? 0" />
-        <x-stat label="Exit Crossings" :value="$runtime['cameras']['exit']['crossings_logged'] ?? 0" />
+        @foreach (\App\Models\Gate::options() as $gateCode => $gateName)
+            <x-stat :label="$gateName.' Crossings'" :value="$runtime['cameras'][$gateCode]['crossings_logged'] ?? 0" />
+        @endforeach
     </x-stat-row>
 
     @include('settings.partials.pipeline-metrics')
 
     <div class="camera-grid">
-        @foreach (['entrance', 'exit'] as $role)
+        @foreach (\App\Models\Gate::options() as $role => $gateName)
             @php($cameraStatus = $runtime['cameras'][$role] ?? null)
             <article class="camera-card">
                 <div class="camera-card-head">
                     <div>
-                        <h4>{{ ucfirst($role) }} Camera</h4>
-                        <p>{{ $cameraStatus['camera_name'] ?? ucfirst($role).' Camera' }}</p>
+                        <h4>{{ $gateName }} Camera</h4>
+                        <p>{{ $cameraStatus['camera_name'] ?? $gateName.' Camera' }}</p>
                     </div>
                     <x-badge :status="($cameraStatus['camera_running'] ?? false) ? 'online' : 'standby'" :label="($cameraStatus['camera_running'] ?? false) ? 'Running' : 'Standby'" />
                 </div>

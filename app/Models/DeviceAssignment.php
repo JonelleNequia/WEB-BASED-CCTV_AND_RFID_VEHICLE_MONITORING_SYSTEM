@@ -7,13 +7,22 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Which network device a station uses: one camera and one reader per station.
+ * Which network device a gate uses: one camera and one reader per gate.
+ * ("station" holds the gate code since Phase 1.)
  */
 class DeviceAssignment extends Model
 {
     use StoresLocalTime;
 
-    public const STATIONS = ['entrance', 'exit'];
+    /**
+     * Phase 1: the active gate codes (replaces the fixed entrance/exit list).
+     *
+     * @return list<string>
+     */
+    public static function stations(): array
+    {
+        return Gate::codes();
+    }
 
     public const ROLE_CAMERA = 'camera';
 

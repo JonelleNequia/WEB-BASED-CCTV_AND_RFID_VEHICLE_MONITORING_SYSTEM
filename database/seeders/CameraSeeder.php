@@ -15,7 +15,7 @@ class CameraSeeder extends Seeder
         $cameras = [
             [
                 'camera_name' => 'PHILCST Entrance Camera',
-                'camera_role' => 'entrance',
+                'camera_role' => 'gate-1',
                 'source_type' => 'webcam',
                 'source_value' => '0',
                 'source_username' => null,
@@ -31,7 +31,7 @@ class CameraSeeder extends Seeder
             ],
             [
                 'camera_name' => 'PHILCST Exit Camera',
-                'camera_role' => 'exit',
+                'camera_role' => 'gate-2',
                 'source_type' => 'webcam',
                 'source_value' => '0',
                 'source_username' => null,

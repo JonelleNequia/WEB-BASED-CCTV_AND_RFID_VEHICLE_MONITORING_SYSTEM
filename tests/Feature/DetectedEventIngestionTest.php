@@ -29,7 +29,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $payload = [
             'external_event_key' => 'test-crossing-entrance-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'vehicle_color' => 'Red',
             'event_time' => now()->toIso8601String(),
@@ -58,7 +58,7 @@ class DetectedEventIngestionTest extends TestCase
             ->firstOrFail();
 
         $this->assertSame('pending_review', $observation->status);
-        $this->assertSame('entrance', $observation->location);
+        $this->assertSame('gate-1', $observation->location);
         $this->assertSame('Car', $observation->vehicle_type);
         $this->assertSame('Red', $observation->vehicle_color);
     }
@@ -72,7 +72,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $payload = [
             'external_event_key' => 'test-crossing-exit-duplicate',
-            'camera_role' => 'exit',
+            'camera_role' => 'gate-2',
             'detected_vehicle_type' => 'Truck',
             'event_time' => now()->toIso8601String(),
             'vehicle_image_path' => 'detected-vehicle-images/exit/test-crossing-exit-duplicate.jpg',
@@ -108,13 +108,13 @@ class DetectedEventIngestionTest extends TestCase
 
         app(RfidService::class)->ingest([
             'tag_uid' => $tag->uid,
-            'scan_location' => 'entrance',
+            'scan_location' => 'gate-1',
             'scan_time' => $scanTime->toIso8601String(),
         ]);
 
         $payload = [
             'external_event_key' => 'test-crossing-rfid-overlay',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => $scanTime->copy()->addSecond()->toIso8601String(),
             'roi_name' => 'Entrance Trigger Line',
@@ -144,7 +144,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $payload = [
             'external_event_key' => 'test-crossing-no-rfid-probe',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'vehicle_color' => 'White',
             'event_time' => now()->toIso8601String(),
@@ -173,7 +173,7 @@ class DetectedEventIngestionTest extends TestCase
 
         app(RfidService::class)->ingest([
             'tag_uid' => $tag->uid,
-            'scan_location' => 'entrance',
+            'scan_location' => 'gate-1',
             'scan_time' => $scanTime->toIso8601String(),
         ]);
 
@@ -181,7 +181,7 @@ class DetectedEventIngestionTest extends TestCase
             'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ])->getJson(route('api.integration.rfid-match', [
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'event_time' => $scanTime->copy()->subSecond()->toIso8601String(),
             'window_seconds' => 4,
         ]))
@@ -200,7 +200,7 @@ class DetectedEventIngestionTest extends TestCase
 
         app(RfidService::class)->ingest([
             'tag_uid' => $tag->uid,
-            'scan_location' => 'entrance',
+            'scan_location' => 'gate-1',
             'scan_time' => $scanTime->toIso8601String(),
         ]);
 
@@ -208,7 +208,7 @@ class DetectedEventIngestionTest extends TestCase
             'X-Api-Key' => 'test-detector-key',
             'X-Source-Name' => 'phpunit-detector',
         ])->getJson(route('api.integration.rfid-match', [
-            'camera_role' => 'exit',
+            'camera_role' => 'gate-2',
             'event_time' => $scanTime->copy()->subSecond()->toIso8601String(),
             'window_seconds' => 4,
         ]))
@@ -229,7 +229,7 @@ class DetectedEventIngestionTest extends TestCase
 
         app(RfidService::class)->ingest([
             'tag_uid' => $tag->uid,
-            'scan_location' => 'entrance',
+            'scan_location' => 'gate-1',
             'scan_time' => $scanTime->toIso8601String(),
         ], 'station_reader');
 
@@ -242,7 +242,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])
             ->withHeaders(['X-Source-Name' => 'phpunit-local-detector'])
             ->getJson(route('api.integration.rfid-match', [
-                'camera_role' => 'entrance',
+                'camera_role' => 'gate-1',
                 'event_time' => $detectorEventTime,
                 'window_seconds' => 4,
             ]))
@@ -261,7 +261,7 @@ class DetectedEventIngestionTest extends TestCase
 
         app(RfidService::class)->ingest([
             'tag_uid' => $tag->uid,
-            'scan_location' => 'entrance',
+            'scan_location' => 'gate-1',
             'scan_time' => $scanTime->toIso8601String(),
         ], 'station_reader');
 
@@ -273,7 +273,7 @@ class DetectedEventIngestionTest extends TestCase
         for ($attempt = 0; $attempt < 75; $attempt++) {
             $this->withHeaders($headers)
                 ->getJson(route('api.integration.rfid-match', [
-                    'camera_role' => 'entrance',
+                    'camera_role' => 'gate-1',
                     'event_time' => $scanTime->copy()->subSecond()->toIso8601String(),
                     'window_seconds' => 4,
                 ]))
@@ -291,7 +291,7 @@ class DetectedEventIngestionTest extends TestCase
             'X-Source-Name' => 'phpunit-detector',
         ])->postJson(route('api.integration.guest-observations'), [
             'external_event_key' => 'guest-window-timeout-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'vehicle_color' => 'White',
             'event_time' => now()->toIso8601String(),
@@ -310,7 +310,7 @@ class DetectedEventIngestionTest extends TestCase
             ->firstOrFail();
 
         $this->assertSame('pending_review', $observation->status);
-        $this->assertSame('entrance', $observation->location);
+        $this->assertSame('gate-1', $observation->location);
         $this->assertSame('cctv', $observation->observation_source);
         $this->assertSame('White', $observation->vehicle_color);
     }
@@ -325,7 +325,7 @@ class DetectedEventIngestionTest extends TestCase
             'X-Source-Name' => 'phpunit-detector',
         ])->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-timeout-upload-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => now()->toIso8601String(),
             'plate_number' => 'abc1234',
@@ -377,7 +377,7 @@ class DetectedEventIngestionTest extends TestCase
             'X-Source-Name' => 'phpunit-detector',
         ])->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-number-first-ocr-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => now()->toIso8601String(),
             'plate_number' => '233DPF',
@@ -422,7 +422,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->withHeaders($headers)->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-persistent-entry-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => $eventTime->toIso8601String(),
             'plate_number' => 'PGS-777',
@@ -445,13 +445,14 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->withHeaders($headers)->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-persistent-exit-001',
-            'camera_role' => 'exit',
+            'camera_role' => 'gate-2',
             'detected_vehicle_type' => 'Car',
             'event_time' => $eventTime->copy()->addMinutes(10)->toIso8601String(),
             'plate_number' => 'PGS 777',
             'vehicle_color' => 'white',
             'snapshot' => UploadedFile::fake()->image('guest-persistent-exit.jpg', 640, 480),
-            'detection_metadata' => json_encode(['track_id' => 255]),
+            // Phase 1 (gates): the detector's crossing direction decides EXIT.
+            'detection_metadata' => json_encode(['track_id' => 255, 'direction' => 'OUT']),
         ])->assertCreated();
 
         $exitEvent = VehicleEvent::query()
@@ -480,7 +481,7 @@ class DetectedEventIngestionTest extends TestCase
 
         app(RfidService::class)->ingest([
             'tag_uid' => $tag->uid,
-            'scan_location' => 'entrance',
+            'scan_location' => 'gate-1',
             'scan_time' => $scanTime->toIso8601String(),
         ], 'station_reader');
 
@@ -489,7 +490,7 @@ class DetectedEventIngestionTest extends TestCase
             'X-Source-Name' => 'phpunit-detector',
         ])->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-registered-suppressed-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => $scanTime->copy()->addSecond()->toIso8601String(),
             'snapshot' => UploadedFile::fake()->image('guest-suppressed.jpg', 640, 480),
@@ -522,7 +523,7 @@ class DetectedEventIngestionTest extends TestCase
 
         app(RfidService::class)->ingest([
             'tag_uid' => $tag->uid,
-            'scan_location' => 'entrance',
+            'scan_location' => 'gate-1',
             'scan_time' => $scanTime->toIso8601String(),
         ], 'station_reader');
 
@@ -531,7 +532,7 @@ class DetectedEventIngestionTest extends TestCase
             'X-Source-Name' => 'phpunit-detector',
         ])->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-registered-suppressed-cross-001',
-            'camera_role' => 'exit',
+            'camera_role' => 'gate-2',
             'detected_vehicle_type' => 'Car',
             'event_time' => $scanTime->copy()->addSecond()->toIso8601String(),
             'snapshot' => UploadedFile::fake()->image('guest-suppressed-cross.jpg', 640, 480),
@@ -563,7 +564,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->withHeaders($headers)->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-duplicate-track-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => $eventTime->toIso8601String(),
             'plate_number' => 'gst 123',
@@ -577,7 +578,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->withHeaders($headers)->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-duplicate-track-002',
-            'camera_role' => 'exit',
+            'camera_role' => 'gate-2',
             'detected_vehicle_type' => 'Car',
             'event_time' => $eventTime->copy()->addSeconds(2)->toIso8601String(),
             'snapshot' => UploadedFile::fake()->image('guest-duplicate-b.jpg', 640, 480),
@@ -592,7 +593,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->withHeaders($headers)->postJson(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-duplicate-track-002',
-            'camera_role' => 'exit',
+            'camera_role' => 'gate-2',
             'detected_vehicle_type' => 'Car',
             'event_time' => $eventTime->copy()->addSeconds(3)->toIso8601String(),
             'plate_number' => 'gst 128',
@@ -635,7 +636,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $firstResponse = $this->withHeaders($headers)->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-plate-long-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => $eventTime->copy()->subSeconds(90)->toIso8601String(),
             'plate_number' => 'aal',
@@ -652,7 +653,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->withHeaders($headers)->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-plate-long-002',
-            'camera_role' => 'exit',
+            'camera_role' => 'gate-2',
             'detected_vehicle_type' => 'Car',
             'event_time' => $eventTime->toIso8601String(),
             'plate_number' => 'A A L',
@@ -728,7 +729,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $firstResponse = $this->withHeaders($headers)->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-stale-same-source-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => $staleDetectorTime->toIso8601String(),
             'snapshot' => UploadedFile::fake()->image('guest-stale-source-a.jpg', 640, 480),
@@ -744,7 +745,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->withHeaders($headers)->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-stale-same-source-002',
-            'camera_role' => 'exit',
+            'camera_role' => 'gate-2',
             'detected_vehicle_type' => 'Car',
             'event_time' => $staleDetectorTime->toIso8601String(),
             'snapshot' => UploadedFile::fake()->image('guest-stale-source-b.jpg', 640, 480),
@@ -792,7 +793,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->withHeaders($headers)->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-source-different-box-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => $eventTime->toIso8601String(),
             'snapshot' => UploadedFile::fake()->image('guest-source-box-a.jpg', 640, 480),
@@ -804,7 +805,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->withHeaders($headers)->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-source-different-box-002',
-            'camera_role' => 'exit',
+            'camera_role' => 'gate-2',
             'detected_vehicle_type' => 'Car',
             'event_time' => $eventTime->copy()->addSeconds(2)->toIso8601String(),
             'snapshot' => UploadedFile::fake()->image('guest-source-box-b.jpg', 640, 480),
@@ -840,7 +841,7 @@ class DetectedEventIngestionTest extends TestCase
         $start = now();
         $send = fn (string $key, int $seconds, int $trackId, array $box) => $this->withHeaders($headers)->post(route('api.guest-observation'), [
             'external_event_key' => $key,
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => $start->copy()->addSeconds($seconds)->toIso8601String(),
             'snapshot' => UploadedFile::fake()->image($key.'.jpg', 640, 480),
@@ -870,7 +871,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->withHeaders($headers)->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-two-step-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => now()->toIso8601String(),
             'snapshot' => UploadedFile::fake()->image('guest-two-step.jpg', 640, 480),
@@ -882,7 +883,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->withHeaders($headers)->postJson(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-two-step-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => now()->toIso8601String(),
             'plate_number' => 'abc 123',
@@ -933,7 +934,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->withHeaders($headers)->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-two-step-replace-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => now()->toIso8601String(),
             'plate_number' => 'TMP 000',
@@ -947,7 +948,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->withHeaders($headers)->postJson(route('api.guest-observation'), [
             'external_event_key' => 'guest-window-two-step-replace-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => now()->toIso8601String(),
             'plate_number' => 'abc 123',

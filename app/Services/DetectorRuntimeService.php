@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Gate;
 use App\Support\CameraFiles;
 use App\Support\CameraSource;
 use App\Support\PythonLauncher;
@@ -162,7 +163,7 @@ class DetectorRuntimeService
      */
     public function withViewerStreamUrls(array $status, ?string $viewerHost): array
     {
-        foreach (['entrance', 'exit'] as $role) {
+        foreach (array_keys((array) ($status['cameras'] ?? [])) as $role) {
             if (! isset($status['cameras'][$role]) || ! is_array($status['cameras'][$role])) {
                 continue;
             }
@@ -234,7 +235,9 @@ class DetectorRuntimeService
 
     public function markStationViewerActive(string $location): void
     {
-        if (! in_array($location, ['entrance', 'exit'], true)) {
+        $location = Gate::resolveCode($location);
+
+        if ($location === null) {
             return;
         }
 
@@ -243,7 +246,7 @@ class DetectorRuntimeService
 
     public function markCalibrationViewerActive(): void
     {
-        $this->markCameraViewerActive(['entrance', 'exit']);
+        $this->markCameraViewerActive(Gate::codes());
     }
 
     /**
@@ -252,7 +255,7 @@ class DetectorRuntimeService
     protected function markCameraViewerActive(array $locationsToMark): void
     {
         $now = now();
-        $locationsToMark = array_values(array_intersect($locationsToMark, ['entrance', 'exit']));
+        $locationsToMark = array_values(array_intersect($locationsToMark, Gate::codes()));
 
         if ($locationsToMark === []) {
             return;
@@ -416,10 +419,7 @@ class DetectorRuntimeService
             'service_running' => false,
             'service_message' => 'Vehicle detector is not running yet.',
             'updated_at' => null,
-            'cameras' => [
-                'entrance' => $this->fallbackCameraStatus($cameras['entrance']),
-                'exit' => $this->fallbackCameraStatus($cameras['exit']),
-            ],
+            'cameras' => collect($cameras)->map(fn (array $camera): array => $this->fallbackCameraStatus($camera))->all(),
         ];
     }
 

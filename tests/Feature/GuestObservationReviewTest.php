@@ -26,7 +26,7 @@ class GuestObservationReviewTest extends TestCase
             'plate_text' => null,
             'plate_number' => null,
             'vehicle_type' => 'Car',
-            'location' => 'entrance',
+            'location' => 'gate-1',
             'observation_source' => 'cctv',
             'status' => 'pending_review',
             'observed_at' => now(),
@@ -38,7 +38,7 @@ class GuestObservationReviewTest extends TestCase
                 'plate_number' => ' abc 1234 ',
                 'vehicle_type' => 'SUV',
                 'vehicle_color' => 'White',
-                'location' => 'entrance',
+                'location' => 'gate-1',
                 'observed_at' => now()->format('Y-m-d H:i:s'),
                 'notes' => 'Verified by guard.',
             ])
@@ -65,7 +65,7 @@ class GuestObservationReviewTest extends TestCase
             'X-Source-Name' => 'phpunit-detector',
         ])->post(route('api.guest-observation'), [
             'external_event_key' => 'guest-review-sync-001',
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => now()->toIso8601String(),
             'snapshot' => UploadedFile::fake()->image('guest-review-sync.jpg', 640, 480),
@@ -86,7 +86,7 @@ class GuestObservationReviewTest extends TestCase
                 'plate_number' => ' sync 123 ',
                 'vehicle_type' => 'SUV',
                 'vehicle_color' => 'Black',
-                'location' => 'entrance',
+                'location' => 'gate-1',
                 'observed_at' => now()->format('Y-m-d H:i:s'),
                 'notes' => 'Corrected after review.',
             ])

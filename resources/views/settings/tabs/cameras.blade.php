@@ -1,6 +1,6 @@
 {{--
     UI Phase 2: one form per Settings tab, each with its own Save button.
-    Plug-and-detect: network cameras are assigned in Stations & Readers ›
+    Plug-and-detect: network cameras are assigned in Gates & Readers ›
     Devices; the manual source moved to "Advanced". The password is never
     sent back to the page.
 --}}
@@ -13,13 +13,14 @@
             <section class="subpanel">
                 <div class="panel-title-row">
                     <h4>Camera Sources</h4>
-                    <p class="field-help">Network cameras are found automatically. Assign them in <a href="{{ route('settings.index', ['tab' => 'stations']) }}">Stations &amp; Readers › Devices</a>.</p>
+                    <p class="field-help">Network cameras are found automatically. Assign them in <a href="{{ route('settings.index', ['tab' => 'stations']) }}">Gates &amp; Readers › Devices</a>.</p>
                 </div>
 
                 <div class="camera-grid">
-                    @foreach (['entrance' => 'Entrance Camera', 'exit' => 'Exit Camera'] as $role => $label)
+                    {{-- Phase 1: one camera per gate. --}}
+                    @foreach ($cameraConfigs as $role => $camera)
                         @php
-                            $camera = $cameraConfigs[$role];
+                            $label = ($camera['gate_name'] ?? \App\Models\Gate::labelFor($role)).' Camera';
                             $assignment = $cameraAssignments[$role] ?? null;
                             $managed = $assignment?->device !== null;
                             $sourceType = old("camera_configs.$role.source_type", $camera['source_type']);
@@ -127,7 +128,7 @@
                             <details class="advanced-section" @if ($errors->hasAny(["camera_configs.$role.source_type", "camera_configs.$role.source_value"])) open @endif>
                                 <summary>Advanced: manual source</summary>
                                 @if ($managed)
-                                    <p class="field-help">Managed by the assigned camera: the address follows it automatically when its IP changes. Unassign it in Stations &amp; Readers to type a source by hand.</p>
+                                    <p class="field-help">Managed by the assigned camera: the address follows it automatically when its IP changes. Unassign it in Gates &amp; Readers to type a source by hand.</p>
                                 @else
                                     <p class="field-help">Only for a USB webcam or a camera that cannot be detected.</p>
                                 @endif

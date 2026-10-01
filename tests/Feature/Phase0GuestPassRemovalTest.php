@@ -67,7 +67,7 @@ class Phase0GuestPassRemovalTest extends TestCase
         RfidTag::query()->create(['uid' => 'E280689400004031D64588E8', 'tag_number' => 8, 'display_number' => 'G-02', 'status' => RfidTag::STATUS_AVAILABLE]);
 
         $response = $this->actingAs($this->admin)
-            ->postJson(route('stations.rfid-scan', 'entrance'), ['tag_uid' => 'E280689400004031D64588E8'])
+            ->postJson(route('stations.rfid-scan', 'gate-1'), ['tag_uid' => 'E280689400004031D64588E8'])
             ->assertCreated()
             ->assertJsonMissingPath('issue')
             ->assertJsonMissingPath('requires_issue')
@@ -92,15 +92,15 @@ class Phase0GuestPassRemovalTest extends TestCase
         $this->actingAs($this->admin)->get(route('registry.index', ['tab' => 'tags']))->assertOk()->assertDontSee('Guest Passes');
 
         // Kiosks: no Issue Guest Pass or Card returned pop-ups.
-        $this->actingAs($this->admin)->get(route('stations.entrance'))->assertOk()->assertDontSee('data-issue-modal', false);
-        $this->actingAs($this->admin)->get(route('stations.exit'))->assertOk()->assertDontSee('data-card-return-modal', false);
+        $this->actingAs($this->admin)->get(route('gates.kiosk', 'gate-1'))->assertOk()->assertDontSee('data-issue-modal', false);
+        $this->actingAs($this->admin)->get(route('gates.kiosk', 'gate-2'))->assertOk()->assertDontSee('data-card-return-modal', false);
     }
 
     public function test_old_guest_pass_reads_do_not_count_as_a_pass_for_the_camera(): void
     {
         RfidScanLog::query()->create([
             'tag_uid' => 'OLD-PASS-READ',
-            'scan_location' => 'entrance',
+            'scan_location' => 'gate-1',
             'scan_direction' => 'entry',
             'scan_time' => now(),
             'verification_status' => 'guest_pass_entry',
@@ -109,7 +109,7 @@ class Phase0GuestPassRemovalTest extends TestCase
         ]);
 
         $this->withHeaders(['X-Api-Key' => 'test-detector-key'])
-            ->getJson(route('api.latest-scan', ['camera_role' => 'entrance', 'event_time' => now()->toIso8601String()]))
+            ->getJson(route('api.latest-scan', ['camera_role' => 'gate-1', 'event_time' => now()->toIso8601String()]))
             ->assertOk()
             ->assertJsonPath('matched', false)
             ->assertJsonPath('status', 'no_pass')
@@ -124,9 +124,9 @@ class Phase0GuestPassRemovalTest extends TestCase
         $tag = RfidTag::query()->create(['uid' => 'REG-TAG-1', 'status' => RfidTag::STATUS_ASSIGNED, 'vehicle_id' => $vehicle->id, 'assigned_at' => now()]);
         $vehicle->forceFill(['rfid_tag_id' => $tag->id, 'rfid_tag_uid' => $tag->uid])->save();
 
-        $this->assertSame('recorded', app(RfidIngestService::class)->ingest(['tag_uid' => 'REG-TAG-1', 'scan_location' => 'entrance'])->outcome);
+        $this->assertSame('recorded', app(RfidIngestService::class)->ingest(['tag_uid' => 'REG-TAG-1', 'scan_location' => 'gate-1'])->outcome);
         $this->assertSame('INSIDE', $vehicle->fresh()->current_state);
-        $this->assertSame('recorded', app(RfidIngestService::class)->ingest(['tag_uid' => 'REG-TAG-1', 'scan_location' => 'exit'])->outcome);
+        $this->assertSame('recorded', app(RfidIngestService::class)->ingest(['tag_uid' => 'REG-TAG-1', 'scan_location' => 'gate-2'])->outcome);
         $this->assertSame('OUTSIDE', $vehicle->fresh()->current_state);
     }
 

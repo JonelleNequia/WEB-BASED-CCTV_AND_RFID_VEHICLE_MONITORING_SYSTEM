@@ -46,17 +46,17 @@ class Phase5DetectorAlertTest extends TestCase
     public function test_rfid_match_accepts_a_read_from_up_to_ten_seconds_before_the_crossing(): void
     {
         $this->registeredVehicle('LBK 101', 'UHF-LOOKBACK-1');
-        $this->scan('UHF-LOOKBACK-1', 'entrance');
+        $this->scan('UHF-LOOKBACK-1', 'gate-1');
 
         $this->travelTo($this->start->copy()->addSeconds(13));
 
-        $this->pollMatch('entrance', $this->start->copy()->addSeconds(8))
+        $this->pollMatch('gate-1', $this->start->copy()->addSeconds(8))
             ->assertOk()
             ->assertJsonPath('matched', true)
             ->assertJsonPath('status', 'registered')
             ->assertJsonPath('overlay.label', 'REGISTERED - LBK 101');
 
-        $this->pollMatch('entrance', $this->start->copy()->addSeconds(11))
+        $this->pollMatch('gate-1', $this->start->copy()->addSeconds(11))
             ->assertOk()
             ->assertJsonPath('matched', false)
             ->assertJsonPath('status', 'no_pass')
@@ -66,18 +66,18 @@ class Phase5DetectorAlertTest extends TestCase
     public function test_one_rfid_read_confirms_only_one_vehicle(): void
     {
         $this->registeredVehicle('ONE 101', 'UHF-ONE-1');
-        $this->scan('UHF-ONE-1', 'entrance');
+        $this->scan('UHF-ONE-1', 'gate-1');
         $this->travelTo($this->start->copy()->addSeconds(8));
 
-        $this->pollMatch('entrance', $this->start->copy()->addSecond(), 'entrance-track-1')
+        $this->pollMatch('gate-1', $this->start->copy()->addSecond(), 'entrance-track-1')
             ->assertJsonPath('matched', true);
 
         // Same car, YOLO gave it a new track id a moment later.
-        $this->pollMatch('entrance', $this->start->copy()->addSeconds(2), 'entrance-track-2')
+        $this->pollMatch('gate-1', $this->start->copy()->addSeconds(2), 'entrance-track-2')
             ->assertJsonPath('matched', true);
 
         // A second car without a tag, right behind the first one.
-        $this->pollMatch('entrance', $this->start->copy()->addSeconds(7), 'entrance-track-3')
+        $this->pollMatch('gate-1', $this->start->copy()->addSeconds(7), 'entrance-track-3')
             ->assertJsonPath('matched', false);
     }
 
@@ -85,7 +85,7 @@ class Phase5DetectorAlertTest extends TestCase
     {
         $insideBefore = $this->liveMetrics()['vehicles_inside'];
 
-        $this->postNoPass('det-no-pass-1', 'entrance', $this->start, 'NOP 101')
+        $this->postNoPass('det-no-pass-1', 'gate-1', $this->start, 'NOP 101')
             ->assertCreated()
             ->assertJsonPath('overlay.verification', 'no_pass')
             ->assertJsonPath('overlay.label', 'NO PASS');
@@ -109,17 +109,17 @@ class Phase5DetectorAlertTest extends TestCase
             ->assertJsonPath('logs.0.verification_label', 'NO PASS')
             ->assertJsonPath('logs.0.plate_number', 'NOP 101')
             ->assertJsonPath('logs.0.no_pass_alert', true)
-            ->assertJsonPath('logs.0.alert_location', 'entrance');
+            ->assertJsonPath('logs.0.alert_location', 'gate-1');
     }
 
     public function test_no_pass_alert_is_suppressed_by_a_read_before_the_crossing(): void
     {
         $this->registeredVehicle('SUP 101', 'UHF-SUP-1');
-        $this->scan('UHF-SUP-1', 'entrance');
+        $this->scan('UHF-SUP-1', 'gate-1');
 
         $this->travelTo($this->start->copy()->addSeconds(13));
 
-        $this->postNoPass('det-suppressed-1', 'entrance', $this->start->copy()->addSeconds(9))
+        $this->postNoPass('det-suppressed-1', 'gate-1', $this->start->copy()->addSeconds(9))
             ->assertOk()
             ->assertJsonPath('suppressed', true)
             ->assertJsonPath('overlay.verification', 'registered');
@@ -129,7 +129,7 @@ class Phase5DetectorAlertTest extends TestCase
 
     public function test_guest_exit_is_not_matched_by_vehicle_type_and_color(): void
     {
-        $cameraId = Camera::query()->forRole('entrance')->value('id');
+        $cameraId = Camera::query()->forRole('gate-1')->value('id');
         $entry = VehicleEvent::query()->create([
             'event_type' => 'ENTRY',
             'event_status' => VehicleEvent::STATUS_COMPLETED,

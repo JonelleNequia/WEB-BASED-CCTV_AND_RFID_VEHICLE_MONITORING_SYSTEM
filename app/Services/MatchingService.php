@@ -6,7 +6,6 @@ use App\Models\ActiveSession;
 use App\Models\VehicleEvent;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Str;
 
 class MatchingService
 {
@@ -189,10 +188,9 @@ class MatchingService
             return true;
         }
 
-        $entryCamera = Str::lower($entryEvent->camera?->camera_name ?? '');
-        $exitCamera = Str::lower($exitEvent->camera?->camera_name ?? '');
-
-        return Str::contains($entryCamera, 'entrance') && Str::contains($exitCamera, 'exit');
+        // Phase 1: every gate records IN and OUT, so any gate camera to any
+        // gate camera is a valid route.
+        return $entryEvent->camera_id !== null && $exitEvent->camera_id !== null;
     }
 
     protected function isGuestVehicleEvent(VehicleEvent $event): bool

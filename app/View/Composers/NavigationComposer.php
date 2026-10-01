@@ -2,6 +2,7 @@
 
 namespace App\View\Composers;
 
+use App\Models\Gate;
 use App\Services\AlertSummaryService;
 use App\Services\DetectorRuntimeService;
 use App\Services\DeviceServiceRuntime;
@@ -58,7 +59,10 @@ class NavigationComposer
             $runtime = [];
         }
 
-        $cameras = collect($runtime['cameras'] ?? [])->only(['entrance', 'exit']);
+        // Phase 1: one camera per gate.
+        $gates = Gate::ordered();
+        $cameraTotal = $gates->count();
+        $cameras = collect($runtime['cameras'] ?? [])->only($gates->pluck('code')->all());
         $camerasOnline = $cameras->filter(fn ($camera): bool => (bool) ($camera['camera_running'] ?? false))->count();
         $detectorOnline = (bool) ($runtime['service_running'] ?? false);
 
@@ -66,7 +70,7 @@ class NavigationComposer
         $cameraReason = null;
         if (! $detectorOnline) {
             $cameraReason = 'Detector off';
-        } elseif ($camerasOnline < 2) {
+        } elseif ($camerasOnline < $cameraTotal) {
             $codes = $cameras->reject(fn ($camera): bool => (bool) ($camera['camera_running'] ?? false))
                 ->pluck('error_code')->filter();
             $cameraReason = match ($codes->first()) {
@@ -87,10 +91,10 @@ class NavigationComposer
             $devices = [];
         }
 
-        $readerProblems = collect(['entrance', 'exit'])
-            ->filter(fn (string $station): bool => $this->settingsService->get("{$station}_reader_type", 'nfc') === 'uhf_ethernet')
-            ->map(function (string $station) use ($devices): ?string {
-                $link = (array) data_get($devices, "readers.$station", []);
+        $readerProblems = $gates
+            ->filter(fn (Gate $gate): bool => $gate->reader_type === 'uhf_ethernet')
+            ->map(function (Gate $gate) use ($devices): ?string {
+                $link = (array) data_get($devices, "readers.{$gate->code}", []);
 
                 return match (true) {
                     ! ($devices['service_running'] ?? false) => 'Device service off',
@@ -104,7 +108,7 @@ class NavigationComposer
 
         return [
             ['label' => 'Detector', 'ok' => $detectorOnline, 'detail' => $detectorOnline ? 'Running' : $this->detectorRuntimeService->notRunningReason()],
-            ['label' => 'Cameras', 'ok' => $camerasOnline === 2, 'detail' => $camerasOnline.'/2 live'.($cameraReason ? ' · '.$cameraReason : '')],
+            ['label' => 'Cameras', 'ok' => $camerasOnline === $cameraTotal, 'detail' => $camerasOnline.'/'.$cameraTotal.' live'.($cameraReason ? ' · '.$cameraReason : '')],
             ['label' => 'Readers', 'ok' => $readersReady, 'detail' => $readersReady ? 'Ready' : (string) $readerProblems->first()],
         ];
     }

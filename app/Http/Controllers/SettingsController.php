@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Concerns\ResolvesTab;
 use App\Http\Requests\SaveSettingsRequest;
 use App\Models\DeviceAssignment;
+use App\Models\Gate;
 use App\Services\DetectorRuntimeService;
 use App\Services\DeviceRegistryService;
 use App\Services\DeviceServiceRuntime;
@@ -19,7 +20,7 @@ class SettingsController extends Controller
 
     /** UI Phase 2: Settings tabs; each form tab has its own Save button. */
     public const TABS = [
-        'stations' => 'Stations & Readers',
+        'stations' => 'Gates & Readers',
         'cameras' => 'Cameras',
         'calibration' => 'Calibration',
         'status' => 'System Status',
@@ -45,7 +46,7 @@ class SettingsController extends Controller
     {
         $settingsService->ensureCameraRuntimeConfigExists();
 
-        // Plug-and-detect: the Devices panel (Stations & Readers) and the
+        // Plug-and-detect: the Devices panel (Gates & Readers) and the
         // camera assignments shown on the Cameras tab.
         if ($tab === 'stations') {
             app(DeviceServiceRuntime::class)->ensureRunning();
@@ -57,6 +58,8 @@ class SettingsController extends Controller
             'cameraConfigs' => $settingsService->cameraConfigurations(),
             'detectorKeySet' => $settingsService->detectorApiKey() !== '',
             'devicesPayload' => $tab === 'stations' ? app(DeviceRegistryService::class)->panelPayload() : null,
+            // Phase 1: every gate, active or not (Settings › Gates & Readers).
+            'gates' => Gate::query()->orderBy('sort_order')->orderBy('id')->get(),
             'cameraAssignments' => DeviceAssignment::query()->with('device')
                 ->where('role', DeviceAssignment::ROLE_CAMERA)->get()->keyBy('station'),
             // Live preview on the Cameras tab (also counts as a viewer).
@@ -75,7 +78,7 @@ class SettingsController extends Controller
 
         // Live-latency work: stream roles of assigned cameras (Settings › Cameras).
         foreach ((array) $request->validated('camera_streams', []) as $station => $choice) {
-            if (in_array($station, DeviceAssignment::STATIONS, true)) {
+            if (in_array($station, DeviceAssignment::stations(), true)) {
                 app(DeviceRegistryService::class)->updateCameraStreams(
                     $station,
                     (string) ($choice['stream'] ?? 'sub'),
@@ -90,5 +93,34 @@ class SettingsController extends Controller
         $section = self::TABS[$request->input('section')] ?? 'System settings';
 
         return back()->with('status', $section.' saved.');
+    }
+
+    /**
+     * Phase 1: add a gate (ready for Gate 2, 3... at deployment). It gets a
+     * camera slot, a kiosk and a reader slot; assign devices in Devices.
+     */
+    public function storeGate(Request $request, SettingsService $settingsService): RedirectResponse
+    {
+        $validated = $request->validate(['name' => ['nullable', 'string', 'max:100']]);
+        $code = Gate::nextCode();
+        $number = (int) preg_replace('/\D+/', '', $code);
+        $name = trim((string) ($validated['name'] ?? '')) ?: "Gate {$number}";
+
+        Gate::query()->create([
+            'code' => $code,
+            'name' => $name,
+            'sort_order' => ((int) Gate::query()->max('sort_order')) + 1,
+            'is_active' => true,
+            'reader_type' => 'nfc',
+            'reader_name' => $name.' NFC Reader',
+        ]);
+
+        $settingsService->ensureCameraRuntimeConfigExists();
+        app(DeviceRegistryService::class)->exportRuntimeConfig();
+        // The detector starts one camera worker per gate when it starts.
+        app(DetectorRuntimeService::class)->ensureRunning(force: true);
+
+        return redirect()->route('settings.index', ['tab' => 'stations'])
+            ->with('status', "{$name} added. Assign its camera and reader in Devices, then calibrate it.");
     }
 }

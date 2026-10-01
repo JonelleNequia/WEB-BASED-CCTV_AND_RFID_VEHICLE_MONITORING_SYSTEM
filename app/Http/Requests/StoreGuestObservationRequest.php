@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\ValidGate;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreGuestObservationRequest extends FormRequest
@@ -37,7 +38,7 @@ class StoreGuestObservationRequest extends FormRequest
             'plate_text' => ['nullable', 'string', 'max:50'],
             'vehicle_type' => ['required', 'string', 'max:50'],
             'vehicle_color' => ['nullable', 'string', 'max:50'],
-            'location' => ['required', 'in:entrance,exit'],
+            'location' => ['required', new ValidGate],
             'observation_source' => ['nullable', 'in:manual,cctv'],
             'observed_at' => ['required', 'date'],
             'camera_id' => ['nullable', 'integer', 'exists:cameras,id'],

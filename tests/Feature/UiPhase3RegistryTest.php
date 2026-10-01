@@ -104,10 +104,10 @@ class UiPhase3RegistryTest extends TestCase
         $this->assertSame(RfidTag::STATUS_ASSIGNED, RfidTag::query()->where('uid', 'NEW-STICKER')->value('status'));
 
         // The old (lost) sticker is now flagged at the gate; the new one works.
-        $old = app(RfidIngestService::class)->ingest(['tag_uid' => 'OLD-STICKER', 'scan_location' => 'entrance']);
+        $old = app(RfidIngestService::class)->ingest(['tag_uid' => 'OLD-STICKER', 'scan_location' => 'gate-1']);
         $this->assertSame('inactive_tag', $old->scanLog->verification_status);
 
-        $new = app(RfidIngestService::class)->ingest(['tag_uid' => 'NEW-STICKER', 'scan_location' => 'entrance']);
+        $new = app(RfidIngestService::class)->ingest(['tag_uid' => 'NEW-STICKER', 'scan_location' => 'gate-1']);
         $this->assertSame('verified', $new->scanLog->verification_status);
     }
 
@@ -120,7 +120,7 @@ class UiPhase3RegistryTest extends TestCase
             ->assertSessionHasNoErrors();
         $this->assertSame('inactive', $vehicle->fresh()->status);
 
-        $scan = app(RfidIngestService::class)->ingest(['tag_uid' => 'DEA-TAG', 'scan_location' => 'entrance']);
+        $scan = app(RfidIngestService::class)->ingest(['tag_uid' => 'DEA-TAG', 'scan_location' => 'gate-1']);
         $this->assertSame('inactive_vehicle', $scan->scanLog->verification_status);
 
         $this->actingAs($this->admin)
@@ -135,7 +135,7 @@ class UiPhase3RegistryTest extends TestCase
 
         foreach (range(1, 12) as $i) {
             $this->travel(2)->minutes();
-            app(RfidIngestService::class)->ingest(['tag_uid' => 'PNL-TAG', 'scan_location' => $i % 2 ? 'entrance' : 'exit']);
+            app(RfidIngestService::class)->ingest(['tag_uid' => 'PNL-TAG', 'scan_location' => $i % 2 ? 'gate-1' : 'gate-2']);
         }
 
         $this->actingAs($this->admin)

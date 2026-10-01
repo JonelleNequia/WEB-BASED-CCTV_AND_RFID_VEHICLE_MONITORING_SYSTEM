@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Gate;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
@@ -20,7 +21,7 @@ use Throwable;
 class StationController extends Controller
 {
     /**
-     * Show one read-only station window for the local extended-display setup.
+     * Phase 1: the kiosk of one gate (code, or the old "entrance"/"exit").
      */
     public function show(
         string $location,
@@ -37,13 +38,11 @@ class StationController extends Controller
             $detectorRuntimeService->ensureRunning(),
             request()->getHost()
         );
-        $eventType = $this->eventTypeForLocation($location);
         $cameraStatus = $detectorStatus['cameras'][$location] ?? [];
 
         return view('stations.show', [
             'location' => $location,
             'stationLabel' => $this->stationLabel($location),
-            'eventType' => $eventType,
             'camera' => $camera,
             'detectorStatus' => $detectorStatus,
             'cameraStatus' => $cameraStatus,
@@ -58,7 +57,6 @@ class StationController extends Controller
     public function state(string $location, Request $request, DetectorRuntimeService $detectorRuntimeService): JsonResponse
     {
         $location = $this->validateLocation($location);
-        $eventType = $this->eventTypeForLocation($location);
         $detectorRuntimeService->markStationViewerActive($location);
         $runtime = $detectorRuntimeService->withViewerStreamUrls(
             $detectorRuntimeService->ensureRunning(),
@@ -67,7 +65,6 @@ class StationController extends Controller
 
         return response()->json([
             'location' => $location,
-            'event_type' => $eventType,
             'runtime' => $runtime,
             'camera' => $runtime['cameras'][$location] ?? null,
             'stream_url' => $runtime['cameras'][$location]['stream_url'] ?? $detectorRuntimeService->defaultStreamUrl($location),
@@ -95,17 +92,15 @@ class StationController extends Controller
                 'notes' => ['nullable', 'string', 'max:1000'],
             ]);
 
-            $readerName = $validated['reader_name']
-                ?? ($location === 'exit' ? 'Exit Station RFID Reader' : 'Entrance Station RFID Reader');
+            $readerName = $validated['reader_name'] ?? Gate::labelFor($location).' Kiosk Reader';
 
-            // Phase 3: the shared ingest service applies the station direction
-            // (Entrance = ENTRY, Exit = EXIT), the per-tag cooldown (replaces
-            // the old 8-second duplicate check).
+            // Phase 1: every gate records IN and OUT (the vehicle's state
+            // decides, until the camera gives the direction). Same cooldown.
             $result = $rfidIngestService->ingest([
                 ...$validated,
                 'scan_location' => $location,
                 'reader_name' => $readerName,
-            ], 'station_reader', RfidIngestService::DIRECTION_STATION);
+            ], 'station_reader');
 
             return response()->json([
                 ...$this->stationScanPayload($result->scanLog, $result->isDuplicate()),
@@ -282,20 +277,19 @@ class StationController extends Controller
         ];
     }
 
+    /**
+     * A gate code, or the old "entrance"/"exit" (Gate 1 / Gate 2).
+     */
     protected function validateLocation(string $location): string
     {
-        abort_unless(in_array($location, ['entrance', 'exit'], true), 404);
+        $code = Gate::resolveCode($location);
+        abort_if($code === null, 404);
 
-        return $location;
-    }
-
-    protected function eventTypeForLocation(string $location): string
-    {
-        return $location === 'exit' ? 'EXIT' : 'ENTRY';
+        return $code;
     }
 
     protected function stationLabel(string $location): string
     {
-        return $location === 'exit' ? 'Exit Station' : 'Entrance Station';
+        return Gate::labelFor($location);
     }
 }

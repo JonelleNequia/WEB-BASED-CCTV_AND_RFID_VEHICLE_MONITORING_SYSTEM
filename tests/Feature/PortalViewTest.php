@@ -21,7 +21,7 @@ class PortalViewTest extends TestCase
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->actingAs($user)
-            ->get(route('portals.show', 'entrance'))
+            ->get(route('portals.show', 'gate-1'))
             ->assertRedirect(route('gates.index'));
     }
 }

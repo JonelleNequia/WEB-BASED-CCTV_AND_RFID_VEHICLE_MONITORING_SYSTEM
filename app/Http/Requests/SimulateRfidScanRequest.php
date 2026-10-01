@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\ValidGate;
 use Illuminate\Foundation\Http\FormRequest;
 
 class SimulateRfidScanRequest extends FormRequest
@@ -24,7 +25,7 @@ class SimulateRfidScanRequest extends FormRequest
         return [
             'vehicle_rfid_tag_id' => ['nullable', 'integer', 'exists:vehicle_rfid_tags,id', 'required_without:tag_uid'],
             'tag_uid' => ['nullable', 'string', 'max:100', 'required_without:vehicle_rfid_tag_id'],
-            'scan_location' => ['required', 'in:entrance,exit'],
+            'scan_location' => ['required', new ValidGate],
             'scan_direction' => ['nullable', 'in:entry,exit'],
             'reader_name' => ['nullable', 'string', 'max:100'],
             'scan_time' => ['nullable', 'date'],

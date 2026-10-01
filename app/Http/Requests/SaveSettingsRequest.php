@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Gate;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 class SaveSettingsRequest extends FormRequest
@@ -40,15 +42,9 @@ class SaveSettingsRequest extends FormRequest
 
     /** UI Phase 2: which fields each Settings tab saves. */
     public const SECTIONS = [
+        // Phase 1: Gates & Readers (name, reader type, manual reader address per gate).
         'stations' => [
-            'entrance_portal_label', 'exit_portal_label',
-            'entrance_rfid_reader_name', 'exit_rfid_reader_name',
-            'entrance_reader_type', 'exit_reader_type',
-            'entrance_reader_ip', 'exit_reader_ip',
-            'entrance_reader_port', 'exit_reader_port',
-            // Plug-and-detect: manual override switch and protocol.
-            'entrance_reader_manual', 'exit_reader_manual',
-            'entrance_reader_transport', 'exit_reader_transport',
+            'gates',
             'rfid_cooldown_seconds',
         ],
         'cameras' => [
@@ -72,34 +68,27 @@ class SaveSettingsRequest extends FormRequest
             'rfid_simulation_mode' => ['required', 'in:enabled,disabled'],
             'camera_source_placeholder' => ['nullable', 'string', 'max:255'],
             'retention_days' => ['nullable', 'integer', 'min:1', 'max:3650'],
-            'entrance_portal_label' => ['required', 'string', 'max:100'],
-            'exit_portal_label' => ['required', 'string', 'max:100'],
-            // Phase 4: reader names are now derived from the reader type.
-            'entrance_rfid_reader_name' => ['nullable', 'string', 'max:100'],
-            'exit_rfid_reader_name' => ['nullable', 'string', 'max:100'],
-            // Phase 4: Reader Configuration.
-            'entrance_reader_type' => ['sometimes', 'in:nfc,uhf_ethernet,simulated'],
-            'exit_reader_type' => ['sometimes', 'in:nfc,uhf_ethernet,simulated'],
-            // Plug-and-detect: the reader is picked in Devices; the address is
-            // needed only for the manual override, and must be a local address.
-            'entrance_reader_manual' => ['sometimes', 'in:0,1'],
-            'exit_reader_manual' => ['sometimes', 'in:0,1'],
-            'entrance_reader_transport' => ['sometimes', 'in:tcp,udp'],
-            'exit_reader_transport' => ['sometimes', 'in:tcp,udp'],
-            'entrance_reader_ip' => ['nullable', 'required_if:entrance_reader_manual,1', 'ipv4', $this->localAddressRule()],
-            'exit_reader_ip' => ['nullable', 'required_if:exit_reader_manual,1', 'ipv4', $this->localAddressRule()],
-            'entrance_reader_port' => ['nullable', 'required_if:entrance_reader_manual,1', 'integer', 'between:1,65535'],
-            'exit_reader_port' => ['nullable', 'required_if:exit_reader_manual,1', 'integer', 'between:1,65535'],
+            // Phase 1: one entry per gate, keyed by gate code. The reader is
+            // picked in Devices; the manual address (a local address only) is
+            // an override.
+            'gates' => ['sometimes', 'array'],
+            'gates.*.name' => ['required', 'string', 'max:100'],
+            'gates.*.reader_type' => ['sometimes', Rule::in(array_keys(Gate::READER_TYPES))],
+            'gates.*.reader_manual' => ['sometimes', 'in:0,1'],
+            'gates.*.reader_transport' => ['sometimes', 'in:tcp,udp'],
+            'gates.*.reader_ip' => ['nullable', 'required_if:gates.*.reader_manual,1', 'ipv4', $this->localAddressRule()],
+            'gates.*.reader_port' => ['nullable', 'required_if:gates.*.reader_manual,1', 'integer', 'between:1,65535'],
+            'gates.*.is_active' => ['sometimes', 'in:0,1'],
             'rfid_cooldown_seconds' => ['sometimes', 'integer', 'min:0', 'max:3600'],
+            // Cameras tab: one camera per gate (keys = gate codes).
             'camera_configs' => ['required', 'array'],
-            'camera_configs.entrance.camera_name' => ['required', 'string', 'max:100'],
-            'camera_configs.entrance.source_type' => ['required', 'in:webcam,rtsp,url'],
-            'camera_configs.entrance.source_value' => ['required', 'string', 'max:500'],
-            'camera_configs.entrance.source_username' => ['nullable', 'string', 'max:255'],
-            'camera_configs.entrance.source_password' => ['nullable', 'string', 'max:255'],
-            'camera_configs.entrance.clear_password' => ['nullable', 'boolean'],
-            'camera_configs.entrance.snapshot_source_value' => ['nullable', 'string', 'max:500'],
-            'camera_configs.exit.snapshot_source_value' => ['nullable', 'string', 'max:500'],
+            'camera_configs.*.camera_name' => ['required', 'string', 'max:100'],
+            'camera_configs.*.source_type' => ['required', 'in:webcam,rtsp,url'],
+            'camera_configs.*.source_value' => ['required', 'string', 'max:500'],
+            'camera_configs.*.source_username' => ['nullable', 'string', 'max:255'],
+            'camera_configs.*.source_password' => ['nullable', 'string', 'max:255'],
+            'camera_configs.*.clear_password' => ['nullable', 'boolean'],
+            'camera_configs.*.snapshot_source_value' => ['nullable', 'string', 'max:500'],
             // Live-latency work: stream roles for assigned cameras and tuning.
             'camera_streams' => ['sometimes', 'array'],
             'camera_streams.*.stream' => ['nullable', 'in:main,sub'],
@@ -112,12 +101,6 @@ class SaveSettingsRequest extends FormRequest
             'perf_yolo_device' => ['sometimes', 'in:auto,cpu,mps,cuda:0'],
             'perf_roi_crop' => ['sometimes', 'in:0,1'],
             'perf_hires_on_trigger' => ['sometimes', 'in:0,1'],
-            'camera_configs.exit.camera_name' => ['required', 'string', 'max:100'],
-            'camera_configs.exit.source_type' => ['required', 'in:webcam,rtsp,url'],
-            'camera_configs.exit.source_value' => ['required', 'string', 'max:500'],
-            'camera_configs.exit.source_username' => ['nullable', 'string', 'max:255'],
-            'camera_configs.exit.source_password' => ['nullable', 'string', 'max:255'],
-            'camera_configs.exit.clear_password' => ['nullable', 'boolean'],
         ];
     }
 
@@ -138,33 +121,73 @@ class SaveSettingsRequest extends FormRequest
     }
 
     /**
+     * Phase 1: forms and clients from before gates sent entrance_* / exit_*
+     * fields; they mean Gate 1 / Gate 2.
+     */
+    protected function mergeLegacyGateFields(): void
+    {
+        $gates = (array) $this->input('gates', []);
+        $map = [
+            'portal_label' => 'name', 'reader_type' => 'reader_type', 'rfid_reader_name' => 'reader_name',
+            'reader_manual' => 'reader_manual', 'reader_ip' => 'reader_ip', 'reader_port' => 'reader_port',
+            'reader_transport' => 'reader_transport',
+        ];
+
+        foreach (Gate::LEGACY_CODES as $station => $code) {
+            foreach ($map as $old => $new) {
+                if ($this->has("{$station}_{$old}") && ! isset($gates[$code][$new])) {
+                    $gates[$code][$new] = $this->input("{$station}_{$old}");
+                }
+            }
+        }
+
+        if ($gates !== []) {
+            // A legacy form without labels keeps the current names.
+            foreach ($gates as $code => $values) {
+                if (! array_key_exists('name', (array) $values)) {
+                    $gates[$code]['name'] = Gate::query()->where('code', $code)->value('name') ?? '';
+                }
+            }
+            $this->merge(['gates' => $gates]);
+        }
+    }
+
+    /**
+     * @return mixed
+     */
+    protected function legacyKeysToGateCodes(mixed $values): mixed
+    {
+        if (! is_array($values)) {
+            return $values;
+        }
+
+        $mapped = [];
+        foreach ($values as $key => $value) {
+            $mapped[Gate::LEGACY_CODES[$key] ?? $key] = $value;
+        }
+
+        return $mapped;
+    }
+
+    /**
      * Trim nested camera fields before validating cross-field source rules.
      */
     protected function prepareForValidation(): void
     {
-        // Phase 4: derive the reader name shown in logs from the reader type.
-        foreach (['entrance' => 'Entrance', 'exit' => 'Exit'] as $station => $label) {
-            $type = (string) $this->input("{$station}_reader_type", '');
+        $this->mergeLegacyGateFields();
 
-            if ($type !== '' && ! $this->filled("{$station}_rfid_reader_name")) {
-                $this->merge([
-                    "{$station}_rfid_reader_name" => $label.' '.match ($type) {
-                        'uhf_ethernet' => 'UHF Reader',
-                        'simulated' => 'RFID Reader (Simulated)',
-                        default => 'NFC Reader',
-                    },
-                ]);
-            }
+        $cameraConfigs = $this->legacyKeysToGateCodes($this->input('camera_configs', []));
+
+        if ($this->has('camera_streams')) {
+            $this->merge(['camera_streams' => $this->legacyKeysToGateCodes($this->input('camera_streams', []))]);
         }
-
-        $cameraConfigs = $this->input('camera_configs', []);
 
         if (! is_array($cameraConfigs)) {
             return;
         }
 
-        foreach (['entrance', 'exit'] as $role) {
-            if (! isset($cameraConfigs[$role]) || ! is_array($cameraConfigs[$role])) {
+        foreach (array_keys($cameraConfigs) as $role) {
+            if (! is_array($cameraConfigs[$role])) {
                 continue;
             }
 
@@ -186,7 +209,14 @@ class SaveSettingsRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
-            foreach (['entrance' => 'Entrance', 'exit' => 'Exit'] as $role => $label) {
+            $gates = (array) $this->input('gates', []);
+            if ($gates !== [] && collect($gates)->every(fn ($gate): bool => (string) ($gate['is_active'] ?? '1') === '0')) {
+                $validator->errors()->add('gates', 'Keep at least one gate active.');
+            }
+
+            $configs = (array) $this->input('camera_configs', []);
+            foreach (array_keys($configs) as $role) {
+                $label = Gate::labelFor((string) $role);
                 $sourceType = (string) $this->input("camera_configs.$role.source_type", '');
                 $sourceValue = trim((string) $this->input("camera_configs.$role.source_value", ''));
                 $field = "camera_configs.$role.source_value";

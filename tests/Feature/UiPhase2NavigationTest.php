@@ -118,34 +118,34 @@ class UiPhase2NavigationTest extends TestCase
         $this->actingAs($this->guard)
             ->get(route('gates.index'))
             ->assertOk()
-            ->assertSee('Open Entrance Kiosk')
-            ->assertSee('Open Exit Kiosk')
-            ->assertSee(route('stations.entrance'), false)
-            ->assertSee(route('stations.exit'), false)
-            ->assertSee('data-gate="entrance"', false)
-            ->assertSee('data-gate="exit"', false);
+            ->assertSee('Open Gate 1 Kiosk')
+            ->assertSee('Open Gate 2 Kiosk')
+            ->assertSee(route('gates.kiosk', 'gate-1'), false)
+            ->assertSee(route('gates.kiosk', 'gate-2'), false)
+            ->assertSee('data-gate="gate-1"', false)
+            ->assertSee('data-gate="gate-2"', false);
 
         $this->actingAs($this->guard)
             ->getJson(route('gates.state'))
             ->assertOk()
-            ->assertJsonStructure(['detector_running', 'gates' => ['entrance' => ['camera_running', 'stream_url', 'latest_scan', 'logs'], 'exit']]);
+            ->assertJsonStructure(['detector_running', 'gates' => ['gate-1' => ['camera_running', 'stream_url', 'latest_scan', 'logs'], 'gate-2']]);
     }
 
     public function test_gate_monitor_shows_the_latest_scan_per_gate(): void
     {
         RfidTag::query()->create(['uid' => 'GATE-UNKNOWN-1', 'status' => RfidTag::STATUS_AVAILABLE]);
-        app(RfidIngestService::class)->ingest(['tag_uid' => 'GATE-UNKNOWN-1', 'scan_location' => 'exit'], 'station_reader');
+        app(RfidIngestService::class)->ingest(['tag_uid' => 'GATE-UNKNOWN-1', 'scan_location' => 'gate-2'], 'station_reader');
 
         $state = $this->actingAs($this->admin)->getJson(route('gates.state'))->json('gates');
 
-        $this->assertNull($state['entrance']['latest_scan']);
-        $this->assertNotNull($state['exit']['latest_scan']);
+        $this->assertNull($state['gate-1']['latest_scan']);
+        $this->assertNotNull($state['gate-2']['latest_scan']);
     }
 
     public function test_sidebar_shows_the_alert_count(): void
     {
         RfidTag::query()->create(['uid' => 'LOST-TAG-1', 'status' => RfidTag::STATUS_LOST]);
-        app(RfidIngestService::class)->ingest(['tag_uid' => 'LOST-TAG-1', 'scan_location' => 'entrance'], 'station_reader');
+        app(RfidIngestService::class)->ingest(['tag_uid' => 'LOST-TAG-1', 'scan_location' => 'gate-1'], 'station_reader');
 
         $this->actingAs($this->admin)
             ->get(route('dashboard.index'))
@@ -180,12 +180,13 @@ class UiPhase2NavigationTest extends TestCase
             ])
             ->assertSessionHasNoErrors();
 
-        $this->assertSame('Main Gate', SystemSetting::query()->where('setting_key', 'entrance_portal_label')->value('setting_value'));
+        // Phase 1: the old label fields rename Gate 1 / Gate 2.
+        $this->assertSame(['Main Gate', 'Back Gate'], \App\Models\Gate::query()->orderBy('sort_order')->pluck('name')->all());
         // The Cameras tab's value was not touched by the stations save.
         $this->assertSame('12', SystemSetting::query()->where('setting_key', 'perf_stream_fps')->value('setting_value'));
 
         $this->actingAs($this->admin)
-            ->put(route('settings.update'), ['section' => 'stations', 'exit_portal_label' => 'Back Gate'])
-            ->assertSessionHasErrors('entrance_portal_label');
+            ->put(route('settings.update'), ['section' => 'stations', 'gates' => ['gate-1' => ['name' => '']]])
+            ->assertSessionHasErrors('gates.gate-1.name');
     }
 }

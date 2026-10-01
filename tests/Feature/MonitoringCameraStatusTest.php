@@ -34,7 +34,7 @@ class MonitoringCameraStatusTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
-        $camera = Camera::query()->forRole('exit')->firstOrFail();
+        $camera = Camera::query()->forRole('gate-2')->firstOrFail();
 
         $this->actingAs($user)
             ->putJson(route('camera-browser.state'), [
@@ -45,7 +45,7 @@ class MonitoringCameraStatusTest extends TestCase
                 'last_connection_message' => 'Exit webcam is unplugged.',
             ])
             ->assertOk()
-            ->assertJsonPath('camera.camera_role', 'exit')
+            ->assertJsonPath('camera.camera_role', 'gate-2')
             ->assertJsonPath('camera.last_connection_status', 'not_connected');
 
         $camera->refresh();

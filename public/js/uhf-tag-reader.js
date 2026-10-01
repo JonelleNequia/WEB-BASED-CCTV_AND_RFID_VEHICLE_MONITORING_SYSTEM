@@ -36,7 +36,7 @@
                     // First call: only tags read from now on (server clock).
                     after = data.now;
                     if (!data.connected) {
-                        options.onStatus?.('No UHF reader is connected. Assign one in Settings › Stations & Readers.', 'error');
+                        options.onStatus?.('No UHF reader is connected. Assign one in Settings › Gates & Readers.', 'error');
                         stop();
                         return;
                     }

@@ -1,8 +1,8 @@
 /*
- * Plug-and-detect: Settings › Stations & Readers › Devices.
+ * Plug-and-detect: Settings › Gates & Readers › Devices.
  * - Polls the device list (faster while a scan runs) and re-renders it.
  * - New devices are highlighted and announced with a toast.
- * - Click a device: details, then assign it to Entrance/Exit as camera or
+ * - Click a device: details, then assign it to a gate as camera or
  *   reader. A camera login is asked only when the saved one does not work.
  */
 (function () {
@@ -195,7 +195,7 @@
         if (role === 'camera') {
             const stream = (assigned.options || {}).stream === 'sub' ? 'Sub' : 'Main';
             const shared = assigned.shared_with
-                ? ` · same physical camera as the ${capitalize(assigned.shared_with.station)} (${assigned.shared_with.stream === 'sub' ? 'sub' : 'main'} stream)`
+                ? ` · same physical camera as ${gateName(assigned.shared_with.station)} (${assigned.shared_with.stream === 'sub' ? 'sub' : 'main'} stream)`
                 : '';
             body.append(el('span', 'field-help', `${stream} stream${shared}`));
 
@@ -221,6 +221,10 @@
         (warning.steps || []).forEach((step) => steps.append(el('li', null, step)));
         box.append(steps);
         return box;
+    }
+
+    function gateName(code) {
+        return (data.stations?.[code]?.label) || capitalize(code);
     }
 
     function capitalize(text) {
@@ -402,7 +406,7 @@
         const tableNode = el('table', 'devices-table');
         const head = el('thead');
         const headRow = el('tr');
-        ['Type', 'Device', 'IP address', 'MAC address', 'Maker', 'Open ports', 'Status', 'Station', ''].forEach((label) => headRow.append(el('th', null, label)));
+        ['Type', 'Device', 'IP address', 'MAC address', 'Maker', 'Open ports', 'Status', 'Gate', ''].forEach((label) => headRow.append(el('th', null, label)));
         head.append(headRow);
 
         const body = el('tbody');
@@ -557,7 +561,7 @@
     function assignForm(device) {
         const form = el('form', 'stack-form devices-assign');
         form.noValidate = true;
-        form.append(el('h3', 'vehicle-panel-subtitle', 'Assign to a station'));
+        form.append(el('h3', 'vehicle-panel-subtitle', 'Assign to a gate'));
 
         const defaultRole = device.kind === 'rfid_reader' ? 'reader' : 'camera';
         const roles = device.kind === 'camera' ? [['camera', 'Camera']]
@@ -565,9 +569,11 @@
                 : [['camera', 'Camera'], ['reader', 'UHF Reader']];
         form.append(radioGroup('role', 'Use as', roles, defaultRole));
 
-        const taken = (device.assigned || [])[0];
-        const freeStation = taken ? (taken.station === 'entrance' ? 'exit' : 'entrance') : 'entrance';
-        form.append(radioGroup('station', 'Station', [['entrance', 'Entrance'], ['exit', 'Exit']], freeStation));
+        // Phase 1: one choice per gate; suggest the first gate this device is not on yet.
+        const gates = Object.entries(data.stations || {}).map(([code, info]) => [code, info.label || code]);
+        const taken = new Set((device.assigned || []).map((item) => item.station));
+        const freeStation = (gates.find(([code]) => !taken.has(code)) || gates[0] || [''])[0];
+        form.append(radioGroup('station', 'Gate', gates, freeStation));
 
         const streams = el('div', 'field devices-camera-only');
         const streamLabel = el('label', null, 'Video stream');
@@ -586,7 +592,7 @@
         // One camera for both stations (testing): the other station gets the other stream.
         const cameraUse = (device.assigned || []).find((item) => item.role === 'camera');
         if (device.kind === 'camera' && cameraUse) {
-            streams.append(el('span', 'field-help', `Already the ${capitalize(cameraUse.station)} camera. You can use it for the other station too; it will show as the same device.`));
+            streams.append(el('span', 'field-help', `Already the ${gateName(cameraUse.station)} camera. You can use it for another gate too; it will show as the same device.`));
         }
         streams.append(el('span', 'field-help', 'Snapshots and plate reading still use the full-resolution main stream when a vehicle is detected.'));
 
@@ -953,7 +959,7 @@
         if (found && !find.running) {
             const saved = (data.devices || []).find((device) => device.mac === found.mac);
             if (saved) {
-                nodes.push(button('Assign this reader to a station', 'button button-primary button-sm', () => openDevice(saved.id)));
+                nodes.push(button('Assign this reader to a gate', 'button button-primary button-sm', () => openDevice(saved.id)));
             }
         }
 

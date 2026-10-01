@@ -21,10 +21,7 @@ class SystemSettingSeeder extends Seeder
             'rfid_simulation_mode' => 'enabled',
             'camera_source_placeholder' => 'rtsp://philcst-green-metrics-demo',
             'retention_days' => '30',
-            'entrance_portal_label' => 'PHILCST Entrance Portal',
-            'exit_portal_label' => 'PHILCST Exit Portal',
-            'entrance_rfid_reader_name' => 'Entrance RFID Reader (Simulated)',
-            'exit_rfid_reader_name' => 'Exit RFID Reader (Simulated)',
+            // Phase 1: gate names and readers live in the gates table.
         ];
 
         foreach ($settings as $key => $value) {

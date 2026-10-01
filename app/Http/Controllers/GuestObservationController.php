@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\UpdateGuestObservationRequest;
 use App\Models\Camera;
+use App\Models\Gate;
+use App\Rules\ValidGate;
 use App\Models\EventReceiveLog;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidScanLog;
@@ -131,7 +133,7 @@ class GuestObservationController extends Controller
             'plate_text' => $plateNumber,
             'vehicle_type' => $validated['vehicle_type'] ?? null,
             'vehicle_color' => $this->normalizeVehicleColor($validated['vehicle_color'] ?? null),
-            'location' => $validated['location'],
+            'location' => Gate::normalizeCode($validated['location']),
             'observed_at' => $validated['observed_at'],
             'status' => $validated['status'],
             'notes' => $validated['notes'] ?? null,
@@ -157,7 +159,7 @@ class GuestObservationController extends Controller
             'plate_number' => ['nullable', 'string', 'max:50'],
             'vehicle_type' => ['nullable', 'string', 'max:50'],
             'vehicle_color' => ['nullable', 'string', 'max:50'],
-            'location' => ['required', 'in:entrance,exit'],
+            'location' => ['required', new ValidGate],
             'observed_at' => ['required', 'date'],
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
@@ -169,7 +171,7 @@ class GuestObservationController extends Controller
             'plate_text' => $plateNumber,
             'vehicle_type' => $validated['vehicle_type'] ?? null,
             'vehicle_color' => $this->normalizeVehicleColor($validated['vehicle_color'] ?? null),
-            'location' => $validated['location'],
+            'location' => Gate::normalizeCode($validated['location']),
             'observed_at' => Carbon::parse($validated['observed_at']),
             'status' => 'verified',
             'notes' => $validated['notes'] ?? null,
@@ -233,7 +235,7 @@ class GuestObservationController extends Controller
 
             $validated = $request->validate([
                 'external_event_key' => ['required', 'string', 'max:120'],
-                'camera_role' => ['required', 'string', 'in:entrance,exit'],
+                'camera_role' => ['required', 'string', new ValidGate],
                 'camera_id' => ['nullable', 'integer', 'exists:cameras,id'],
                 'detected_vehicle_type' => ['nullable', 'string', 'max:50'],
                 'event_time' => ['required', 'date'],
@@ -254,7 +256,7 @@ class GuestObservationController extends Controller
                     : ($request->hasFile('image') ? $request->file('image') : null));
 
             $cameraId = $validated['camera_id']
-                ?? Camera::query()->forRole($validated['camera_role'])->value('id');
+                ?? Camera::query()->forRole(Gate::normalizeCode($validated['camera_role']))->value('id');
             $cameraId = $cameraId !== null ? (int) $cameraId : null;
 
             $existing = $this->findExistingDetectorGuestObservation($validated['external_event_key']);
@@ -291,7 +293,7 @@ class GuestObservationController extends Controller
             // crossing up to a late read after the window) means no alert.
             $matchService = app(DetectorRfidMatchService::class);
             $recentVerifiedScan = $matchService->find(
-                $validated['camera_role'],
+                Gate::normalizeCode($validated['camera_role']),
                 Carbon::parse($validated['event_time']),
                 self::DETECTOR_LATE_SCAN_SECONDS,
                 DetectorRfidMatchService::DEFAULT_LOOKBACK_SECONDS,
@@ -318,7 +320,7 @@ class GuestObservationController extends Controller
             }
 
             $recentDuplicate = $this->findRecentGuestObservationForDetectorPayload(
-                $validated['camera_role'],
+                Gate::normalizeCode($validated['camera_role']),
                 Carbon::parse($validated['event_time']),
                 $this->normalizePlate($validated['plate_number'] ?? $validated['plate_text'] ?? null),
                 $validated['detection_metadata'] ?? [],
@@ -376,7 +378,7 @@ class GuestObservationController extends Controller
                     'plate_number' => $plateNumber,
                     'vehicle_type' => $validated['detected_vehicle_type'] ?? 'Vehicle',
                     'vehicle_color' => $vehicleColor,
-                    'location' => $validated['camera_role'],
+                    'location' => Gate::normalizeCode($validated['camera_role']),
                     'observation_source' => 'cctv',
                     'status' => 'pending_review',
                     'observed_at' => Carbon::parse($validated['event_time']),
@@ -474,7 +476,9 @@ class GuestObservationController extends Controller
             ]);
         }
 
-        $eventType = $observation->location === 'exit' ? 'EXIT' : 'ENTRY';
+        $eventType = VehicleEvent::eventTypeForDirection(
+            data_get($observation->detection_metadata_json, 'direction') ?? data_get($validated, 'detection_metadata.direction')
+        );
         $plateNumber = $this->normalizePlate(
             $observation->plate_number
                 ?: $observation->plate_text
@@ -508,9 +512,7 @@ class GuestObservationController extends Controller
                 'camera_id' => $observation->camera_id,
                 'detection_metadata_json' => $observation->detection_metadata_json,
                 'details_completed_at' => now(),
-                'roi_name' => $observation->location === 'exit'
-                    ? 'Exit Camera'
-                    : 'Entrance Camera',
+                'roi_name' => Gate::labelFor($observation->location).' Camera',
                 'event_time' => $observation->observed_at,
                 'vehicle_image_path' => $observation->snapshot_path,
                 'plate_image_path' => null,
@@ -1111,7 +1113,7 @@ class GuestObservationController extends Controller
             'plate_text' => ['nullable', 'string', 'max:50'],
             'vehicle_type' => ['required', 'string', 'max:50'],
             'vehicle_color' => ['nullable', 'string', 'max:50'],
-            'location' => ['required', 'in:entrance,exit'],
+            'location' => ['required', new ValidGate],
             'observation_source' => ['nullable', 'in:manual,cctv'],
             'observed_at' => ['required', 'date'],
             'camera_id' => ['nullable', 'integer', 'exists:cameras,id'],

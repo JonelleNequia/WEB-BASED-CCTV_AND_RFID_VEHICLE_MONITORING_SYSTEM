@@ -63,7 +63,7 @@ class AlertSummaryService
                     'kind' => 'anomaly',
                     'tone' => 'critical',
                     'label' => 'Anomaly',
-                    'title' => ($scan->vehicle?->plate_number ?? $scan->vehicleRfidTag?->label ?? $scan->tag_uid).' · '.ucfirst($scan->scan_location),
+                    'title' => ($scan->vehicle?->plate_number ?? $scan->vehicleRfidTag?->label ?? $scan->tag_uid).' · '.\App\Models\Gate::labelFor($scan->scan_location),
                     'detail' => (string) ($scan->anomaly_reason ?: $scan->verificationLabel),
                     'time' => DisplayTime::time($scan->scan_time),
                     'sort' => $scan->scan_time?->getTimestamp() ?? 0,

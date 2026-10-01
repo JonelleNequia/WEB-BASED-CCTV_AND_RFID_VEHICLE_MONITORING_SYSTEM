@@ -157,7 +157,7 @@ class RfidScanLog extends Model
      */
     public function getScanLocationLabelAttribute(): string
     {
-        return ucfirst($this->scan_location);
+        return Gate::labelFor($this->scan_location);
     }
 
     /**

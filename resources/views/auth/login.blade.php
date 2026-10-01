@@ -22,7 +22,7 @@
                 <div class="auth-brand-copy">
                     <p class="auth-kicker">Green Metrics Prototype</p>
                     <h1 id="auth-system-title">Web-Based CCTV Vehicle Monitoring System</h1>
-                    <p class="auth-subtitle">PhilCST Campus Entrance and Exit Monitoring</p>
+                    <p class="auth-subtitle">PhilCST Campus Gate Monitoring</p>
                 </div>
             </div>
 
@@ -34,14 +34,14 @@
             <div class="auth-feature-grid" aria-label="System highlights">
                 <article class="auth-feature-card auth-feature-card-purple">
                     <span class="auth-feature-label">Monitoring</span>
-                    <strong>Entrance and Exit Visibility</strong>
+                    <strong>Every Gate, In and Out</strong>
                     <p>Review campus vehicle flow with browser-ready live monitoring and clean event records.</p>
                 </article>
 
                 <article class="auth-feature-card auth-feature-card-green">
                     <span class="auth-feature-label">Camera Monitoring</span>
                     <strong>Prepared for Two Cameras</strong>
-                    <p>Keep Entrance and Exit camera monitoring organized for guard-side observation.</p>
+                    <p>Keep every gate's camera monitoring organized for guard-side observation.</p>
                 </article>
 
                 <article class="auth-feature-card auth-feature-card-orange">

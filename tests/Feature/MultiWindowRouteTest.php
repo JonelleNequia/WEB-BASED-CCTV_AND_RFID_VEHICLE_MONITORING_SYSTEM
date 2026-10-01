@@ -40,9 +40,10 @@ class MultiWindowRouteTest extends TestCase
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->actingAs($admin)
-            ->get(route('stations.entrance'))
+            ->get(route('gates.kiosk', 'gate-1'))
             ->assertOk()
-            ->assertSee('Camera 1')
+            ->assertSee('Gate 1')
+            ->assertSee('IN and OUT')
             ->assertSee('Shared Station Logs')
             ->assertSee('RFID Ready')
             ->assertSee('data-rfid-input', false)
@@ -53,9 +54,9 @@ class MultiWindowRouteTest extends TestCase
             ->assertDontSee('data-browser-frame', false);
 
         $this->actingAs($admin)
-            ->get(route('stations.exit'))
+            ->get(route('gates.kiosk', 'gate-2'))
             ->assertOk()
-            ->assertSee('Camera 2')
+            ->assertSee('Gate 2')
             ->assertSee('Shared Station Logs')
             ->assertSee('RFID Ready')
             ->assertSee('data-rfid-input', false)
@@ -73,16 +74,21 @@ class MultiWindowRouteTest extends TestCase
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->actingAs($admin)
-            ->getJson(route('stations.state', 'entrance'))
+            ->getJson(route('stations.state', 'gate-1'))
             ->assertOk()
-            ->assertJsonPath('location', 'entrance')
-            ->assertJsonPath('event_type', 'ENTRY');
+            ->assertJsonPath('location', 'gate-1')
+            // Phase 1: a gate has no fixed direction.
+            ->assertJsonMissingPath('event_type');
 
         $this->actingAs($admin)
-            ->getJson(route('stations.state', 'exit'))
+            ->getJson(route('stations.state', 'gate-2'))
             ->assertOk()
-            ->assertJsonPath('location', 'exit')
-            ->assertJsonPath('event_type', 'EXIT');
+            ->assertJsonPath('location', 'gate-2')
+            ->assertJsonMissingPath('event_type');
+
+        // Old station names still open Gate 1 / Gate 2.
+        $this->actingAs($admin)->getJson(route('stations.state', 'entrance'))->assertOk()->assertJsonPath('location', 'gate-1');
+        $this->actingAs($admin)->get(route('stations.exit'))->assertRedirect(route('gates.kiosk', 'gate-2'));
     }
 
     public function test_station_state_endpoint_attempts_detector_restart_when_polled(): void
@@ -94,7 +100,7 @@ class MultiWindowRouteTest extends TestCase
         $this->mock(DetectorRuntimeService::class, function ($mock): void {
             $mock->shouldReceive('markStationViewerActive')
                 ->once()
-                ->with('entrance');
+                ->with('gate-1');
             $mock->shouldReceive('ensureRunning')
                 ->once()
                 ->andReturn([
@@ -102,8 +108,8 @@ class MultiWindowRouteTest extends TestCase
                     'service_message' => 'Detector status is stale. A restart will be attempted while monitoring stays online.',
                     'updated_at' => null,
                     'cameras' => [
-                        'entrance' => [
-                            'camera_role' => 'entrance',
+                        'gate-1' => [
+                            'camera_role' => 'gate-1',
                             'camera_running' => false,
                             'detection_ready' => false,
                             'stream_url' => 'http://127.0.0.1:8765/stream/entrance',
@@ -116,7 +122,7 @@ class MultiWindowRouteTest extends TestCase
         });
 
         $this->actingAs($admin)
-            ->getJson(route('stations.state', 'entrance'))
+            ->getJson(route('stations.state', 'gate-1'))
             ->assertOk()
             ->assertJsonPath('runtime.service_running', false)
             ->assertJsonPath('camera.camera_running', false);
@@ -132,7 +138,7 @@ class MultiWindowRouteTest extends TestCase
             'plate_text' => null,
             'vehicle_type' => 'Car',
             'vehicle_color' => null,
-            'location' => 'entrance',
+            'location' => 'gate-1',
             'observation_source' => 'cctv',
             'status' => 'pending_review',
             'observed_at' => now(),
@@ -143,7 +149,7 @@ class MultiWindowRouteTest extends TestCase
         $this->mock(DetectorRuntimeService::class, function ($mock): void {
             $mock->shouldReceive('markStationViewerActive')
                 ->once()
-                ->with('entrance');
+                ->with('gate-1');
             $mock->shouldReceive('ensureRunning')
                 ->once()
                 ->andReturn([
@@ -151,8 +157,8 @@ class MultiWindowRouteTest extends TestCase
                     'service_message' => 'Detector service is already running.',
                     'updated_at' => now()->toIso8601String(),
                     'cameras' => [
-                        'entrance' => [
-                            'camera_role' => 'entrance',
+                        'gate-1' => [
+                            'camera_role' => 'gate-1',
                             'camera_running' => true,
                             'detection_ready' => true,
                             'stream_url' => 'http://127.0.0.1:8765/stream/entrance',
@@ -165,7 +171,7 @@ class MultiWindowRouteTest extends TestCase
         });
 
         $this->actingAs($admin)
-            ->getJson(route('stations.state', 'entrance'))
+            ->getJson(route('stations.state', 'gate-1'))
             ->assertOk()
             ->assertJsonFragment([
                 'event_type' => 'GUEST',
@@ -201,20 +207,20 @@ class MultiWindowRouteTest extends TestCase
         $tag->load('vehicle');
 
         $this->actingAs($admin)
-            ->postJson(route('stations.rfid-scan', 'entrance'), [
+            ->postJson(route('stations.rfid-scan', 'gate-1'), [
                 'tag_uid' => $tag->uid,
             ])
             ->assertCreated()
             ->assertJsonPath('scan.verification_status', 'verified')
             ->assertJsonPath('scan.verification_label', 'Registered')
-            ->assertJsonPath('scan.scan_location', 'entrance')
+            ->assertJsonPath('scan.scan_location', 'gate-1')
             ->assertJsonPath('action_taken', 'ENTRY')
             ->assertJsonPath('new_state', Vehicle::STATE_INSIDE)
             ->assertJsonPath('vehicle.plate_number', $tag->vehicle->plate_number);
 
         $this->assertDatabaseHas('rfid_scan_logs', [
             'tag_uid' => $tag->uid,
-            'scan_location' => 'entrance',
+            'scan_location' => 'gate-1',
             'verification_status' => 'verified',
             'source_mode' => 'station_reader',
         ]);
@@ -228,7 +234,7 @@ class MultiWindowRouteTest extends TestCase
         $this->mock(DetectorRuntimeService::class, function ($mock): void {
             $mock->shouldReceive('markStationViewerActive')
                 ->once()
-                ->with('exit');
+                ->with('gate-2');
             $mock->shouldReceive('ensureRunning')
                 ->once()
                 ->andReturn([
@@ -236,8 +242,8 @@ class MultiWindowRouteTest extends TestCase
                     'service_message' => 'Detector service is already running.',
                     'updated_at' => now()->toIso8601String(),
                     'cameras' => [
-                        'exit' => [
-                            'camera_role' => 'exit',
+                        'gate-2' => [
+                            'camera_role' => 'gate-2',
                             'camera_running' => true,
                             'detection_ready' => true,
                             'stream_url' => 'http://127.0.0.1:8765/stream/exit',
@@ -250,11 +256,11 @@ class MultiWindowRouteTest extends TestCase
         });
 
         $this->actingAs($admin)
-            ->getJson(route('stations.state', 'exit'))
+            ->getJson(route('stations.state', 'gate-2'))
             ->assertOk()
             ->assertJsonPath('logs.0.event_type', 'ENTRY')
             ->assertJsonPath('logs.0.plate_number', 'STA-1002')
-            ->assertJsonPath('logs.0.scan_location', 'entrance');
+            ->assertJsonPath('logs.0.scan_location', 'gate-1');
     }
 
     public function test_station_rfid_scan_links_vehicle_by_legacy_rfid_tag_uid(): void
@@ -274,7 +280,7 @@ class MultiWindowRouteTest extends TestCase
         ])->save();
 
         $this->actingAs($admin)
-            ->postJson(route('stations.rfid-scan', 'entrance'), [
+            ->postJson(route('stations.rfid-scan', 'gate-1'), [
                 'tag_uid' => '1261556674',
             ])
             ->assertCreated()
@@ -302,7 +308,7 @@ class MultiWindowRouteTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
-        $sourcePath = \App\Support\CameraFiles::framePath('entrance');
+        $sourcePath = \App\Support\CameraFiles::framePath('gate-1');
         File::ensureDirectoryExists(dirname($sourcePath));
         File::put($sourcePath, 'guest-category-frame');
 
@@ -325,13 +331,13 @@ class MultiWindowRouteTest extends TestCase
             ])->save();
 
             $this->actingAs($admin)
-                ->postJson(route('stations.rfid-scan', 'entrance'), [
+                ->postJson(route('stations.rfid-scan', 'gate-1'), [
                     'tag_uid' => $tag->uid,
                 ])
                 ->assertCreated()
                 ->assertJsonPath('scan.verification_status', 'guest')
                 ->assertJsonPath('scan.verification_label', 'Guest')
-                ->assertJsonPath('scan.scan_location', 'entrance');
+                ->assertJsonPath('scan.scan_location', 'gate-1');
 
             $scanLog = RfidScanLog::query()
                 ->with('guestVehicleObservation')
@@ -341,14 +347,14 @@ class MultiWindowRouteTest extends TestCase
 
             $this->assertNotNull($observation);
             $this->assertSame('GST-1005', $observation->plate_number);
-            $this->assertSame('entrance', $observation->location);
+            $this->assertSame('gate-1', $observation->location);
             $this->assertNotNull($observation->snapshot_path);
             Storage::disk('public')->assertExists($observation->snapshot_path);
 
             $this->mock(DetectorRuntimeService::class, function ($mock): void {
                 $mock->shouldReceive('markStationViewerActive')
                     ->once()
-                    ->with('entrance');
+                    ->with('gate-1');
                 $mock->shouldReceive('ensureRunning')
                     ->once()
                     ->andReturn([
@@ -356,8 +362,8 @@ class MultiWindowRouteTest extends TestCase
                         'service_message' => 'Detector service is already running.',
                         'updated_at' => now()->toIso8601String(),
                         'cameras' => [
-                            'entrance' => [
-                                'camera_role' => 'entrance',
+                            'gate-1' => [
+                                'camera_role' => 'gate-1',
                                 'camera_running' => true,
                                 'detection_ready' => true,
                                 'stream_url' => 'http://127.0.0.1:8765/stream/entrance',
@@ -370,7 +376,7 @@ class MultiWindowRouteTest extends TestCase
             });
 
             $this->actingAs($admin)
-                ->getJson(route('stations.state', 'entrance'))
+                ->getJson(route('stations.state', 'gate-1'))
                 ->assertOk()
                 ->assertJsonFragment([
                     'event_type' => 'GUEST',
@@ -390,7 +396,7 @@ class MultiWindowRouteTest extends TestCase
         [$vehicle, $tag] = $this->createStationVehicleWithTag('DUP-1003', 'RFID-DUP-1003');
 
         $this->actingAs($admin)
-            ->postJson(route('stations.rfid-scan', 'entrance'), [
+            ->postJson(route('stations.rfid-scan', 'gate-1'), [
                 'tag_uid' => $tag->uid,
             ])
             ->assertCreated()
@@ -398,7 +404,7 @@ class MultiWindowRouteTest extends TestCase
             ->assertJsonPath('action_taken', 'ENTRY');
 
         $this->actingAs($admin)
-            ->postJson(route('stations.rfid-scan', 'entrance'), [
+            ->postJson(route('stations.rfid-scan', 'gate-1'), [
                 'tag_uid' => $tag->uid,
             ])
             ->assertOk()
@@ -425,26 +431,26 @@ class MultiWindowRouteTest extends TestCase
         [$vehicle, $tag] = $this->createStationVehicleWithTag('CNT-1004', 'RFID-CNT-1004');
 
         $this->actingAs($admin)
-            ->postJson(route('stations.rfid-scan', 'entrance'), ['tag_uid' => $tag->uid])
+            ->postJson(route('stations.rfid-scan', 'gate-1'), ['tag_uid' => $tag->uid])
             ->assertCreated();
 
         $this->travel(10)->seconds();
 
         $this->actingAs($admin)
-            ->postJson(route('stations.rfid-scan', 'exit'), ['tag_uid' => $tag->uid])
+            ->postJson(route('stations.rfid-scan', 'gate-2'), ['tag_uid' => $tag->uid])
             ->assertCreated();
 
         // Phase 3: wait past the 60-second per-station cooldown.
         $this->travel(61)->seconds();
 
         $this->actingAs($admin)
-            ->postJson(route('stations.rfid-scan', 'entrance'), ['tag_uid' => $tag->uid])
+            ->postJson(route('stations.rfid-scan', 'gate-1'), ['tag_uid' => $tag->uid])
             ->assertCreated();
 
         $this->mock(DetectorRuntimeService::class, function ($mock): void {
             $mock->shouldReceive('markStationViewerActive')
                 ->once()
-                ->with('entrance');
+                ->with('gate-1');
             $mock->shouldReceive('ensureRunning')
                 ->once()
                 ->andReturn([
@@ -452,8 +458,8 @@ class MultiWindowRouteTest extends TestCase
                     'service_message' => 'Detector service is already running.',
                     'updated_at' => now()->toIso8601String(),
                     'cameras' => [
-                        'entrance' => [
-                            'camera_role' => 'entrance',
+                        'gate-1' => [
+                            'camera_role' => 'gate-1',
                             'camera_running' => true,
                             'detection_ready' => true,
                             'stream_url' => 'http://127.0.0.1:8765/stream/entrance',
@@ -466,7 +472,7 @@ class MultiWindowRouteTest extends TestCase
         });
 
         $response = $this->actingAs($admin)
-            ->getJson(route('stations.state', 'entrance'))
+            ->getJson(route('stations.state', 'gate-1'))
             ->assertOk()
             ->assertJsonPath('logs.0.plate_number', 'CNT-1004')
             ->assertJsonPath('logs.0.event_type', 'ENTRY')

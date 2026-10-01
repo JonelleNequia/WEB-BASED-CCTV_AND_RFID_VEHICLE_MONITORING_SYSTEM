@@ -4,8 +4,8 @@ namespace App\Services;
 
 use App\Models\Camera;
 use App\Models\DeviceAssignment;
+use App\Models\Gate;
 use App\Models\NetworkDevice;
-use App\Models\SystemSetting;
 use App\Support\CameraSource;
 use App\Support\DeviceFiles;
 use App\Support\DisplayTime;
@@ -176,7 +176,8 @@ class DeviceRegistryService
      */
     public function assign(NetworkDevice $device, string $station, string $role, array $input = []): array
     {
-        abort_unless(in_array($station, DeviceAssignment::STATIONS, true), 422);
+        // Phase 1: a gate code (the old "entrance"/"exit" mean Gate 1 / Gate 2).
+        $station = Gate::resolveCode($station) ?? abort(422);
         abort_unless(in_array($role, [DeviceAssignment::ROLE_CAMERA, DeviceAssignment::ROLE_READER], true), 422);
 
         $result = $role === DeviceAssignment::ROLE_CAMERA
@@ -260,7 +261,7 @@ class DeviceRegistryService
 
         $camera->save();
 
-        $label = ucfirst($station);
+        $label = Gate::labelFor($station);
 
         if ($resolved['result'] === CameraProbeService::UNREACHABLE) {
             return [
@@ -279,7 +280,7 @@ class DeviceRegistryService
     protected function savedLogins(string $station): array
     {
         return Camera::query()
-            ->whereIn('camera_role', DeviceAssignment::STATIONS)
+            ->whereIn('camera_role', DeviceAssignment::stations())
             ->get()
             ->sortBy(fn (Camera $camera): int => $camera->camera_role === $station ? 0 : 1)
             ->filter(fn (Camera $camera): bool => filled($camera->source_username))
@@ -403,13 +404,14 @@ class DeviceRegistryService
             ]]
         );
 
-        $this->saveSettings([
-            "{$station}_reader_type" => 'uhf_ethernet',
-            "{$station}_reader_manual" => '0',
-            "{$station}_rfid_reader_name" => ucfirst($station).' UHF Reader',
-        ]);
+        $gate = Gate::query()->where('code', $station)->firstOrFail();
+        $gate->forceFill([
+            'reader_type' => 'uhf_ethernet',
+            'reader_manual' => false,
+            'reader_name' => $gate->name.' UHF Reader',
+        ])->save();
 
-        $result = ['ok' => true, 'message' => ucfirst($station).' reader assigned. Tags read at this reader are logged at the '.ucfirst($station).'.'];
+        $result = ['ok' => true, 'message' => $gate->name.' reader assigned. Tags read at this reader are logged at '.$gate->name.'.'];
 
         if (($reader['confirmed'] ?? false) !== true) {
             $result['warning'] = 'This reader is not confirmed yet. Hold a tag near it: the first tag confirms the data format.';
@@ -424,6 +426,7 @@ class DeviceRegistryService
      */
     public function updateCameraStreams(string $station, string $stream, bool $snapshots): void
     {
+        $station = Gate::normalizeCode($station);
         $assignment = DeviceAssignment::query()->with('device')
             ->where('station', $station)->where('role', DeviceAssignment::ROLE_CAMERA)->first();
 
@@ -450,29 +453,17 @@ class DeviceRegistryService
 
     public function unassign(string $station, string $role): void
     {
+        $station = Gate::normalizeCode($station);
         DeviceAssignment::query()->where('station', $station)->where('role', $role)->delete();
 
-        if ($role === DeviceAssignment::ROLE_READER
-            && $this->settingsService->get("{$station}_reader_manual", '0') !== '1') {
-            $this->saveSettings([
-                "{$station}_reader_type" => 'nfc',
-                "{$station}_rfid_reader_name" => ucfirst($station).' NFC Reader',
-            ]);
+        $gate = Gate::query()->where('code', $station)->first();
+        if ($role === DeviceAssignment::ROLE_READER && $gate && ! $gate->reader_manual) {
+            $gate->forceFill(['reader_type' => 'nfc', 'reader_name' => $gate->name.' NFC Reader'])->save();
         }
 
         // An unassigned camera keeps its last address as a manual source
         // (Settings › Cameras › Advanced) until another one is assigned.
         $this->syncAssignments(force: true);
-    }
-
-    /**
-     * @param  array<string, string>  $values
-     */
-    protected function saveSettings(array $values): void
-    {
-        foreach ($values as $key => $value) {
-            SystemSetting::query()->updateOrCreate(['setting_key' => $key], ['setting_value' => $value]);
-        }
     }
 
     /**
@@ -578,11 +569,12 @@ class DeviceRegistryService
             'scan_request' => $scanRequest ?? ($current['scan_request'] ?? null),
             'identify_request' => $identifyRequest ?? ($current['identify_request'] ?? null),
             'find_request' => $findRequest ?? ($current['find_request'] ?? null),
-            'stations' => collect(DeviceAssignment::STATIONS)->mapWithKeys(fn (string $station): array => [
-                $station => [
-                    'label' => $settings["{$station}_portal_label"] ?? ucfirst($station),
-                    'reader' => $this->readerTarget($station, $settings),
-                    'camera' => $this->cameraTarget($station),
+            // Phase 1: one entry per gate (key = gate code).
+            'stations' => Gate::ordered()->mapWithKeys(fn (Gate $gate): array => [
+                $gate->code => [
+                    'label' => $gate->name,
+                    'reader' => $this->readerTarget($gate, $settings),
+                    'camera' => $this->cameraTarget($gate->code),
                 ],
             ])->all(),
         ];
@@ -607,22 +599,21 @@ class DeviceRegistryService
      * @param  array<string, string>  $settings
      * @return array<string, mixed>|null
      */
-    protected function readerTarget(string $station, array $settings): ?array
+    protected function readerTarget(Gate $gate, array $settings): ?array
     {
-        $readerName = $settings["{$station}_rfid_reader_name"] ?? ucfirst($station).' UHF Reader';
+        $station = $gate->code;
+        $readerName = $gate->readerDisplayName();
         // Debounce in the reader link: one event per EPC within the RFID cooldown (Settings).
         $cooldown = max(0, (int) ($settings['rfid_cooldown_seconds'] ?? 60));
 
         // Settings › Advanced: manual address wins only when switched on.
-        if (($settings["{$station}_reader_manual"] ?? '0') === '1'
-            && filled($settings["{$station}_reader_ip"] ?? null)
-            && filled($settings["{$station}_reader_port"] ?? null)) {
+        if ($gate->reader_manual && filled($gate->reader_ip) && filled($gate->reader_port)) {
             return [
                 'source' => 'manual',
                 'mac' => null,
-                'ip' => $settings["{$station}_reader_ip"],
-                'port' => (int) $settings["{$station}_reader_port"],
-                'transport' => $settings["{$station}_reader_transport"] ?? 'tcp',
+                'ip' => $gate->reader_ip,
+                'port' => (int) $gate->reader_port,
+                'transport' => $gate->reader_transport ?: 'tcp',
                 'protocol' => null,
                 'work_mode' => null,
                 'reader_name' => $readerName,
@@ -733,12 +724,13 @@ class DeviceRegistryService
                 'running', 'started_at', 'finished_at', 'seconds', 'phase', 'phase_label', 'baseline_count', 'interfaces',
                 'passive', 'new_devices', 'events', 'result', 'message', 'waiting_until', 'other_subnet',
             ]) : null,
-            'stations' => collect(DeviceAssignment::STATIONS)->mapWithKeys(fn (string $station): array => [
-                $station => [
-                    'label' => ucfirst($station),
-                    'camera' => $this->assignmentPayload($assignments, $station, DeviceAssignment::ROLE_CAMERA, $status),
-                    'reader' => $this->assignmentPayload($assignments, $station, DeviceAssignment::ROLE_READER, $status),
-                    'manual_reader' => $this->settingsService->get("{$station}_reader_manual", '0') === '1',
+            // Phase 1: one card per gate.
+            'stations' => Gate::ordered()->mapWithKeys(fn (Gate $gate): array => [
+                $gate->code => [
+                    'label' => $gate->name,
+                    'camera' => $this->assignmentPayload($assignments, $gate->code, DeviceAssignment::ROLE_CAMERA, $status),
+                    'reader' => $this->assignmentPayload($assignments, $gate->code, DeviceAssignment::ROLE_READER, $status),
+                    'manual_reader' => (bool) $gate->reader_manual,
                 ],
             ])->all(),
             'devices' => $devices->all(),
@@ -861,7 +853,7 @@ class DeviceRegistryService
                 'station' => $assignment->station,
                 'role' => $assignment->role,
                 'stream' => data_get($assignment->options, 'stream'),
-                'label' => ucfirst($assignment->station).' '.($assignment->role === 'camera' ? 'camera' : 'reader')
+                'label' => Gate::labelFor($assignment->station).' '.($assignment->role === 'camera' ? 'camera' : 'reader')
                     .($assignment->role === 'camera' && data_get($assignment->options, 'stream') === 'sub' ? ' (sub)' : ''),
             ])->values()->all(),
             'camera' => $camera ? Arr::only($camera, ['rtsp_port', 'onvif_xaddr', 'vendor_profile']) + [

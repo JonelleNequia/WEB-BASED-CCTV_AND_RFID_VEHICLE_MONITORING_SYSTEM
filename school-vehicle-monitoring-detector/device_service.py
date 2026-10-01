@@ -12,7 +12,7 @@ Service mode (started by Laravel, like the detector):
 Diagnostics:
     python device_service.py --scan-once --verbose [--target IP] [--post]
     python device_service.py --listen IP:PORT [--transport udp] [--seconds 30]
-    python device_service.py --dump [entrance|exit|IP:PORT] [--seconds 30]
+    python device_service.py --dump [GATE-CODE|IP:PORT] [--seconds 30]
 """
 
 import os
@@ -69,7 +69,13 @@ from devices.identify import ReaderIdentifier
 from devices.reader_link import CaptureLog, ClientModeListener, ReaderLink, TagPoster, utc_now
 from devices.scanner import Scanner
 
-STATIONS = ("entrance", "exit")
+# Phase 1: one reader link per gate; the gate codes come from Laravel's
+# device_runtime_config.json ("stations"). Old names still work on the CLI.
+LEGACY_STATIONS = {"entrance": "gate-1", "exit": "gate-2"}
+
+
+def station_codes(runtime):
+    return list((runtime or {}).get("stations") or {}) or ["gate-1", "gate-2"]
 STATUS_EVERY_SECONDS = 2.0
 
 logger = logging.getLogger("devices")
@@ -159,10 +165,9 @@ class DeviceService:
         self.capture = CaptureLog(profiles.get("reader_link", {}).get("capture_log_max_bytes", 1048576))
         self.poster = TagPoster(log)
         self.poster.configure(self.runtime.get("app"))
-        self.links = {
-            station: ReaderLink(station, self.poster, profiles, self.capture, self.resolve_ip, log)
-            for station in STATIONS
-        }
+        self.links = {}
+        self.links_started = False
+        self.sync_links()
         self.listener = ClientModeListener(
             profiles.get("uhf_reader", {}).get("client_mode_listen_ports", []),
             self.route_client, self.capture, log,
@@ -207,9 +212,20 @@ class DeviceService:
         self.runtime_mtime = mtime
         self.runtime = load_runtime_config()
         self.poster.configure(self.runtime.get("app"))
+        self.sync_links()
         stations = self.runtime.get("stations") or {}
         for station, link in self.links.items():
+            # A removed gate keeps an idle link (no target).
             link.set_target((stations.get(station) or {}).get("reader"))
+
+    def sync_links(self):
+        """A reader link for every gate in the runtime config (gates can be added later)."""
+        for station in station_codes(self.runtime):
+            if station not in self.links:
+                link = ReaderLink(station, self.poster, self.profiles, self.capture, self.resolve_ip, log)
+                self.links[station] = link
+                if self.links_started:
+                    link.start()
 
     # -- scanning -------------------------------------------------------
     def request_scan(self, trigger, light=False):
@@ -395,6 +411,7 @@ class DeviceService:
         self.poster.start()
         for link in self.links.values():
             link.start()
+        self.links_started = True
         self.listener.start()
         self.reload_runtime()
         self.request_scan("startup")
@@ -682,12 +699,14 @@ def dump(args, profiles):
     target = args.dump
     runtime = load_runtime_config()
     status = _service_status()
-    stations = [target] if target in STATIONS else ([] if ":" in target else list(STATIONS))
+    target = LEGACY_STATIONS.get(target, target)
+    codes = station_codes(runtime)
+    stations = [target] if target in codes else ([] if ":" in target else codes)
 
     connected = [station for station in stations
                  if (status.get("readers", {}).get(station) or {}).get("state") == "connected"]
     if connected:
-        station = connected[0] if target in STATIONS else None
+        station = connected[0] if target in codes else None
         link = status["readers"][connected[0]]
         print(f"The device service is connected to the {connected[0]} reader ({link.get('ip')}:{link.get('port')}); "
               f"showing what it receives for {args.seconds}s. Hold a tag near the reader. Ctrl+C stops.", flush=True)
@@ -776,7 +795,7 @@ def main():
     parser.add_argument("--find", action="store_true", help="Find my reader: baseline, plug in, watch for new devices")
     parser.add_argument("--no-passive", action="store_true", help="do not capture raw packets")
     parser.add_argument("--listen", help="IP:PORT of a reader to listen to")
-    parser.add_argument("--dump", nargs="?", const="auto", help="raw hex dump: entrance, exit or IP:PORT")
+    parser.add_argument("--dump", nargs="?", const="auto", help="raw hex dump: a gate code (gate-1) or IP:PORT")
     parser.add_argument("--transport", choices=["tcp", "udp"], default="tcp")
     parser.add_argument("--seconds", type=int, default=30)
     args = parser.parse_args()

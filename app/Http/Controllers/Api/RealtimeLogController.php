@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Camera;
 use App\Models\GuestVehicleObservation;
+use App\Models\Gate;
 use App\Models\VehicleEvent;
 use App\Support\DisplayTime;
 use Illuminate\Http\JsonResponse;
@@ -95,19 +97,21 @@ class RealtimeLogController extends Controller
     }
 
     /**
-     * UI Phase 2: recent logs for one gate on the Gate Monitor
-     * (Entrance = ENTRY events, Exit = EXIT events, plus that gate's captures).
+     * UI Phase 2: recent logs for one gate on the Gate Monitor. Phase 1: the
+     * gate's IN and OUT events (its camera or its reader), plus its captures.
      *
      * @return list<array<string, mixed>>
      */
     public function gateLogRows(string $location, int $limit = 8): array
     {
-        $eventType = $location === 'exit' ? 'EXIT' : 'ENTRY';
+        $location = Gate::normalizeCode($location);
+        $cameraId = Camera::query()->forRole($location)->value('id');
 
         $eventLogs = VehicleEvent::query()
             ->with(['camera', 'vehicle', 'rfidScanLog', 'guestVisit.rfidTag'])
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
-            ->where('event_type', $eventType)
+            ->where(fn ($query) => $query->where('camera_id', $cameraId)
+                ->orWhereHas('rfidScanLog', fn ($scan) => $scan->where('scan_location', $location)))
             ->latest('created_at')
             ->latest('event_time')
             ->limit($limit)
@@ -189,6 +193,7 @@ class RealtimeLogController extends Controller
             'vehicle_type' => $observation->vehicle_type,
             'vehicle_color' => $observation->vehicle_color,
             'location' => $observation->location,
+            'location_label' => Gate::labelFor($observation->location),
             'observed_at' => $observation->observed_at?->format('Y-m-d\TH:i'),
             'display_time' => DisplayTime::datetime($observation->observed_at),
             'status' => $observation->status,
@@ -328,7 +333,7 @@ class RealtimeLogController extends Controller
             'vehicle_color' => $observation->vehicle_color ?: 'N/A',
             'category_label' => 'Guest',
             'source_label' => $observation->observation_source === 'cctv' ? 'Guest CCTV' : 'Guest Manual',
-            'station_label' => ucfirst($observation->location).' Station',
+            'station_label' => Gate::labelFor($observation->location),
             'state_label' => 'Guest',
             'display_time' => DisplayTime::datetime($time, 'No time'),
             'summary_label' => 'Guest Observation #'.$observation->id.' • '.(DisplayTime::datetime($time, 'No time')),

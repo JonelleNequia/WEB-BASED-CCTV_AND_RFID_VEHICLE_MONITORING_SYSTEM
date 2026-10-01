@@ -56,11 +56,11 @@ class UhfReaderIntegrationTest extends TestCase
         $this->assertSame('signature', $reader->readerDetails()['confirmed_by']);
 
         $this->actingAs($this->admin)
-            ->postJson(route('settings.devices.assign', $reader), ['station' => 'entrance', 'role' => 'reader'])
+            ->postJson(route('settings.devices.assign', $reader), ['station' => 'gate-1', 'role' => 'reader'])
             ->assertOk()
             ->assertJsonMissingPath('warning');
 
-        $target = json_decode(File::get(DeviceFiles::runtimeConfigPath()), true)['stations']['entrance']['reader'];
+        $target = json_decode(File::get(DeviceFiles::runtimeConfigPath()), true)['stations']['gate-1']['reader'];
         $this->assertSame([self::MAC, 49152, 'tcp', 'cc', 'active', 60], [
             $target['mac'], $target['port'], $target['transport'], $target['protocol'], $target['work_mode'], $target['cooldown_seconds'],
         ]);
@@ -68,7 +68,7 @@ class UhfReaderIntegrationTest extends TestCase
         // The RFID cooldown in Settings is also the reader link's debounce.
         SystemSetting::query()->updateOrCreate(['setting_key' => 'rfid_cooldown_seconds'], ['setting_value' => '20']);
         $registry->exportRuntimeConfig();
-        $target = json_decode(File::get(DeviceFiles::runtimeConfigPath()), true)['stations']['entrance']['reader'];
+        $target = json_decode(File::get(DeviceFiles::runtimeConfigPath()), true)['stations']['gate-1']['reader'];
         $this->assertSame(20, $target['cooldown_seconds']);
     }
 
@@ -77,7 +77,7 @@ class UhfReaderIntegrationTest extends TestCase
         app(DeviceRegistryService::class)->ingestScan($this->scan());
         $reader = NetworkDevice::query()->where('mac', self::MAC)->firstOrFail();
         $this->actingAs($this->admin)
-            ->postJson(route('settings.devices.assign', $reader), ['station' => 'entrance', 'role' => 'reader'])->assertOk();
+            ->postJson(route('settings.devices.assign', $reader), ['station' => 'gate-1', 'role' => 'reader'])->assertOk();
 
         $payload = $this->actingAs($this->admin)->getJson(route('settings.devices.index'))->assertOk()->json();
         $device = collect($payload['devices'])->firstWhere('mac', self::MAC);
@@ -85,7 +85,7 @@ class UhfReaderIntegrationTest extends TestCase
         $this->assertStringContainsString('198.51.100.0/24', $device['network_warning']['text']);
         $this->assertStringContainsString('198.51.100.1', $device['network_warning']['text']);
         $this->assertStringContainsString('no DHCP', $device['network_warning']['steps'][0]);
-        $this->assertSame($device['network_warning'], $payload['stations']['entrance']['reader']['network_warning']);
+        $this->assertSame($device['network_warning'], $payload['stations']['gate-1']['reader']['network_warning']);
 
         // Fixed: the reader moved into the router's network.
         $scan = $this->scan();
@@ -110,7 +110,7 @@ class UhfReaderIntegrationTest extends TestCase
             ->assertJsonPath('ok', true);
 
         $read = [
-            'tag_uid' => self::EPC, 'scan_location' => 'entrance', 'reader_name' => 'Entrance UHF Reader',
+            'tag_uid' => self::EPC, 'scan_location' => 'gate-1', 'reader_name' => 'Entrance UHF Reader',
             'payload_json' => ['source' => 'uhf_ethernet', 'protocol' => 'cc', 'rssi' => -70],
         ];
         $headers = ['X-Api-Key' => 'test-detector-key', 'X-Source-Name' => 'philcst-uhf-reader'];
@@ -128,7 +128,7 @@ class UhfReaderIntegrationTest extends TestCase
             'service_running' => true,
             'updated_at' => now()->toIso8601String(),
             'readers' => [
-                'entrance' => [
+                'gate-1' => [
                     'state' => 'connected', 'ip' => '198.51.100.116', 'port' => 49152, 'protocol' => 'cc',
                     'last_tag' => self::EPC, 'last_rssi' => -70, 'last_tag_at' => now()->toIso8601String(),
                     'target' => ['mac' => self::MAC, 'device_id' => 1],
@@ -137,14 +137,14 @@ class UhfReaderIntegrationTest extends TestCase
                         ['epc' => 'E2000017221101441890ABCD', 'rssi' => -61, 'epoch' => $now - 60],
                     ],
                 ],
-                'exit' => ['state' => 'unassigned', 'target' => null],
+                'gate-2' => ['state' => 'unassigned', 'target' => null],
             ],
         ]));
 
         $this->actingAs($this->admin)->getJson(route('devices.uhf-status'))
             ->assertOk()
             ->assertJsonCount(1, 'readers')
-            ->assertJsonPath('readers.0.label', 'Entrance UHF')
+            ->assertJsonPath('readers.0.label', 'Gate 1 UHF')
             ->assertJsonPath('readers.0.ok', true)
             ->assertJsonPath('readers.0.epc', self::EPC);
         $this->assertStringStartsWith('…D6458CE8 · -70 dBm', $this->actingAs($this->admin)->getJson(route('devices.uhf-status'))->json('readers.0.tag_line'));
@@ -154,11 +154,11 @@ class UhfReaderIntegrationTest extends TestCase
             ->assertJsonPath('connected', true)
             ->assertJsonCount(1, 'reads')
             ->assertJsonPath('reads.0.epc', self::EPC)
-            ->assertJsonPath('reads.0.station', 'entrance');
+            ->assertJsonPath('reads.0.station', 'gate-1');
 
         $this->actingAs($this->admin)->get(route('dashboard.index'))
             ->assertOk()
-            ->assertSee('Entrance UHF')
+            ->assertSee('Gate 1 UHF')
             ->assertSee('-70 dBm')
             ->assertSee('js/sidebar-uhf.js');
 

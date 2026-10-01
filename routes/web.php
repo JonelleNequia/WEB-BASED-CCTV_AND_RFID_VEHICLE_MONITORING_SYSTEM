@@ -47,7 +47,7 @@ Route::middleware('guest')->group(function (): void {
 // Phase 6: camera frames and detector status are no longer public files.
 Route::middleware('auth')->group(function (): void {
     Route::get('/camera/{role}/frame/{kind?}', [CameraFileController::class, 'frame'])
-        ->whereIn('role', CameraFiles::ROLES)
+        ->where('role', '[a-z0-9-]+')
         ->whereIn('kind', CameraFiles::KINDS)
         ->name('camera.frame');
     Route::get('/camera/status', [CameraFileController::class, 'status'])
@@ -59,26 +59,27 @@ Route::middleware('auth')->group(function (): void {
 Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect): void {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
 
-    Route::get('/station/entrance', [StationController::class, 'show'])
-        ->defaults('location', 'entrance')
-        ->name('stations.entrance');
-    Route::get('/station/exit', [StationController::class, 'show'])
-        ->defaults('location', 'exit')
-        ->name('stations.exit');
+    // Phase 1: one kiosk per gate. The old station links open Gate 1 / Gate 2.
+    Route::get('/gates/{location}/kiosk', [StationController::class, 'show'])
+        ->where('location', '[a-z0-9-]+')
+        ->name('gates.kiosk');
+    Route::get('/station/entrance', fn () => redirect()->route('gates.kiosk', 'gate-1'))->name('stations.entrance');
+    Route::get('/station/exit', fn () => redirect()->route('gates.kiosk', 'gate-2'))->name('stations.exit');
+    // {location}: a gate code, or the old "entrance" / "exit".
     Route::get('/station/{location}/state', [StationController::class, 'state'])
-        ->whereIn('location', ['entrance', 'exit'])
+        ->where('location', '[a-z0-9-]+')
         ->name('stations.state');
     Route::post('/station/{location}/rfid-scan', [StationController::class, 'rfidScan'])
-        ->whereIn('location', ['entrance', 'exit'])
+        ->where('location', '[a-z0-9-]+')
         ->name('stations.rfid-scan');
 
-    // UI Phase 2: Gate Monitor shows Entrance and Exit side by side (all signed-in users).
+    // UI Phase 2: Gate Monitor shows every gate side by side (all signed-in users).
     Route::get('/devices/uhf-status', [DeviceController::class, 'uhfStatus'])->name('devices.uhf-status');
     Route::get('/gates', [GateMonitorController::class, 'index'])->name('gates.index');
     Route::get('/gates/state', [GateMonitorController::class, 'state'])->name('gates.state');
     Route::get('/monitoring', fn () => redirect()->route('gates.index'))->name('monitoring.index');
     Route::get('/portals/{location}', fn () => redirect()->route('gates.index'))
-        ->whereIn('location', ['entrance', 'exit'])
+        ->where('location', '[a-z0-9-]+')
         ->name('portals.show');
 
     Route::middleware('admin')->group(function () use ($legacyRedirect): void {
@@ -143,15 +144,16 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
             ->name('reports.export.csv');
         Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('settings.update');
+        Route::post('/settings/gates', [SettingsController::class, 'storeGate'])->name('settings.gates.store');
         // Plug-and-detect: Settings › Stations & Readers › Devices.
         Route::get('/settings/devices', [DeviceController::class, 'index'])->name('settings.devices.index');
         Route::post('/settings/devices/scan', [DeviceController::class, 'scan'])->name('settings.devices.scan');
         Route::post('/settings/devices/identify', [DeviceController::class, 'identify'])->name('settings.devices.identify');
         Route::post('/settings/devices/find', [DeviceController::class, 'find'])->name('settings.devices.find');
         Route::get('/settings/cameras/{station}/encoder', [DeviceController::class, 'encoderPreview'])
-            ->whereIn('station', ['entrance', 'exit'])->name('settings.cameras.encoder');
+            ->where('station', '[a-z0-9-]+')->name('settings.cameras.encoder');
         Route::post('/settings/cameras/{station}/encoder/optimize', [DeviceController::class, 'encoderOptimize'])
-            ->whereIn('station', ['entrance', 'exit'])->name('settings.cameras.encoder.optimize');
+            ->where('station', '[a-z0-9-]+')->name('settings.cameras.encoder.optimize');
         Route::get('/settings/status/metrics', [\App\Http\Controllers\SystemStatusController::class, 'metrics'])->name('settings.status.metrics');
         Route::post('/settings/devices/unassign', [DeviceController::class, 'unassign'])->name('settings.devices.unassign');
         Route::post('/settings/devices/acknowledge', [DeviceController::class, 'acknowledge'])->name('settings.devices.acknowledge');

@@ -27,7 +27,7 @@ class PendingDetailsCompletionTest extends TestCase
         $eventService = app(EventService::class);
 
         $vehicleEvent = $eventService->createDetectedEvent([
-            'camera_role' => 'entrance',
+            'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
             'event_time' => now()->toIso8601String(),
             'vehicle_image_path' => 'detected-vehicle-images/entrance/pending-entry-test.jpg',
@@ -91,12 +91,14 @@ class PendingDetailsCompletionTest extends TestCase
         ]);
 
         $vehicleEvent = $eventService->createDetectedEvent([
-            'camera_role' => 'exit',
+            'camera_role' => 'gate-2',
             'detected_vehicle_type' => 'Van',
             'event_time' => now()->toIso8601String(),
             'vehicle_image_path' => 'detected-vehicle-images/exit/pending-exit-test.jpg',
             'external_event_key' => 'pending-exit-match-001',
             'roi_name' => 'Exit Trigger Line',
+            // Phase 1 (gates): the crossing direction makes it an EXIT.
+            'direction' => 'OUT',
             'detection_metadata_json' => [
                 'track_id' => 18,
                 'confidence' => 0.89,

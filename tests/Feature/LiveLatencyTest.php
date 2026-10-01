@@ -76,7 +76,7 @@ class LiveLatencyTest extends TestCase
             'camera' => ['rtsp_port' => 554, 'onvif_xaddr' => 'http://198.51.100.20:80/onvif/device_service', 'vendor_profile' => 'TP-Link VIGI', 'rtsp_paths' => ['main' => '/stream1', 'sub' => '/stream2']],
         ]]]);
         $device = NetworkDevice::query()->firstOrFail();
-        app(DeviceRegistryService::class)->assign($device, 'entrance', 'camera', ['username' => 'admin', 'password' => 'secret']);
+        app(DeviceRegistryService::class)->assign($device, 'gate-1', 'camera', ['username' => 'admin', 'password' => 'secret']);
     }
 
     protected function tearDown(): void
@@ -91,7 +91,7 @@ class LiveLatencyTest extends TestCase
     {
         $runtime = fn () => json_decode(File::get(app(SettingsService::class)->cameraRuntimeConfigPath()), true);
 
-        $entrance = $runtime()['cameras']['entrance'];
+        $entrance = $runtime()['cameras']['gate-1'];
         $this->assertSame('rtsp://198.51.100.20:554/stream2', $entrance['source_value']);
         $this->assertSame('rtsp://198.51.100.20:554/stream1', $entrance['snapshot_source_value']);
         $this->assertSame(1, $entrance['decoder_threads']);
@@ -101,19 +101,19 @@ class LiveLatencyTest extends TestCase
         $this->actingAs($this->admin)->put(route('settings.update'), [
             'section' => 'cameras',
             'camera_configs' => [
-                'entrance' => ['camera_name' => 'Entrance Camera', 'source_type' => 'rtsp', 'source_value' => $entrance['source_value'], 'source_username' => 'admin', 'source_password' => ''],
-                'exit' => ['camera_name' => 'Exit Camera', 'source_type' => 'webcam', 'source_value' => '0', 'source_username' => '', 'source_password' => ''],
+                'gate-1' => ['camera_name' => 'Entrance Camera', 'source_type' => 'rtsp', 'source_value' => $entrance['source_value'], 'source_username' => 'admin', 'source_password' => ''],
+                'gate-2' => ['camera_name' => 'Exit Camera', 'source_type' => 'webcam', 'source_value' => '0', 'source_username' => '', 'source_password' => ''],
             ],
-            'camera_streams' => ['entrance' => ['stream' => 'main', 'snapshots' => '1']],
+            'camera_streams' => ['gate-1' => ['stream' => 'main', 'snapshots' => '1']],
             'perf_stream_fps' => 12, 'perf_stream_width' => 800, 'perf_jpeg_quality' => 65, 'perf_detection_fps' => 6,
             'perf_yolo_imgsz' => 416, 'perf_yolo_device' => 'cpu', 'perf_roi_crop' => '0', 'perf_hires_on_trigger' => '1',
         ])->assertSessionHasNoErrors();
 
-        $entrance = $runtime()['cameras']['entrance'];
+        $entrance = $runtime()['cameras']['gate-1'];
         $this->assertSame('rtsp://198.51.100.20:554/stream1', $entrance['source_value']);
         $this->assertSame('', $entrance['snapshot_source_value'], 'Main stream live: no second connection to the same stream.');
         $this->assertSame(0, $entrance['decoder_threads']);
-        $this->assertSame('main', DeviceAssignment::query()->where('station', 'entrance')->value('options')['stream']);
+        $this->assertSame('main', DeviceAssignment::query()->where('station', 'gate-1')->value('options')['stream']);
         $performance = $runtime()['system_settings']['performance'];
         $this->assertSame([12.0, 800, 65, 6.0, 416, 'cpu', 0], [
             (float) $performance['stream_fps'], $performance['stream_width'], $performance['jpeg_quality'],
@@ -143,7 +143,7 @@ class LiveLatencyTest extends TestCase
         File::put(CameraFiles::statusPath(), json_encode([
             'service_running' => true,
             'updated_at' => now()->toIso8601String(),
-            'cameras' => ['entrance' => [
+            'cameras' => ['gate-1' => [
                 'camera_running' => true, 'detection_ready' => true, 'last_error' => '',
                 'detection' => ['detection_fps' => 7.8, 'device' => 'mps', 'last_raw_detections' => 4, 'last_vehicles' => 3, 'last_in_zone' => 2, 'line_crossings' => 5],
             ]],
@@ -159,14 +159,14 @@ class LiveLatencyTest extends TestCase
             'service_running' => true,
             'updated_at' => now()->toIso8601String(),
             'cpu' => ['process' => 26.5, 'system' => 15.6, 'cores' => 8],
-            'cameras' => ['entrance' => ['camera_running' => true], 'exit' => ['camera_running' => true]],
+            'cameras' => ['gate-1' => ['camera_running' => true], 'gate-2' => ['camera_running' => true]],
             'metrics' => [
-                'entrance' => [
+                'gate-1' => [
                     'fps' => ['capture' => 25.0, 'stream_published' => 15.0, 'stream_sent' => 15.0, 'detection' => 7.6],
                     'ms' => ['encode' => ['avg' => 1.2, 'p95' => 1.8], 'yolo' => ['avg' => 23.9, 'p95' => 29.5], 'pipeline' => ['avg' => 2.3, 'p95' => 4.6]],
                     'values' => ['resolution' => '736x416', 'decoder_threads' => 1, 'decode_backlog_ms' => -3, 'yolo_device' => 'mps'],
                 ],
-                'exit' => [
+                'gate-2' => [
                     'fps' => ['capture' => 25.0],
                     'ms' => ['pipeline' => ['avg' => 2.0, 'p95' => 4.0]],
                     'values' => ['resolution' => '2560x1440', 'decoder_threads' => 'auto', 'decode_backlog_ms' => 900],
@@ -178,7 +178,7 @@ class LiveLatencyTest extends TestCase
             ->assertOk()
             ->assertSee('Live video pipeline')
             ->assertSee('736x416 · 1 thread (low delay)')
-            ->assertSee('Exit: decoding falls behind the camera by 900 ms')
+            ->assertSee('Gate 2: decoding falls behind the camera by 900 ms')
             ->assertSee('frame threads, which hold frames back');
 
         $this->actingAs($this->admin)->get(route('settings.status.metrics'))->assertOk()->assertSee('data-pipeline-metrics', false);
@@ -186,21 +186,21 @@ class LiveLatencyTest extends TestCase
 
     public function test_camera_optimization_previews_then_writes_only_after_the_request(): void
     {
-        $this->actingAs($this->admin)->getJson(route('settings.cameras.encoder', 'entrance'))
+        $this->actingAs($this->admin)->getJson(route('settings.cameras.encoder', 'gate-1'))
             ->assertOk()
             ->assertJsonCount(2, 'encoders') // JPEG stream left alone
             ->assertJsonPath('encoders.0.current.fps', 25)
             ->assertJsonPath('encoders.0.proposed', ['fps' => 15, 'gov' => 15, 'bitrate' => 3072]);
         $this->assertSame([], $this->writes, 'Previewing must not change the camera.');
 
-        $this->actingAs($this->admin)->postJson(route('settings.cameras.encoder.optimize', 'entrance'))
+        $this->actingAs($this->admin)->postJson(route('settings.cameras.encoder.optimize', 'gate-1'))
             ->assertOk()
             ->assertJsonPath('ok', true);
 
         // Only the main stream differed from the recommendation.
         $this->assertSame([['main', ['fps' => 15, 'gov' => 15, 'bitrate' => 3072]]], $this->writes);
 
-        $this->actingAs($this->admin)->getJson(route('settings.cameras.encoder', 'exit'))
+        $this->actingAs($this->admin)->getJson(route('settings.cameras.encoder', 'gate-2'))
             ->assertStatus(422);
     }
 }

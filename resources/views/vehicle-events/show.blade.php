@@ -119,7 +119,7 @@
                         <div><span>RFID Log</span><strong>#{{ $vehicleEvent->rfidScanLog->id }}</strong></div>
                         <div><span>Tag UID</span><strong>{{ $vehicleEvent->rfidScanLog->tag_uid }}</strong></div>
                         <div><span>Result</span><strong>{{ $vehicleEvent->rfidScanLog->verificationLabel }}</strong></div>
-                        <div><span>Station</span><strong>{{ $vehicleEvent->rfidScanLog->scanLocationLabel }} • {{ $vehicleEvent->rfidScanLog->scanDirectionLabel }}</strong></div>
+                        <div><span>Gate</span><strong>{{ $vehicleEvent->rfidScanLog->scanLocationLabel }} • {{ $vehicleEvent->rfidScanLog->scanDirectionLabel }}</strong></div>
                         <div><span>Event Type</span><strong>{{ $vehicleEvent->rfidScanLog->resolvedEventTypeLabel }}</strong></div>
                         <div><span>Current State</span><strong>{{ $vehicleEvent->rfidScanLog->resultingStateLabel }}</strong></div>
                         <div><span>Reader</span><strong>{{ $vehicleEvent->rfidScanLog->reader_name }}</strong></div>

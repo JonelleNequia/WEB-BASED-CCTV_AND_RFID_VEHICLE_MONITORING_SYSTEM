@@ -6095,3 +6095,21 @@ button[aria-busy="true"] {
     color: var(--text);
     font-weight: 700;
 }
+
+/* Phase 1 (gates): Settings › Gates & Readers › Add a gate */
+.add-gate-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+}
+
+.add-gate-form .field {
+    flex: 1 1 16rem;
+    margin: 0;
+}
+
+.add-gate-form .field-help {
+    flex-basis: 100%;
+    margin: 0;
+}

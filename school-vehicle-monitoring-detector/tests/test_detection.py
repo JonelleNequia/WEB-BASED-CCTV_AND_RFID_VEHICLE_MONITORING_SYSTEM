@@ -111,3 +111,38 @@ class LineCrossingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GateConfigTests(unittest.TestCase):
+    """Phase 1: the detector and device service follow Laravel's gate list."""
+
+    def test_cameras_follow_the_exported_gate_order(self):
+        import json
+        import tempfile
+
+        import config
+
+        payload = {
+            "gates": [{"code": "gate-2", "name": "Back Gate"}, {"code": "gate-1", "name": "Main Gate"}, {"code": "gate-3", "name": "Service"}],
+            "cameras": {role: {"camera_role": role, "source_type": "webcam", "source_value": 0} for role in ("gate-1", "gate-3", "gate-2")},
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "camera_runtime_config.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            original = config.RUNTIME_CONFIG_PATH
+            config.RUNTIME_CONFIG_PATH = path
+            try:
+                loaded = config._load_runtime_config_file()
+            finally:
+                config.RUNTIME_CONFIG_PATH = original
+
+        self.assertEqual(config.camera_roles(loaded), ["gate-2", "gate-1", "gate-3"])
+        self.assertEqual(loaded["gates"][0]["name"], "Back Gate")
+
+    def test_device_service_has_a_reader_link_per_gate(self):
+        import device_service
+
+        runtime = {"stations": {"gate-1": {}, "gate-2": {}, "gate-3": {}}}
+        self.assertEqual(device_service.station_codes(runtime), ["gate-1", "gate-2", "gate-3"])
+        self.assertEqual(device_service.station_codes({}), ["gate-1", "gate-2"])
+        self.assertEqual(device_service.LEGACY_STATIONS["entrance"], "gate-1")

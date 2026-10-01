@@ -1,4 +1,4 @@
-{{-- UI Phase 2: Gate Monitor. Entrance and Exit side by side; the kiosks open full screen from here. --}}
+{{-- UI Phase 2: Gate Monitor. Every gate side by side; the kiosks open full screen from here. --}}
 @extends('layouts.app')
 
 @section('title', 'Gate Monitor | PHILCST Vehicle Monitoring')

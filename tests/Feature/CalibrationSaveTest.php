@@ -21,7 +21,7 @@ class CalibrationSaveTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
-        $camera = Camera::query()->forRole('entrance')->firstOrFail();
+        $camera = Camera::query()->forRole('gate-1')->firstOrFail();
 
         $this->actingAs($user)
             ->putJson(route('calibration.update'), [
@@ -44,7 +44,7 @@ class CalibrationSaveTest extends TestCase
                 ],
             ])
             ->assertOk()
-            ->assertJsonPath('camera.camera_role', 'entrance');
+            ->assertJsonPath('camera.camera_role', 'gate-1');
 
         $camera->refresh();
 
@@ -80,7 +80,7 @@ class CalibrationSaveTest extends TestCase
 
         $activity = json_decode((string) File::get(app(\App\Services\DetectorRuntimeService::class)->stationActivityPath()), true);
 
-        $this->assertArrayHasKey('entrance', $activity['locations']);
-        $this->assertArrayHasKey('exit', $activity['locations']);
+        $this->assertArrayHasKey('gate-1', $activity['locations']);
+        $this->assertArrayHasKey('gate-2', $activity['locations']);
     }
 }

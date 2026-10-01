@@ -49,27 +49,27 @@ class Phase6SecurityTest extends TestCase
     public function test_camera_files_are_stored_outside_public(): void
     {
         $this->assertStringStartsNotWith(public_path(), CameraFiles::statusPath());
-        $this->assertStringStartsNotWith(public_path(), CameraFiles::framePath('entrance'));
-        $this->assertStringStartsNotWith(public_path(), CameraFiles::framePath('exit', 'annotated'));
+        $this->assertStringStartsNotWith(public_path(), CameraFiles::framePath('gate-1'));
+        $this->assertStringStartsNotWith(public_path(), CameraFiles::framePath('gate-2', 'annotated'));
     }
 
     public function test_camera_frame_needs_a_signed_in_user(): void
     {
-        File::ensureDirectoryExists(dirname(CameraFiles::framePath('entrance')));
-        File::put(CameraFiles::framePath('entrance'), 'jpeg-bytes');
+        File::ensureDirectoryExists(dirname(CameraFiles::framePath('gate-1')));
+        File::put(CameraFiles::framePath('gate-1'), 'jpeg-bytes');
 
-        $this->get(route('camera.frame', ['role' => 'entrance']))
+        $this->get(route('camera.frame', ['role' => 'gate-1']))
             ->assertRedirect(route('login'));
 
         $response = $this->actingAs($this->guard)
-            ->get(route('camera.frame', ['role' => 'entrance']))
+            ->get(route('camera.frame', ['role' => 'gate-1']))
             ->assertOk()
             ->assertHeader('Content-Type', 'image/jpeg');
 
         $this->assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
 
         $this->actingAs($this->guard)
-            ->get(route('camera.frame', ['role' => 'exit', 'kind' => 'annotated']))
+            ->get(route('camera.frame', ['role' => 'gate-2', 'kind' => 'annotated']))
             ->assertNotFound();
     }
 
@@ -79,7 +79,7 @@ class Phase6SecurityTest extends TestCase
         File::put(CameraFiles::statusPath(), json_encode([
             'service_running' => false,
             'cameras' => [
-                'exit' => ['source_value' => 'rtsp://admin:secret@192.168.1.64:554/stream1'],
+                'gate-2' => ['source_value' => 'rtsp://admin:secret@192.168.1.64:554/stream1'],
             ],
         ]));
 
@@ -89,7 +89,7 @@ class Phase6SecurityTest extends TestCase
         $this->actingAs($this->admin)
             ->getJson(route('camera.status'))
             ->assertOk()
-            ->assertJsonPath('cameras.exit.source_value', 'rtsp://***@192.168.1.64:554/stream1')
+            ->assertJsonPath('cameras.gate-2.source_value', 'rtsp://***@192.168.1.64:554/stream1')
             ->assertDontSee('secret');
     }
 
@@ -109,7 +109,7 @@ class Phase6SecurityTest extends TestCase
 
     public function test_detector_api_uses_the_env_key_and_rejects_the_old_demo_key(): void
     {
-        $query = ['camera_role' => 'entrance', 'event_time' => now()->toIso8601String()];
+        $query = ['camera_role' => 'gate-1', 'event_time' => now()->toIso8601String()];
 
         $this->withHeaders(['X-Api-Key' => 'PHILCST-DEMO-KEY'])
             ->getJson(route('api.latest-scan', $query))
@@ -125,7 +125,7 @@ class Phase6SecurityTest extends TestCase
     public function test_keyless_local_access_is_refused_in_production(): void
     {
         config(['services.detector.api_key' => '']);
-        $query = ['camera_role' => 'entrance', 'event_time' => now()->toIso8601String()];
+        $query = ['camera_role' => 'gate-1', 'event_time' => now()->toIso8601String()];
 
         $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])
             ->getJson(route('api.latest-scan', $query))

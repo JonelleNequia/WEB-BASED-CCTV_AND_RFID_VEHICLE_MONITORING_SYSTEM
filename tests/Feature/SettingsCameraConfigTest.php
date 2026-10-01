@@ -42,14 +42,14 @@ class SettingsCameraConfigTest extends TestCase
                 'entrance_rfid_reader_name' => 'Entrance Reader Sim',
                 'exit_rfid_reader_name' => 'Exit Reader Sim',
                 'camera_configs' => [
-                    'entrance' => [
+                    'gate-1' => [
                         'camera_name' => 'Entrance Camera',
                         'source_type' => 'webcam',
                         'source_value' => '0',
                         'source_username' => '',
                         'source_password' => '',
                     ],
-                    'exit' => [
+                    'gate-2' => [
                         'camera_name' => 'Exit Camera',
                         'source_type' => 'rtsp',
                         'source_value' => 'rtsp://192.168.1.50:554/stream1',
@@ -67,21 +67,23 @@ class SettingsCameraConfigTest extends TestCase
             $this->assertSame('manual', $config['system_settings']['operating_mode']);
             $this->assertSame('offline_local', $config['system_settings']['deployment_mode']);
             $this->assertSame('enabled', $config['system_settings']['rfid_simulation_mode']);
-            $this->assertSame('Main Entrance Portal', $config['system_settings']['entrance_portal_label']);
+            // Phase 1: gate names (the old label fields rename Gate 1 / Gate 2).
+            $this->assertSame([['code' => 'gate-1', 'name' => 'Main Entrance Portal'], ['code' => 'gate-2', 'name' => 'Main Exit Portal']],
+                array_map(fn (array $gate): array => ['code' => $gate['code'], 'name' => $gate['name']], $config['gates']));
             // Phase 6: the detector key is exported from .env, not saved in the database.
             $this->assertSame('test-detector-key', $config['system_settings']['python_api_key']);
             $this->assertDatabaseMissing('system_settings', ['setting_key' => 'python_api_key']);
-            $this->assertSame('Entrance Camera', $config['cameras']['entrance']['camera_name']);
-            $this->assertSame('webcam', $config['cameras']['entrance']['source_type']);
-            $this->assertSame(0, $config['cameras']['entrance']['source_value']);
-            $this->assertSame('Exit Camera', $config['cameras']['exit']['camera_name']);
-            $this->assertSame('rtsp', $config['cameras']['exit']['source_type']);
-            $this->assertSame('rtsp://192.168.1.50:554/stream1', $config['cameras']['exit']['source_value']);
-            $this->assertSame('admin', $config['cameras']['exit']['source_username']);
-            $this->assertSame('secret', $config['cameras']['exit']['source_password']);
+            $this->assertSame('Entrance Camera', $config['cameras']['gate-1']['camera_name']);
+            $this->assertSame('webcam', $config['cameras']['gate-1']['source_type']);
+            $this->assertSame(0, $config['cameras']['gate-1']['source_value']);
+            $this->assertSame('Exit Camera', $config['cameras']['gate-2']['camera_name']);
+            $this->assertSame('rtsp', $config['cameras']['gate-2']['source_type']);
+            $this->assertSame('rtsp://192.168.1.50:554/stream1', $config['cameras']['gate-2']['source_value']);
+            $this->assertSame('admin', $config['cameras']['gate-2']['source_username']);
+            $this->assertSame('secret', $config['cameras']['gate-2']['source_password']);
 
-            $this->assertSame('Entrance Camera', Camera::query()->forRole('entrance')->value('camera_name'));
-            $this->assertSame('rtsp://192.168.1.50:554/stream1', Camera::query()->forRole('exit')->value('source_value'));
+            $this->assertSame('Entrance Camera', Camera::query()->forRole('gate-1')->value('camera_name'));
+            $this->assertSame('rtsp://192.168.1.50:554/stream1', Camera::query()->forRole('gate-2')->value('source_value'));
         } finally {
             if ($originalContents === null) {
                 File::delete($configPath);
@@ -114,14 +116,14 @@ class SettingsCameraConfigTest extends TestCase
             'entrance_rfid_reader_name' => 'Entrance Reader Sim',
             'exit_rfid_reader_name' => 'Exit Reader Sim',
             'camera_configs' => [
-                'entrance' => [
+                'gate-1' => [
                     'camera_name' => 'Entrance Camera',
                     'source_type' => 'rtsp',
                     'source_value' => '0',
                     'source_username' => '',
                     'source_password' => '',
                 ],
-                'exit' => [
+                'gate-2' => [
                     'camera_name' => 'Exit Camera',
                     'source_type' => 'webcam',
                     'source_value' => '0',
@@ -131,6 +133,6 @@ class SettingsCameraConfigTest extends TestCase
             ],
         ])
             ->assertRedirect(route('settings.index'))
-            ->assertSessionHasErrors('camera_configs.entrance.source_value');
+            ->assertSessionHasErrors('camera_configs.gate-1.source_value');
     }
 }

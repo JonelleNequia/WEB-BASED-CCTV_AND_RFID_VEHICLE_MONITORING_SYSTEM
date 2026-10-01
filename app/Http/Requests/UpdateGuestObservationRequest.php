@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\ValidGate;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UpdateGuestObservationRequest extends FormRequest
@@ -20,7 +21,7 @@ class UpdateGuestObservationRequest extends FormRequest
             'plate_number' => ['nullable', 'string', 'max:50'],
             'vehicle_type' => ['nullable', 'string', 'max:50'],
             'vehicle_color' => ['nullable', 'string', 'max:50'],
-            'location' => ['required', 'in:entrance,exit'],
+            'location' => ['required', new ValidGate],
             'observed_at' => ['required', 'date'],
             'status' => ['required', 'in:pending_review,reviewed,verified'],
             'notes' => ['nullable', 'string', 'max:1000'],

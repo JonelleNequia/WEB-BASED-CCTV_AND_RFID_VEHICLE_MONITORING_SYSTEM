@@ -22,7 +22,8 @@ final class PipelineReport
         $streamBudget = 1000 / max(1, (float) ($performance['stream_fps'] ?? 15));
         $detectBudget = 1000 / max(0.5, (float) ($performance['detection_fps'] ?? 8));
 
-        foreach (['entrance', 'exit'] as $role) {
+        // Phase 1: one entry per gate camera the detector reports.
+        foreach (array_keys($metrics) as $role) {
             $data = (array) ($metrics[$role] ?? []);
             $fps = (array) ($data['fps'] ?? []);
             $ms = (array) ($data['ms'] ?? []);
@@ -36,7 +37,7 @@ final class PipelineReport
 
             $publishCost = ($avg('overlay') ?? 0) + ($avg('resize') ?? 0) + ($avg('encode') ?? 0);
             $backlog = isset($values['decode_backlog_ms']) ? (int) $values['decode_backlog_ms'] : null;
-            $label = ucfirst($role);
+            $label = \App\Models\Gate::labelFor((string) $role);
 
             if ($backlog !== null && $backlog > 500) {
                 $findings[] = "{$label}: decoding falls behind the camera by {$backlog} ms. Use the sub stream for the live view.";

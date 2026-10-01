@@ -88,6 +88,8 @@ def run(args):
         perf["yolo_imgsz"] = int(args.imgsz)
     perf["hires_on_trigger"] = 0
 
+    # Phase 1: a gate code; the old "entrance"/"exit" mean Gate 1 / Gate 2.
+    args.role = {"entrance": "gate-1", "exit": "gate-2"}.get(args.role or "", args.role) or (list(runtime.get("cameras") or {}) or ["gate-1"])[0]
     camera_config = dict((runtime.get("cameras") or {}).get(args.role) or {})
     if not args.use_calibration:
         camera_config["calibration_mask"] = parse_points(args.roi) if args.roi else parse_points("0.02,0.02 0.98,0.02 0.98,0.98 0.02,0.98")

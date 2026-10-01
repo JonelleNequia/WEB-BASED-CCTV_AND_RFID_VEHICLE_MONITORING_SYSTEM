@@ -44,7 +44,7 @@
             @foreach ($attentionItems as $item)
                 <p>
                     <x-badge status="anomaly" label="Flagged" />
-                    <x-datetime :value="$item->scan_time" format="time" /> · {{ ucfirst($item->scan_location) }} · {{ $item->anomaly_reason }}
+                    <x-datetime :value="$item->scan_time" format="time" /> · {{ \App\Models\Gate::labelFor($item->scan_location) }} · {{ $item->anomaly_reason }}
                 </p>
             @endforeach
         </section>
@@ -87,10 +87,11 @@
                     </div>
 
                     <div class="field">
-                        <label for="scan_location">Station</label>
+                        <label for="scan_location">Gate</label>
                         <select id="scan_location" name="scan_location" required>
-                            <option value="entrance" @selected(old('scan_location', 'entrance') === 'entrance')>Entrance</option>
-                            <option value="exit" @selected(old('scan_location') === 'exit')>Exit</option>
+                            @foreach (\App\Models\Gate::options() as $gateCode => $gateName)
+                                <option value="{{ $gateCode }}" @selected(old('scan_location', array_key_first(\App\Models\Gate::options())) === $gateCode)>{{ $gateName }}</option>
+                            @endforeach
                         </select>
                     </div>
 
@@ -106,12 +107,11 @@
                 </div>
 
                 <div class="mini-note">
-                    {{-- Phase 4: replaced the old "same station can become ENTRY or EXIT" note. --}}
-                    <strong>Station readers decide the direction.</strong>
+                    {{-- Phase 1 (gates): every gate records IN and OUT. --}}
+                    <strong>Every gate records IN and OUT.</strong>
                     <p>
-                        At the stations, Entrance always records ENTRY and Exit always records EXIT; a mismatch is flagged for review.
-                        Test Scan keeps the inside/outside toggle for registered vehicles.
-                        The same tag at the same station is ignored for {{ $settings['rfid_cooldown_seconds'] ?? 60 }} seconds.
+                        A registered vehicle that is outside is recorded as IN, one that is inside as OUT (the camera will give the direction later).
+                        The same tag at the same gate is ignored for {{ $settings['rfid_cooldown_seconds'] ?? 60 }} seconds.
                     </p>
                 </div>
 
@@ -136,7 +136,7 @@
                 <div class="result-card result-card-{{ $latestScan->verification_status === 'verified' ? 'success' : 'warning' }}">
                     <div class="result-card-head">
                         <strong>{{ $latestScan->verificationLabel }}</strong>
-                        <x-badge :status="$latestScan->scan_location === 'exit' ? 'exit' : 'entry'" :label="$latestScan->scanLocationLabel" />
+                        <x-badge :status="$latestScan->resolved_event_type === 'EXIT' ? 'exit' : 'entry'" :label="$latestScan->scanLocationLabel" />
                     </div>
                     <div class="detail-list">
                         <div><span>Tag UID</span><strong>{{ $latestScan->tag_uid }}</strong></div>

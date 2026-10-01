@@ -29,8 +29,9 @@ class UiPhase4PagesTest extends TestCase
 
     public function test_dashboard_has_kpis_needs_attention_and_hourly_chart(): void
     {
-        $this->vehicle('ANO 101', 'ANO-TAG', 'INSIDE');
-        app(RfidIngestService::class)->ingest(['tag_uid' => 'ANO-TAG', 'scan_location' => 'entrance']);
+        // Phase 1: gates have no fixed direction, so the anomaly is a lost tag read.
+        $this->vehicle('ANO 101', 'ANO-TAG', 'INSIDE')->rfidTag->forceFill(['status' => 'lost'])->save();
+        app(RfidIngestService::class)->ingest(['tag_uid' => 'ANO-TAG', 'scan_location' => 'gate-1']);
 
         $html = $this->actingAs($this->admin)->get(route('dashboard.index'))->assertOk()->getContent();
 
@@ -53,9 +54,9 @@ class UiPhase4PagesTest extends TestCase
     public function test_activity_logs_use_one_table_with_chips_and_toolbar_exports(): void
     {
         $this->vehicle('LOG 101', 'LOG-TAG', 'OUTSIDE');
-        app(RfidIngestService::class)->ingest(['tag_uid' => 'LOG-TAG', 'scan_location' => 'entrance']);
-        $this->vehicle('ALR 101', 'ALR-TAG', 'INSIDE');
-        app(RfidIngestService::class)->ingest(['tag_uid' => 'ALR-TAG', 'scan_location' => 'entrance']); // anomaly
+        app(RfidIngestService::class)->ingest(['tag_uid' => 'LOG-TAG', 'scan_location' => 'gate-1']);
+        $this->vehicle('ALR 101', 'ALR-TAG', 'INSIDE')->rfidTag->forceFill(['status' => 'lost'])->save();
+        app(RfidIngestService::class)->ingest(['tag_uid' => 'ALR-TAG', 'scan_location' => 'gate-1']); // anomaly (lost tag)
 
         $this->actingAs($this->admin)
             ->get(route('logs.index'))
@@ -88,7 +89,7 @@ class UiPhase4PagesTest extends TestCase
     {
         foreach (range(1, 12) as $i) {
             $this->vehicle('CSV '.$i, 'CSV-TAG-'.$i, 'OUTSIDE');
-            app(RfidIngestService::class)->ingest(['tag_uid' => 'CSV-TAG-'.$i, 'scan_location' => 'entrance']);
+            app(RfidIngestService::class)->ingest(['tag_uid' => 'CSV-TAG-'.$i, 'scan_location' => 'gate-1']);
         }
 
         $csv = $this->actingAs($this->admin)->get(route('vehicle-events.export.csv', ['all' => 1]))->streamedContent();
@@ -101,10 +102,10 @@ class UiPhase4PagesTest extends TestCase
     public function test_station_kiosk_has_the_big_result_banner_and_short_logs(): void
     {
         $this->vehicle('KSK 101', 'KSK-TAG', 'OUTSIDE');
-        app(RfidIngestService::class)->ingest(['tag_uid' => 'KSK-TAG', 'scan_location' => 'entrance']);
+        app(RfidIngestService::class)->ingest(['tag_uid' => 'KSK-TAG', 'scan_location' => 'gate-1']);
 
         $this->actingAs($this->admin)
-            ->get(route('stations.entrance'))
+            ->get(route('gates.kiosk', 'gate-1'))
             ->assertOk()
             ->assertSee('data-scan-result', false)
             ->assertSee('READY')

@@ -138,6 +138,17 @@ class VehicleEvent extends Model
     }
 
     /**
+     * Phase 1 (gates): a camera event's type comes from the crossing
+     * direction the detector reports (IN / OUT), not from the gate, because
+     * every gate records both. Unknown -> ENTRY until Phase 2 calibrates the
+     * IN side of each gate.
+     */
+    public static function eventTypeForDirection(mixed $direction): string
+    {
+        return strtoupper(trim((string) $direction)) === 'OUT' ? 'EXIT' : 'ENTRY';
+    }
+
+    /**
      * Phase 5: station log fields for a detector "Vehicle with no pass" alert.
      *
      * @return array<string, mixed>
@@ -155,7 +166,8 @@ class VehicleEvent extends Model
             'resulting_state' => 'N/A',
             // Older CCTV guest rows (before Phase 5) keep their old status and do not alert.
             'no_pass_alert' => $event->match_status === self::MATCH_NO_PASS_ALERT,
-            'alert_location' => $event->event_type === 'EXIT' ? 'exit' : 'entrance',
+            // Phase 1: the gate whose camera raised the alert.
+            'alert_location' => $event->camera?->camera_role,
             'snapshot_url' => $event->vehicle_image_path
                 ? Storage::disk('public')->url($event->vehicle_image_path)
                 : null,
@@ -332,7 +344,7 @@ class VehicleEvent extends Model
             return 'No Camera Linked';
         }
 
-        return ucfirst($role).' Camera';
+        return Gate::labelFor($role).' Camera';
     }
 
     /**

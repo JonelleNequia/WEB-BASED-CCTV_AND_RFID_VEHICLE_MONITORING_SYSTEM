@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Api\RealtimeLogController;
+use App\Models\Gate;
 use App\Models\RfidScanLog;
 use App\Services\CalibrationService;
 use App\Services\DetectorRuntimeService;
@@ -14,13 +15,12 @@ use Illuminate\Http\Request;
 use Illuminate\View\View;
 
 /**
- * UI Phase 2: Gate Monitor. Entrance and Exit side by side (live feed,
- * latest scan, recent logs); the full-screen kiosks open from here.
+ * UI Phase 2: Gate Monitor. Every gate side by side (live feed, latest scan,
+ * recent logs); the full-screen kiosks open from here. Phase 1: gates from
+ * the gates table instead of the fixed Entrance/Exit.
  */
 class GateMonitorController extends Controller
 {
-    public const GATES = ['entrance' => 'Entrance', 'exit' => 'Exit'];
-
     public function index(
         Request $request,
         CalibrationService $calibrationService,
@@ -32,16 +32,17 @@ class GateMonitorController extends Controller
         $cameras = $calibrationService->cameraPayload();
 
         $gates = [];
-        foreach (self::GATES as $location => $label) {
+        foreach (Gate::ordered() as $gate) {
+            $location = $gate->code;
             $gates[$location] = [
-                'label' => $settingsService->get("{$location}_portal_label") ?: "PHILCST {$label}",
-                'short_label' => $label,
+                'label' => $gate->readerDisplayName(),
+                'short_label' => $gate->name,
                 'camera' => $cameras[$location] ?? [],
                 'camera_status' => $runtime['cameras'][$location] ?? [],
                 'stream_url' => $runtime['cameras'][$location]['stream_url'] ?? $detectorRuntimeService->defaultStreamUrl($location),
                 'latest_scan' => $this->latestScan($location),
                 'logs' => app(RealtimeLogController::class)->gateLogRows($location, 8),
-                'kiosk_url' => route($location === 'exit' ? 'stations.exit' : 'stations.entrance'),
+                'kiosk_url' => route('gates.kiosk', $location),
             ];
         }
 
@@ -59,7 +60,7 @@ class GateMonitorController extends Controller
         $runtime = $this->runtime($request, $detectorRuntimeService);
         $gates = [];
 
-        foreach (array_keys(self::GATES) as $location) {
+        foreach (Gate::codes() as $location) {
             $camera = $runtime['cameras'][$location] ?? [];
             $gates[$location] = [
                 'camera_running' => (bool) ($camera['camera_running'] ?? false),
@@ -84,7 +85,7 @@ class GateMonitorController extends Controller
      */
     protected function runtime(Request $request, DetectorRuntimeService $detectorRuntimeService): array
     {
-        foreach (array_keys(self::GATES) as $location) {
+        foreach (Gate::codes() as $location) {
             $detectorRuntimeService->markStationViewerActive($location);
         }
 

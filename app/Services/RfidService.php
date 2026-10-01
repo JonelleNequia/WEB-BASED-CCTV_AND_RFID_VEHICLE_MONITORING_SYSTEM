@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\RfidScanLog;
+use App\Models\Gate;
 use App\Models\RfidTag;
 use App\Models\Vehicle;
 use App\Support\PhilippineTime;
@@ -86,7 +87,7 @@ class RfidService
         return RfidScanLog::query()
             ->with(['vehicle.rfidTag', 'vehicleRfidTag', 'correlatedVehicleEvent', 'guestVehicleObservation'])
             ->where('tag_uid', $uid)
-            ->where('scan_location', $scanLocation === 'exit' ? 'exit' : 'entrance')
+            ->where('scan_location', Gate::normalizeCode($scanLocation))
             ->when($sourceMode, fn ($query) => $query->where('source_mode', $sourceMode))
             ->where('created_at', '>=', now()->subSeconds($withinSeconds))
             ->latest('created_at')
@@ -120,7 +121,7 @@ class RfidService
                 });
             })
             ->when(! empty($filters['scan_location']), function ($query) use ($filters): void {
-                $query->where('scan_location', $filters['scan_location'] === 'exit' ? 'exit' : 'entrance');
+                $query->where('scan_location', Gate::normalizeCode((string) $filters['scan_location']));
             })
             ->when(! empty($filters['verification_status']), function ($query) use ($filters): void {
                 // Phase 4: "anomaly" filters every flagged scan.

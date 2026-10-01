@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Support\DeviceFiles;
+use App\Models\Gate;
 use App\Support\DisplayTime;
 use App\Support\PythonLauncher;
 use Carbon\Carbon;
@@ -94,7 +95,7 @@ class DeviceServiceRuntime
         $running = (bool) ($status['service_running'] ?? false);
         $rows = [];
 
-        foreach (['entrance', 'exit'] as $station) {
+        foreach (Gate::codes() as $station) {
             $link = (array) data_get($status, "readers.$station", []);
 
             if (empty($link['target'])) {
@@ -104,7 +105,7 @@ class DeviceServiceRuntime
             $connected = $running && ($link['state'] ?? null) === 'connected';
             $rows[] = [
                 'station' => $station,
-                'label' => ucfirst($station).' UHF',
+                'label' => Gate::labelFor($station).' UHF',
                 'ok' => $connected,
                 'state' => $running ? (string) ($link['state'] ?? 'connecting') : 'stopped',
                 'detail' => match (true) {

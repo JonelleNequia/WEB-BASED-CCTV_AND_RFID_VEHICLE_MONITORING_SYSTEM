@@ -45,7 +45,7 @@ class Phase1BugFixTest extends TestCase
 
         $scan = app(RfidService::class)->ingest([
             'tag_uid' => 'TZ-TAG-1',
-            'scan_location' => 'entrance',
+            'scan_location' => 'gate-1',
             'scan_time' => '2026-09-25T23:30:00Z',
         ], 'station_reader');
 
@@ -87,14 +87,14 @@ class Phase1BugFixTest extends TestCase
         $original = File::exists($path) ? File::get($path) : null;
 
         try {
-            $service->markStationViewerActive('entrance');
-            $service->markStationViewerActive('exit');
+            $service->markStationViewerActive('gate-1');
+            $service->markStationViewerActive('gate-2');
 
             $payload = json_decode((string) File::get($path), true);
 
             $this->assertIsArray($payload);
-            $this->assertArrayHasKey('entrance', $payload['locations']);
-            $this->assertArrayHasKey('exit', $payload['locations']);
+            $this->assertArrayHasKey('gate-1', $payload['locations']);
+            $this->assertArrayHasKey('gate-2', $payload['locations']);
             $this->assertSame([], File::glob($path.'.*.tmp'));
             $this->assertTrue($service->stationActivity()['active']);
         } finally {

@@ -21,7 +21,7 @@
         <section class="station-video-pane">
             <div class="station-video-topbar">
                 <div>
-                    <span class="station-kicker">Camera {{ $location === 'entrance' ? '1' : '2' }}</span>
+                    <span class="station-kicker">Gate kiosk · IN and OUT</span>
                     <h1>{{ $stationLabel }}</h1>
                 </div>
                 <div class="station-status-stack">
@@ -99,7 +99,6 @@
 
     @php($stationPayload = [
         'location' => $location,
-        'eventType' => $eventType,
         'logLabel' => 'station logs',
         'camera' => $camera,
         'cameraStatus' => $cameraStatus,

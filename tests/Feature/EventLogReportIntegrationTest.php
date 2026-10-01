@@ -99,7 +99,7 @@ class EventLogReportIntegrationTest extends TestCase
             'plate_number' => 'GST-LOG-01',
             'vehicle_type' => 'Car',
             'vehicle_color' => 'White',
-            'location' => 'entrance',
+            'location' => 'gate-1',
             'observation_source' => 'cctv',
             'status' => 'pending_review',
             'observed_at' => now(),
@@ -169,7 +169,7 @@ class EventLogReportIntegrationTest extends TestCase
             'plate_number' => 'GST-RT-01',
             'vehicle_type' => 'Van',
             'vehicle_color' => 'Blue',
-            'location' => 'entrance',
+            'location' => 'gate-1',
             'observation_source' => 'cctv',
             'status' => 'pending_review',
             'observed_at' => now(),
@@ -201,7 +201,7 @@ class EventLogReportIntegrationTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
-        $sourcePath = \App\Support\CameraFiles::framePath('exit');
+        $sourcePath = \App\Support\CameraFiles::framePath('gate-2');
         File::ensureDirectoryExists(dirname($sourcePath));
         File::put($sourcePath, 'guest-event-log-frame');
 
@@ -226,7 +226,7 @@ class EventLogReportIntegrationTest extends TestCase
             $this->actingAs($admin)
                 ->postJson(route('rfid-scans.store'), [
                     'tag_uid' => $tag->uid,
-                    'scan_location' => 'exit',
+                    'scan_location' => 'gate-2',
                     'reader_name' => 'Exit RFID Reader',
                 ])
                 ->assertCreated()

@@ -16,15 +16,15 @@ class GuestObservationSeeder extends Seeder
     {
         /** @var GuestObservationService $guestObservationService */
         $guestObservationService = app(GuestObservationService::class);
-        $entranceCameraId = Camera::query()->forRole('entrance')->value('id');
-        $exitCameraId = Camera::query()->forRole('exit')->value('id');
+        $entranceCameraId = Camera::query()->forRole('gate-1')->value('id');
+        $exitCameraId = Camera::query()->forRole('gate-2')->value('id');
 
         $records = [
             [
                 'plate_text' => 'GUEST-1001',
                 'vehicle_type' => 'Car',
                 'vehicle_color' => 'Black',
-                'location' => 'entrance',
+                'location' => 'gate-1',
                 'observation_source' => 'manual',
                 'observed_at' => Carbon::today()->setTime(9, 25, 0)->toIso8601String(),
                 'camera_id' => $entranceCameraId,
@@ -34,7 +34,7 @@ class GuestObservationSeeder extends Seeder
                 'plate_text' => null,
                 'vehicle_type' => 'Car',
                 'vehicle_color' => 'White',
-                'location' => 'entrance',
+                'location' => 'gate-1',
                 'observation_source' => 'cctv',
                 'observed_at' => Carbon::today()->setTime(10, 40, 0)->toIso8601String(),
                 'camera_id' => $exitCameraId,
@@ -44,7 +44,7 @@ class GuestObservationSeeder extends Seeder
                 'plate_text' => 'TMP-3030',
                 'vehicle_type' => 'Motorcycle',
                 'vehicle_color' => 'Red',
-                'location' => 'exit',
+                'location' => 'gate-2',
                 'observation_source' => 'manual',
                 'observed_at' => Carbon::today()->setTime(14, 5, 0)->toIso8601String(),
                 'camera_id' => $exitCameraId,

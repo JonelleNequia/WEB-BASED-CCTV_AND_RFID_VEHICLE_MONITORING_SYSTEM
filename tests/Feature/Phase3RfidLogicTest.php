@@ -36,47 +36,43 @@ class Phase3RfidLogicTest extends TestCase
     {
         $vehicle = $this->registeredVehicle('FIX 1001', 'FIX-TAG-1');
 
-        $entry = $this->scan('FIX-TAG-1', 'entrance');
+        $entry = $this->scan('FIX-TAG-1', 'gate-1');
         $this->assertSame(RfidIngestResult::RECORDED, $entry->outcome);
         $this->assertSame('ENTRY', $entry->scanLog->resolved_event_type);
         $this->assertSame(Vehicle::STATE_INSIDE, $vehicle->fresh()->current_state);
 
-        $exit = $this->scan('FIX-TAG-1', 'exit');
+        $exit = $this->scan('FIX-TAG-1', 'gate-2');
         $this->assertSame(RfidIngestResult::RECORDED, $exit->outcome);
         $this->assertSame('EXIT', $exit->scanLog->resolved_event_type);
         $this->assertSame(Vehicle::STATE_OUTSIDE, $vehicle->fresh()->current_state);
         $this->assertFalse($exit->scanLog->is_anomaly);
     }
 
-    public function test_direction_mismatch_is_recorded_and_flagged(): void
+    public function test_every_gate_records_in_and_out(): void
     {
+        // Phase 1 (gates): no fixed direction per gate. A vehicle inside that
+        // passes Gate 1 is going OUT; no "already inside" anomaly any more.
         $vehicle = $this->registeredVehicle('ANO 2002', 'ANO-TAG-2', Vehicle::STATE_INSIDE);
 
-        $result = $this->scan('ANO-TAG-2', 'entrance');
+        $out = $this->scan('ANO-TAG-2', 'gate-1');
+        $this->assertSame(RfidIngestResult::RECORDED, $out->outcome);
+        $this->assertSame('EXIT', $out->scanLog->resolved_event_type);
+        $this->assertSame('exit', $out->scanLog->scan_direction);
+        $this->assertFalse($out->scanLog->is_anomaly);
+        $this->assertSame(Vehicle::STATE_OUTSIDE, $vehicle->fresh()->current_state);
+        $this->assertSame('EXIT', VehicleEvent::query()->findOrFail($out->scanLog->correlated_vehicle_event_id)->event_type);
 
-        $this->assertSame(RfidIngestResult::ANOMALY, $result->outcome);
-        $this->assertSame('ENTRY', $result->scanLog->resolved_event_type);
-        $this->assertTrue($result->scanLog->is_anomaly);
-        $this->assertStringContainsString('already inside', $result->scanLog->anomaly_reason);
-        $this->assertSame(Vehicle::STATE_INSIDE, $vehicle->fresh()->current_state);
-
-        $event = VehicleEvent::query()->findOrFail($result->scanLog->correlated_vehicle_event_id);
-        $this->assertSame('ENTRY', $event->event_type);
-        $this->assertNotNull($event->anomaly_reason);
-
-        $exitWhileOutside = $this->scan('ANO-TAG-2', 'exit');
-        $this->assertFalse($exitWhileOutside->scanLog->is_anomaly);
         $this->travel(2)->minutes(); // past the 60-second cooldown
-        $again = $this->scan('ANO-TAG-2', 'exit');
-        $this->assertTrue($again->scanLog->is_anomaly);
-        $this->assertStringContainsString('already outside', $again->scanLog->anomaly_reason);
+        $in = $this->scan('ANO-TAG-2', 'gate-1');
+        $this->assertSame('ENTRY', $in->scanLog->resolved_event_type);
+        $this->assertSame(Vehicle::STATE_INSIDE, $vehicle->fresh()->current_state);
     }
 
     public function test_rfid_desk_keeps_the_toggle(): void
     {
         $vehicle = $this->registeredVehicle('TGL 3003', 'TGL-TAG-3', Vehicle::STATE_INSIDE);
 
-        $result = app(RfidService::class)->simulate(['tag_uid' => 'TGL-TAG-3', 'scan_location' => 'entrance']);
+        $result = app(RfidService::class)->simulate(['tag_uid' => 'TGL-TAG-3', 'scan_location' => 'gate-1']);
 
         $this->assertSame('EXIT', $result->scanLog->resolved_event_type);
         $this->assertFalse($result->scanLog->is_anomaly);
@@ -87,19 +83,19 @@ class Phase3RfidLogicTest extends TestCase
     {
         $this->registeredVehicle('CDN 4004', 'CDN-TAG-4');
 
-        $this->scan('CDN-TAG-4', 'entrance');
+        $this->scan('CDN-TAG-4', 'gate-1');
         $this->travel(30)->seconds();
-        $duplicate = $this->scan('CDN-TAG-4', 'entrance');
+        $duplicate = $this->scan('CDN-TAG-4', 'gate-1');
 
         $this->assertTrue($duplicate->isDuplicate());
         $this->assertSame(1, RfidScanLog::query()->where('tag_uid', 'CDN-TAG-4')->count());
         $this->assertSame(1, VehicleEvent::query()->where('plate_text', 'CDN 4004')->count());
 
         // Another station is not blocked by the entrance cooldown.
-        $this->assertFalse($this->scan('CDN-TAG-4', 'exit')->isDuplicate());
+        $this->assertFalse($this->scan('CDN-TAG-4', 'gate-2')->isDuplicate());
 
         $this->travel(31)->seconds();
-        $this->assertFalse($this->scan('CDN-TAG-4', 'entrance')->isDuplicate());
+        $this->assertFalse($this->scan('CDN-TAG-4', 'gate-1')->isDuplicate());
     }
 
     public function test_cooldown_is_configurable(): void
@@ -107,18 +103,18 @@ class Phase3RfidLogicTest extends TestCase
         SystemSetting::query()->updateOrCreate(['setting_key' => 'rfid_cooldown_seconds'], ['setting_value' => '5']);
         $this->registeredVehicle('CFG 5005', 'CFG-TAG-5');
 
-        $this->scan('CFG-TAG-5', 'entrance');
+        $this->scan('CFG-TAG-5', 'gate-1');
         $this->travel(6)->seconds();
 
-        $this->assertFalse($this->scan('CFG-TAG-5', 'entrance')->isDuplicate());
+        $this->assertFalse($this->scan('CFG-TAG-5', 'gate-1')->isDuplicate());
     }
 
     public function test_inside_count_is_registered_vehicles_only(): void
     {
         $this->registeredVehicle('INS 0001', 'INS-TAG-1');
         $this->registeredVehicle('INS 0002', 'INS-TAG-2');
-        $this->scan('INS-TAG-1', 'entrance');
-        $this->scan('INS-TAG-2', 'entrance');
+        $this->scan('INS-TAG-1', 'gate-1');
+        $this->scan('INS-TAG-2', 'gate-1');
 
         // Phase 0: guest passes are gone; vehicles without a tag never count as inside.
         $counts = app(VehicleOccupancyService::class)->counts();

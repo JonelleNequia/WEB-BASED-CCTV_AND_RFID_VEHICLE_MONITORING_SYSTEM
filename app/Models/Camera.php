@@ -7,6 +7,7 @@ use App\Models\Concerns\StoresLocalTime;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Camera extends Model
@@ -65,9 +66,18 @@ class Camera extends Model
     /**
      * Filter cameras by their role in the vehicle flow.
      */
+    /**
+     * The camera of one gate. Phase 1: the role is the gate code; the old
+     * "entrance" / "exit" still mean Gate 1 / Gate 2.
+     */
     public function scopeForRole(Builder $query, string $role): Builder
     {
-        return $query->where('camera_role', $role);
+        return $query->where('camera_role', Gate::LEGACY_CODES[strtolower($role)] ?? $role);
+    }
+
+    public function gate(): BelongsTo
+    {
+        return $this->belongsTo(Gate::class, 'camera_role', 'code');
     }
 
     /**

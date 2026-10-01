@@ -3,15 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Models\DeviceAssignment;
+use App\Models\Gate;
 use App\Models\NetworkDevice;
 use App\Services\DeviceRegistryService;
 use App\Services\DeviceServiceRuntime;
+use App\Rules\ValidGate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
 /**
- * Plug-and-detect: Settings › Stations & Readers › Devices.
+ * Plug-and-detect: Settings › Gates & Readers › Devices.
  */
 class DeviceController extends Controller
 {
@@ -55,7 +57,7 @@ class DeviceController extends Controller
     public function assign(Request $request, NetworkDevice $networkDevice, DeviceRegistryService $registry): JsonResponse
     {
         $validated = $request->validate([
-            'station' => ['required', Rule::in(DeviceAssignment::STATIONS)],
+            'station' => ['required', new ValidGate],
             'role' => ['required', Rule::in([DeviceAssignment::ROLE_CAMERA, DeviceAssignment::ROLE_READER])],
             'stream' => ['nullable', 'in:main,sub'],
             'snapshots' => ['nullable', 'boolean'],
@@ -65,7 +67,7 @@ class DeviceController extends Controller
             'transport' => ['nullable', 'in:tcp,udp'],
         ]);
 
-        $result = $registry->assign($networkDevice, $validated['station'], $validated['role'], $validated);
+        $result = $registry->assign($networkDevice, Gate::normalizeCode($validated['station']), $validated['role'], $validated);
 
         return response()->json($result + ['devices' => $registry->panelPayload()], $result['ok'] ? 200 : 422);
     }
@@ -73,15 +75,16 @@ class DeviceController extends Controller
     public function unassign(Request $request, DeviceRegistryService $registry): JsonResponse
     {
         $validated = $request->validate([
-            'station' => ['required', Rule::in(DeviceAssignment::STATIONS)],
+            'station' => ['required', new ValidGate],
             'role' => ['required', Rule::in([DeviceAssignment::ROLE_CAMERA, DeviceAssignment::ROLE_READER])],
         ]);
 
-        $registry->unassign($validated['station'], $validated['role']);
+        $station = Gate::normalizeCode($validated['station']);
+        $registry->unassign($station, $validated['role']);
 
         return response()->json([
             'ok' => true,
-            'message' => ucfirst($validated['station']).' '.$validated['role'].' unassigned.',
+            'message' => Gate::labelFor($station).' '.$validated['role'].' unassigned.',
             'devices' => $registry->panelPayload(),
         ]);
     }
@@ -91,7 +94,7 @@ class DeviceController extends Controller
      */
     public function encoderPreview(string $station, \App\Services\CameraEncoderService $encoders): JsonResponse
     {
-        abort_unless(in_array($station, DeviceAssignment::STATIONS, true), 404);
+        $station = Gate::resolveCode($station) ?? abort(404);
         $result = $encoders->preview($station);
 
         return response()->json($result, $result['ok'] ? 200 : 422);
@@ -99,7 +102,7 @@ class DeviceController extends Controller
 
     public function encoderOptimize(string $station, \App\Services\CameraEncoderService $encoders): JsonResponse
     {
-        abort_unless(in_array($station, DeviceAssignment::STATIONS, true), 404);
+        $station = Gate::resolveCode($station) ?? abort(404);
         $result = $encoders->optimize($station);
 
         return response()->json($result, $result['ok'] ? 200 : 422);

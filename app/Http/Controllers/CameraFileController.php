@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Gate;
 use App\Services\DetectorRuntimeService;
 use App\Support\CameraFiles;
 use App\Support\CameraSource;
@@ -20,6 +21,8 @@ class CameraFileController extends Controller
      */
     public function frame(string $role, string $kind = 'latest'): BinaryFileResponse
     {
+        // Phase 1: a gate code (or the old "entrance" / "exit").
+        $role = Gate::resolveCode($role) ?? abort(404);
         $path = CameraFiles::framePath($role, $kind);
 
         abort_unless(File::isFile($path) && File::size($path) > 0, 404);

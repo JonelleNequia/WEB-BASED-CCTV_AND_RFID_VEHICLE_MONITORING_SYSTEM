@@ -76,12 +76,15 @@ class DashboardRankingTest extends TestCase
             ]);
         }
 
-        foreach (['entrance', 'exit'] as $location) {
+        // Phase 1 (gates): a camera capture counts by its crossing direction,
+        // not by the gate (both gates record IN and OUT).
+        foreach (['IN' => 'gate-1', 'OUT' => 'gate-1'] as $direction => $location) {
             GuestVehicleObservation::query()->create([
-                'plate_number' => 'GST-'.$location,
+                'plate_number' => 'GST-'.$direction,
                 'vehicle_type' => 'Car',
                 'vehicle_color' => 'White',
                 'location' => $location,
+                'detection_metadata_json' => ['direction' => $direction],
                 'observation_source' => 'cctv',
                 'status' => 'pending_review',
                 'observed_at' => now(),
@@ -92,7 +95,7 @@ class DashboardRankingTest extends TestCase
             'plate_number' => 'GST-CREATED-TODAY',
             'vehicle_type' => 'Car',
             'vehicle_color' => 'Blue',
-            'location' => 'entrance',
+            'location' => 'gate-1',
             'observation_source' => 'cctv',
             'status' => 'pending_review',
             'observed_at' => now()->subDay(),
@@ -102,7 +105,7 @@ class DashboardRankingTest extends TestCase
 
         RfidScanLog::query()->create([
             'tag_uid' => 'UNLINKED-GUEST-ENTRY',
-            'scan_location' => 'entrance',
+            'scan_location' => 'gate-1',
             'scan_direction' => 'entry',
             'resolved_event_type' => 'ENTRY',
             'reader_name' => 'Entrance RFID Reader',
@@ -114,13 +117,15 @@ class DashboardRankingTest extends TestCase
         $this->actingAs($user)
             ->getJson(route('dashboard.live-state'))
             ->assertOk()
-            ->assertJsonPath('metrics.total_vehicles_entered_today', 4)
+            // 1 registered + 1 capture IN + 1 capture without a direction (ENTRY);
+            // the unknown-tag read is not a movement.
+            ->assertJsonPath('metrics.total_vehicles_entered_today', 3)
             ->assertJsonPath('metrics.total_vehicles_exited_today', 2)
             ->assertJsonPath('metrics.guest_observations_today', 3)
-            ->assertJsonPath('traffic_summary.today.entries', 4)
-            ->assertJsonPath('traffic_summary.week.entries', 4)
-            ->assertJsonPath('traffic_summary.month.entries', 4)
-            ->assertJsonPath('traffic_summary.year.entries', 4);
+            ->assertJsonPath('traffic_summary.today.entries', 3)
+            ->assertJsonPath('traffic_summary.week.entries', 3)
+            ->assertJsonPath('traffic_summary.month.entries', 3)
+            ->assertJsonPath('traffic_summary.year.entries', 3);
     }
 
     public function test_dashboard_recent_events_do_not_duplicate_mirrored_guest_observations(): void
@@ -135,7 +140,7 @@ class DashboardRankingTest extends TestCase
             'plate_text' => 'DPF-233',
             'vehicle_type' => 'Car',
             'vehicle_color' => 'White',
-            'location' => 'entrance',
+            'location' => 'gate-1',
             'observation_source' => 'cctv',
             'status' => 'pending_review',
             'observed_at' => $eventTime,
@@ -234,7 +239,7 @@ class DashboardRankingTest extends TestCase
                 'plate_number' => 'GST-PH',
                 'vehicle_type' => 'Car',
                 'vehicle_color' => 'White',
-                'location' => 'entrance',
+                'location' => 'gate-1',
                 'observation_source' => 'cctv',
                 'status' => 'pending_review',
                 'observed_at' => $currentBusinessTime,
@@ -248,7 +253,7 @@ class DashboardRankingTest extends TestCase
                 'plate_number' => 'GST-OLD',
                 'vehicle_type' => 'Car',
                 'vehicle_color' => 'White',
-                'location' => 'entrance',
+                'location' => 'gate-1',
                 'observation_source' => 'cctv',
                 'status' => 'pending_review',
                 'observed_at' => $previousBusinessTime,
@@ -260,7 +265,7 @@ class DashboardRankingTest extends TestCase
 
             $currentScan = RfidScanLog::query()->create([
                 'tag_uid' => 'PH-SCAN-CURRENT',
-                'scan_location' => 'entrance',
+                'scan_location' => 'gate-1',
                 'scan_direction' => 'entry',
                 'resolved_event_type' => 'ENTRY',
                 'reader_name' => 'Entrance RFID Reader',
@@ -275,7 +280,7 @@ class DashboardRankingTest extends TestCase
 
             $previousScan = RfidScanLog::query()->create([
                 'tag_uid' => 'PH-SCAN-OLD',
-                'scan_location' => 'entrance',
+                'scan_location' => 'gate-1',
                 'scan_direction' => 'entry',
                 'resolved_event_type' => 'ENTRY',
                 'reader_name' => 'Entrance RFID Reader',

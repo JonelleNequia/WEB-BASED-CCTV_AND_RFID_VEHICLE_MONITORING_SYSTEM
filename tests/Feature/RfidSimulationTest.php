@@ -44,7 +44,7 @@ class RfidSimulationTest extends TestCase
         $this->actingAs($user)
             ->post(route('rfid-scans.store'), [
                 'tag_uid' => 'RFID-ABC-1001',
-                'scan_location' => 'entrance',
+                'scan_location' => 'gate-1',
                 'scan_direction' => 'entry',
                 'reader_name' => 'Entrance RFID Reader (Simulated)',
                 'scan_time' => now()->toIso8601String(),
@@ -56,7 +56,7 @@ class RfidSimulationTest extends TestCase
 
         $this->assertNotNull($scanLog);
         $this->assertSame('RFID-ABC-1001', $scanLog->tag_uid);
-        $this->assertSame('entrance', $scanLog->scan_location);
+        $this->assertSame('gate-1', $scanLog->scan_location);
     }
 
     /**
@@ -70,7 +70,7 @@ class RfidSimulationTest extends TestCase
         $this->actingAs($user)
             ->postJson(route('rfid-scans.store'), [
                 'tag_uid' => 'RFID-TOGGLE-1001',
-                'scan_location' => 'exit',
+                'scan_location' => 'gate-2',
                 'reader_name' => 'Exit RFID Reader',
             ])
             ->assertCreated()
@@ -105,7 +105,7 @@ class RfidSimulationTest extends TestCase
             'X-Source-Name' => 'phpunit-rfid-reader',
         ])->postJson(route('api.integration.rfid-scans'), [
             'tag_uid' => 'RFID-TOGGLE-2002',
-            'scan_location' => 'exit',
+            'scan_location' => 'gate-2',
             'reader_name' => 'Exit RFID Reader',
         ])
             ->assertCreated()
@@ -132,7 +132,7 @@ class RfidSimulationTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
-        $sourcePath = \App\Support\CameraFiles::framePath('entrance');
+        $sourcePath = \App\Support\CameraFiles::framePath('gate-1');
 
         File::ensureDirectoryExists(dirname($sourcePath));
         File::put($sourcePath, 'guest-frame');
@@ -141,7 +141,7 @@ class RfidSimulationTest extends TestCase
             $this->actingAs($user)
                 ->postJson(route('rfid-scans.store'), [
                     'tag_uid' => 'UNKNOWN-GUEST-1001',
-                    'scan_location' => 'entrance',
+                    'scan_location' => 'gate-1',
                     'reader_name' => 'Entrance RFID Reader',
                 ])
                 ->assertCreated()

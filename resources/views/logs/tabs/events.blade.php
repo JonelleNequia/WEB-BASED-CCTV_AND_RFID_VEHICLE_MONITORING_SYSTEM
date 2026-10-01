@@ -131,7 +131,7 @@
             <th>Vehicle / Color</th>
             <th>Movement</th>
             <th>Log Type</th>
-            <th>Station</th>
+            <th>Gate</th>
             <th>Status</th>
             <th><span class="sr-only">Details</span></th>
         </tr>

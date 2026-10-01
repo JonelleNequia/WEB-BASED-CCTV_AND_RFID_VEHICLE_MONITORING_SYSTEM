@@ -65,7 +65,8 @@
         const usedIds = new Set();
         const assignments = {};
 
-        ['entrance', 'exit'].forEach(function (role) {
+        // Phase 1: one camera per gate (keys = gate codes).
+        Object.keys(cameraConfigs || {}).forEach(function (role) {
             const cameraConfig = cameraConfigs[role] || {};
             let chosenDevice = null;
 

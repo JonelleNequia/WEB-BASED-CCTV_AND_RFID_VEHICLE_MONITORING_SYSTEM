@@ -47,6 +47,7 @@ from config import (
     YOLO_IMAGE_SIZE,
     annotated_frame_path,
     latest_frame_path,
+    camera_roles,
     load_runtime_config,
     performance_settings,
     resolve_capture_source,
@@ -67,14 +68,15 @@ from camera_health import RtspDiagnosis, take_over_stale_detector
 import metrics
 from hires import HiResGrabber, scale_box
 
-CAMERA_ROLES = ("entrance", "exit")
-STREAM_FRAMES = {role: None for role in CAMERA_ROLES}
+# Phase 1: one camera per gate; the gate codes come from Laravel's runtime
+# config (camera_roles()) and can change while the detector runs.
+STREAM_FRAMES = {}
 # When the frame behind each published JPEG was decoded (for latency metrics).
-STREAM_FRAME_TIMES = {role: 0.0 for role in CAMERA_ROLES}
+STREAM_FRAME_TIMES = {}
 STREAM_CONDITION = threading.Condition()
 # Open MJPEG connections per camera. Any page that shows the live view
 # (Station, Gate Monitor, Calibration, Settings › Cameras) counts as a viewer.
-STREAM_CLIENTS = {role: 0 for role in CAMERA_ROLES}
+STREAM_CLIENTS = {}
 STREAM_CLIENTS_LOCK = threading.Lock()
 RTSP_DIAGNOSIS = RtspDiagnosis()
 # Full-resolution frames from the snapshot (main) stream, only around triggers.
@@ -122,7 +124,7 @@ class MjpegStreamHandler(BaseHTTPRequestHandler):
             return
 
         role = request_path.strip("/").split("/")
-        if len(role) != 2 or role[0] != "stream" or role[1] not in CAMERA_ROLES:
+        if len(role) != 2 or role[0] != "stream" or role[1] not in camera_roles(load_runtime_config()):
             self.send_error(404)
             return
 
@@ -139,7 +141,7 @@ class MjpegStreamHandler(BaseHTTPRequestHandler):
         last_frame_id = None
 
         with STREAM_CLIENTS_LOCK:
-            STREAM_CLIENTS[role] += 1
+            STREAM_CLIENTS[role] = STREAM_CLIENTS.get(role, 0) + 1
         try:
             self._send_frames(role, last_frame_id)
         finally:
@@ -150,10 +152,10 @@ class MjpegStreamHandler(BaseHTTPRequestHandler):
         while True:
             with STREAM_CONDITION:
                 STREAM_CONDITION.wait_for(
-                    lambda: STREAM_FRAMES[role] is not None and id(STREAM_FRAMES[role]) != last_frame_id,
+                    lambda: STREAM_FRAMES.get(role) is not None and id(STREAM_FRAMES.get(role)) != last_frame_id,
                     timeout=1.0,
                 )
-                frame = STREAM_FRAMES[role]
+                frame = STREAM_FRAMES.get(role)
 
             if frame is None:
                 continue
@@ -187,7 +189,7 @@ def ensure_output_directories():
     SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
     DETECTED_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-    for role in CAMERA_ROLES:
+    for role in camera_roles(load_runtime_config()):
         (DETECTED_IMAGE_DIR / role).mkdir(parents=True, exist_ok=True)
 
 
@@ -416,6 +418,14 @@ def resize_frame_for_stream(frame, max_width=STREAM_FRAME_MAX_WIDTH):
     return cv2.resize(frame, target_size, interpolation=cv2.INTER_AREA)
 
 
+def gate_name(role):
+    """Phase 1: the gate's display name ("Main Gate") from Laravel's export."""
+    for gate in load_runtime_config().get("gates") or []:
+        if isinstance(gate, dict) and gate.get("code") == role:
+            return str(gate.get("name") or role)
+    return str(role)
+
+
 def publish_status_frame(role, title, detail):
     """
     Publish a simple diagnostic frame when a configured camera cannot provide
@@ -426,7 +436,7 @@ def publish_status_frame(role, title, detail):
 
     cv2.putText(
         frame,
-        f"{role.upper()} CAMERA",
+        f"{gate_name(role).upper()} CAMERA",
         (70, 170),
         cv2.FONT_HERSHEY_SIMPLEX,
         1.6,
@@ -1022,7 +1032,9 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
         "cameras": {},
     }
 
-    for role in CAMERA_ROLES:
+    for role in camera_roles(runtime_config):
+        if role not in camera_states:
+            continue
         camera_config = runtime_config["cameras"][role]
         state = camera_states[role]
         model_info = detector_models.get(role, {})
@@ -2394,8 +2406,8 @@ def release_all(camera_states):
     """
     Release every open capture cleanly.
     """
-    for role in CAMERA_ROLES:
-        release_capture(camera_states[role])
+    for state in camera_states.values():
+        release_capture(state)
 
 
 def build_models():
@@ -2406,7 +2418,7 @@ def build_models():
 
     detector_models = {}
 
-    for role in CAMERA_ROLES:
+    for role in camera_roles(load_runtime_config()):
         model = YOLO(MODEL_PATH)
         vehicle_labels = resolve_allowed_vehicle_classes(model)
         detector_models[role] = {
@@ -2885,6 +2897,29 @@ def camera_detection_worker(role, state, model_info, stop_event):
         metrics.timing(role, "detection_age", (time.monotonic() - frame_time) * 1000.0)
 
 
+class _CombinedStop:
+    """Stops a camera worker when the detector stops OR its gate is removed."""
+
+    def __init__(self, *events):
+        self.events = events
+
+    def is_set(self):
+        return any(event.is_set() for event in self.events)
+
+    def wait(self, timeout=None):
+        deadline = time.monotonic() + (timeout or 0)
+        while not self.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            self.events[0].wait(min(remaining, 0.25))
+        return True
+
+    def set(self):
+        for event in self.events:
+            event.set()
+
+
 def run_detector_loop():
     """
     Start the dual-camera vehicle detector until the user stops it.
@@ -2905,8 +2940,8 @@ def run_detector_loop():
         return
 
     runtime_config = load_runtime_config()
-    camera_states = {role: initial_camera_state() for role in CAMERA_ROLES}
-    detector_models = {role: {"model": None, "vehicle_labels": {}} for role in CAMERA_ROLES}
+    camera_states = {}
+    detector_models = {}
     write_status(
         runtime_config,
         camera_states,
@@ -2918,25 +2953,37 @@ def run_detector_loop():
     try:
         stop_event = threading.Event()
         workers = []
+        role_stops = {}
 
-        for role in CAMERA_ROLES:
-            stream_worker = threading.Thread(
-                target=camera_stream_worker,
-                args=(role, camera_states[role], detector_models[role], stop_event),
-                daemon=True,
-            )
-            detection_worker = threading.Thread(
-                target=camera_detection_worker,
-                args=(role, camera_states[role], detector_models[role], stop_event),
-                daemon=True,
-            )
-            stream_worker.start()
-            detection_worker.start()
-            workers.extend([stream_worker, detection_worker])
+        def sync_camera_workers(runtime_config):
+            """Phase 1: a worker pair per gate camera; added or removed gates follow."""
+            roles = camera_roles(runtime_config)
+            for role in roles:
+                if role in role_stops:
+                    continue
+                camera_states[role] = initial_camera_state()
+                detector_models[role] = {"model": None, "vehicle_labels": {}}
+                role_stop = threading.Event()
+                role_stops[role] = role_stop
+                combined = _CombinedStop(stop_event, role_stop)
+                for target in (camera_stream_worker, camera_detection_worker):
+                    worker = threading.Thread(target=target, args=(role, camera_states[role], detector_models[role], combined), daemon=True)
+                    worker.start()
+                    workers.append(worker)
+                print(f"Camera worker started for {role}", flush=True)
+            for role in [role for role in role_stops if role not in roles]:
+                role_stops.pop(role).set()
+                state = camera_states.pop(role, None)
+                detector_models.pop(role, None)
+                STREAM_FRAMES.pop(role, None)
+                if state is not None:
+                    release_capture(state)
+                print(f"Camera worker stopped for {role} (gate removed)", flush=True)
 
         last_metrics_log = time.monotonic()
         while True:
             runtime_config = load_runtime_config()
+            sync_camera_workers(runtime_config)
             write_status(
                 runtime_config,
                 camera_states,
@@ -2970,7 +3017,7 @@ def run_detector_loop():
         if 'stop_event' in locals():
             stop_event.set()
 
-        for role in CAMERA_ROLES:
+        for role in list(camera_states):
             camera_states[role]["camera_running"] = False
             camera_states[role]["detection_ready"] = False
             camera_states[role]["retry_count"] += 1
@@ -2994,7 +3041,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="PHILCST dual-camera vehicle detector")
     parser.add_argument("--video", help="run the detection pipeline on a video file instead of the cameras")
-    parser.add_argument("--role", choices=CAMERA_ROLES, default="entrance")
+    parser.add_argument("--role", default=None, help="gate code (default: the first gate)")
     parser.add_argument("--use-calibration", action="store_true", help="use the station's saved zone and line")
     parser.add_argument("--roi", help='zone polygon, normalized: "x,y x,y x,y ..."')
     parser.add_argument("--line", help='trigger line, normalized: "x1,y1,x2,y2"')

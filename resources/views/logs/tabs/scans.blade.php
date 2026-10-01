@@ -14,11 +14,12 @@
             </div>
 
             <div class="field">
-                <label for="history_scan_location">Station</label>
+                <label for="history_scan_location">Gate</label>
                 <select id="history_scan_location" name="scan_location">
                     <option value="">All</option>
-                    <option value="entrance" @selected(($filters['scan_location'] ?? '') === 'entrance')>Entrance</option>
-                    <option value="exit" @selected(($filters['scan_location'] ?? '') === 'exit')>Exit</option>
+                    @foreach (\App\Models\Gate::options() as $gateCode => $gateName)
+                        <option value="{{ $gateCode }}" @selected(($filters['scan_location'] ?? '') === $gateCode)>{{ $gateName }}</option>
+                    @endforeach
                 </select>
             </div>
 
@@ -46,7 +47,7 @@
                         <th>Time</th>
                         <th>Tag UID</th>
                         <th>Vehicle</th>
-                        <th>Station</th>
+                        <th>Gate</th>
                         <th>Event</th>
                         <th>Result</th>
                         <th>Vehicle Log</th>

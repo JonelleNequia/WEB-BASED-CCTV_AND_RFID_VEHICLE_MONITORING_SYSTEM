@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\ActiveSession;
 use App\Models\Camera;
+use App\Models\Gate;
 use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
 use Illuminate\Http\UploadedFile;
@@ -71,7 +72,7 @@ class EventService
 
         return DB::transaction(function () use ($data): VehicleEvent {
             $camera = $this->resolveCamera($data);
-            $eventType = $camera->camera_role === 'exit' ? 'EXIT' : 'ENTRY';
+            $eventType = VehicleEvent::eventTypeForDirection($data['direction'] ?? data_get($data, 'detection_metadata_json.direction'));
             $detectedVehicleType = $this->normalizeVehicleType((string) $data['detected_vehicle_type']);
 
             return VehicleEvent::query()->create([
@@ -87,7 +88,7 @@ class EventService
                 'camera_id' => $camera->id,
                 'external_event_key' => $data['external_event_key'],
                 'detection_metadata_json' => $data['detection_metadata_json'] ?? null,
-                'roi_name' => $data['roi_name'] ?? ($camera->camera_role === 'exit' ? 'Exit Trigger Line' : 'Entrance Trigger Line'),
+                'roi_name' => $data['roi_name'] ?? Gate::labelFor($camera->camera_role).' Trigger Line',
                 'event_time' => $data['event_time'],
                 'vehicle_image_path' => $data['vehicle_image_path'],
                 'plate_image_path' => null,
@@ -189,9 +190,7 @@ class EventService
                 'vehicle_color' => null,
                 'vehicle_category' => $vehicle->category,
                 'camera_id' => $cameraId,
-                'roi_name' => $scanLog->scan_location === 'exit'
-                    ? 'Exit RFID Reader'
-                    : 'Entrance RFID Reader',
+                'roi_name' => Gate::labelFor($scanLog->scan_location).' Reader',
                 'event_time' => $scanLog->scan_time,
                 'vehicle_image_path' => null,
                 'plate_image_path' => null,
@@ -436,7 +435,7 @@ class EventService
         }
 
         return Camera::query()
-            ->forRole((string) ($data['camera_role'] ?? 'entrance'))
+            ->forRole(Gate::normalizeCode((string) ($data['camera_role'] ?? '')))
             ->firstOrFail();
     }
 

@@ -11,8 +11,6 @@ namespace App\Support;
  */
 final class CameraFiles
 {
-    public const ROLES = ['entrance', 'exit'];
-
     public const KINDS = ['latest', 'annotated'];
 
     public static function directory(): string
