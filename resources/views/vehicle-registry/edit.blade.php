@@ -8,8 +8,7 @@
 
     <section class="panel">
         @php($selectedCategory = old('category', $vehicle->category))
-        @php($categoryOtherValue = old('category_other', ! in_array($selectedCategory, $vehicleCategories, true) && $selectedCategory !== 'others' ? $selectedCategory : ''))
-        @php($categorySelectValue = $categoryOtherValue !== '' ? 'others' : $selectedCategory)
+        @php($categorySelectValue = \App\Support\VehicleCategory::normalize($selectedCategory))
         @php($selectedVehicleType = old('vehicle_type', $vehicle->vehicle_type))
         @php($vehicleTypeOtherValue = old('vehicle_type_other', ! in_array($selectedVehicleType, $vehicleTypes, true) && $selectedVehicleType !== 'Others' ? $selectedVehicleType : ''))
         @php($vehicleTypeSelectValue = $vehicleTypeOtherValue !== '' ? 'Others' : $selectedVehicleType)
@@ -63,28 +62,14 @@
 
                 <div class="field">
                     <label for="category">Category</label>
-                    <select id="category" name="category" required data-other-select data-other-target="category_other">
+                    <select id="category" name="category" required>
                         @foreach ($vehicleCategories as $category)
                             <option value="{{ $category }}" @selected($categorySelectValue === $category)>
-                                {{ ucfirst(str_replace('_', ' ', $category)) }}
+                                {{ \App\Support\VehicleCategory::label($category) }}
                             </option>
                         @endforeach
-                        <option value="others" @selected($categorySelectValue === 'others')>Others</option>
                     </select>
-                    <input
-                        id="category_other"
-                        aria-label="Custom category"
-                        type="text"
-                        name="category_other"
-                        value="{{ $categoryOtherValue }}"
-                        placeholder="Enter custom category"
-                        data-other-field
-                        @if ($categorySelectValue !== 'others') hidden @endif
-                    >
                     @error('category')
-                        <span class="field-error">{{ $message }}</span>
-                    @enderror
-                    @error('category_other')
                         <span class="field-error">{{ $message }}</span>
                     @enderror
                 </div>

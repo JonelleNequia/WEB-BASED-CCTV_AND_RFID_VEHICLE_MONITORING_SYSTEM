@@ -7,9 +7,8 @@
     $useOld = $useOld ?? false;
     $value = fn (string $field, $default = '') => $useOld ? old($field, $default) : $default;
 
-    $selectedCategory = $value('category', 'faculty_staff');
-    $categoryOtherValue = $value('category_other', ! in_array($selectedCategory, $vehicleCategories, true) && $selectedCategory !== 'others' ? $selectedCategory : '');
-    $categorySelectValue = $categoryOtherValue !== '' ? 'others' : $selectedCategory;
+    // Phase 4 (visitor model): Faculty & Staff or Registered Visitor only.
+    $categorySelectValue = \App\Support\VehicleCategory::normalize($value('category', 'faculty_staff'));
     $selectedVehicleType = $value('vehicle_type', 'Car');
     $vehicleTypeOtherValue = $value('vehicle_type_other', ! in_array($selectedVehicleType, $vehicleTypes, true) && $selectedVehicleType !== 'Others' ? $selectedVehicleType : '');
     $vehicleTypeSelectValue = $vehicleTypeOtherValue !== '' ? 'Others' : $selectedVehicleType;
@@ -33,16 +32,14 @@
 
 <div class="field">
     <label for="{{ $prefix }}_category">Category</label>
-    <select id="{{ $prefix }}_category" name="category" required data-other-select data-other-target="{{ $prefix }}_category_other" data-field="category">
+    <select id="{{ $prefix }}_category" name="category" required data-field="category">
         @foreach ($vehicleCategories as $category)
-            <option value="{{ $category }}" @selected($categorySelectValue === $category)>{{ ucfirst(str_replace('_', ' ', $category)) }}</option>
+            <option value="{{ $category }}" @selected($categorySelectValue === $category)>{{ \App\Support\VehicleCategory::label($category) }}</option>
         @endforeach
-        <option value="others" @selected($categorySelectValue === 'others')>Others</option>
     </select>
-    <input id="{{ $prefix }}_category_other" type="text" name="category_other" value="{{ $categoryOtherValue }}" placeholder="Custom category" aria-label="Custom category" data-other-field data-field="category_other" @if ($categorySelectValue !== 'others') hidden @endif>
+    <span class="field-help">Unregistered Visitor is set by the system for vehicles the camera sees without a registered tag.</span>
     @if ($useOld)
         @error('category')<span class="field-error">{{ $message }}</span>@enderror
-        @error('category_other')<span class="field-error">{{ $message }}</span>@enderror
     @endif
 </div>
 

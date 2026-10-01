@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\StoresLocalTime;
+use App\Support\VehicleCategory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -19,16 +20,11 @@ class Vehicle extends Model
     public const STATE_OUTSIDE = 'OUTSIDE';
 
     /**
-     * Built-in categories shown in registry forms.
+     * Phase 4 (visitor model): Registry categories (see VehicleCategory).
      *
      * @var list<string>
      */
-    public const RFID_RECURRING_CATEGORIES = [
-        'parent',
-        'student',
-        'faculty_staff',
-        'guard',
-    ];
+    public const RFID_RECURRING_CATEGORIES = VehicleCategory::REGISTRY;
 
     /**
      * The attributes that are mass assignable.

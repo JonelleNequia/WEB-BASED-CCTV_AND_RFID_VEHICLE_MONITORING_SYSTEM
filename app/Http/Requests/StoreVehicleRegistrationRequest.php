@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Models\RfidTag;
 use App\Models\Vehicle;
+use App\Support\VehicleCategory;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -53,18 +54,21 @@ class StoreVehicleRegistrationRequest extends FormRequest
                 Rule::unique('vehicles', 'plate_number')->ignore($vehicleId),
             ],
             'vehicle_owner_name' => ['nullable', 'string', 'max:100'],
+            // Phase 4 (visitor model): Faculty & Staff or Registered Visitor.
+            // Unregistered Visitor is set by the system (camera, no tag).
             'category' => [
                 'required',
                 'string',
-                'max:50',
-                // Vehicles without a tag are recorded by the camera, not registered as "guest".
                 function (string $attribute, mixed $value, \Closure $fail): void {
-                    if (in_array(strtolower(trim((string) $value)), ['guest', 'guests'], true)) {
-                        $fail('Guest is not a registry category. Vehicles without an RFID tag are recorded by the camera.');
+                    $value = strtolower(trim((string) $value));
+
+                    if (in_array($value, [VehicleCategory::UNREGISTERED_VISITOR, 'guest', 'guests'], true)) {
+                        $fail('Unregistered Visitor cannot be picked here: the system sets it for vehicles the camera sees without a registered tag. Choose Faculty & Staff or Registered Visitor.');
+                    } elseif (! in_array($value, VehicleCategory::REGISTRY, true)) {
+                        $fail('Choose Faculty & Staff or Registered Visitor.');
                     }
                 },
             ],
-            'category_other' => ['nullable', 'required_if:category,others', 'string', 'max:50'],
             'vehicle_type' => ['required', 'string', 'max:50'],
             'vehicle_type_other' => ['nullable', 'required_if:vehicle_type,Others', 'string', 'max:50'],
             // UI Phase 3: Add Vehicle drawer registers a new scanned tag automatically.
@@ -125,13 +129,12 @@ class StoreVehicleRegistrationRequest extends FormRequest
         }
 
         if (! $this->filled('category')) {
-            $this->merge(['category' => 'faculty_staff']);
+            $this->merge(['category' => VehicleCategory::FACULTY_STAFF]);
         }
 
-        if ($this->input('category') === 'others' && $this->filled('category_other')) {
-            $this->merge([
-                'category' => trim((string) $this->input('category_other')),
-            ]);
+        // Phase 4: old forms and clients may still send Parent / Student / Guard.
+        if (in_array(strtolower((string) $this->input('category')), VehicleCategory::LEGACY_REGISTERED, true)) {
+            $this->merge(['category' => VehicleCategory::REGISTERED_VISITOR]);
         }
 
         if ($this->input('vehicle_type') === 'Others' && $this->filled('vehicle_type_other')) {

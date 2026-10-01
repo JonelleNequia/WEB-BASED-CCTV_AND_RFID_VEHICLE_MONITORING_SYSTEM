@@ -91,7 +91,7 @@
                                 <td><strong>#{{ $loop->iteration }}</strong></td>
                                 <td><strong>{{ $vehicle->plate_number }}</strong></td>
                                 <td>{{ $vehicle->vehicle_owner_name ?: 'N/A' }}</td>
-                                <td>{{ ucfirst(str_replace('_', ' ', $vehicle->category)) }}</td>
+                                <td>{{ \App\Support\VehicleCategory::label($vehicle->category) }}</td>
                                 <td><strong>{{ $vehicle->ranking_total_entries_count ?? $vehicle->total_entries_count }}</strong></td>
                                 <td>{{ $vehicle->ranking_entries_today_count ?? $vehicle->entries_today_count_from_logs }}</td>
                             </tr>

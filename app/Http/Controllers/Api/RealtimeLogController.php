@@ -331,7 +331,7 @@ class RealtimeLogController extends Controller
             'owner_name' => 'N/A',
             'vehicle_type' => $observation->vehicle_type ?: 'Vehicle',
             'vehicle_color' => $observation->vehicle_color ?: 'N/A',
-            'category_label' => 'Guest',
+            'category_label' => \App\Support\VehicleCategory::LABELS[\App\Support\VehicleCategory::UNREGISTERED_VISITOR],
             'source_label' => $observation->observation_source === 'cctv' ? 'Guest CCTV' : 'Guest Manual',
             'station_label' => Gate::labelFor($observation->location),
             'state_label' => 'Guest',
@@ -349,11 +349,8 @@ class RealtimeLogController extends Controller
 
     protected function displayCategory(?string $category): string
     {
-        if (blank($category)) {
-            return 'N/A';
-        }
-
-        return str((string) $category)->replace('_', ' ')->title()->value();
+        // Phase 4 (visitor model): new names, also for older stored values.
+        return \App\Support\VehicleCategory::label($category);
     }
 
     protected function sortTimestamp($createdAt, $eventAt): float

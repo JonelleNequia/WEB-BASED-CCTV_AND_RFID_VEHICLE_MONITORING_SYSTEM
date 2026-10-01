@@ -69,7 +69,7 @@ class DashboardController extends Controller
                     'rank' => $index + 1,
                     'plate_number' => $vehicle->plate_number,
                     'owner_name' => $vehicle->vehicle_owner_name ?: 'N/A',
-                    'category' => ucfirst(str_replace('_', ' ', (string) $vehicle->category)),
+                    'category' => \App\Support\VehicleCategory::label($vehicle->category),
                     'total_entries_count' => (int) ($vehicle->ranking_total_entries_count ?? $vehicle->total_entries_count),
                     'entries_today_count_from_logs' => (int) ($vehicle->ranking_entries_today_count ?? $vehicle->entries_today_count_from_logs),
                 ]),

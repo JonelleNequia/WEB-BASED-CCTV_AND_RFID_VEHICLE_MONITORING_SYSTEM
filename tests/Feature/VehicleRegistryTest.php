@@ -72,7 +72,7 @@ class VehicleRegistryTest extends TestCase
         ]);
     }
 
-    public function test_vehicle_registry_saves_custom_category_and_vehicle_type(): void
+    public function test_vehicle_registry_saves_custom_vehicle_type_but_not_a_custom_category(): void
     {
         $this->seed(DatabaseSeeder::class);
 
@@ -81,22 +81,26 @@ class VehicleRegistryTest extends TestCase
             'uid' => 'RFID-CUSTOM-3001',
             'status' => RfidTag::STATUS_AVAILABLE,
         ]);
+        $form = [
+            'rfid_tag_id' => $tag->id,
+            'plate_number' => 'CUS-3001',
+            'vehicle_owner_name' => 'Custom Owner',
+            'vehicle_type' => 'Others',
+            'vehicle_type_other' => 'Tricycle',
+        ];
+
+        // Phase 4 (visitor model): only Faculty & Staff and Registered Visitor.
+        $this->actingAs($user)
+            ->post(route('vehicle-registry.store'), $form + ['category' => 'others', 'category_other' => 'Alumni'])
+            ->assertSessionHasErrors('category');
 
         $this->actingAs($user)
-            ->post(route('vehicle-registry.store'), [
-                'rfid_tag_id' => $tag->id,
-                'plate_number' => 'CUS-3001',
-                'vehicle_owner_name' => 'Custom Owner',
-                'category' => 'others',
-                'category_other' => 'Alumni',
-                'vehicle_type' => 'Others',
-                'vehicle_type_other' => 'Tricycle',
-            ])
+            ->post(route('vehicle-registry.store'), $form + ['category' => 'registered_visitor'])
             ->assertRedirect();
 
         $vehicle = Vehicle::query()->where('plate_number', 'CUS-3001')->firstOrFail();
 
-        $this->assertSame('Alumni', $vehicle->category);
+        $this->assertSame('registered_visitor', $vehicle->category);
         $this->assertSame('Tricycle', $vehicle->vehicle_type);
         $this->assertTrue($vehicle->isRfidRecurring());
     }

@@ -4,7 +4,7 @@
         $owner = $tag->vehicle?->vehicle_owner_name ?: $tag->vehicle?->owner_name ?: 'No owner linked';
         $plate = $tag->vehicle?->plate_number ?: 'No plate';
         $category = $tag->vehicle?->category
-            ? str($tag->vehicle->category)->replace('_', ' ')->title()->value()
+            ? \App\Support\VehicleCategory::label($tag->vehicle->category)
             : 'No category';
         $uidLabel = $tag->uid.' - '.$owner;
         $plateLabel = $plate.' - '.$category;
@@ -141,7 +141,7 @@
                     <div class="detail-list">
                         <div><span>Tag UID</span><strong>{{ $latestScan->tag_uid }}</strong></div>
                         <div><span>Vehicle</span><strong>{{ $latestScan->vehicle?->plate_number ?? 'GUEST' }}</strong></div>
-                        <div><span>Category</span><strong>{{ $latestScan->vehicle?->category ? ucfirst(str_replace('_', ' ', $latestScan->vehicle->category)) : 'N/A' }}</strong></div>
+                        <div><span>Category</span><strong>{{ \App\Support\VehicleCategory::label($latestScan->vehicle?->category) }}</strong></div>
                         <div><span>Event Type</span><strong>{{ $latestScan->resolvedEventTypeLabel }}</strong></div>
                         <div><span>Current State</span><strong>{{ $latestScan->resultingStateLabel }}</strong></div>
                         <div><span>Time</span><strong><x-datetime :value="$latestScan->scan_time" /></strong></div>

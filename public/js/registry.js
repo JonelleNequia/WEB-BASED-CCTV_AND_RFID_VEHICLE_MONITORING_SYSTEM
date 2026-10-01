@@ -269,9 +269,8 @@
         setField(form, 'plate_number', vehicle.plate_number);
         setField(form, 'vehicle_owner_name', vehicle.vehicle_owner_name);
 
-        const knownCategory = (options.categories || []).includes(vehicle.category);
-        setField(form, 'category', knownCategory ? vehicle.category : 'others');
-        setField(form, 'category_other', knownCategory ? '' : vehicle.category);
+        // Phase 4: Faculty & Staff or Registered Visitor (no custom categories).
+        setField(form, 'category', (options.categories || []).includes(vehicle.category) ? vehicle.category : 'registered_visitor');
 
         const knownType = (options.vehicleTypes || []).includes(vehicle.vehicle_type);
         setField(form, 'vehicle_type', knownType ? vehicle.vehicle_type : 'Others');

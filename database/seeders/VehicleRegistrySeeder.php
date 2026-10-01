@@ -30,7 +30,7 @@ class VehicleRegistrySeeder extends Seeder
             [
                 'plate_number' => 'DEF-5678',
                 'vehicle_owner_name' => 'Mark Rivera',
-                'category' => 'student',
+                'category' => 'registered_visitor',
                 'vehicle_type' => 'Motorcycle',
                 'status' => 'active',
                 'rfid_tag_uid' => 'RFID-DEF-1002',
@@ -40,7 +40,7 @@ class VehicleRegistrySeeder extends Seeder
             [
                 'plate_number' => 'GHI-9012',
                 'vehicle_owner_name' => 'PhilCST Service Unit',
-                'category' => 'guard',
+                'category' => 'registered_visitor',
                 'vehicle_type' => 'Car',
                 'status' => 'active',
                 'rfid_tag_uid' => 'RFID-GHI-1003',
@@ -50,7 +50,7 @@ class VehicleRegistrySeeder extends Seeder
             [
                 'plate_number' => 'LMN-3456',
                 'vehicle_owner_name' => 'Campus Shuttle',
-                'category' => 'parent',
+                'category' => 'registered_visitor',
                 'vehicle_type' => 'Bus',
                 'status' => 'active',
                 'rfid_tag_uid' => 'RFID-LMN-1004',

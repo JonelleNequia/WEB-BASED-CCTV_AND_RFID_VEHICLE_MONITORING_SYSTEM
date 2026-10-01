@@ -26,7 +26,7 @@
                 <div><span>Source</span><strong>{{ $vehicleEvent->event_origin_label }}</strong></div>
                 <div><span>Plate</span><strong>{{ $vehicleEvent->plate_text ?: $vehicleEvent->vehicle?->plate_number ?: 'GUEST' }}</strong></div>
                 <div><span>Vehicle</span><strong>{{ $vehicleEvent->vehicle_color ?: 'Pending color' }} {{ $vehicleEvent->display_vehicle_type }}</strong></div>
-                <div><span>Category</span><strong>{{ $vehicleEvent->vehicle_category ? ucfirst(str_replace('_', ' ', $vehicleEvent->vehicle_category)) : 'N/A' }}</strong></div>
+                <div><span>Category</span><strong>{{ \App\Support\VehicleCategory::label($vehicleEvent->vehicle_category) }}</strong></div>
                 <div><span>Station / Camera</span><strong>{{ $vehicleEvent->camera?->camera_name ?? 'No camera linked' }}</strong></div>
                 <div><span>RFID Match</span><strong>{{ $vehicleEvent->rfidScanLog ? '#'.$vehicleEvent->rfidScanLog->id.' • '.$vehicleEvent->rfidScanLog->verificationLabel : 'No RFID scan linked' }}</strong></div>
                 <div><span>Current State</span><strong>{{ $vehicleEvent->resulting_state_label }}</strong></div>

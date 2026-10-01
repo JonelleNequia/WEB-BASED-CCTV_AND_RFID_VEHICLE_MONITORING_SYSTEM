@@ -67,7 +67,7 @@
                                     @endif
                                 @else
                                     <strong>{{ $scan->vehicle?->plate_number ?? 'GUEST' }}</strong>
-                                    <div class="table-subtext">{{ $scan->vehicle ? $scan->vehicle->vehicle_type.' · '.ucfirst(str_replace('_', ' ', (string) $scan->vehicle->category)) : 'Guest record' }}</div>
+                                    <div class="table-subtext">{{ $scan->vehicle ? $scan->vehicle->vehicle_type.' · '.\App\Support\VehicleCategory::label($scan->vehicle->category) : 'Guest record' }}</div>
                                 @endif
                                 @if ($scan->guestVehicleObservation)
                                     <div class="table-subtext">Guest observation #{{ $scan->guestVehicleObservation->id }}</div>

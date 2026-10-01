@@ -8,7 +8,6 @@ use App\Models\Camera;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidScanLog;
 use App\Models\Roi;
-use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Services\EventService;
 use App\Services\VehicleRegistryService;
@@ -390,9 +389,11 @@ class VehicleEventController extends Controller
             ->when($request->filled('category'), function ($query) use ($request): void {
                 $category = $request->string('category')->value();
 
-                $query->where(function ($query) use ($category): void {
-                    $query->where('vehicle_category', $category)
-                        ->orWhereHas('vehicle', fn ($vehicleQuery) => $vehicleQuery->where('category', $category));
+                // Phase 4: a category also matches its older stored values (Student -> Registered Visitor).
+                $values = \App\Support\VehicleCategory::storedValues($category);
+                $query->where(function ($query) use ($values): void {
+                    $query->whereIn('vehicle_category', $values)
+                        ->orWhereHas('vehicle', fn ($vehicleQuery) => $vehicleQuery->whereIn('category', $values));
                 });
             })
             ->when($request->filled('vehicle_owner_name'), function ($query) use ($request): void {
@@ -599,9 +600,11 @@ class VehicleEventController extends Controller
             ->when($request->filled('category'), function ($query) use ($request): void {
                 $category = $request->string('category')->value();
 
-                $query->where(function ($query) use ($category): void {
-                    $query->where('vehicle_category', $category)
-                        ->orWhereHas('vehicle', fn ($vehicleQuery) => $vehicleQuery->where('category', $category));
+                // Phase 4: a category also matches its older stored values (Student -> Registered Visitor).
+                $values = \App\Support\VehicleCategory::storedValues($category);
+                $query->where(function ($query) use ($values): void {
+                    $query->whereIn('vehicle_category', $values)
+                        ->orWhereHas('vehicle', fn ($vehicleQuery) => $vehicleQuery->whereIn('category', $values));
                 });
             })
             ->when($request->filled('vehicle_owner_name'), function ($query) use ($request): void {
@@ -704,7 +707,7 @@ class VehicleEventController extends Controller
             'owner_name' => 'N/A',
             'vehicle_type' => $observation->vehicle_type ?: 'Vehicle',
             'vehicle_color' => $observation->vehicle_color ?: 'N/A',
-            'category_label' => 'Guest',
+            'category_label' => \App\Support\VehicleCategory::LABELS[\App\Support\VehicleCategory::UNREGISTERED_VISITOR],
             'source_label' => $observation->observation_source === 'cctv' ? 'Guest CCTV' : 'Guest Manual',
             'station_label' => \App\Models\Gate::labelFor($observation->location),
             'state_label' => 'Guest',
@@ -776,26 +779,14 @@ class VehicleEventController extends Controller
      */
     protected function categoryOptions(): array
     {
-        return VehicleEvent::query()
-            ->whereNotNull('vehicle_category')
-            ->distinct()
-            ->orderBy('vehicle_category')
-            ->pluck('vehicle_category')
-            ->merge(Vehicle::RFID_RECURRING_CATEGORIES)
-            ->merge(Vehicle::query()->whereNotNull('category')->distinct()->orderBy('category')->pluck('category'))
-            ->filter()
-            ->unique()
-            ->mapWithKeys(fn (string $category): array => [$category => $this->displayCategory($category)])
-            ->all();
+        // Phase 4 (visitor model): the three categories.
+        return \App\Support\VehicleCategory::LABELS;
     }
 
     protected function displayCategory(?string $category): string
     {
-        if (blank($category)) {
-            return 'N/A';
-        }
-
-        return str((string) $category)->replace('_', ' ')->title()->value();
+        // Phase 4 (visitor model): new names, also for older stored values.
+        return \App\Support\VehicleCategory::label($category);
     }
 
     protected function sortTimestamp($createdAt, $eventAt): float

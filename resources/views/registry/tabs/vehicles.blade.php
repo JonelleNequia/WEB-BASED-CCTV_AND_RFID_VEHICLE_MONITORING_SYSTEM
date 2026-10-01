@@ -6,7 +6,7 @@
 @php
     $failedForm = old('_form');
     $failedVehicleId = old('_vehicle_id');
-    $categoryLabel = fn (?string $category): string => ucfirst(str_replace('_', ' ', (string) $category));
+    $categoryLabel = fn (?string $category): string => \App\Support\VehicleCategory::label($category);
 @endphp
 
 <x-stat-row>

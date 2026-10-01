@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\RfidTag;
 use App\Models\Vehicle;
 use App\Support\DisplayTime;
+use App\Support\VehicleCategory;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -193,7 +194,8 @@ class VehicleRegistryService
      */
     public function vehicleCategories(): array
     {
-        return ['parent', 'student', 'faculty_staff', 'guard'];
+        // Phase 4 (visitor model): Unregistered Visitor is set by the system.
+        return VehicleCategory::REGISTRY;
     }
 
     /**
@@ -239,7 +241,7 @@ class VehicleRegistryService
     {
         $category = trim($category);
 
-        return $category !== '' ? $category : 'faculty_staff';
+        return $category !== '' ? VehicleCategory::normalize($category) : VehicleCategory::FACULTY_STAFF;
     }
 
     public function normalizeVehicleType(string $vehicleType): string
@@ -569,7 +571,7 @@ class VehicleRegistryService
             'plate_number' => $vehicle->plate_number,
             'vehicle_owner_name' => $vehicle->vehicle_owner_name,
             'category' => $vehicle->category,
-            'category_label' => Str::of((string) $vehicle->category)->replace('_', ' ')->ucfirst()->value(),
+            'category_label' => VehicleCategory::label($vehicle->category),
             'vehicle_type' => $vehicle->vehicle_type,
             'status' => $vehicle->status,
             'current_state' => strtolower((string) ($vehicle->current_state ?: 'outside')),
