@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\GuestVehicleObservation;
 use App\Models\Gate;
+use App\Models\PlateProfile;
 use App\Models\RfidScanLog;
 use App\Models\Vehicle;
 use App\Models\VehicleEvent;
@@ -11,6 +12,7 @@ use App\Services\AlertSummaryService;
 use App\Services\CalibrationService;
 use App\Services\GuestObservationService;
 use App\Services\RfidService;
+use App\Services\VisitorRecordService;
 use App\Support\DisplayTime;
 use App\Support\PhilippineTime;
 use Illuminate\Http\JsonResponse;
@@ -73,6 +75,19 @@ class DashboardController extends Controller
                     'total_entries_count' => (int) ($vehicle->ranking_total_entries_count ?? $vehicle->total_entries_count),
                     'entries_today_count_from_logs' => (int) ($vehicle->ranking_entries_today_count ?? $vehicle->entries_today_count_from_logs),
                 ]),
+            'frequent_unregistered_visitors' => $data['frequentUnregisteredVisitors']
+                ->values()
+                ->map(fn (PlateProfile $profile, int $index): array => [
+                    'rank' => $index + 1,
+                    'plate_number' => $profile->plate_number,
+                    'entries_count' => (int) $profile->entries_count,
+                    'visit_count' => (int) $profile->visit_count,
+                    'entries_today_count' => (int) $profile->entries_today_count,
+                    'last_seen' => DisplayTime::datetime($profile->last_seen_at),
+                    'note' => $profile->note,
+                    'profile_url' => route('visitors.profiles.show', $profile),
+                    'register_url' => route('registry.index', ['tab' => 'vehicles', 'register_plate' => $profile->id]),
+                ]),
             'camera_summary' => $data['cameraSummary'],
             'generated_at' => now()->toIso8601String(),
         ]);
@@ -118,6 +133,8 @@ class DashboardController extends Controller
             'hourlyTraffic' => $this->hourlyTrafficToday(),
             'latestEvents' => $this->recentEventActivities(),
             'frequentEntryVehicles' => $this->frequentEntryVehicles(),
+            // Phase 6 (visitor model): Visitor Ranking, separate from the registered one.
+            'frequentUnregisteredVisitors' => app(VisitorRecordService::class)->unregisteredRanking(),
             'rfidStats' => $rfidStats,
             'recentRfidScans' => $this->recentRfidActivities($rfidService),
             'cameraSummary' => [
@@ -140,6 +157,11 @@ class DashboardController extends Controller
                 'vehicleEvents as entries_today_count_from_logs' => fn ($query) => $query
                     ->where('event_type', 'ENTRY')
                     ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['event_time', 'created_at'])),
+                // Phase 6 (visitor model): entries the camera saw with no tag read
+                // (visits before registration, moved by "Register this vehicle").
+                'visitorRecords as camera_entries_count' => fn ($query) => $query->active()->where('direction', 'IN'),
+                'visitorRecords as camera_entries_today_count' => fn ($query) => $query->active()->where('direction', 'IN')
+                    ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['seen_at'])),
             ])
             ->orderBy('plate_number')
             ->get()
@@ -148,8 +170,8 @@ class DashboardController extends Controller
                     ? (int) $vehicle->entries_today_count
                     : 0;
 
-                $vehicle->ranking_total_entries_count = max((int) $vehicle->total_entries_count, $dailyCounter);
-                $vehicle->ranking_entries_today_count = max((int) $vehicle->entries_today_count_from_logs, $dailyCounter);
+                $vehicle->ranking_total_entries_count = max((int) $vehicle->total_entries_count, $dailyCounter) + (int) $vehicle->camera_entries_count;
+                $vehicle->ranking_entries_today_count = max((int) $vehicle->entries_today_count_from_logs, $dailyCounter) + (int) $vehicle->camera_entries_today_count;
 
                 return $vehicle;
             })

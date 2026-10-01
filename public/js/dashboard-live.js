@@ -166,6 +166,64 @@
         });
     }
 
+    // Phase 6 (visitor model): Visitor Ranking (plates not in the Registry).
+    function renderVisitorRanking(rows) {
+        const body = document.querySelector('[data-dashboard-visitor-ranking]');
+        const empty = document.querySelector('[data-dashboard-visitor-ranking-empty]');
+
+        if (!body || !Array.isArray(rows)) {
+            return;
+        }
+
+        body.innerHTML = '';
+        if (empty) {
+            empty.hidden = rows.length > 0;
+        }
+
+        rows.forEach(function (row) {
+            const tr = document.createElement('tr');
+            const cell = function (content) {
+                const td = document.createElement('td');
+                if (content instanceof Node) {
+                    td.appendChild(content);
+                } else {
+                    td.textContent = content;
+                }
+                tr.appendChild(td);
+                return td;
+            };
+            const link = function (href, text, className) {
+                const a = document.createElement('a');
+                a.href = href;
+                a.textContent = text;
+                if (className) {
+                    a.className = className;
+                }
+                return a;
+            };
+            const rank = document.createElement('strong');
+            rank.textContent = `#${row.rank}`;
+            cell(rank);
+            const plate = link(row.profile_url, '');
+            const plateText = document.createElement('strong');
+            plateText.textContent = row.plate_number;
+            plate.appendChild(plateText);
+            cell(plate);
+            const entries = cell('');
+            const entriesText = document.createElement('strong');
+            entriesText.textContent = row.entries_count;
+            const seen = document.createElement('span');
+            seen.className = 'table-subtext';
+            seen.textContent = ` of ${row.visit_count} seen`;
+            entries.append(entriesText, seen);
+            cell(String(row.entries_today_count));
+            cell(row.last_seen || '—');
+            cell(row.note ? (row.note.length > 40 ? row.note.slice(0, 37) + '...' : row.note) : '—');
+            cell(link(row.register_url, 'Register this vehicle', 'button button-secondary button-sm'));
+            body.appendChild(tr);
+        });
+    }
+
     function renderTrafficSummary(summary) {
         if (!summary || typeof summary !== 'object') {
             return;
@@ -336,6 +394,7 @@
             'Event logs will appear after scans and manual entries.'
         );
         renderRanking(body.frequent_entry_vehicles || []);
+        renderVisitorRanking(body.frequent_unregistered_visitors || []);
         renderAttention(body.attention);
         renderChart(body.hourly);
     }

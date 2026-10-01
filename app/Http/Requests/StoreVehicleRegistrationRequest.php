@@ -70,6 +70,8 @@ class StoreVehicleRegistrationRequest extends FormRequest
                 },
             ],
             'vehicle_type' => ['required', 'string', 'max:50'],
+            // Phase 6 (visitor model): "Register this vehicle" from the Visitor Ranking.
+            'plate_profile_id' => ['nullable', 'integer', 'exists:plate_profiles,id'],
             'vehicle_type_other' => ['nullable', 'required_if:vehicle_type,Others', 'string', 'max:50'],
             // UI Phase 3: Add Vehicle drawer registers a new scanned tag automatically.
             'auto_register_tag' => ['sometimes', 'boolean'],

@@ -13,6 +13,7 @@
             <div><span>Last seen</span><strong><x-datetime :value="$profile->last_seen_at" /></strong></div>
             <div><span>Vehicle</span><strong>{{ collect([$profile->vehicle_color, $profile->vehicle_type])->filter()->implode(' ') ?: '—' }}</strong></div>
             <div><span>Category</span><strong>{{ \App\Support\VehicleCategory::label(\App\Models\VisitorRecord::CATEGORY) }}</strong></div>
+            <div><span>Registry</span><strong>@include('visitors.partials.registry-link', ['profile' => $profile])</strong></div>
             @if ($profile->aliases->isNotEmpty())
                 <div><span>Merged plates</span><strong>{{ $profile->aliases->pluck('plate_number')->implode(', ') }}</strong></div>
             @endif

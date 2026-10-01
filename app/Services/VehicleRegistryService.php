@@ -39,7 +39,11 @@ class VehicleRegistryService
 
             $this->assignTagToVehicle($tag, $vehicle);
 
-            return $vehicle->fresh(['rfidTag', 'rfidTags']);
+            // Phase 6 (visitor model): "Register this vehicle" (or the same
+            // plate seen before as an unregistered visitor): its history moves.
+            $moved = app(VisitorRecordService::class)->transferHistoryToVehicle($vehicle, isset($data['plate_profile_id']) ? (int) $data['plate_profile_id'] : null);
+
+            return tap($vehicle->fresh(['rfidTag', 'rfidTags']), fn (Vehicle $fresh) => $fresh->transferred_visits = $moved);
         });
     }
 
@@ -63,6 +67,9 @@ class VehicleRegistryService
             ])->save();
 
             $this->assignTagToVehicle($tag, $vehicle);
+
+            // Phase 6: a corrected plate brings that plate's earlier visits with it.
+            app(VisitorRecordService::class)->transferHistoryToVehicle($vehicle);
 
             return $vehicle->fresh(['rfidTag', 'rfidTags']);
         });
@@ -589,6 +596,12 @@ class VehicleRegistryService
                 ->map(fn (RfidTag $tag): array => ['uid' => $tag->uid, 'tag_number' => $tag->tag_number, 'status' => $tag->status])
                 ->values(),
             'movements' => $movements,
+            // Phase 6 (visitor model): camera visits with no tag read (before
+            // registration, moved by "Register this vehicle", or a missed read).
+            'camera_visits' => $vehicle->visitorRecords()->active()->count(),
+            'plate_profile_url' => ($profileId = \App\Models\PlateProfile::query()->where('vehicle_id', $vehicle->id)->current()->value('id'))
+                ? route('visitors.profiles.show', $profileId)
+                : null,
             'urls' => [
                 'update' => route('vehicle-registry.update', $vehicle),
                 'replace_tag' => route('registry.vehicles.replace-tag', $vehicle),

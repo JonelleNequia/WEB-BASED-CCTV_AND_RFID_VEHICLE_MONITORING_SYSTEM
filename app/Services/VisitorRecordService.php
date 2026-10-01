@@ -6,11 +6,14 @@ use App\Models\Camera;
 use App\Models\Gate;
 use App\Models\PlateProfile;
 use App\Models\User;
+use App\Models\Vehicle;
 use App\Models\VehicleCrossing;
 use App\Models\VisitorRecord;
+use App\Support\PhilippineTime;
 use App\Support\PlateNumber;
 use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -109,7 +112,9 @@ class VisitorRecordService
                     'plate_key' => $read ? PlateNumber::key($plate) : null,
                     'plate_confidence' => isset($data['plate_confidence']) ? (float) $data['plate_confidence'] : null,
                 ]);
-                $record->plate_profile_id = $read ? $this->profileFor($plate, $record->seen_at)->id : null;
+                $profile = $read ? $this->profileFor($plate, $record->seen_at) : null;
+                $record->plate_profile_id = $profile?->id;
+                $record->vehicle_id = $profile?->vehicle_id;
             }
 
             $record->save();
@@ -132,6 +137,7 @@ class VisitorRecordService
         return DB::transaction(function () use ($record, $plate, $user): VisitorRecord {
             $oldProfileId = $record->plate_profile_id;
             $plate = PlateNumber::display($plate);
+            $profile = $plate ? $this->profileFor($plate, $record->seen_at) : null;
 
             $record->fill([
                 // What OCR said stays in ocr_plate_number.
@@ -139,7 +145,8 @@ class VisitorRecordService
                 'plate_status' => $plate ? VisitorRecord::PLATE_CORRECTED : VisitorRecord::PLATE_UNREADABLE,
                 'plate_number' => $plate,
                 'plate_key' => PlateNumber::key($plate),
-                'plate_profile_id' => $plate ? $this->profileFor($plate, $record->seen_at)->id : null,
+                'plate_profile_id' => $profile?->id,
+                'vehicle_id' => $profile?->vehicle_id,
                 'corrected_by' => $user->id,
                 'corrected_at' => now(),
             ])->save();
@@ -194,7 +201,7 @@ class VisitorRecordService
         }
 
         return DB::transaction(function () use ($source, $target, $user): PlateProfile {
-            VisitorRecord::query()->where('plate_profile_id', $source->id)->update(['plate_profile_id' => $target->id]);
+            VisitorRecord::query()->where('plate_profile_id', $source->id)->update(['plate_profile_id' => $target->id, 'vehicle_id' => $target->vehicle_id]);
             // Plates merged into the source earlier now point to the target.
             PlateProfile::query()->where('merged_into_id', $source->id)->update(['merged_into_id' => $target->id]);
 
@@ -226,10 +233,77 @@ class VisitorRecordService
         $key = (string) PlateNumber::key($plate);
         $profile = PlateProfile::query()->firstOrCreate(
             ['plate_key' => $key],
-            ['plate_number' => PlateNumber::display($plate), 'first_seen_at' => $seenAt, 'last_seen_at' => $seenAt]
+            [
+                'plate_number' => PlateNumber::display($plate),
+                'first_seen_at' => $seenAt,
+                'last_seen_at' => $seenAt,
+                // Phase 6: a plate already in the Registry (seen with no tag read).
+                'vehicle_id' => $this->vehicleIdForPlateKey($key),
+            ]
         );
 
         return $this->resolve($profile);
+    }
+
+    /**
+     * Phase 6 (visitor model): "Register this vehicle". The plate's profile
+     * (the one picked in the ranking, and any profile with the vehicle's
+     * plate) and its records now belong to the Registry vehicle. Returns how
+     * many visits moved.
+     */
+    public function transferHistoryToVehicle(Vehicle $vehicle, ?int $plateProfileId = null): int
+    {
+        return DB::transaction(function () use ($vehicle, $plateProfileId): int {
+            $profiles = PlateProfile::query()
+                ->where(fn ($query) => $query->where('plate_key', PlateNumber::key($vehicle->plate_number))
+                    ->when($plateProfileId, fn ($inner) => $inner->orWhere('id', $plateProfileId)))
+                ->get()
+                ->map(fn (PlateProfile $profile): PlateProfile => $this->resolve($profile))
+                ->unique('id')
+                ->filter(fn (PlateProfile $profile): bool => $profile->vehicle_id === null || (int) $profile->vehicle_id === (int) $vehicle->id);
+
+            $moved = 0;
+
+            foreach ($profiles as $profile) {
+                $profile->forceFill(['vehicle_id' => $vehicle->id, 'registered_at' => $profile->registered_at ?? now()])->save();
+                PlateProfile::query()->where('merged_into_id', $profile->id)->update(['vehicle_id' => $vehicle->id]);
+                $moved += VisitorRecord::query()->where('plate_profile_id', $profile->id)->whereNull('vehicle_id')->update(['vehicle_id' => $vehicle->id]);
+            }
+
+            return $moved;
+        });
+    }
+
+    /**
+     * Phase 6: Visitor Ranking. Plates not in the Registry, most entries (IN)
+     * first, then most sightings.
+     *
+     * @return Collection<int, PlateProfile>
+     */
+    public function unregisteredRanking(int $limit = 5): Collection
+    {
+        return PlateProfile::query()
+            ->unregistered()
+            ->where('visit_count', '>', 0)
+            ->withCount([
+                'records as entries_count' => fn ($query) => $query->active()->where('direction', 'IN'),
+                'records as entries_today_count' => fn ($query) => $query->active()->where('direction', 'IN')
+                    ->where(fn ($inner) => PhilippineTime::constrainTodayAny($inner, ['seen_at'])),
+            ])
+            ->orderByDesc('entries_count')
+            ->orderByDesc('visit_count')
+            ->orderByDesc('last_seen_at')
+            ->limit($limit)
+            ->get();
+    }
+
+    protected function vehicleIdForPlateKey(string $key): ?int
+    {
+        $id = Vehicle::query()
+            ->whereRaw("replace(replace(upper(plate_number), ' ', ''), '-', '') = ?", [$key])
+            ->value('id');
+
+        return $id !== null ? (int) $id : null;
     }
 
     /**

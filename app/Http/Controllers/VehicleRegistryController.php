@@ -37,6 +37,10 @@ class VehicleRegistryController extends Controller
             'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
             'vehicleCategories' => $vehicleRegistryService->vehicleCategories(),
             'rfidStats' => $rfidService->stats(),
+            // Phase 6 (visitor model): "Register this vehicle" from the Visitor Ranking.
+            'registerPlate' => $request->filled('register_plate')
+                ? \App\Models\PlateProfile::query()->unregistered()->find($request->integer('register_plate'))
+                : null,
         ]);
     }
 
@@ -156,14 +160,20 @@ class VehicleRegistryController extends Controller
                 ->withErrors(['vehicle' => 'Vehicle could not be saved. Please check the vehicle details and try again.']);
         }
 
+        // Phase 6 (visitor model): the plate's visits as an unregistered visitor move to the vehicle.
+        $moved = (int) ($vehicle->transferred_visits ?? 0);
+        $message = $vehicle->plate_number.' was saved to the local vehicle registry.'
+            .($moved > 0 ? ' '.$moved.' earlier '.\Illuminate\Support\Str::plural('visit', $moved).' as an unregistered visitor moved to this vehicle.' : '');
+
         if ($request->expectsJson()) {
             return response()->json([
-                'message' => $vehicle->plate_number.' was saved to the local vehicle registry.',
+                'message' => $message,
                 'vehicle_id' => $vehicle->id,
+                'transferred_visits' => $moved,
             ], 201);
         }
 
-        return back()->with('status', $vehicle->plate_number.' was saved to the local vehicle registry.');
+        return back()->with('status', $message);
     }
 
     /**

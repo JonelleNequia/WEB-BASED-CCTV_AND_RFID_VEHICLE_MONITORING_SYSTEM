@@ -220,6 +220,20 @@
             details.append(el('dt', null, label), el('dd', null, value));
         });
 
+        // Phase 6: visits the camera recorded with no tag read (e.g. before registration).
+        if (vehicle.camera_visits > 0) {
+            const visits = el('dd');
+            const text = `${vehicle.camera_visits} as an unregistered visitor`;
+            if (vehicle.plate_profile_url) {
+                const link = el('a', null, text);
+                link.href = vehicle.plate_profile_url;
+                visits.append(link);
+            } else {
+                visits.textContent = text;
+            }
+            details.append(el('dt', null, 'Camera visits'), visits);
+        }
+
         if (vehicle.previous_tags?.length) {
             details.append(
                 el('dt', null, 'Old tags'),

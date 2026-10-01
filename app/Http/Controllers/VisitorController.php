@@ -30,7 +30,7 @@ class VisitorController extends Controller
     public function index(Request $request): View
     {
         $tab = $this->resolveTab($request, self::TABS);
-        $filters = $request->only(['q', 'gate', 'plate_status', 'status']);
+        $filters = $request->only(['q', 'gate', 'plate_status', 'status', 'sort']);
 
         return view('visitors.index', [
             'tab' => $tab,
@@ -38,8 +38,13 @@ class VisitorController extends Controller
             'records' => $tab === 'records' ? $this->records($filters)->paginate(20)->withQueryString() : null,
             'profiles' => $tab === 'plates'
                 ? PlateProfile::query()->current()
+                    ->with('vehicle')
+                    ->withCount(['records as entries_count' => fn ($query) => $query->active()->where('direction', 'IN')])
                     ->when(filled($filters['q'] ?? null), fn (Builder $query) => $query->where('plate_key', 'like', '%'.PlateNumber::key($filters['q']).'%'))
-                    ->orderByDesc('last_seen_at')
+                    // Phase 6: Visitor Ranking (most entries first) or latest first.
+                    ->when(($filters['sort'] ?? '') === 'entries',
+                        fn (Builder $query) => $query->whereNull('vehicle_id')->orderByDesc('entries_count')->orderByDesc('visit_count'),
+                        fn (Builder $query) => $query->orderByDesc('last_seen_at'))
                     ->paginate(20)
                     ->withQueryString()
                 : null,
@@ -55,7 +60,7 @@ class VisitorController extends Controller
         }
 
         return view('visitors.profile', [
-            'profile' => $plateProfile->load(['aliases', 'noteAuthor']),
+            'profile' => $plateProfile->load(['aliases', 'noteAuthor', 'vehicle']),
             'records' => VisitorRecord::query()
                 ->where('plate_profile_id', $plateProfile->id)
                 ->latest('seen_at')
@@ -118,7 +123,7 @@ class VisitorController extends Controller
         $status = $filters['status'] ?? VisitorRecord::STATUS_ACTIVE;
 
         return VisitorRecord::query()
-            ->with(['plateProfile', 'corrector'])
+            ->with(['plateProfile', 'corrector', 'vehicle'])
             ->when($status !== 'all', fn (Builder $query) => $query->where('status', $status))
             ->when(filled($filters['gate'] ?? null), fn (Builder $query) => $query->where('gate', $filters['gate']))
             ->when(filled($filters['plate_status'] ?? null), fn (Builder $query) => $query->where('plate_status', $filters['plate_status']))

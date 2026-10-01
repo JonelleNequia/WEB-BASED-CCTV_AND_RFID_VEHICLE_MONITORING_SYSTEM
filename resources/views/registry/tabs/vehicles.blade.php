@@ -110,11 +110,20 @@
 {{-- Add Vehicle: 1. scan tag, 2. details, 3. save. --}}
 {{-- Phase 3: "Register this tag" from an unknown-tag read opens this with the UID. --}}
 @php($registerTag = $failedForm === 'add' ? null : (string) request('register_tag', ''))
-<x-drawer id="add-vehicle-drawer" title="Add Vehicle" :open="$failedForm === 'add' || $registerTag !== ''">
+{{-- Phase 6: "Register this vehicle" (Visitor Ranking) opens this with the plate's details. --}}
+@php($registerPlate = $failedForm === 'add' ? null : ($registerPlate ?? null))
+@php($registerPlateId = $failedForm === 'add' ? old('plate_profile_id') : $registerPlate?->id)
+<x-drawer id="add-vehicle-drawer" title="Add Vehicle" :open="$failedForm === 'add' || $registerTag !== '' || (bool) $registerPlate">
     <form method="POST" action="{{ route('vehicle-registry.store') }}" class="stack-form" data-vehicle-form="add">
         @csrf
         <input type="hidden" name="_form" value="add">
         <input type="hidden" name="auto_register_tag" value="1">
+        @if ($registerPlateId)
+            <input type="hidden" name="plate_profile_id" value="{{ $registerPlateId }}">
+        @endif
+        @if ($registerPlate)
+            <p class="field-help" data-register-plate>Registering <strong>{{ $registerPlate->plate_number }}</strong>, seen {{ $registerPlate->visit_count }} {{ \Illuminate\Support\Str::plural('time', $registerPlate->visit_count) }} as an unregistered visitor. Those visits move to this vehicle when you save. Give it an RFID tag first.</p>
+        @endif
 
         @error('vehicle')
             <p class="field-error">{{ $message }}</p>
@@ -124,7 +133,11 @@
         @include('registry.partials.tag-picker', ['prefix' => 'add', 'useOld' => $failedForm === 'add', 'legend' => 'RFID Tag', 'prefillUid' => $registerTag ?: null])
 
         <span class="step-label">2 · Vehicle details</span>
-        @include('registry.partials.vehicle-fields', ['prefix' => 'add', 'useOld' => $failedForm === 'add'])
+        @include('registry.partials.vehicle-fields', ['prefix' => 'add', 'useOld' => $failedForm === 'add', 'prefill' => $registerPlate ? [
+            'plate_number' => $registerPlate->plate_number,
+            'vehicle_type' => $registerPlate->vehicle_type ? \Illuminate\Support\Str::title($registerPlate->vehicle_type) : 'Car',
+            'category' => \App\Support\VehicleCategory::REGISTERED_VISITOR,
+        ] : []])
 
         <div class="button-row">
             <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>

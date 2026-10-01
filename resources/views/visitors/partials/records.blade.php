@@ -33,6 +33,10 @@
                         @default OCR running
                     @endswitch
                 </div>
+                @if ($record->vehicle)
+                    {{-- Phase 6: the plate is in the Registry (registered later, or its tag was not read). --}}
+                    <div class="table-subtext">Registered vehicle{{ $record->seen_at && $record->plateProfile?->registered_at && $record->seen_at->lt($record->plateProfile->registered_at) ? ' (visit before registration)' : ' · tag not read' }}</div>
+                @endif
                 @if ($record->status !== 'active')
                     <x-badge tone="neutral" :label="ucfirst($record->status)" />
                     <div class="table-subtext">{{ $record->status_note }}</div>

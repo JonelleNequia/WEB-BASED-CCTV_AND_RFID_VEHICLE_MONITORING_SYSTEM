@@ -92,6 +92,15 @@ class Vehicle extends Model
     }
 
     /**
+     * Phase 6 (visitor model): camera records of this plate with no tag read
+     * (visits before it was registered, or a missed tag read since).
+     */
+    public function visitorRecords(): HasMany
+    {
+        return $this->hasMany(VisitorRecord::class);
+    }
+
+    /**
      * Latest RFID tag assigned to this vehicle.
      */
     public function latestRfidTag(): HasOne

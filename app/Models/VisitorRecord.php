@@ -55,6 +55,7 @@ class VisitorRecord extends Model
         'ocr_plate_number',
         'ocr_details_json',
         'plate_profile_id',
+        'vehicle_id',
         'vehicle_type',
         'vehicle_color',
         'corrected_by',
@@ -79,6 +80,12 @@ class VisitorRecord extends Model
     public function plateProfile(): BelongsTo
     {
         return $this->belongsTo(PlateProfile::class);
+    }
+
+    /** Phase 6: the Registry vehicle this plate belongs to (registered later, or tag not read). */
+    public function vehicle(): BelongsTo
+    {
+        return $this->belongsTo(Vehicle::class);
     }
 
     public function corrector(): BelongsTo

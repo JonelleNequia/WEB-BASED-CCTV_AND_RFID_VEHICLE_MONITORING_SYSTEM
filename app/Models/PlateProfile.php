@@ -28,6 +28,8 @@ class PlateProfile extends Model
         'first_seen_at',
         'last_seen_at',
         'visit_count',
+        'vehicle_id',
+        'registered_at',
         'merged_into_id',
         'merged_by',
         'merged_at',
@@ -39,6 +41,7 @@ class PlateProfile extends Model
             'first_seen_at' => 'datetime',
             'last_seen_at' => 'datetime',
             'merged_at' => 'datetime',
+            'registered_at' => 'datetime',
             'visit_count' => 'integer',
         ];
     }
@@ -46,6 +49,15 @@ class PlateProfile extends Model
     public function records(): HasMany
     {
         return $this->hasMany(VisitorRecord::class);
+    }
+
+    /**
+     * Phase 6: the Registry vehicle with this plate (registered from the
+     * Visitor Ranking, or already in the Registry).
+     */
+    public function vehicle(): BelongsTo
+    {
+        return $this->belongsTo(Vehicle::class);
     }
 
     public function mergedInto(): BelongsTo
@@ -67,5 +79,11 @@ class PlateProfile extends Model
     public function scopeCurrent(Builder $query): Builder
     {
         return $query->whereNull('merged_into_id');
+    }
+
+    /** Phase 6: plates that are not in the Registry (the Visitor Ranking). */
+    public function scopeUnregistered(Builder $query): Builder
+    {
+        return $query->current()->whereNull('vehicle_id');
     }
 }

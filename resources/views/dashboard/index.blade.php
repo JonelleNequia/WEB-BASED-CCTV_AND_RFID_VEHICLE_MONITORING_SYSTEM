@@ -77,7 +77,8 @@
 
         <section class="panel">
             <div class="panel-header panel-header-modern">
-                <h2 class="panel-title">Frequent Entry Ranking</h2>
+                {{-- Phase 6 (visitor model): registered and unregistered rankings are separate. --}}
+                <h2 class="panel-title">Registered Vehicles · Most Entries</h2>
                 <a href="{{ route('logs.index', ['event_type' => 'ENTRY']) }}" class="button button-secondary button-sm">Entry logs</a>
             </div>
             <div class="table-responsive dashboard-ranking" data-dashboard-ranking-table>
@@ -98,6 +99,36 @@
                         @endforeach
                     </tbody>
                 </table>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header panel-header-modern">
+                <h2 class="panel-title">Visitor Ranking · Unregistered Visitors</h2>
+                <a href="{{ route('visitors.index', ['tab' => 'plates', 'sort' => 'entries']) }}" class="button button-secondary button-sm">All plates</a>
+            </div>
+            <div class="table-responsive dashboard-ranking" data-dashboard-visitor-ranking-table>
+                <table>
+                    <thead>
+                        <tr><th>Rank</th><th>Plate</th><th>Entries</th><th>Today</th><th>Last seen</th><th>Note</th><th></th></tr>
+                    </thead>
+                    <tbody data-dashboard-visitor-ranking>
+                        @foreach ($frequentUnregisteredVisitors as $profile)
+                            <tr>
+                                <td><strong>#{{ $loop->iteration }}</strong></td>
+                                <td><a href="{{ route('visitors.profiles.show', $profile) }}"><strong>{{ $profile->plate_number }}</strong></a></td>
+                                <td><strong>{{ $profile->entries_count }}</strong> <span class="table-subtext">of {{ $profile->visit_count }} seen</span></td>
+                                <td>{{ $profile->entries_today_count }}</td>
+                                <td><x-datetime :value="$profile->last_seen_at" /></td>
+                                <td>{{ \Illuminate\Support\Str::limit((string) $profile->note, 40) ?: '—' }}</td>
+                                <td><a href="{{ route('registry.index', ['tab' => 'vehicles', 'register_plate' => $profile->id]) }}" class="button button-secondary button-sm">Register this vehicle</a></td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+                @if ($frequentUnregisteredVisitors->isEmpty())
+                    <p class="field-help" data-dashboard-visitor-ranking-empty>No unregistered visitor with a readable plate yet.</p>
+                @endif
             </div>
         </section>
     </div>

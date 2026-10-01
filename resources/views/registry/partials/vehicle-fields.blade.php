@@ -5,7 +5,9 @@
 --}}
 @php
     $useOld = $useOld ?? false;
-    $value = fn (string $field, $default = '') => $useOld ? old($field, $default) : $default;
+    // Phase 6 (visitor model): "Register this vehicle" fills plate, type and category.
+    $prefill = $useOld ? [] : ($prefill ?? []);
+    $value = fn (string $field, $default = '') => $useOld ? old($field, $default) : ($prefill[$field] ?? $default);
 
     // Phase 4 (visitor model): Faculty & Staff or Registered Visitor only.
     $categorySelectValue = \App\Support\VehicleCategory::normalize($value('category', 'faculty_staff'));

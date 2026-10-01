@@ -5631,8 +5631,9 @@ button[aria-busy="true"] {
 }
 
 /* Fit 1366px: hide the ranking Category column and tighten the logs table. */
-.dashboard-ranking th:nth-child(4),
-.dashboard-ranking td:nth-child(4) {
+/* Category column of the registered ranking (Phase 6: not the Visitor Ranking's "Today"). */
+[data-dashboard-ranking-table] th:nth-child(4),
+[data-dashboard-ranking-table] td:nth-child(4) {
     display: none;
 }
 
