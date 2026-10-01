@@ -109,10 +109,6 @@ class LineCrossingTests(unittest.TestCase):
         self.assertGreater(int(np.count_nonzero(drawn)), 1000)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class GateConfigTests(unittest.TestCase):
     """Phase 1: the detector and device service follow Laravel's gate list."""
 
@@ -146,3 +142,85 @@ class GateConfigTests(unittest.TestCase):
         self.assertEqual(device_service.station_codes(runtime), ["gate-1", "gate-2", "gate-3"])
         self.assertEqual(device_service.station_codes({}), ["gate-1", "gate-2"])
         self.assertEqual(device_service.LEGACY_STATIONS["entrance"], "gate-1")
+
+
+class DirectionTests(unittest.TestCase):
+    """Phase 2: IN / OUT from which side of the line the vehicle moved to."""
+
+    LINE_Y = 0.6 * 416
+
+    def setUp(self):
+        self.state = detector.initial_camera_state()
+        self.frame = np.zeros((416, 736, 3), dtype=np.uint8)
+
+    def tearDown(self):
+        self.state["pending_windows"].clear()  # stops the background RFID workers
+
+    def camera(self, in_side=1):
+        return {**CAMERA, "calibration_line": {**CAMERA["calibration_line"], "in_side": in_side}}
+
+    def step(self, camera, top, bottom, track_id=7):
+        rows = [[300, top, 380, bottom, track_id, 0.9, 2]] if top is not None else []
+        detector.handle_detection("gate-1", self.frame, tracked_results(rows), None, camera, {"yolo_imgsz": 480}, self.state, FakeClient(), {2: "Car"}, "cpu")
+
+    def window(self, track_id=7):
+        return self.state["pending_windows"][track_id]
+
+    def test_helpers(self):
+        from tracking import crossing_direction, line_in_side, trail_direction
+
+        self.assertEqual(line_in_side({"calibration_line": {"x1": 0, "y1": 0, "x2": 1, "y2": 0}}), 1)  # lines saved before Phase 2
+        self.assertEqual(line_in_side(self.camera(-1)), -1)
+        self.assertEqual((crossing_direction(1, 1), crossing_direction(-1, 1), crossing_direction(1, -1)), ("IN", "OUT", "OUT"))
+        self.assertIsNone(crossing_direction(0, 1))
+        self.assertEqual(trail_direction([(300, 200), (300, 280), (300, 420)], LINE, 1), "IN")
+        self.assertIsNone(trail_direction([(300, 200)], LINE, 1))
+
+    def test_fast_vehicle_jumping_the_line_gets_its_direction_at_once(self):
+        camera = self.camera(1)
+        self.step(camera, self.LINE_Y - 90, self.LINE_Y - 40)   # above, not touching
+        self.step(camera, self.LINE_Y + 30, self.LINE_Y + 90)   # already below
+        self.assertEqual((self.window()["direction"], self.window()["direction_reason"]), ("IN", "crossed the line"))
+
+    def test_same_gate_records_in_and_out_and_the_arrow_flips_it(self):
+        self.step(self.camera(1), self.LINE_Y + 30, self.LINE_Y + 90)   # below
+        self.step(self.camera(1), self.LINE_Y - 90, self.LINE_Y - 40)   # moved up
+        self.assertEqual(self.window()["direction"], "OUT")
+
+        self.state = detector.initial_camera_state()
+        self.step(self.camera(-1), self.LINE_Y + 30, self.LINE_Y + 90)
+        self.step(self.camera(-1), self.LINE_Y - 90, self.LINE_Y - 40)
+        self.assertEqual(self.window()["direction"], "IN")
+
+    def test_a_box_touching_the_line_is_decided_when_it_gets_across(self):
+        camera = self.camera(1)
+        self.step(camera, self.LINE_Y - 50, self.LINE_Y + 10)   # touches; centre above
+        self.assertIsNone(self.window()["direction"])
+        self.step(camera, self.LINE_Y - 10, self.LINE_Y + 50)   # centre below now
+        self.assertEqual((self.window()["direction"], self.window()["direction_reason"]), ("IN", "moved across the line"))
+
+    def test_a_track_seen_once_is_direction_unknown_and_still_sent(self):
+        class CrossingClient(FakeClient):
+            def __init__(self):
+                self.crossings = []
+
+            def submit_crossing(self, payload, image_bytes=None, filename=None):
+                self.crossings.append((payload, bool(image_bytes)))
+                return {"accepted": True, "created": True}
+
+        self.step(self.camera(1), self.LINE_Y - 50, self.LINE_Y + 10)   # one sighting on the line, then gone
+        window = self.window()
+        window["deadline_at"] = 0
+        client = CrossingClient()
+        detector.submit_crossing_for_window("gate-1", self.state, 7, window, "no_pass", client)
+
+        payload, has_snapshot = client.crossings[0]
+        self.assertEqual((payload["direction"], payload["direction_reason"]), ("UNKNOWN", "track too short"))
+        self.assertEqual((payload["camera_role"], payload["track_id"], payload["confidence"]), ("gate-1", 7, 0.9))
+        self.assertTrue(has_snapshot)
+        self.assertEqual(self.state["direction_counts"]["UNKNOWN"], 1)
+        self.assertNotIn(7, self.state["open_crossings"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -31,6 +31,8 @@
             this.messageValue = element.querySelector('[data-message-value]');
             this.maskValue = element.querySelector('[data-mask-value]');
             this.lineValue = element.querySelector('[data-line-value]');
+            this.directionValue = element.querySelector('[data-direction-value]');
+            this.crossingList = element.querySelector('[data-crossings]');
             this.saveButton = element.querySelector('[data-save]');
             this.ctx = this.canvas.getContext('2d');
             this.streamUrl = camera.stream_url || this.video?.dataset.streamUrl || "";
@@ -67,6 +69,19 @@
                 this.maskDraftPoints = [];
                 this.lineShape = null;
                 this.draftShape = null;
+                this.updateCalibrationSummary();
+                this.render();
+            });
+
+            // Phase 2: which side of the line is IN (the arrow on the canvas).
+            this.element.querySelector('[data-flip-direction]')?.addEventListener('click', () => {
+                if (!this.lineShape) {
+                    this.messageValue.textContent = 'Draw the trigger line first.';
+                    return;
+                }
+
+                this.lineShape = { ...this.lineShape, in_side: this.inSide() * -1 };
+                this.messageValue.textContent = 'IN direction flipped. Save to apply it.';
                 this.updateCalibrationSummary();
                 this.render();
             });
@@ -346,7 +361,11 @@
             event.preventDefault();
 
             if (this.draftShape.type === 'line') {
+                const inSide = this.inSide();
                 this.lineShape = this.toImageLine(this.draftShape.value);
+                if (this.lineShape) {
+                    this.lineShape.in_side = inSide;
+                }
             }
 
             this.pointerStart = null;
@@ -383,6 +402,48 @@
                 ? `${pointCount}-point polygon saved or drawn`
                 : 'No polygon yet';
             this.lineValue.textContent = this.lineShape ? 'Line saved or drawn' : 'No line yet';
+            if (this.directionValue) {
+                this.directionValue.textContent = this.lineShape
+                    ? 'IN = the side the arrow points to'
+                    : 'Draw a line first';
+            }
+        }
+
+        inSide() {
+            return Number(this.lineShape?.in_side) < 0 ? -1 : 1;
+        }
+
+        renderCrossings(crossings) {
+            if (!this.crossingList || !Array.isArray(crossings)) {
+                return;
+            }
+
+            this.crossingList.innerHTML = '';
+
+            if (crossings.length === 0) {
+                const empty = document.createElement('li');
+                empty.className = 'field-help';
+                empty.textContent = 'No crossing recorded yet.';
+                this.crossingList.appendChild(empty);
+                return;
+            }
+
+            crossings.forEach((crossing) => {
+                const item = document.createElement('li');
+                const badge = document.createElement('span');
+                badge.className = `badge ${crossing.direction === 'IN' ? 'badge-matched' : (crossing.direction === 'OUT' ? 'badge-secondary' : 'badge-manual-review')}`;
+                badge.textContent = crossing.direction_label;
+                item.appendChild(badge);
+                const details = [crossing.time, `track #${crossing.track_id ?? '—'}`];
+                if (crossing.confidence !== null && crossing.confidence !== undefined) {
+                    details.push(Number(crossing.confidence).toFixed(2));
+                }
+                if (crossing.reason) {
+                    details.push(crossing.reason);
+                }
+                item.appendChild(document.createTextNode(` ${details.join(' · ')}`));
+                this.crossingList.appendChild(item);
+            });
         }
 
         async saveCalibration() {
@@ -499,6 +560,49 @@
             this.ctx.stroke();
         }
 
+        /*
+         * Phase 2: arrow from the middle of the line toward the IN side.
+         * Side +1 is to the right of the line's direction in image
+         * coordinates (below a line drawn left to right), as in the detector.
+         */
+        drawDirectionArrow(line, inSide) {
+            const dx = line.x2 - line.x1;
+            const dy = line.y2 - line.y1;
+            const length = Math.hypot(dx, dy);
+
+            if (length < 4) {
+                return;
+            }
+
+            const size = Math.max(28, Math.min(70, length * 0.25));
+            const nx = (-dy / length) * inSide;
+            const ny = (dx / length) * inSide;
+            const midX = (line.x1 + line.x2) / 2;
+            const midY = (line.y1 + line.y2) / 2;
+            const tipX = midX + nx * size;
+            const tipY = midY + ny * size;
+            const head = 10;
+
+            this.ctx.strokeStyle = '#38bdf8';
+            this.ctx.fillStyle = '#38bdf8';
+            this.ctx.lineWidth = 4;
+            this.ctx.beginPath();
+            this.ctx.moveTo(midX, midY);
+            this.ctx.lineTo(tipX, tipY);
+            this.ctx.stroke();
+            this.ctx.beginPath();
+            this.ctx.moveTo(tipX + nx * head, tipY + ny * head);
+            this.ctx.lineTo(tipX - ny * head, tipY + nx * head);
+            this.ctx.lineTo(tipX + ny * head, tipY - nx * head);
+            this.ctx.closePath();
+            this.ctx.fill();
+            this.ctx.font = '700 14px system-ui, sans-serif';
+            this.ctx.lineWidth = 3;
+            this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+            this.ctx.strokeText('IN', tipX + nx * (head + 8) - 8, tipY + ny * (head + 8) + 5);
+            this.ctx.fillText('IN', tipX + nx * (head + 8) - 8, tipY + ny * (head + 8) + 5);
+        }
+
         render() {
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -513,6 +617,7 @@
 
             if (savedLine) {
                 this.drawLine(savedLine);
+                this.drawDirectionArrow(savedLine, this.inSide());
             }
 
             if (this.draftShape?.type === 'line') {
@@ -601,6 +706,10 @@
                 return {};
             });
             const cameras = body.runtime?.cameras || {};
+
+            for (const [role, crossings] of Object.entries(body.crossings || {})) {
+                cards[role]?.renderCrossings(crossings);
+            }
 
             for (const [role, cameraStatus] of Object.entries(cameras)) {
                 if (cards[role]) {

@@ -1,6 +1,7 @@
 
 
     <p class="field-help">Pick a camera, click point by point to draw the detection zone, then draw the trigger line, then save. The detector logs a vehicle when it crosses the line inside the zone.</p>
+    <p class="field-help">Each gate records IN and OUT. The <strong>IN</strong> arrow on the line shows the direction of a vehicle coming into campus; use <strong>Flip IN direction</strong> if it points the wrong way, then save. Check it below: drive through once and look at "Recent crossings".</p>
 
     {{-- Detector debug view: raw detections, zone/line as used, track IDs, counters. --}}
     <form method="POST" action="{{ route('calibration.debug') }}" class="calibration-debug-toggle">
@@ -39,6 +40,7 @@
                     <div class="button-row camera-toolbar">
                         <button type="button" class="button button-secondary button-sm" data-tool="mask">Draw Polygon ROI</button>
                         <button type="button" class="button button-secondary button-sm" data-tool="line">Draw Trigger Line</button>
+                        <button type="button" class="button button-secondary button-sm" data-flip-direction>Flip IN direction</button>
                         <button type="button" class="button button-secondary button-sm" data-clear>Clear</button>
                         <button type="button" class="button button-primary button-sm" data-save>Save Calibration</button>
                     </div>
@@ -84,9 +86,28 @@
                         <strong data-line-value>{{ $camera['calibration_line'] ? 'Line saved' : 'No line yet' }}</strong>
                     </div>
                     <div>
+                        <span>IN direction</span>
+                        <strong data-direction-value>{{ $camera['calibration_line'] ? 'Arrow on the line' : 'Draw a line first' }}</strong>
+                    </div>
+                    <div>
                         <span>Message</span>
                         <strong data-message-value>{{ $camera['last_connection_message'] }}</strong>
                     </div>
+                </div>
+
+                {{-- Phase 2: the last crossings at this gate with the direction the detector worked out. --}}
+                <div class="calibration-crossings">
+                    <strong>Recent crossings</strong>
+                    <ul class="calibration-crossing-list" data-crossings>
+                        @forelse ($recentCrossings[$role] ?? [] as $crossing)
+                            <li>
+                                <span class="badge {{ $crossing['direction'] === 'IN' ? 'badge-matched' : ($crossing['direction'] === 'OUT' ? 'badge-secondary' : 'badge-manual-review') }}">{{ $crossing['direction_label'] }}</span>
+                                {{ $crossing['time'] }} · track #{{ $crossing['track_id'] ?? '—' }}{{ $crossing['confidence'] !== null ? ' · '.number_format($crossing['confidence'], 2) : '' }}{{ $crossing['reason'] ? ' · '.$crossing['reason'] : '' }}
+                            </li>
+                        @empty
+                            <li class="field-help">No crossing recorded yet.</li>
+                        @endforelse
+                    </ul>
                 </div>
             </article>
         @endforeach

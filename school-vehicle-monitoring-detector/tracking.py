@@ -258,6 +258,39 @@ def path_crosses_line(previous_point, current_point, line):
     return after
 
 
+def line_in_side(camera_config):
+    """
+    Phase 2: which side of the trigger line is "inside" (+1 or -1), saved
+    with the line in Calibration (the IN arrow points to it). +1 is the side
+    left of the line from (x1, y1) to (x2, y2) in image coordinates, i.e.
+    below a line drawn left to right. Old calibrations default to +1.
+    """
+    line = (camera_config or {}).get("calibration_line") or {}
+    try:
+        return -1 if int(line.get("in_side", 1)) < 0 else 1
+    except (TypeError, ValueError):
+        return 1
+
+
+def crossing_direction(side_moved_to, in_side):
+    """IN when the track moved to the inside, OUT when it moved away; None if it did not cross."""
+    if not side_moved_to:
+        return None
+    return "IN" if side_moved_to == in_side else "OUT"
+
+
+def trail_direction(points, line, in_side):
+    """
+    Direction from a track's trail: the side of its first point against the
+    side of its last one. None while it has not been seen on both sides
+    (track too short, or it stopped on the line).
+    """
+    sides = [side for side in (point_side_of_line(point, line) for point in points or []) if side]
+    if len(sides) < 2 or sides[0] == sides[-1]:
+        return None
+    return crossing_direction(sides[-1], in_side)
+
+
 def calibration_ready(camera_config):
     """
     Auto logging requires both an ROI mask and a trigger line.

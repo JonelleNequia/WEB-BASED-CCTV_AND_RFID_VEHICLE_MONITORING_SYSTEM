@@ -1945,6 +1945,25 @@ th {
     line-height: 1.45;
 }
 
+.calibration-crossings {
+    margin-top: 0.85rem;
+}
+
+.calibration-crossing-list {
+    list-style: none;
+    margin: 0.4rem 0 0;
+    padding: 0;
+    display: grid;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+}
+
+.calibration-crossing-list .badge {
+    min-width: 2.6rem;
+    text-align: center;
+    margin-right: 0.35rem;
+}
+
 .calibration-help {
     background: #ffffff;
 }

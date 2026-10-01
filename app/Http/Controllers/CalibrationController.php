@@ -40,6 +40,7 @@ class CalibrationController extends Controller
             'cameras' => $cameras,
             'detectorStatus' => $detectorStatus,
             'debugOverlay' => $settingsService->get('detector_debug_overlay', '0') === '1',
+            'recentCrossings' => $calibrationService->recentCrossings(),
         ]);
     }
 
@@ -58,7 +59,7 @@ class CalibrationController extends Controller
             : back()->with('status', $enabled ? 'Detector debug view is on.' : 'Detector debug view is off.');
     }
 
-    public function heartbeat(DetectorRuntimeService $detectorRuntimeService): JsonResponse
+    public function heartbeat(DetectorRuntimeService $detectorRuntimeService, CalibrationService $calibrationService): JsonResponse
     {
         $detectorRuntimeService->markCalibrationViewerActive();
         $detectorStatus = $detectorRuntimeService->withViewerStreamUrls(
@@ -68,6 +69,7 @@ class CalibrationController extends Controller
 
         return response()->json([
             'runtime' => $detectorStatus,
+            'crossings' => $calibrationService->recentCrossings(),
             'generated_at' => now()->toIso8601String(),
         ]);
     }

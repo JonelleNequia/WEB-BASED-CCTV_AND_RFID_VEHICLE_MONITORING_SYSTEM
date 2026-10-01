@@ -23,6 +23,11 @@ class LaravelEventClient:
         self.event_ingest_url = str(system_settings.get("event_ingest_url", "")).strip()
         self.guest_observation_url = str(system_settings.get("guest_observation_url", "")).strip()
         self.rfid_match_url = str(system_settings.get("rfid_match_url", "")).strip()
+        # Phase 2: every trigger-line crossing with its CCTV direction. Older
+        # exports have no crossing_url; it sits next to the events endpoint.
+        self.crossing_url = str(system_settings.get("crossing_url", "")).strip() or (
+            self.event_ingest_url.rsplit("/", 1)[0] + "/crossings" if self.event_ingest_url else ""
+        )
         self.api_key = str(system_settings.get("python_api_key", "")).strip()
 
     def integration_headers(self, include_json=False):
@@ -218,6 +223,37 @@ class LaravelEventClient:
 
         return {
             "matched": False,
+            "message": body.get("message", response.text),
+            "body": body,
+        }
+
+    def submit_crossing(self, payload, image_bytes=None, filename=None):
+        """
+        Phase 2: store one crossing (gate, IN / OUT / UNKNOWN, time, track ID,
+        confidence, snapshot). The same external_event_key twice is one row.
+        """
+        if not self.crossing_url:
+            return {"accepted": False, "created": False, "message": "Laravel crossing endpoint is not configured."}
+
+        try:
+            response = requests.post(
+                self.crossing_url,
+                data=self.multipart_payload(payload),
+                files={"snapshot": (filename or "crossing.jpg", image_bytes, "image/jpeg")} if image_bytes else None,
+                headers=self.integration_headers(),
+                timeout=API_TIMEOUT_SECONDS,
+            )
+        except requests.RequestException as error:
+            return {"accepted": False, "created": False, "message": f"Could not submit crossing: {error}"}
+
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+
+        return {
+            "accepted": response.status_code in {200, 201},
+            "created": response.status_code == 201,
             "message": body.get("message", response.text),
             "body": body,
         }

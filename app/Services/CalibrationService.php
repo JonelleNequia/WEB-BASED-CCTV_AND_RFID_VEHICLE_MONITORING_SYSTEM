@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Camera;
 use App\Models\Gate;
+use App\Models\VehicleCrossing;
 use App\Support\CameraSource;
 use App\Support\DisplayTime;
 use Illuminate\Support\Collection;
@@ -74,7 +75,7 @@ class CalibrationService
                 'browser_device_id' => $data['browser_device_id'] ?? null,
                 'browser_label' => $data['browser_label'] ?? null,
                 'calibration_mask_json' => $data['calibration_mask'] ?? null,
-                'calibration_line_json' => $data['calibration_line'] ?? null,
+                'calibration_line_json' => $this->lineWithInSide($data['calibration_line'] ?? null),
                 'last_connection_status' => $connectionStatus,
                 'last_connection_message' => $data['last_connection_message'] ?? null,
             ]);
@@ -87,6 +88,61 @@ class CalibrationService
 
             return $camera->fresh();
         });
+    }
+
+    /**
+     * Phase 2: the latest crossings per gate, to check the IN direction
+     * right after calibrating (drive through once, see IN or OUT here).
+     *
+     * @return array<string, list<array<string, mixed>>>
+     */
+    public function recentCrossings(int $limit = 5): array
+    {
+        $crossings = [];
+
+        foreach (Gate::codes() as $gate) {
+            $crossings[$gate] = VehicleCrossing::query()
+                ->atGate($gate)
+                ->latest('crossed_at')
+                ->latest('id')
+                ->limit($limit)
+                ->get()
+                ->map(fn (VehicleCrossing $crossing): array => [
+                    'id' => $crossing->id,
+                    'direction' => $crossing->direction,
+                    'direction_label' => $crossing->directionLabel(),
+                    'reason' => $crossing->direction_reason,
+                    'time' => DisplayTime::datetimeSeconds($crossing->crossed_at),
+                    'track_id' => $crossing->track_id,
+                    'confidence' => $crossing->confidence !== null ? round($crossing->confidence, 2) : null,
+                    'vehicle_type' => $crossing->vehicle_type,
+                    'snapshot_url' => $crossing->snapshot_url,
+                ])
+                ->all();
+        }
+
+        return $crossings;
+    }
+
+    /**
+     * Phase 2: every saved line says which side is IN (+1 unless flipped).
+     *
+     * @param  array<string, mixed>|null  $line
+     * @return array<string, mixed>|null
+     */
+    protected function lineWithInSide(?array $line): ?array
+    {
+        if (! $line) {
+            return null;
+        }
+
+        return [
+            'x1' => (float) $line['x1'],
+            'y1' => (float) $line['y1'],
+            'x2' => (float) $line['x2'],
+            'y2' => (float) $line['y2'],
+            'in_side' => (int) ($line['in_side'] ?? 1) < 0 ? -1 : 1,
+        ];
     }
 
     /**

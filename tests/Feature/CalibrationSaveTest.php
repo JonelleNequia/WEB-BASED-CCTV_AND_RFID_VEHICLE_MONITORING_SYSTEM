@@ -62,6 +62,7 @@ class CalibrationSaveTest extends TestCase
             'y1' => 0.80,
             'x2' => 0.90,
             'y2' => 0.80,
+            'in_side' => 1, // Phase 2: IN side, not flipped
         ], $camera->calibration_line_json);
         $this->assertNotNull($camera->last_connected_at);
     }

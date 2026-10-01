@@ -57,11 +57,14 @@ from tracking import (
     bbox_intersects_line,
     bbox_center,
     calibration_ready,
+    crossing_direction,
+    line_in_side,
     normalized_line_to_pixels,
     normalized_polygon_to_pixels,
     path_crosses_line,
     point_in_polygon,
     point_side_of_line,
+    trail_direction,
 )
 from anpr import detect_vehicle_color, ocr_runtime_status, read_license_plate
 from camera_health import RtspDiagnosis, take_over_stale_detector
@@ -918,6 +921,11 @@ def initial_camera_state():
         "track_points": {},
         "confirmed_tracks": {},
         "line_crossings": 0,
+        # Phase 2: crossings whose direction is still being decided / sent,
+        # and the latest decided ones (debug view).
+        "open_crossings": {},
+        "recent_crossings": [],
+        "direction_counts": {"IN": 0, "OUT": 0, "UNKNOWN": 0},
         "detection_times": [],
         "debug": None,
         "debug_enabled": False,
@@ -1548,6 +1556,7 @@ DEBUG_COLORS = {
     "low confidence": (0, 215, 255),
     "not a vehicle": (150, 150, 150),
     "track": (0, 140, 255),
+    "in_arrow": (248, 189, 56),  # sky blue, like the calibration page
 }
 
 
@@ -1560,6 +1569,25 @@ def draw_debug_panel(frame, lines, color=(255, 255, 255)):
     cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
     for index, text in enumerate(lines):
         cv2.putText(frame, text, (8, height * (index + 1)), cv2.FONT_HERSHEY_SIMPLEX, scale, color, 1, cv2.LINE_AA)
+
+
+def draw_in_arrow(frame, line, in_side, thickness=1):
+    """
+    Phase 2: arrow from the middle of the trigger line toward the IN side
+    (the same arrow as in Settings > Calibration).
+    """
+    dx, dy = line["x2"] - line["x1"], line["y2"] - line["y1"]
+    length = float(np.hypot(dx, dy))
+    if length < 4:
+        return
+
+    size = max(24.0, min(70.0, length * 0.25))
+    nx, ny = -dy / length * in_side, dx / length * in_side
+    mid = ((line["x1"] + line["x2"]) / 2, (line["y1"] + line["y2"]) / 2)
+    tip = (int(mid[0] + nx * size), int(mid[1] + ny * size))
+    cv2.arrowedLine(frame, (int(mid[0]), int(mid[1])), tip, DEBUG_COLORS["in_arrow"], thickness + 2, cv2.LINE_AA, tipLength=0.35)
+    cv2.putText(frame, "IN", (int(tip[0] + nx * 12) - 8, int(tip[1] + ny * 12) + 5), cv2.FONT_HERSHEY_SIMPLEX,
+                0.5 * max(1, thickness), DEBUG_COLORS["in_arrow"], max(1, thickness), cv2.LINE_AA)
 
 
 def draw_debug_overlay(frame, camera_config, state, message=None):
@@ -1580,6 +1608,7 @@ def draw_debug_overlay(frame, camera_config, state, message=None):
         cv2.line(frame, (line["x1"], line["y1"]), (line["x2"], line["y2"]), DEBUG_COLORS["line"], thickness + 2)
         for x, y in ((line["x1"], line["y1"]), (line["x2"], line["y2"])):
             cv2.circle(frame, (x, y), thickness * 4, DEBUG_COLORS["line"], -1)
+        draw_in_arrow(frame, line, line_in_side(camera_config), thickness)
 
     with state["lock"]:
         debug = dict(state.get("debug") or {})
@@ -1618,6 +1647,8 @@ def draw_debug_overlay(frame, camera_config, state, message=None):
     draw_debug_panel(frame, [
         f"DEBUG  detections/frame {debug.get('raw_count', 0)}  vehicles {debug.get('vehicle_count', 0)}  in zone {debug.get('in_roi', 0)}",
         f"line crossings {debug.get('line_crossings', 0)}  detection {debug.get('detection_fps', 0)} fps  on {debug.get('device') or '-'} @{debug.get('imgsz')}",
+        "IN {IN}  OUT {OUT}  unknown {UNKNOWN}".format(**{"IN": 0, "OUT": 0, "UNKNOWN": 0, **(state.get("direction_counts") or {})})
+        + ("  last: " + ", ".join(f"{item['direction']} #{item['track_id']}" for item in reversed(state.get("recent_crossings") or [])) if state.get("recent_crossings") else ""),
         f"frame {source[0]}x{source[1]}  last detection {age:.1f}s ago" + (f"  ERROR {state.get('last_detection_error')}" if state.get("last_detection_error") else ""),
     ])
 
@@ -1681,7 +1712,14 @@ def start_detection_window(
 ):
     """
     Start one RFID matching window for a triggered vehicle.
+
+    direction: {"direction": "IN" / "OUT" / None, "reason", "line" (pixels),
+    "in_side", "start_side"}; None is decided from the track while the
+    window is open (Phase 2).
     """
+    if not isinstance(direction, dict):
+        direction = {"direction": direction, "reason": "crossed the line" if direction else None}
+
     now_monotonic = time.monotonic()
     event_key = f"{role}-track-{track_id}-{int(time.time() * 1000)}"
     event_time = datetime.now().astimezone().isoformat()
@@ -1707,7 +1745,12 @@ def start_detection_window(
             "detected_vehicle_type": display_label,
             "confidence": confidence,
             "xyxy": xyxy,
-            "direction": direction,
+            "direction": direction.get("direction"),
+            "direction_reason": direction.get("reason"),
+            "line": direction.get("line"),
+            "in_side": direction.get("in_side", 1),
+            "start_side": direction.get("start_side"),
+            "trail_length": int(direction.get("trail_length") or 0),
             "event_time": event_time,
             "started_at": now_monotonic,
             "deadline_at": now_monotonic + RFID_DETECTION_WINDOW_SECONDS,
@@ -1717,6 +1760,7 @@ def start_detection_window(
             "last_analysis_frame_at": now_monotonic,
             "last_message": "Waiting for RFID scan.",
         }
+        state["open_crossings"][track_id] = state["pending_windows"][track_id]
         state["track_overlays"][track_id] = waiting_overlay()
 
     worker = threading.Thread(
@@ -1771,14 +1815,33 @@ def apply_rfid_match_result(state, track_id, match):
 def rfid_detection_window_worker(role, state, track_id, laravel_client):
     """
     Poll Laravel for a pass read; on timeout send a no-pass alert, all outside
-    the frame capture loop.
+    the frame capture loop. Either way the crossing itself (gate, direction,
+    time, track, snapshot) is sent once (Phase 2).
+    """
+    with state["lock"]:
+        window = state["pending_windows"].get(track_id)
+
+    if not window:
+        return
+
+    matched = wait_for_rfid_match(role, state, track_id, laravel_client)
+    submit_crossing_for_window(role, state, track_id, window, "matched" if matched else "no_pass", laravel_client)
+
+    if not matched:
+        submit_guest_observation_for_window(role, state, track_id, laravel_client)
+
+
+def wait_for_rfid_match(role, state, track_id, laravel_client):
+    """
+    True when a pass read resolved the window (or it was resolved elsewhere),
+    False when the window ran out without one.
     """
     while True:
         with state["lock"]:
             window = state["pending_windows"].get(track_id)
 
             if not window:
-                return
+                return True
 
             event_time = window["event_time"]
             event_key = window["event_key"]
@@ -1801,7 +1864,7 @@ def rfid_detection_window_worker(role, state, track_id, laravel_client):
         )
 
         if apply_rfid_match_result(state, track_id, match):
-            return
+            return True
 
         sleep_for = min(
             RFID_POLL_INTERVAL_SECONDS,
@@ -1813,7 +1876,104 @@ def rfid_detection_window_worker(role, state, track_id, laravel_client):
 
         time.sleep(sleep_for)
 
-    submit_guest_observation_for_window(role, state, track_id, laravel_client)
+    return False
+
+
+# Phase 2: fewer sightings than this and no crossing seen = "track too short".
+MIN_DIRECTION_TRAIL_POINTS = 3
+
+
+def resolve_window_direction_locked(window, center_point):
+    """
+    Phase 2: a vehicle that only touched the line when its window started
+    gets its direction once its centre is on the other side of the line.
+    """
+    if window.get("direction") or not window.get("line"):
+        return
+
+    side = point_side_of_line(center_point, window["line"])
+    start_side = window.get("start_side")
+
+    if not start_side:
+        window["start_side"] = side or None
+        return
+
+    if side and side != start_side:
+        window["direction"] = crossing_direction(side, window.get("in_side", 1))
+        window["direction_reason"] = "moved across the line"
+
+
+def final_direction_locked(window):
+    """
+    IN / OUT, or UNKNOWN with the reason (the track was too short or never
+    reached the other side of the line).
+    """
+    if window.get("direction") in {"IN", "OUT"}:
+        return window["direction"], window.get("direction_reason") or "crossed the line"
+
+    if not window.get("start_side") or window.get("trail_length", 0) < MIN_DIRECTION_TRAIL_POINTS:
+        return "UNKNOWN", "track too short"
+
+    return "UNKNOWN", "never reached the other side"
+
+
+def submit_crossing_for_window(role, state, track_id, window, rfid_status, laravel_client):
+    """
+    Phase 2: send one crossing (gate, IN / OUT / UNKNOWN, time, track ID,
+    confidence, snapshot) to Laravel. A pass read can end the RFID window
+    before a vehicle that only touched the line has crossed it, so the
+    direction may still be decided until the window's deadline.
+    """
+    try:
+        while True:
+            with state["lock"]:
+                decided = window.get("direction") in {"IN", "OUT"}
+            if decided or time.monotonic() >= window["deadline_at"]:
+                break
+            time.sleep(0.2)
+
+        with state["lock"]:
+            direction, reason = final_direction_locked(window)
+            window["direction"], window["direction_reason"] = direction, reason
+            snapshot_frame = window.get("snapshot_frame")
+            snapshot_frame = snapshot_frame.copy() if snapshot_frame is not None else None
+            payload = {
+                "external_event_key": window["event_key"],
+                "camera_role": role,
+                "camera_id": window.get("camera_id"),
+                "direction": direction,
+                "direction_reason": reason,
+                "event_time": window["event_time"],
+                "track_id": track_id,
+                "confidence": round(float(window.get("confidence") or 0.0), 4),
+                "detected_vehicle_type": window.get("detected_vehicle_type"),
+                "detection_metadata": {
+                    "bbox_xyxy": [round(float(value), 1) for value in window.get("xyxy", ())],
+                    "in_side": window.get("in_side", 1),
+                    "rfid_status": rfid_status,
+                },
+            }
+            state["direction_counts"][direction] = state["direction_counts"].get(direction, 0) + 1
+            state["recent_crossings"].append({"track_id": track_id, "direction": direction, "at": time.monotonic()})
+            del state["recent_crossings"][:-5]
+
+        print(f"{role} crossing track {track_id}: {direction} ({reason})", flush=True)
+
+        # The full-resolution frame from the moment of the crossing when there is one.
+        hires_frame = HIRES[role].frame_near(window["started_at"]) if role in HIRES else None
+        snapshot = encode_frame_snapshot(role, hires_frame if hires_frame is not None else snapshot_frame, f"crossing-{window['event_key']}") \
+            if (hires_frame is not None or snapshot_frame is not None) else None
+        submit = getattr(laravel_client, "submit_crossing", None)
+        if submit is None:
+            return
+        result = submit(payload, snapshot["bytes"] if snapshot else None, snapshot["filename"] if snapshot else None)
+
+        if not result.get("accepted"):
+            with state["lock"]:
+                state["last_error"] = result.get("message", "Crossing could not be saved.")
+    finally:
+        with state["lock"]:
+            state["open_crossings"].pop(track_id, None)
 
 
 def most_common_value(values):
@@ -2143,6 +2303,13 @@ def update_detection_windows(role, frame, results, state, laravel_client):
     now_monotonic = time.monotonic()
 
     with state["lock"]:
+        for track_id, window in list(state["open_crossings"].items()):
+            visible_box = visible_boxes.get(track_id)
+            if visible_box:
+                # Sightings of the track (the trail before the window, plus every frame since).
+                window["trail_length"] = window.get("trail_length", 0) + 1
+                resolve_window_direction_locked(window, bbox_center(visible_box["xyxy"]))
+
         for track_id, window in list(state["pending_windows"].items()):
             visible_box = visible_boxes.get(track_id)
             if visible_box:
@@ -2288,15 +2455,19 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
         with state["lock"]:
             state["line_crossings"] += 1
 
-        if previous_side is not None and current_side is not None:
-            if previous_side < 0 and current_side > 0:
-                direction = "IN"
-            elif previous_side > 0 and current_side < 0:
-                direction = "OUT"
-            else:
-                direction = "IN"
+        # Phase 2: the direction is the side of the line the vehicle moved TO
+        # (the gate's calibration says which side is IN). A box that only
+        # touches the line has not crossed yet: its direction is decided
+        # while the window is open, or stays unknown.
+        in_side = line_in_side(camera_config)
+        with state["lock"]:
+            trail = list((state["track_points"].get(track_id) or {}).get("points") or [])
+
+        if crossed:
+            direction, direction_reason = crossing_direction(crossed, in_side), "crossed the line"
         else:
-            direction = "IN"
+            direction = trail_direction(trail, line, in_side)
+            direction_reason = "trail crossed the line" if direction else None
 
         start_detection_window(
             role,
@@ -2306,7 +2477,14 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
             class_id,
             confidence,
             xyxy,
-            direction,
+            {
+                "direction": direction,
+                "reason": direction_reason,
+                "line": line,
+                "in_side": in_side,
+                "start_side": next((side for side in (point_side_of_line(point, line) for point in trail) if side), previous_side or current_side),
+                "trail_length": len(trail) - 1,  # this frame is counted by update_detection_windows
+            },
             camera_config,
             vehicle_labels,
             laravel_client,

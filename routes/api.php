@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\CrossingIntegrationController;
 use App\Http\Controllers\Api\DeviceIntegrationController;
 use App\Http\Controllers\Api\FutureIntegrationController;
 use App\Http\Controllers\Api\RealtimeLogController;
@@ -38,6 +39,8 @@ Route::prefix('v1/integration')
         Route::post('/events', [FutureIntegrationController::class, 'receive'])->name('events');
         Route::post('/guest-observations', [GuestObservationController::class, 'store'])->name('guest-observations');
         Route::post('/rfid-scans', [FutureIntegrationController::class, 'receiveRfidScan'])->name('rfid-scans');
+        // Phase 2: every trigger-line crossing with its CCTV direction.
+        Route::post('/crossings', [CrossingIntegrationController::class, 'store'])->name('crossings');
         // Plug-and-detect: scan results from the device service.
         Route::post('/devices', [DeviceIntegrationController::class, 'store'])->name('devices');
     });

@@ -8,7 +8,7 @@ crossing -> RFID window -> "no pass" alert), at the same detection rate.
 Zone and line (normalized 0-1, like Settings > Calibration):
     --use-calibration          the station's saved zone and line (--role)
     --roi "x,y x,y x,y ..."    zone polygon
-    --line "x1,y1,x2,y2"       trigger line
+    --line "x1,y1,x2,y2[,in]"  trigger line; in = -1 flips the IN side (default 1)
     (default: the whole frame and a horizontal line at 60% height)
 
     --post        send events/alerts to Laravel for real (default: dry run)
@@ -37,6 +37,7 @@ class DryRunClient:
         self.rfid_checks = 0
         self.alerts = []
         self.events = []
+        self.crossings = []
 
     def check_rfid_match(self, camera_role, event_time, window_seconds=4, lookback_seconds=10, event_key=None):
         with self.lock:
@@ -47,6 +48,11 @@ class DryRunClient:
         with self.lock:
             self.alerts.append({"event_key": payload.get("external_event_key"), **{key: payload.get(key) for key in ("camera_role", "detected_vehicle_type", "plate_number", "vehicle_color")}})
         return {"accepted": True, "created": True, "duplicate": False, "message": "Dry run.", "body": {}, "overlay": None}
+
+    def submit_crossing(self, payload, image_bytes=None, filename=None):
+        with self.lock:
+            self.crossings.append({key: payload.get(key) for key in ("track_id", "direction", "direction_reason", "detected_vehicle_type")})
+        return {"accepted": True, "created": True, "message": "Dry run.", "body": {}}
 
     def submit_event(self, payload):
         with self.lock:
@@ -63,8 +69,11 @@ def parse_points(text):
 
 
 def parse_line(text):
-    x1, y1, x2, y2 = (float(value) for value in text.split(","))
-    return {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+    values = [float(value) for value in text.split(",")]
+    line = dict(zip(("x1", "y1", "x2", "y2"), values[:4]))
+    # Optional 5th value: the IN side, +1 (default) or -1 (flipped arrow).
+    line["in_side"] = -1 if len(values) > 4 and values[4] < 0 else 1
+    return line
 
 
 def with_app_url(runtime, app_url):
@@ -167,7 +176,7 @@ def run(args):
                     if not any(item["track"] == track_id for item in crossings):
                         crossings.append({"t": round(video_time, 1), "track": track_id,
                                           "class": window.get("detected_vehicle_type"), "direction": window.get("direction")})
-                        print(f"  {video_time:5.1f}s  CROSSING  track {track_id}  {window.get('detected_vehicle_type')}  {window.get('direction')}", flush=True)
+                        print(f"  {video_time:5.1f}s  CROSSING  track {track_id}  {window.get('detected_vehicle_type')}  {window.get('direction') or 'direction pending'}", flush=True)
 
         if writer is not None:
             writer.write(detector.render_annotated_frame(args.role, frame, results, camera_config, state, vehicle_labels))
@@ -178,7 +187,7 @@ def run(args):
 
     # Let the RFID windows finish (no match -> "no pass" alert).
     deadline = time.monotonic() + detector.RFID_DETECTION_WINDOW_SECONDS + 30
-    while state["pending_windows"] and time.monotonic() < deadline:
+    while (state["pending_windows"] or state["open_crossings"]) and time.monotonic() < deadline:
         time.sleep(0.2)
 
     summary = {
@@ -190,6 +199,9 @@ def run(args):
         "vehicle_track_ids": len(track_ids),
         "line_crossings": state["line_crossings"],
         "crossings": crossings,
+        # Phase 2: the direction each crossing was finally sent with.
+        "directions": dict(state["direction_counts"]),
+        "crossings_sent": getattr(client, "crossings", None) if not args.post else "sent to Laravel",
         "rfid_checks": getattr(client, "rfid_checks", None),
         # One alert per vehicle (sent as snapshot, then color, then plate updates).
         "no_pass_vehicles": len({item["event_key"] for item in getattr(client, "alerts", [])}) if not args.post else "sent to Laravel",

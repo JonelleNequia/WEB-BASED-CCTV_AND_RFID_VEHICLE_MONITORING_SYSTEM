@@ -35,6 +35,8 @@ class SaveCalibrationRequest extends FormRequest
             'calibration_line.y1' => ['required_with:calibration_line', 'numeric', 'between:0,1'],
             'calibration_line.x2' => ['required_with:calibration_line', 'numeric', 'between:0,1'],
             'calibration_line.y2' => ['required_with:calibration_line', 'numeric', 'between:0,1'],
+            // Phase 2: the side of the line a vehicle moves to when it goes IN.
+            'calibration_line.in_side' => ['nullable', 'integer', 'in:-1,1'],
         ];
     }
 }

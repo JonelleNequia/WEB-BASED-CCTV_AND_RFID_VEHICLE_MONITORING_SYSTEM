@@ -220,6 +220,7 @@ class SettingsService
                 'rfid_match_url' => $integrationBaseUrl.'/api/latest-scan',
                 'status_url' => $integrationBaseUrl.'/api/v1/integration/status',
                 'rfid_ingest_url' => $integrationBaseUrl.'/api/v1/integration/rfid-scans',
+                'crossing_url' => $integrationBaseUrl.'/api/v1/integration/crossings',
             ],
             // Phase 1: the detector runs one camera per gate, in this order.
             'gates' => Gate::ordered()->map(fn (Gate $gate): array => [
