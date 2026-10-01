@@ -1,18 +1,10 @@
 {{--
-    UI Phase 3: "Register Tags" bulk scanning (Registry › RFID Tags and › Guest Passes).
-    Each tap on the reader adds one tag; numbers (and G-xx labels) are assigned
+    UI Phase 3: "Register Tags" bulk scanning (Registry › RFID Tags).
+    Each tap on the reader adds one vehicle tag; numbers are assigned
     automatically. Nothing else on the page listens to the reader.
 --}}
 <x-drawer id="register-tag-drawer" title="Register Tags">
     <div class="stack-form" data-bulk-register data-store-url="{{ route('rfid-inventory.store') }}">
-        <div class="field">
-            <label for="bulk_tag_type">Tag type</label>
-            <select id="bulk_tag_type" data-bulk-type>
-                <option value="guest_pass" @selected($defaultTagType === 'guest_pass')>Guest pass (gets the next G-xx number)</option>
-                <option value="vehicle" @selected($defaultTagType === 'vehicle')>Vehicle tag</option>
-            </select>
-        </div>
-
         <div class="field">
             <label for="bulk_scan">Scan tags one after another</label>
             <input id="bulk_scan" type="text" autocomplete="off" placeholder="Focus here and tap each tag" data-bulk-scan autofocus>

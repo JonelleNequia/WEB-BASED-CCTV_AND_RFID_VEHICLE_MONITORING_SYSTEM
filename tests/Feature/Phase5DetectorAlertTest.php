@@ -10,7 +10,6 @@ use App\Models\RfidTag;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Models\VehicleEvent;
-use App\Services\GuestPassService;
 use App\Services\MatchingService;
 use App\Services\RfidIngestService;
 use Carbon\Carbon;
@@ -62,20 +61,6 @@ class Phase5DetectorAlertTest extends TestCase
             ->assertJsonPath('matched', false)
             ->assertJsonPath('status', 'no_pass')
             ->assertJsonPath('overlay.label', 'NO PASS');
-    }
-
-    public function test_rfid_match_counts_a_guest_pass_read(): void
-    {
-        app(GuestPassService::class)->issue($this->guestPass('GP-DET-1'), ['plate' => 'GPD 101', 'id_presented' => 'UMID']);
-        $this->scan('GP-DET-1', 'exit');
-
-        $this->pollMatch('exit', $this->start->copy()->addSecond())
-            ->assertOk()
-            ->assertJsonPath('matched', true)
-            ->assertJsonPath('status', 'guest_pass')
-            ->assertJsonPath('guest_pass.label', 'Guest Pass #G-01')
-            ->assertJsonPath('overlay.verification', 'guest_pass')
-            ->assertJsonPath('overlay.label', 'GUEST PASS - G-01');
     }
 
     public function test_one_rfid_read_confirms_only_one_vehicle(): void
@@ -140,81 +125,6 @@ class Phase5DetectorAlertTest extends TestCase
             ->assertJsonPath('overlay.verification', 'registered');
 
         $this->assertSame(0, GuestVehicleObservation::query()->count());
-    }
-
-    public function test_guest_pass_exit_read_suppresses_the_no_pass_alert(): void
-    {
-        app(GuestPassService::class)->issue($this->guestPass('GP-SUP-1'), ['plate' => 'GPS 101', 'id_presented' => 'UMID']);
-        $this->scan('GP-SUP-1', 'exit');
-
-        $this->postNoPass('det-suppressed-guest-1', 'exit', $this->start->copy()->addSeconds(3))
-            ->assertOk()
-            ->assertJsonPath('suppressed', true)
-            ->assertJsonPath('overlay.verification', 'guest_pass');
-
-        $this->assertSame(0, GuestVehicleObservation::query()->count());
-    }
-
-    public function test_issuing_a_guest_pass_resolves_the_no_pass_alert(): void
-    {
-        $this->postNoPass('det-resolve-1', 'entrance', $this->start, 'RES 101')->assertCreated();
-        $observation = GuestVehicleObservation::query()->where('external_event_key', 'det-resolve-1')->firstOrFail();
-        $this->guestPass('GP-RES-1');
-
-        $scan = $this->actingAs($this->admin)
-            ->postJson(route('stations.rfid-scan', 'entrance'), ['tag_uid' => 'GP-RES-1'])
-            ->assertCreated()
-            ->assertJsonPath('issue.prefill.observation_id', $observation->id)
-            ->assertJsonPath('issue.prefill.plate', 'RES 101');
-
-        $this->actingAs($this->admin)
-            ->postJson($scan->json('issue.url'), [
-                'plate' => 'RES 101',
-                'id_presented' => 'UMID',
-                'rfid_scan_log_id' => $scan->json('issue.rfid_scan_log_id'),
-                'guest_observation_id' => $observation->id,
-            ])
-            ->assertCreated();
-
-        $this->assertSame(GuestVehicleObservation::STATUS_RESOLVED, $observation->fresh()->status);
-        $this->assertStringContainsString('Guest Pass #G-01 issued', $observation->fresh()->notes);
-        $this->assertSame(
-            VehicleEvent::MATCH_NO_PASS_RESOLVED,
-            VehicleEvent::query()->where('external_event_key', 'det-resolve-1')->value('match_status')
-        );
-        $this->assertSame(0, $this->liveMetrics()['no_pass_alerts_today']);
-
-        // Late OCR update from the detector keeps the alert resolved.
-        $this->postNoPass('det-resolve-1', 'entrance', $this->start, 'RES 101')->assertOk();
-        $this->assertSame(
-            VehicleEvent::MATCH_NO_PASS_RESOLVED,
-            VehicleEvent::query()->where('external_event_key', 'det-resolve-1')->value('match_status')
-        );
-    }
-
-    public function test_guest_pass_issued_after_the_tap_still_counts_for_the_crossing(): void
-    {
-        $this->guestPass('GP-LATE-1');
-
-        $scan = $this->actingAs($this->admin)
-            ->postJson(route('stations.rfid-scan', 'entrance'), ['tag_uid' => 'GP-LATE-1'])
-            ->assertCreated();
-
-        // The guard takes a minute to fill in the Issue form.
-        $this->travelTo($this->start->copy()->addSeconds(60));
-
-        $this->actingAs($this->admin)
-            ->postJson($scan->json('issue.url'), [
-                'id_presented' => 'UMID',
-                'rfid_scan_log_id' => $scan->json('issue.rfid_scan_log_id'),
-            ])
-            ->assertCreated();
-
-        $this->travelTo($this->start->copy()->addSeconds(66));
-
-        $this->pollMatch('entrance', $this->start->copy()->addSeconds(65))
-            ->assertJsonPath('matched', true)
-            ->assertJsonPath('status', 'guest_pass');
     }
 
     public function test_guest_exit_is_not_matched_by_vehicle_type_and_color(): void
@@ -310,15 +220,6 @@ class Phase5DetectorAlertTest extends TestCase
             'tag_uid' => $uid,
             'scan_location' => $location,
         ], 'station_reader');
-    }
-
-    protected function guestPass(string $uid): RfidTag
-    {
-        return RfidTag::query()->create([
-            'uid' => $uid,
-            'tag_type' => RfidTag::TYPE_GUEST_PASS,
-            'status' => RfidTag::STATUS_AVAILABLE,
-        ]);
     }
 
     protected function registeredVehicle(string $plate, string $uid): Vehicle

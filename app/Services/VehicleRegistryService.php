@@ -128,7 +128,7 @@ class VehicleRegistryService
     {
         $query = RfidTag::query()
             ->with('vehicle')
-            ->vehicleTags() // Phase 2: guest passes are never assigned to a vehicle
+            ->vehicleTags()
             ->assigned()
             ->when(filled($search), function ($query) use ($search): void {
                 $term = '%'.trim((string) $search).'%';
@@ -156,7 +156,7 @@ class VehicleRegistryService
     {
         $query = RfidTag::query()
             ->with('vehicle')
-            ->vehicleTags() // Phase 2: vehicle tags only
+            ->vehicleTags()
             ->available();
 
         return $this->orderTagsByNumberThenUid($query)->get();
@@ -258,7 +258,7 @@ class VehicleRegistryService
     {
         $query = RfidTag::query()
             ->with('vehicle')
-            ->vehicleTags() // Phase 2: vehicle tags only
+            ->vehicleTags()
             ->where(function ($query) use ($vehicle): void {
                 $query->where('status', RfidTag::STATUS_AVAILABLE);
 
@@ -287,10 +287,6 @@ class VehicleRegistryService
         return DB::transaction(function () use ($data): RfidTag {
             $uid = $this->normalizeTagUid((string) ($data['uid'] ?? $data['rfid_uid'] ?? $data['tag_uid'] ?? ''));
             $tagNumber = $this->normalizeTagNumber($data['tag_number'] ?? null);
-            // Phase 2: a tag is either a vehicle tag or a reusable guest pass.
-            $tagType = in_array($data['tag_type'] ?? null, RfidTag::TYPES, true)
-                ? $data['tag_type']
-                : RfidTag::TYPE_VEHICLE;
 
             if ($uid === '') {
                 throw ValidationException::withMessages([
@@ -334,11 +330,7 @@ class VehicleRegistryService
                 'tag_number' => $tagNumber,
                 'uid' => $uid,
                 'status' => RfidTag::STATUS_AVAILABLE,
-                'tag_type' => $tagType,
-                // Guest passes get the next G-xx label automatically.
-                'display_number' => $tagType === RfidTag::TYPE_GUEST_PASS
-                    ? RfidTag::nextGuestPassNumber()
-                    : null,
+                'tag_type' => RfidTag::TYPE_VEHICLE,
             ]);
         });
     }
@@ -373,13 +365,6 @@ class VehicleRegistryService
         if (! $tag) {
             throw ValidationException::withMessages([
                 'rfid_tag_id' => 'Choose an available RFID tag from the inventory.',
-            ]);
-        }
-
-        // Phase 2: guest passes are issued per visit, never assigned to a vehicle.
-        if ($tag->isGuestPass()) {
-            throw ValidationException::withMessages([
-                'rfid_uid' => 'Guest passes cannot be assigned to a registered vehicle. Choose a vehicle tag.',
             ]);
         }
 
@@ -458,7 +443,6 @@ class VehicleRegistryService
         $summary = ['id' => $tag->id, 'uid' => $tag->uid, 'tag_number' => $tag->tag_number, 'label' => $tag->label];
 
         [$state, $ok, $message] = match (true) {
-            $tag->isGuestPass() => ['guest_pass', false, $tag->label.' is a guest pass. Guest passes cannot be assigned to a vehicle; scan a vehicle tag.'],
             $vehicle && (int) $tag->vehicle_id === (int) $vehicle->id && $tag->status === RfidTag::STATUS_ASSIGNED
                 => ['current', false, 'This is already the current tag of '.$vehicle->plate_number.'.'],
             $tag->status === RfidTag::STATUS_ASSIGNED => ['assigned', false, $tag->label.' is already assigned to '.($tag->vehicle?->plate_number ?? 'another vehicle').'. Use Replace Tag on that vehicle first.'],
@@ -528,21 +512,15 @@ class VehicleRegistryService
     }
 
     /**
-     * UI Phase 3: mark a tag or guest pass lost / disabled, or enable it again.
+     * UI Phase 3: mark a tag lost / disabled, or enable it again.
      */
     public function setTagStatus(RfidTag $tag, string $status): RfidTag
     {
         return DB::transaction(function () use ($tag, $status): RfidTag {
-            $tag = RfidTag::query()->with(['vehicle', 'activeGuestVisit'])->whereKey($tag->id)->lockForUpdate()->firstOrFail();
+            $tag = RfidTag::query()->with('vehicle')->whereKey($tag->id)->lockForUpdate()->firstOrFail();
 
             if (! in_array($status, [RfidTag::STATUS_LOST, RfidTag::STATUS_DISABLED, RfidTag::STATUS_AVAILABLE], true)) {
                 throw ValidationException::withMessages(['status' => 'Unknown tag status.']);
-            }
-
-            if ($tag->isGuestPass() && $tag->activeGuestVisit) {
-                throw ValidationException::withMessages([
-                    'status' => $tag->label.' is with a guest right now. Use Guests › Lost (or close the visit) instead.',
-                ]);
             }
 
             if ($status === RfidTag::STATUS_AVAILABLE) {

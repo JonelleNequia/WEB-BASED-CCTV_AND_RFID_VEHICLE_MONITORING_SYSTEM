@@ -18,6 +18,8 @@ use Tests\TestCase;
 
 /**
  * Phase 2: guest pass data model, registry rules, and stale session cleanup.
+ * Phase 0 (visitor model): guest passes were removed; the tables stay for
+ * history, so only the schema, registry and cleanup tests remain.
  */
 class Phase2GuestPassModelTest extends TestCase
 {
@@ -32,80 +34,6 @@ class Phase2GuestPassModelTest extends TestCase
             'valid_until', 'status', 'notes',
         ]));
         $this->assertTrue(Schema::hasColumn('vehicle_events', 'guest_visit_id'));
-    }
-
-    public function test_guest_passes_get_sequential_display_numbers_and_no_vehicle(): void
-    {
-        $service = app(VehicleRegistryService::class);
-
-        $first = $service->registerRfidTag(['uid' => 'GP-UID-1', 'tag_number' => 101, 'tag_type' => 'guest_pass']);
-        $second = $service->registerRfidTag(['uid' => 'GP-UID-2', 'tag_number' => 102, 'tag_type' => 'guest_pass']);
-        $vehicleTag = $service->registerRfidTag(['uid' => 'VT-UID-1', 'tag_number' => 1]);
-
-        $this->assertSame('G-01', $first->display_number);
-        $this->assertSame('G-02', $second->display_number);
-        $this->assertSame('Guest Pass #G-02', $second->label);
-        $this->assertSame(RfidTag::TYPE_VEHICLE, $vehicleTag->tag_type);
-        $this->assertNull($vehicleTag->display_number);
-
-        $first->forceFill(['vehicle_id' => 999])->save();
-        $this->assertNull($first->fresh()->vehicle_id);
-    }
-
-    public function test_each_issue_is_a_new_visit_and_a_pass_cannot_be_issued_twice(): void
-    {
-        $pass = app(VehicleRegistryService::class)
-            ->registerRfidTag(['uid' => 'GP-UID-9', 'tag_number' => 109, 'tag_type' => 'guest_pass']);
-
-        $firstVisit = GuestVisit::query()->create([
-            'rfid_tag_id' => $pass->id,
-            'active_rfid_tag_id' => $pass->id,
-            'plate' => 'GST 001',
-            'entry_at' => now(),
-            'status' => GuestVisit::STATUS_ACTIVE,
-        ]);
-
-        $this->assertTrue($pass->fresh()->activeGuestVisit->is($firstVisit));
-
-        try {
-            GuestVisit::query()->create([
-                'rfid_tag_id' => $pass->id,
-                'active_rfid_tag_id' => $pass->id,
-                'plate' => 'GST 002',
-                'status' => GuestVisit::STATUS_ACTIVE,
-            ]);
-            $this->fail('A pass that is already issued must not be issued again.');
-        } catch (QueryException) {
-            $this->assertSame(1, GuestVisit::query()->count());
-        }
-
-        // Closing the visit frees the pass for the next guest.
-        $firstVisit->update(['active_rfid_tag_id' => null, 'status' => GuestVisit::STATUS_COMPLETED, 'exit_at' => now()]);
-
-        GuestVisit::query()->create([
-            'rfid_tag_id' => $pass->id,
-            'active_rfid_tag_id' => $pass->id,
-            'plate' => 'GST 002',
-            'status' => GuestVisit::STATUS_ACTIVE,
-        ]);
-
-        $this->assertSame(2, $pass->guestVisits()->count());
-    }
-
-    public function test_guest_pass_cannot_be_assigned_to_a_registered_vehicle(): void
-    {
-        $service = app(VehicleRegistryService::class);
-        $pass = $service->registerRfidTag(['uid' => 'GP-UID-3', 'tag_number' => 103, 'tag_type' => 'guest_pass']);
-
-        $this->assertFalse($service->availableTags()->contains('id', $pass->id));
-
-        $this->expectException(ValidationException::class);
-        $service->register([
-            'rfid_tag_id' => $pass->id,
-            'plate_number' => 'NOP 123',
-            'vehicle_type' => 'Car',
-            'category' => 'faculty_staff',
-        ]);
     }
 
     public function test_registry_rejects_guest_category(): void

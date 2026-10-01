@@ -13,7 +13,7 @@
     <x-stat label="Registered Vehicles" :value="$rfidStats['registered_vehicles'] ?? 0" />
     {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
     <x-stat label="Inside Campus" :value="$rfidStats['vehicles_inside'] ?? 0"
-            :hint="($rfidStats['registered_inside'] ?? 0).' registered · '.($rfidStats['guests_inside'] ?? 0).' guests'" />
+            hint="Registered vehicles" />
     <x-stat label="Available RFID Tags" :value="$rfidStats['available_tags'] ?? 0" :href="route('registry.index', ['tab' => 'tags', 'status' => 'available'])" />
 </x-stat-row>
 

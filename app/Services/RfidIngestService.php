@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\GuestVisit;
 use App\Models\RfidScanLog;
 use App\Models\RfidTag;
 use App\Models\Vehicle;
@@ -22,7 +21,9 @@ use Illuminate\Validation\ValidationException;
  *   that does not match the vehicle's current state is still recorded but
  *   flagged as an anomaly. Only the RFID Desk keeps the old toggle.
  * - Cooldown per tag + station (setting rfid_cooldown_seconds, default 60).
- * - Guest pass rules (see handleGuestPass()).
+ *
+ * Guest passes were removed (Phase 0 of the visitor model): every tag is a
+ * vehicle tag; vehicles without a tag are handled by the camera.
  */
 class RfidIngestService
 {
@@ -37,8 +38,7 @@ class RfidIngestService
         protected LocalStorageService $localStorageService,
         protected VehicleRegistryService $vehicleRegistryService,
         protected EventService $eventService,
-        protected GuestObservationService $guestObservationService,
-        protected GuestPassService $guestPassService
+        protected GuestObservationService $guestObservationService
     ) {
     }
 
@@ -66,19 +66,14 @@ class RfidIngestService
 
         if ($duplicate = $this->recentScanWithinCooldown($requestedUid, $scanLocation)) {
             return new RfidIngestResult(
-                $duplicate->loadMissing(['vehicle.rfidTag', 'vehicleRfidTag', 'correlatedVehicleEvent', 'guestVehicleObservation', 'guestVisit']),
+                $duplicate->loadMissing(['vehicle.rfidTag', 'vehicleRfidTag', 'correlatedVehicleEvent', 'guestVehicleObservation']),
                 RfidIngestResult::DUPLICATE,
-                'Duplicate read of '.$duplicate->tag_uid.' ignored (cooldown '.$this->cooldownSeconds().'s).',
-                $duplicate->guestVisit
+                'Duplicate read of '.$duplicate->tag_uid.' ignored (cooldown '.$this->cooldownSeconds().'s).'
             );
         }
 
         return DB::transaction(function () use ($data, $sourceMode, $directionMode, $scanLocation, $scanTime): RfidIngestResult {
             $tag = $this->resolveTag($data);
-
-            if ($tag?->isGuestPass()) {
-                return $this->handleGuestPass($tag, $data, $sourceMode, $scanLocation, $scanTime);
-            }
 
             return $this->handleVehicleTag($tag, $data, $sourceMode, $directionMode, $scanLocation, $scanTime);
         });
@@ -148,83 +143,6 @@ class RfidIngestService
         $scanLog->forceFill(['outcome' => $outcome])->save();
 
         return $this->result($scanLog, $outcome, (string) $anomalyReason);
-    }
-
-    /**
-     * Guest pass rules.
-     *
-     * | Pass status | Entrance                  | Exit                              |
-     * |-------------|---------------------------|-----------------------------------|
-     * | available   | open Issue Guest Pass form | anomaly (never issued)            |
-     * | issued      | ignored (duplicate read)  | EXIT, close visit, pass available |
-     * | lost        | alert                     | alert                             |
-     * | disabled    | alert                     | alert                             |
-     *
-     * @param  array<string, mixed>  $data
-     */
-    protected function handleGuestPass(
-        RfidTag $pass,
-        array $data,
-        string $sourceMode,
-        string $scanLocation,
-        Carbon $scanTime
-    ): RfidIngestResult {
-        $pass = RfidTag::query()->with('activeGuestVisit')->whereKey($pass->id)->lockForUpdate()->firstOrFail();
-        $label = $pass->label;
-        $visit = $pass->activeGuestVisit;
-        $atEntrance = $scanLocation === 'entrance';
-
-        [$status, $outcome, $anomaly, $message] = match (true) {
-            $pass->status === RfidTag::STATUS_LOST => [
-                'guest_pass_lost', RfidIngestResult::ALERT,
-                "{$label} is marked LOST but was scanned at the ".ucfirst($scanLocation).'.',
-                "ALERT: {$label} is marked lost. Hold the vehicle and check with the admin.",
-            ],
-            $pass->status === RfidTag::STATUS_DISABLED => [
-                'guest_pass_disabled', RfidIngestResult::ALERT,
-                "{$label} is DISABLED but was scanned at the ".ucfirst($scanLocation).'.',
-                "ALERT: {$label} is disabled and cannot be used.",
-            ],
-            $pass->status === RfidTag::STATUS_AVAILABLE && $atEntrance => [
-                'guest_pass_available', RfidIngestResult::ISSUE_REQUIRED, null,
-                "{$label} is available. Fill in the Issue Guest Pass form to record the ENTRY.",
-            ],
-            $pass->status === RfidTag::STATUS_AVAILABLE => [
-                'guest_pass_not_issued', RfidIngestResult::ANOMALY,
-                "{$label} was scanned at the Exit but was never issued.",
-                "{$label} was never issued. Check the vehicle before letting it out.",
-            ],
-            $pass->status === RfidTag::STATUS_ISSUED && $visit === null => [
-                'guest_pass_not_issued', RfidIngestResult::ANOMALY,
-                "{$label} is marked issued but has no open visit.",
-                "{$label} has no open visit. Check with the admin.",
-            ],
-            $pass->status === RfidTag::STATUS_ISSUED && $atEntrance => [
-                'guest_pass_duplicate', RfidIngestResult::IGNORED, null,
-                "{$label} is already issued. Entrance read ignored.",
-            ],
-            default => [
-                'guest_pass_exit', RfidIngestResult::GUEST_PASS_EXIT, null,
-                "{$label} returned. Guest visit closed; collect the card and return the ID.",
-            ],
-        };
-
-        $scanLog = $this->createScanLog($data, $sourceMode, $scanLocation, $scanTime, $pass, [
-            'vehicle' => null,
-            'vehicle_category' => 'guest_pass',
-            'verification_status' => $status,
-            'resolved_event_type' => in_array($outcome, [RfidIngestResult::GUEST_PASS_EXIT], true) ? 'EXIT' : null,
-            'resulting_state' => null,
-            'anomaly_reason' => $anomaly,
-            'guest_visit_id' => $visit?->id,
-            'outcome' => $outcome,
-        ]);
-
-        if ($outcome === RfidIngestResult::GUEST_PASS_EXIT) {
-            $visit = $this->guestPassService->completeExit($visit, $scanLog);
-        }
-
-        return $this->result($scanLog, $outcome, $message, $visit);
     }
 
     /**
@@ -335,7 +253,6 @@ class RfidIngestService
             'is_anomaly' => filled($resolved['anomaly_reason'] ?? null),
             'anomaly_reason' => $resolved['anomaly_reason'] ?? null,
             'outcome' => $resolved['outcome'] ?? null,
-            'guest_visit_id' => $resolved['guest_visit_id'] ?? null,
         ]);
 
         $tag?->forceFill(['last_scanned_at' => $scanTime])->save();
@@ -343,13 +260,12 @@ class RfidIngestService
         return $scanLog;
     }
 
-    protected function result(RfidScanLog $scanLog, string $outcome, string $message, ?GuestVisit $visit = null): RfidIngestResult
+    protected function result(RfidScanLog $scanLog, string $outcome, string $message): RfidIngestResult
     {
         return new RfidIngestResult(
-            $scanLog->fresh(['vehicle.rfidTag', 'vehicleRfidTag', 'correlatedVehicleEvent.camera', 'guestVehicleObservation.camera', 'guestVisit']),
+            $scanLog->fresh(['vehicle.rfidTag', 'vehicleRfidTag', 'correlatedVehicleEvent.camera', 'guestVehicleObservation.camera']),
             $outcome,
-            $message,
-            $visit
+            $message
         );
     }
 
@@ -424,7 +340,7 @@ class RfidIngestService
      */
     protected function ensureVehicleTagConnection(RfidTag $tag): RfidTag
     {
-        if ($tag->vehicle || $tag->isGuestPass()) {
+        if ($tag->vehicle) {
             return $tag;
         }
 

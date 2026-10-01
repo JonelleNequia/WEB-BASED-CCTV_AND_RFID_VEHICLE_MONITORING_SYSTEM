@@ -11,8 +11,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * Phase 2: one guest visit = one issue of a guest pass.
  *
- * The guest pass (an RFID tag with tag_type "guest_pass") is reused. It is
- * not tied to a person, so every issue creates a new visit.
+ * Phase 0 (visitor model): guest passes were removed. This model stays only
+ * so old visits and the events linked to them can still be shown; nothing
+ * creates visits any more.
  */
 class GuestVisit extends Model
 {

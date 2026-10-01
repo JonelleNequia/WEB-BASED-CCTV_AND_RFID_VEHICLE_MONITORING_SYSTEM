@@ -57,10 +57,10 @@ class StoreVehicleRegistrationRequest extends FormRequest
                 'required',
                 'string',
                 'max:50',
-                // Phase 2: guests use guest passes, not the vehicle registry.
+                // Vehicles without a tag are recorded by the camera, not registered as "guest".
                 function (string $attribute, mixed $value, \Closure $fail): void {
                     if (in_array(strtolower(trim((string) $value)), ['guest', 'guests'], true)) {
-                        $fail('Guests use a Guest Pass instead of the vehicle registry.');
+                        $fail('Guest is not a registry category. Vehicles without an RFID tag are recorded by the camera.');
                     }
                 },
             ],

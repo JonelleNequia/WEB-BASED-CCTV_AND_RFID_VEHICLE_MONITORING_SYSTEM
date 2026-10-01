@@ -50,7 +50,7 @@ class GuestObservationController extends Controller
     /** Phase 5: a pass read this long after the crossing still cancels the alert. */
     protected const DETECTOR_LATE_SCAN_SECONDS = 8;
 
-    public const NO_PASS_NOTE = 'Vehicle with no pass: no RFID tag or guest pass was read within the detector window.';
+    public const NO_PASS_NOTE = 'Vehicle with no pass: no registered RFID tag was read within the detector window.';
 
     /**
      * Show guest monitoring form and log history.
@@ -62,8 +62,7 @@ class GuestObservationController extends Controller
             'tab' => 'alerts',
             'flaggedScans' => RfidScanLog::query()
                 ->with(['vehicle', 'vehicleRfidTag'])
-                ->where(fn ($query) => $query->where('is_anomaly', true)
-                    ->orWhereIn('verification_status', ['guest_pass_lost', 'guest_pass_disabled']))
+                ->where('is_anomaly', true)
                 ->latest('scan_time')
                 ->limit(10)
                 ->get(),
@@ -288,7 +287,7 @@ class GuestObservationController extends Controller
                 ]);
             }
 
-            // Phase 5: a registered tag or guest pass read (from ~10s before the
+            // Phase 5: a registered tag read (from ~10s before the
             // crossing up to a late read after the window) means no alert.
             $matchService = app(DetectorRfidMatchService::class);
             $recentVerifiedScan = $matchService->find(
@@ -300,7 +299,7 @@ class GuestObservationController extends Controller
             );
 
             if ($recentVerifiedScan) {
-                $passType = $matchService->isGuestPassScan($recentVerifiedScan) ? 'a guest pass' : 'a registered vehicle';
+                $passType = 'a registered vehicle';
 
                 EventReceiveLog::query()->create([
                     'source_name' => $sourceName,
@@ -456,8 +455,8 @@ class GuestObservationController extends Controller
      * dashboard, and report screens that read the primary event stream.
      *
      * Phase 5: the alert is a log entry only. It no longer opens a guest
-     * ActiveSession or changes INSIDE/OUTSIDE; guests are tracked by
-     * guest pass visits.
+     * ActiveSession or changes INSIDE/OUTSIDE (only registered vehicles
+     * have an inside/outside state).
      *
      * @param  array<string, mixed>  $validated
      */

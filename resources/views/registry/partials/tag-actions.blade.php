@@ -1,15 +1,10 @@
-{{-- UI Phase 3: Mark lost / Disable / Enable for one tag or guest pass. --}}
+{{-- UI Phase 3: Mark lost / Disable / Enable for one tag. --}}
 @php
     $actions = match ($tag->status) {
         'lost', 'disabled' => ['available' => $tag->status === 'lost' ? 'Mark found' : 'Enable'],
-        'issued' => [],
         default => ['lost' => 'Mark lost', 'disabled' => 'Disable'],
     };
 @endphp
-
-@if ($tag->status === 'issued')
-    <span class="text-muted">With a guest</span>
-@endif
 
 @foreach ($actions as $status => $label)
     <form method="POST" action="{{ route('registry.tags.status', $tag) }}"

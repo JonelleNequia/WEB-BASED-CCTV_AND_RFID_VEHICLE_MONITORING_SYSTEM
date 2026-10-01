@@ -2,18 +2,16 @@
 
 namespace Tests\Feature;
 
-use App\Models\GuestVisit;
 use App\Models\RfidTag;
 use App\Models\User;
 use App\Models\Vehicle;
-use App\Services\GuestPassService;
 use App\Services\RfidIngestService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * UI Phase 4: Dashboard, Guests, Activity Logs and the Station kiosk.
+ * UI Phase 4: Dashboard, Activity Logs and the Station kiosk. (Guests page removed in Phase 0.)
  */
 class UiPhase4PagesTest extends TestCase
 {
@@ -29,22 +27,20 @@ class UiPhase4PagesTest extends TestCase
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
 
-    public function test_dashboard_has_five_kpis_needs_attention_and_hourly_chart(): void
+    public function test_dashboard_has_kpis_needs_attention_and_hourly_chart(): void
     {
-        $visit = $this->issuedVisit('GP-DASH-1', 'DSH 101');
-        $visit->forceFill(['status' => GuestVisit::STATUS_OVERSTAY, 'valid_until' => now()->subHour()])->save();
-
         $this->vehicle('ANO 101', 'ANO-TAG', 'INSIDE');
         app(RfidIngestService::class)->ingest(['tag_uid' => 'ANO-TAG', 'scan_location' => 'entrance']);
 
         $html = $this->actingAs($this->admin)->get(route('dashboard.index'))->assertOk()->getContent();
 
-        foreach (['Inside Campus', 'Entries Today', 'Exits Today', 'Active Guests', 'Alerts', 'Needs attention', 'Live activity', "Today's traffic"] as $text) {
+        foreach (['Inside Campus', 'Entries Today', 'Exits Today', 'Alerts', 'Needs attention', 'Live activity', "Today's traffic"] as $text) {
             $this->assertStringContainsString($text, $html, $text);
         }
-        $this->assertStringContainsString('Overstay', $html);
+        // Phase 0: no guest pass card or overstay items.
+        $this->assertStringNotContainsString('Active Guests', $html);
+        $this->assertStringNotContainsString('Overstay', $html);
         $this->assertStringContainsString('Anomaly', $html);
-        $this->assertStringContainsString(route('guest-passes.visits.show', $visit), $html);
 
         $this->actingAs($this->admin)
             ->getJson(route('dashboard.live-state'))
@@ -65,7 +61,7 @@ class UiPhase4PagesTest extends TestCase
             ->get(route('logs.index'))
             ->assertOk()
             ->assertSee('Registered')
-            ->assertSee('Guest Pass')
+            ->assertDontSee('>Guest Pass<', false)
             ->assertSee('Manual')
             ->assertSee('Alerts')
             ->assertSee('This Week')
@@ -102,29 +98,6 @@ class UiPhase4PagesTest extends TestCase
         }
     }
 
-    public function test_guests_page_lists_active_visits_above_history(): void
-    {
-        $active = $this->issuedVisit('GP-ACT-1', 'ACT 101');
-        $overstay = $this->issuedVisit('GP-OVR-1', 'OVR 101');
-        $overstay->forceFill(['status' => GuestVisit::STATUS_OVERSTAY])->save();
-        $done = $this->issuedVisit('GP-DONE-1', 'DON 101');
-        app(GuestPassService::class)->closeManually($done, 'Test');
-
-        $html = $this->actingAs($this->admin)->get(route('guests.index'))->assertOk()->getContent();
-
-        $inside = strpos($html, 'Inside now');
-        $history = strpos($html, 'History');
-        $this->assertNotFalse($inside);
-        $this->assertLessThan($history, $inside);
-        $this->assertLessThan($history, strpos($html, 'ACT 101'));
-        $this->assertLessThan(strpos($html, 'ACT 101'), strpos($html, 'OVR 101'), 'Overstay is listed first.');
-        $this->assertGreaterThan($history, strpos($html, 'DON 101'));
-        $this->assertStringContainsString('is-alert-row', $html);
-        $this->assertStringContainsString('data-duration-since', $html);
-        $this->assertStringContainsString('close-visit-modal', $html);
-        $this->assertNotNull($active);
-    }
-
     public function test_station_kiosk_has_the_big_result_banner_and_short_logs(): void
     {
         $this->vehicle('KSK 101', 'KSK-TAG', 'OUTSIDE');
@@ -139,13 +112,6 @@ class UiPhase4PagesTest extends TestCase
             ->assertSee('KSK 101')
             ->assertDontSee('Entries Today')
             ->assertDontSee('<span>Owner</span>', false);
-    }
-
-    protected function issuedVisit(string $uid, string $plate): GuestVisit
-    {
-        $pass = RfidTag::query()->create(['uid' => $uid, 'tag_type' => RfidTag::TYPE_GUEST_PASS, 'status' => RfidTag::STATUS_AVAILABLE]);
-
-        return app(GuestPassService::class)->issue($pass, ['plate' => $plate, 'id_presented' => 'UMID']);
     }
 
     protected function vehicle(string $plate, string $uid, string $state): Vehicle

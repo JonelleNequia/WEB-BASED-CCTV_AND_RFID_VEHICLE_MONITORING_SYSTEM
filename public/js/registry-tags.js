@@ -10,7 +10,6 @@
 
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
     const scan = box.querySelector('[data-bulk-scan]');
-    const type = box.querySelector('[data-bulk-type]');
     const list = box.querySelector('[data-bulk-list]');
     const summary = box.querySelector('[data-bulk-summary]');
     const next = box.querySelector('[data-bulk-next]');
@@ -36,7 +35,6 @@
 
         const body = new FormData();
         body.append('uid', uid);
-        body.append('tag_type', type.value);
         body.append('auto_number', '1');
 
         try {
@@ -55,7 +53,7 @@
 
             added += 1;
             next.textContent = String((result.tag_number || 0) + 1);
-            addRow('ok', `${uid} · #${result.tag_number}`, result.display_number ? `Guest Pass ${result.display_number}` : 'Vehicle tag');
+            addRow('ok', `${uid} · #${result.tag_number}`, 'Vehicle tag');
             summary.textContent = `${added} tag(s) added. Keep scanning, or press Done.`;
         } catch (error) {
             addRow('error', uid, 'Could not reach the server.');

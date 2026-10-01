@@ -22,7 +22,6 @@ class SettingsController extends Controller
         'stations' => 'Stations & Readers',
         'cameras' => 'Cameras',
         'calibration' => 'Calibration',
-        'guest-pass' => 'Guest Pass Rules',
         'status' => 'System Status',
         'test-scan' => 'Test Scan',
     ];

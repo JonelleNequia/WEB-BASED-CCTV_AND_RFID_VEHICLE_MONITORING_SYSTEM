@@ -1,13 +1,11 @@
-{{-- UI Phase 2: Activity Logs › Alerts (no-pass alerts, flagged scans, overstay). Was Guest Monitoring. --}}
+{{-- UI Phase 2: Activity Logs › Alerts (no-pass alerts, flagged scans). Was Guest Monitoring. --}}
     <x-stat-row>
-        <x-stat label="No-pass Alerts Today" :value="$alertCounts['no_pass'] ?? 0" tone="danger" hint="Camera saw a vehicle with no tag or pass" />
+        <x-stat label="No-pass Alerts Today" :value="$alertCounts['no_pass'] ?? 0" tone="danger" hint="Camera saw a vehicle with no RFID tag" />
         <x-stat label="Anomalies Today" :value="$alertCounts['anomalies'] ?? 0" tone="danger" :href="route('logs.index', ['tab' => 'scans', 'verification_status' => 'anomaly'])" />
-        <x-stat label="Lost / Disabled Pass Scans" :value="$alertCounts['lost_pass'] ?? 0" tone="danger" />
-        <x-stat label="Overstay" :value="$alertCounts['overstay'] ?? 0" tone="warning" :href="route('guests.index', ['status' => 'overstay'])" />
         <x-stat label="Guest Captures Today" :value="$guestCountToday" />
     </x-stat-row>
 
-    <x-table title="Flagged RFID Scans" :empty="$flaggedScans->isEmpty()" empty-title="No flagged scans." empty-text="Anomalies and lost or disabled pass scans appear here.">
+    <x-table title="Flagged RFID Scans" :empty="$flaggedScans->isEmpty()" empty-title="No flagged scans." empty-text="Anomalies and lost or disabled tag scans appear here.">
         <x-slot:toolbar>
             <a href="{{ route('logs.index', ['tab' => 'scans', 'verification_status' => 'anomaly']) }}" class="button button-secondary button-sm">All flagged scans</a>
         </x-slot:toolbar>
@@ -29,7 +27,7 @@
                         <div class="table-subtext">{{ $scan->tag_uid }}</div>
                     </td>
                     <td>{{ ucfirst($scan->scan_location) }}</td>
-                    <td><x-badge :status="in_array($scan->verification_status, ['guest_pass_lost', 'guest_pass_disabled'], true) ? $scan->verification_status : 'anomaly'" :label="$scan->verificationLabel" /></td>
+                    <td><x-badge status="anomaly" :label="$scan->verificationLabel" /></td>
                     <td>{{ $scan->anomaly_reason ?: '—' }}</td>
                 </tr>
             @endforeach

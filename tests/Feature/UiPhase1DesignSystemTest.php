@@ -33,8 +33,7 @@ class UiPhase1DesignSystemTest extends TestCase
     {
         foreach ([
             route('dashboard.index'), route('gates.index'),
-            route('registry.index'), route('registry.index', ['tab' => 'tags']), route('registry.index', ['tab' => 'passes']),
-            route('guests.index'),
+            route('registry.index'), route('registry.index', ['tab' => 'tags']),
             route('logs.index'), route('logs.index', ['tab' => 'scans']), route('logs.index', ['tab' => 'alerts']),
             route('vehicle-events.create'),
             ...array_map(fn ($tab) => route('settings.index', ['tab' => $tab]), array_keys(\App\Http\Controllers\SettingsController::TABS)),

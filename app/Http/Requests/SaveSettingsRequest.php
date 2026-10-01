@@ -56,9 +56,6 @@ class SaveSettingsRequest extends FormRequest
             'perf_stream_fps', 'perf_stream_width', 'perf_jpeg_quality', 'perf_detection_fps',
             'perf_yolo_imgsz', 'perf_yolo_device', 'perf_roi_crop', 'perf_hires_on_trigger',
         ],
-        'guest-pass' => [
-            'guest_pass_validity_minutes', 'guest_pass_overstay_grace_minutes', 'guest_pass_require_id',
-        ],
     ];
 
     /**
@@ -80,7 +77,7 @@ class SaveSettingsRequest extends FormRequest
             // Phase 4: reader names are now derived from the reader type.
             'entrance_rfid_reader_name' => ['nullable', 'string', 'max:100'],
             'exit_rfid_reader_name' => ['nullable', 'string', 'max:100'],
-            // Phase 4: Reader Configuration and Guest Pass settings.
+            // Phase 4: Reader Configuration.
             'entrance_reader_type' => ['sometimes', 'in:nfc,uhf_ethernet,simulated'],
             'exit_reader_type' => ['sometimes', 'in:nfc,uhf_ethernet,simulated'],
             // Plug-and-detect: the reader is picked in Devices; the address is
@@ -94,9 +91,6 @@ class SaveSettingsRequest extends FormRequest
             'entrance_reader_port' => ['nullable', 'required_if:entrance_reader_manual,1', 'integer', 'between:1,65535'],
             'exit_reader_port' => ['nullable', 'required_if:exit_reader_manual,1', 'integer', 'between:1,65535'],
             'rfid_cooldown_seconds' => ['sometimes', 'integer', 'min:0', 'max:3600'],
-            'guest_pass_validity_minutes' => ['sometimes', 'integer', 'min:15', 'max:1440'],
-            'guest_pass_overstay_grace_minutes' => ['sometimes', 'integer', 'min:0', 'max:720'],
-            'guest_pass_require_id' => ['sometimes', 'in:0,1'],
             'camera_configs' => ['required', 'array'],
             'camera_configs.entrance.camera_name' => ['required', 'string', 'max:100'],
             'camera_configs.entrance.source_type' => ['required', 'in:webcam,rtsp,url'],
@@ -161,10 +155,6 @@ class SaveSettingsRequest extends FormRequest
                     },
                 ]);
             }
-        }
-
-        if ($this->has('guest_pass_require_id')) {
-            $this->merge(['guest_pass_require_id' => $this->boolean('guest_pass_require_id') ? '1' : '0']);
         }
 
         $cameraConfigs = $this->input('camera_configs', []);

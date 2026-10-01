@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\RfidTag;
 use App\Models\User;
 use App\Models\Vehicle;
-use App\Services\GuestPassService;
 use App\Services\RfidIngestService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -14,7 +13,7 @@ use Tests\TestCase;
 /**
  * UI Phase 3: Registry › Vehicles (one-flow Add Vehicle, Replace Tag,
  * Deactivate, side panel), RFID Tags (bulk register, lost/disable) and
- * Guest Passes (lost/disable).
+ * (lost/disable). Guest Passes were removed in Phase 0.
  */
 class UiPhase3RegistryTest extends TestCase
 {
@@ -34,13 +33,13 @@ class UiPhase3RegistryTest extends TestCase
     {
         $this->tag('LOOK-AVAIL', 901);
         $this->vehicleWithTag('LKP 101', 'LOOK-ASSIGNED', 902);
-        $this->tag('LOOK-PASS', 903, RfidTag::TYPE_GUEST_PASS);
+        $this->tag('LOOK-LOST', 903)->forceFill(['status' => RfidTag::STATUS_LOST])->save();
 
         $this->lookup('look-new')->assertJsonPath('state', 'new')->assertJsonPath('ok', true);
         $this->lookup('LOOK-AVAIL')->assertJsonPath('state', 'available')->assertJsonPath('ok', true);
         $this->lookup('LOOK-ASSIGNED')->assertJsonPath('state', 'assigned')->assertJsonPath('ok', false)
             ->assertJsonFragment(['message' => 'Tag #902 is already assigned to LKP 101. Use Replace Tag on that vehicle first.']);
-        $this->lookup('LOOK-PASS')->assertJsonPath('state', 'guest_pass')->assertJsonPath('ok', false);
+        $this->lookup('LOOK-LOST')->assertJsonPath('state', 'lost')->assertJsonPath('ok', false);
     }
 
     public function test_add_vehicle_with_a_new_scanned_tag_creates_and_assigns_it(): void
@@ -63,10 +62,10 @@ class UiPhase3RegistryTest extends TestCase
         $this->assertSame($tag->id, $vehicle->rfid_tag_id);
     }
 
-    public function test_add_vehicle_assigns_an_existing_available_tag_and_rejects_passes_and_assigned_tags(): void
+    public function test_add_vehicle_assigns_an_existing_available_tag_and_rejects_lost_and_assigned_tags(): void
     {
         $this->tag('EXIST-AVAIL', 911);
-        $this->tag('EXIST-PASS', 912, RfidTag::TYPE_GUEST_PASS);
+        $this->tag('EXIST-LOST', 912)->forceFill(['status' => RfidTag::STATUS_LOST])->save();
         $this->vehicleWithTag('OWN 101', 'EXIST-TAKEN', 913);
 
         $this->actingAs($this->admin)
@@ -75,8 +74,8 @@ class UiPhase3RegistryTest extends TestCase
         $this->assertSame(RfidTag::STATUS_ASSIGNED, RfidTag::query()->where('uid', 'EXIST-AVAIL')->value('status'));
 
         $this->actingAs($this->admin)
-            ->post(route('vehicle-registry.store'), $this->vehiclePayload('ADD 3002', ['rfid_uid' => 'EXIST-PASS']))
-            ->assertSessionHasErrors('rfid_uid');
+            ->post(route('vehicle-registry.store'), $this->vehiclePayload('ADD 3002', ['rfid_uid' => 'EXIST-LOST']))
+            ->assertSessionHasErrors();
 
         $this->actingAs($this->admin)
             ->post(route('vehicle-registry.store'), $this->vehiclePayload('ADD 3003', ['rfid_uid' => 'EXIST-TAKEN']))
@@ -171,36 +170,28 @@ class UiPhase3RegistryTest extends TestCase
 
         foreach (['BULK-1', 'BULK-2'] as $uid) {
             $this->actingAs($this->admin)
-                ->postJson(route('rfid-inventory.store'), ['uid' => $uid, 'tag_type' => 'guest_pass', 'auto_number' => '1'])
+                ->postJson(route('rfid-inventory.store'), ['uid' => $uid, 'auto_number' => '1'])
                 ->assertCreated();
         }
 
         $this->assertSame($next, RfidTag::query()->where('uid', 'BULK-1')->value('tag_number'));
         $this->assertSame($next + 1, RfidTag::query()->where('uid', 'BULK-2')->value('tag_number'));
-        $this->assertNotSame(
-            RfidTag::query()->where('uid', 'BULK-1')->value('display_number'),
-            RfidTag::query()->where('uid', 'BULK-2')->value('display_number')
-        );
+        $this->assertSame([RfidTag::TYPE_VEHICLE], RfidTag::query()->whereIn('uid', ['BULK-1', 'BULK-2'])->distinct()->pluck('tag_type')->all());
 
         $this->actingAs($this->admin)
-            ->postJson(route('rfid-inventory.store'), ['uid' => 'BULK-1', 'tag_type' => 'guest_pass', 'auto_number' => '1'])
+            ->postJson(route('rfid-inventory.store'), ['uid' => 'BULK-1', 'auto_number' => '1'])
             ->assertUnprocessable();
     }
 
     public function test_mark_tags_lost_disabled_and_enable_again(): void
     {
-        $pass = $this->tag('PASS-ACT', 961, RfidTag::TYPE_GUEST_PASS);
+        $spare = $this->tag('SPARE-ACT', 961);
 
-        $this->actingAs($this->admin)->post(route('registry.tags.status', $pass), ['status' => 'disabled'])->assertSessionHasNoErrors();
-        $this->assertSame(RfidTag::STATUS_DISABLED, $pass->fresh()->status);
+        $this->actingAs($this->admin)->post(route('registry.tags.status', $spare), ['status' => 'disabled'])->assertSessionHasNoErrors();
+        $this->assertSame(RfidTag::STATUS_DISABLED, $spare->fresh()->status);
 
-        $this->actingAs($this->admin)->post(route('registry.tags.status', $pass), ['status' => 'available'])->assertSessionHasNoErrors();
-        $this->assertSame(RfidTag::STATUS_AVAILABLE, $pass->fresh()->status);
-
-        // A pass with a guest must be handled from the visit.
-        app(GuestPassService::class)->issue($pass, ['plate' => 'GST 1', 'id_presented' => 'UMID']);
-        $this->actingAs($this->admin)->post(route('registry.tags.status', $pass), ['status' => 'lost'])->assertSessionHasErrors('status');
-        $this->assertSame(RfidTag::STATUS_ISSUED, $pass->fresh()->status);
+        $this->actingAs($this->admin)->post(route('registry.tags.status', $spare), ['status' => 'available'])->assertSessionHasNoErrors();
+        $this->assertSame(RfidTag::STATUS_AVAILABLE, $spare->fresh()->status);
 
         $vehicle = $this->vehicleWithTag('LST 101', 'LST-TAG', 962);
         $tag = $vehicle->rfidTag;
@@ -215,7 +206,7 @@ class UiPhase3RegistryTest extends TestCase
     public function test_registry_pages_render_new_actions(): void
     {
         $this->vehicleWithTag('UI 101', 'UI-TAG', 971);
-        $this->tag('UI-PASS', 972, RfidTag::TYPE_GUEST_PASS);
+        $this->tag('UI-SPARE', 972);
 
         $this->actingAs($this->admin)->get(route('registry.index'))
             ->assertOk()
@@ -229,12 +220,10 @@ class UiPhase3RegistryTest extends TestCase
             ->assertOk()
             ->assertSee('Register Tags')
             ->assertSee('data-bulk-scan', false)
-            ->assertSee('Mark lost');
-
-        $this->actingAs($this->admin)->get(route('registry.index', ['tab' => 'passes']))
-            ->assertOk()
-            ->assertSee('UI-PASS')
-            ->assertSee('Disable');
+            ->assertSee('UI-SPARE')
+            ->assertSee('Disable')
+            ->assertSee('Mark lost')
+            ->assertDontSee('data-bulk-type', false);
     }
 
     protected function lookup(string $uid)
@@ -258,14 +247,12 @@ class UiPhase3RegistryTest extends TestCase
         ], $overrides);
     }
 
-    protected function tag(string $uid, int $number, string $type = RfidTag::TYPE_VEHICLE): RfidTag
+    protected function tag(string $uid, int $number): RfidTag
     {
         return RfidTag::query()->create([
             'uid' => $uid,
             'tag_number' => $number,
-            'tag_type' => $type,
             'status' => RfidTag::STATUS_AVAILABLE,
-            'display_number' => $type === RfidTag::TYPE_GUEST_PASS ? RfidTag::nextGuestPassNumber() : null,
         ]);
     }
 

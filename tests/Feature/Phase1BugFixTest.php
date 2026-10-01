@@ -110,24 +110,27 @@ class Phase1BugFixTest extends TestCase
         $this->registeredVehicle('IN 0001', 'IN-TAG-1', Vehicle::STATE_INSIDE);
         $this->registeredVehicle('IN 0002', 'IN-TAG-2', Vehicle::STATE_INSIDE);
         $this->registeredVehicle('OUT 0003', 'OUT-TAG-3', Vehicle::STATE_OUTSIDE);
+        // Phase 0: an old open guest visit (left from the removed guest pass
+        // feature) no longer counts; only registered vehicles are "inside".
         $this->openGuestSession();
 
         $stats = app(RfidService::class)->stats();
         $this->assertSame(2, $stats['registered_inside']);
-        $this->assertSame(1, $stats['guests_inside']);
-        $this->assertSame(3, $stats['vehicles_inside']);
+        $this->assertArrayNotHasKey('guests_inside', $stats);
+        $this->assertSame(2, $stats['vehicles_inside']);
 
         foreach ([route('dashboard.index'), route('registry.index'), route('settings.index', ['tab' => 'test-scan'])] as $url) {
             $this->actingAs($admin)
                 ->get($url)
                 ->assertOk()
-                ->assertSee('2 registered · 1 guests');
+                ->assertSee('Registered vehicles')
+                ->assertDontSee('guests');
         }
 
         $this->actingAs($admin)
             ->getJson(route('dashboard.live-state'))
             ->assertOk()
-            ->assertJsonPath('metrics.vehicles_inside', 3);
+            ->assertJsonPath('metrics.vehicles_inside', 2);
     }
 
     protected function registeredVehicle(string $plate, string $uid, string $state = Vehicle::STATE_OUTSIDE): Vehicle
@@ -162,8 +165,8 @@ class Phase1BugFixTest extends TestCase
     {
         $pass = RfidTag::query()->create([
             'uid' => 'GP-INSIDE-1',
-            'tag_type' => RfidTag::TYPE_GUEST_PASS,
-            'status' => RfidTag::STATUS_ISSUED,
+            'tag_type' => 'guest_pass',
+            'status' => 'issued',
         ]);
 
         GuestVisit::query()->create([

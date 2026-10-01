@@ -7,11 +7,9 @@ use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
 use App\Services\CalibrationService;
 use App\Services\DetectorRuntimeService;
-use App\Services\GuestPassService;
 use App\Services\RfidIngestService;
 use App\Services\SettingsService;
 use App\Support\DisplayTime;
-use App\Support\RfidIngestResult;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -84,8 +82,7 @@ class StationController extends Controller
     public function rfidScan(
         string $location,
         Request $request,
-        RfidIngestService $rfidIngestService,
-        GuestPassService $guestPassService
+        RfidIngestService $rfidIngestService
     ): JsonResponse
     {
         $location = $this->validateLocation($location);
@@ -103,7 +100,7 @@ class StationController extends Controller
 
             // Phase 3: the shared ingest service applies the station direction
             // (Entrance = ENTRY, Exit = EXIT), the per-tag cooldown (replaces
-            // the old 8-second duplicate check) and the guest pass rules.
+            // the old 8-second duplicate check).
             $result = $rfidIngestService->ingest([
                 ...$validated,
                 'scan_location' => $location,
@@ -113,18 +110,6 @@ class StationController extends Controller
             return response()->json([
                 ...$this->stationScanPayload($result->scanLog, $result->isDuplicate()),
                 ...$result->toArray(),
-                // Phase 4: data for the Entrance "Issue Guest Pass" pop-up and
-                // the Exit "Card returned" reminder.
-                'issue' => $result->requiresIssue() ? $this->issuePrompt($result, $guestPassService) : null,
-                'card_return' => $result->outcome === RfidIngestResult::GUEST_PASS_EXIT && $result->guestVisit
-                    ? [
-                        'url' => route('guest-passes.visits.card-returned', $result->guestVisit),
-                        'pass_label' => $result->scanLog->vehicleRfidTag?->label,
-                        'id_presented' => $result->guestVisit->id_presented,
-                        'plate' => $result->guestVisit->plate,
-                        'driver_name' => $result->guestVisit->driver_name,
-                    ]
-                    : null,
             ], $result->isDuplicate() ? 200 : 201);
         } catch (ValidationException $exception) {
             throw $exception;
@@ -139,42 +124,6 @@ class StationController extends Controller
                 'message' => 'RFID scan could not be recorded. Check laravel.log for details.',
             ], 500);
         }
-    }
-
-    /**
-     * Phase 4: prefill the Issue Guest Pass pop-up with the latest camera
-     * snapshot and the plate/color the detector read at the Entrance.
-     *
-     * @return array<string, mixed>
-     */
-    protected function issuePrompt(RfidIngestResult $result, GuestPassService $guestPassService): array
-    {
-        $pass = $result->scanLog->vehicleRfidTag;
-        $recentCapture = GuestVehicleObservation::query()
-            ->where('location', 'entrance')
-            ->where('observation_source', 'cctv')
-            ->where('status', '!=', GuestVehicleObservation::STATUS_RESOLVED)
-            ->where('created_at', '>=', now()->subMinutes(2))
-            ->latest('created_at')
-            ->first();
-
-        return [
-            'url' => route('guest-passes.issue', $pass),
-            'rfid_scan_log_id' => $result->scanLog->id,
-            'pass_label' => $pass?->label,
-            'requires_id' => $guestPassService->requiresId(),
-            'valid_minutes' => $guestPassService->validityMinutes(),
-            'prefill' => [
-                // Phase 5: issuing the pass resolves this no-pass alert.
-                'observation_id' => $recentCapture?->id,
-                'plate' => $recentCapture?->plate_number ?: $recentCapture?->plate_text,
-                'color' => $recentCapture?->vehicle_color,
-                'vehicle_type' => $recentCapture?->vehicle_type,
-                'snapshot_url' => $recentCapture?->snapshot_path
-                    ? $recentCapture->snapshot_url
-                    : route('camera.frame', ['role' => 'entrance']).'?t='.now()->timestamp,
-            ],
-        ];
     }
 
     /**

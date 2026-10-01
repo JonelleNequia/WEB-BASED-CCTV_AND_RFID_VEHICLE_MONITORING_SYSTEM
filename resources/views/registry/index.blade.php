@@ -1,4 +1,4 @@
-{{-- UI Phase 2: Registry (Vehicles | RFID Tags | Guest Passes). Replaces Vehicle Registry and RFID Tags. --}}
+{{-- UI Phase 2: Registry (Vehicles | RFID Tags). Replaces Vehicle Registry and RFID Tags. --}}
 @extends('layouts.app')
 
 @section('title', 'Registry | PHILCST Vehicle Monitoring')
@@ -9,9 +9,6 @@
             @switch($tab)
                 @case('tags')
                     <button type="button" class="button button-primary" data-drawer-open="register-tag-drawer">Register Tags</button>
-                    @break
-                @case('passes')
-                    <button type="button" class="button button-primary" data-drawer-open="register-tag-drawer">Register Guest Passes</button>
                     @break
                 @default
                     <button type="button" class="button button-primary" data-drawer-open="add-vehicle-drawer">Add Vehicle</button>

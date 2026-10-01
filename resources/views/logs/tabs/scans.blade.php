@@ -26,7 +26,7 @@
                 <label for="verification_status">Result</label>
                 <select id="verification_status" name="verification_status">
                     <option value="">All</option>
-                    @foreach (['anomaly' => 'Needs attention (flagged)', 'verified' => 'Registered', 'guest_pass_entry' => 'Guest Pass Entry', 'guest_pass_exit' => 'Guest Pass Exit', 'guest_pass_available' => 'Guest Pass (to issue)', 'guest_pass_not_issued' => 'Guest Pass not issued', 'guest_pass_lost' => 'Lost Guest Pass', 'guest' => 'Guest', 'inactive_tag' => 'Inactive Tag', 'unassigned_tag' => 'Unassigned Tag', 'inactive_vehicle' => 'Inactive Vehicle', 'non_recurring_category' => 'Manual Review'] as $value => $label)
+                    @foreach (['anomaly' => 'Needs attention (flagged)', 'verified' => 'Registered', 'guest' => 'Unknown tag', 'inactive_tag' => 'Inactive Tag', 'unassigned_tag' => 'Unassigned Tag', 'inactive_vehicle' => 'Inactive Vehicle', 'non_recurring_category' => 'Manual Review'] as $value => $label)
                         <option value="{{ $value }}" @selected(($filters['verification_status'] ?? '') === $value)>{{ $label }}</option>
                     @endforeach
                 </select>

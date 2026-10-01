@@ -1,7 +1,7 @@
 @php
     $isAdmin = auth()->user()?->isAdmin() === true;
 
-    // UI Phase 2: six items. Station kiosks open from the Gate Monitor.
+    // UI Phase 2: sidebar items. Station kiosks open from the Gate Monitor.
     $mainItems = array_values(array_filter([
         $isAdmin ? [
             'label' => 'Dashboard',
@@ -21,12 +21,7 @@
             'active' => request()->routeIs('registry.*', 'vehicle-registry.*'),
             'icon' => 'vehicle',
         ] : null,
-        $isAdmin ? [
-            'label' => 'Guests',
-            'route' => route('guests.index'),
-            'active' => request()->routeIs('guests.*', 'guest-passes.*'),
-            'icon' => 'guest',
-        ] : null,
+        // Phase 0: "Guests" (guest passes) removed; the Visitors page replaces it later.
         $isAdmin ? [
             'label' => 'Activity Logs',
             'route' => route('logs.index'),

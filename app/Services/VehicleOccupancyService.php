@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\GuestVisit;
 use App\Models\Vehicle;
 
 /**
@@ -11,11 +10,15 @@ use App\Models\Vehicle;
  * Before, the Dashboard added open guest sessions to the registered count
  * (16) while Vehicle Registry and RFID Desk showed registered vehicles only
  * (2). Every page now reads the same numbers from here.
+ *
+ * Phase 0 (visitor model): only REGISTERED vehicles have an inside/outside
+ * state. Vehicles without a tag are counted as IN/OUT movements, never as
+ * "inside" (there is no reset for them, so errors would pile up).
  */
 class VehicleOccupancyService
 {
     /**
-     * @return array{registered: int, guests: int, total: int}
+     * @return array{registered: int, total: int}
      */
     public function counts(): array
     {
@@ -25,21 +28,9 @@ class VehicleOccupancyService
             ->where('current_state', Vehicle::STATE_INSIDE)
             ->count();
 
-        $guests = $this->guestsInside();
-
         return [
             'registered' => $registered,
-            'guests' => $guests,
-            'total' => $registered + $guests,
+            'total' => $registered,
         ];
-    }
-
-    /**
-     * Phase 3: guests inside = guest pass visits that are still open
-     * (active or overstay). CCTV guest sessions no longer count.
-     */
-    protected function guestsInside(): int
-    {
-        return GuestVisit::query()->open()->count();
     }
 }

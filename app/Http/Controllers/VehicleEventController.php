@@ -485,16 +485,15 @@ class VehicleEventController extends Controller
      */
     public const LOG_TYPES = [
         'registered' => 'Registered',
-        'guest_pass' => 'Guest Pass',
+        'guest_pass' => 'Guest Pass (old records)',
         'manual' => 'Manual',
         'no_pass_alert' => 'No-pass Alert',
     ];
 
-    /** UI Phase 4: filter chips on Activity Logs › All Events. */
+    /** UI Phase 4: filter chips on Activity Logs › All Events. (Guest Pass removed in Phase 0; old rows keep their label.) */
     public const LOG_FILTER_CHIPS = [
         '' => 'All',
         'registered' => 'Registered',
-        'guest_pass' => 'Guest Pass',
         'manual' => 'Manual',
         'alerts' => 'Alerts',
     ];

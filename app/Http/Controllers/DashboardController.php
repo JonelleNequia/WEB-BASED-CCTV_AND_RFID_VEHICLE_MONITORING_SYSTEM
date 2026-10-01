@@ -3,14 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\GuestVehicleObservation;
-use App\Models\GuestVisit;
 use App\Models\RfidScanLog;
 use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Services\AlertSummaryService;
 use App\Services\CalibrationService;
 use App\Services\GuestObservationService;
-use App\Services\GuestPassService;
 use App\Services\RfidService;
 use App\Support\DisplayTime;
 use App\Support\PhilippineTime;
@@ -51,8 +49,6 @@ class DashboardController extends Controller
                 'total_vehicles_entered_today' => $data['totalVehiclesEnteredToday'],
                 'total_vehicles_exited_today' => $data['totalVehiclesExitedToday'],
                 'guest_observations_today' => $data['guestObservationsToday'],
-                'active_guests' => $data['activeGuests'],
-                'overstay_guests' => $data['overstayGuests'],
                 'no_pass_alerts_today' => $data['noPassAlertsToday'],
                 'pass_alerts_today' => $data['passAlertsToday'],
                 'registered_scans_today' => $data['rfidStats']['registered_scans_today'] ?? 0,
@@ -90,9 +86,6 @@ class DashboardController extends Controller
         GuestObservationService $guestObservationService
     ): array
     {
-        // Phase 3: overstay check on page load (also scheduled every minute).
-        app(GuestPassService::class)->markOverstays();
-
         $rfidStats = $rfidService->stats();
         $cameraStatuses = collect($calibrationService->cameraPayload());
         $connectedCameras = $cameraStatuses->where('last_connection_status', 'connected')->count();
@@ -107,17 +100,14 @@ class DashboardController extends Controller
             'totalVehiclesEnteredToday' => $totalTraffic['entries'],
             'totalVehiclesExitedToday' => $totalTraffic['exits'],
             'guestObservationsToday' => $guestObservationService->countToday(),
-            // Phase 4: guest pass and alert cards.
-            'activeGuests' => GuestVisit::query()->open()->count(),
-            'overstayGuests' => GuestVisit::query()->where('status', GuestVisit::STATUS_OVERSTAY)->count(),
+            // Alert card: camera no-pass alerts and lost/disabled tag reads today.
             'noPassAlertsToday' => GuestVehicleObservation::query()
                 ->where('observation_source', 'cctv')
-                // Phase 5: alerts resolved by issuing a guest pass are not counted.
                 ->where('status', '!=', GuestVehicleObservation::STATUS_RESOLVED)
                 ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['observed_at', 'created_at']))
                 ->count(),
             'passAlertsToday' => RfidScanLog::query()
-                ->whereIn('verification_status', ['guest_pass_lost', 'guest_pass_disabled', 'inactive_tag'])
+                ->where('verification_status', 'inactive_tag')
                 ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
                 ->count(),
             'trafficSummary' => $trafficSummary,

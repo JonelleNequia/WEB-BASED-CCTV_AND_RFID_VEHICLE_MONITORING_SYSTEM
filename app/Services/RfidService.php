@@ -178,7 +178,6 @@ class RfidService
                 ->count(),
             'vehicles_inside' => $inside['total'],
             'registered_inside' => $inside['registered'],
-            'guests_inside' => $inside['guests'],
             'entries_today' => (int) Vehicle::query()
                 ->where('category', '!=', 'guest')
                 ->whereDate('daily_count_date', $today) // Phase 1: column holds 'Y-m-d 00:00:00'

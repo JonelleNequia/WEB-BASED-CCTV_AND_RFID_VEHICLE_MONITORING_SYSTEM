@@ -36,18 +36,19 @@ class UiPhase2NavigationTest extends TestCase
         ]);
     }
 
-    public function test_admin_sidebar_has_six_items_and_no_station_links(): void
+    public function test_admin_sidebar_has_five_items_and_no_station_links(): void
     {
         $html = $this->actingAs($this->admin)->get(route('dashboard.index'))->assertOk()->getContent();
 
+        // Phase 0: "Guests" (guest passes) was removed.
         preg_match_all('/class="nav-link[^"]*"/', $html, $links);
-        $this->assertCount(6, $links[0]);
+        $this->assertCount(5, $links[0]);
 
-        foreach (['Dashboard', 'Gate Monitor', 'Registry', 'Guests', 'Activity Logs', 'Settings'] as $label) {
+        foreach (['Dashboard', 'Gate Monitor', 'Registry', 'Activity Logs', 'Settings'] as $label) {
             $this->assertStringContainsString('<span class="nav-label">'.$label.'</span>', $html);
         }
 
-        foreach (['Entrance Station', 'Exit Station', 'RFID Desk', 'Camera Calibration', 'System Status', 'Vehicle Registry'] as $old) {
+        foreach (['Guests', 'Entrance Station', 'Exit Station', 'RFID Desk', 'Camera Calibration', 'System Status', 'Vehicle Registry'] as $old) {
             $this->assertStringNotContainsString('<span class="nav-label">'.$old.'</span>', $html);
         }
 
@@ -72,13 +73,15 @@ class UiPhase2NavigationTest extends TestCase
         $redirects = [
             '/vehicle-registry' => '/registry?tab=vehicles',
             '/rfid-inventory' => '/registry?tab=tags',
-            '/rfid-inventory?tag_type=guest_pass' => '/registry?tab=passes',
+            '/rfid-inventory?tag_type=guest_pass' => '/registry?tab=tags',
             '/rfid-scans?history_q=ABC' => '/logs?tab=scans&history_q=ABC',
             '/guest-observations' => '/logs?tab=alerts',
             '/vehicle-events?period=month' => '/logs?tab=events&period=month',
             '/camera-calibration' => '/settings?tab=calibration',
             '/system-status' => '/settings?tab=status',
-            '/guest-passes?status=overstay' => '/guests?status=overstay',
+            // Phase 0: guest pass pages are gone; old links open the camera alerts.
+            '/guest-passes?status=overstay' => '/logs?tab=alerts&status=overstay',
+            '/guests' => '/logs?tab=alerts',
         ];
 
         foreach ($redirects as $from => $to) {
@@ -89,13 +92,20 @@ class UiPhase2NavigationTest extends TestCase
     public function test_tabs_are_url_synced(): void
     {
         $html = $this->actingAs($this->admin)
-            ->get(route('registry.index', ['tab' => 'passes']))
+            ->get(route('registry.index', ['tab' => 'tags']))
             ->assertOk()
-            ->assertSee('Register Guest Pass')
+            ->assertSee('Register Tags')
+            ->assertDontSee('Guest Passes')
             ->assertSee('?tab=vehicles', false)
             ->getContent();
 
-        $this->assertMatchesRegularExpression('#href="[^"]*\?tab=passes"\s+class="tab is-active"\s+aria-current="page"#', $html);
+        $this->assertMatchesRegularExpression('#href="[^"]*\?tab=tags"\s+class="tab is-active"\s+aria-current="page"#', $html);
+
+        // The removed Guest Passes tab falls back to the first tab.
+        $this->actingAs($this->admin)
+            ->get(route('registry.index', ['tab' => 'passes']))
+            ->assertOk()
+            ->assertDontSee('Register Guest Pass');
 
         $this->actingAs($this->admin)
             ->get(route('logs.index', ['tab' => 'nope']))
@@ -134,8 +144,8 @@ class UiPhase2NavigationTest extends TestCase
 
     public function test_sidebar_shows_the_alert_count(): void
     {
-        RfidTag::query()->create(['uid' => 'LOST-PASS-1', 'tag_type' => RfidTag::TYPE_GUEST_PASS, 'status' => RfidTag::STATUS_LOST]);
-        app(RfidIngestService::class)->ingest(['tag_uid' => 'LOST-PASS-1', 'scan_location' => 'entrance'], 'station_reader');
+        RfidTag::query()->create(['uid' => 'LOST-TAG-1', 'status' => RfidTag::STATUS_LOST]);
+        app(RfidIngestService::class)->ingest(['tag_uid' => 'LOST-TAG-1', 'scan_location' => 'entrance'], 'station_reader');
 
         $this->actingAs($this->admin)
             ->get(route('dashboard.index'))
@@ -145,24 +155,18 @@ class UiPhase2NavigationTest extends TestCase
             ->get(route('logs.index', ['tab' => 'alerts']))
             ->assertOk()
             ->assertSee('Flagged RFID Scans')
-            ->assertSee('LOST-PASS-1');
+            ->assertSee('LOST-TAG-1');
     }
 
     public function test_each_settings_tab_saves_only_its_own_fields(): void
     {
+        // Phase 0: the guest pass section is gone; its fields are never saved.
         $this->actingAs($this->admin)
-            ->from(route('settings.index', ['tab' => 'guest-pass']))
-            ->put(route('settings.update'), [
-                'section' => 'guest-pass',
-                'guest_pass_validity_minutes' => 120,
-                'guest_pass_overstay_grace_minutes' => 15,
-                'guest_pass_require_id' => '0',
-            ])
-            ->assertSessionHasNoErrors()
-            ->assertRedirect(route('settings.index', ['tab' => 'guest-pass']));
+            ->put(route('settings.update'), ['section' => 'guest-pass', 'guest_pass_validity_minutes' => 120])
+            ->assertSessionHasErrors();
+        $this->assertFalse(SystemSetting::query()->where('setting_key', 'guest_pass_validity_minutes')->exists());
 
-        $this->assertSame('120', SystemSetting::query()->where('setting_key', 'guest_pass_validity_minutes')->value('setting_value'));
-        $this->assertSame('0', SystemSetting::query()->where('setting_key', 'guest_pass_require_id')->value('setting_value'));
+        SystemSetting::query()->updateOrCreate(['setting_key' => 'perf_stream_fps'], ['setting_value' => '12']);
 
         $this->actingAs($this->admin)
             ->from(route('settings.index', ['tab' => 'stations']))
@@ -177,8 +181,8 @@ class UiPhase2NavigationTest extends TestCase
             ->assertSessionHasNoErrors();
 
         $this->assertSame('Main Gate', SystemSetting::query()->where('setting_key', 'entrance_portal_label')->value('setting_value'));
-        // The guest pass tab's value was not touched by the stations save.
-        $this->assertSame('120', SystemSetting::query()->where('setting_key', 'guest_pass_validity_minutes')->value('setting_value'));
+        // The Cameras tab's value was not touched by the stations save.
+        $this->assertSame('12', SystemSetting::query()->where('setting_key', 'perf_stream_fps')->value('setting_value'));
 
         $this->actingAs($this->admin)
             ->put(route('settings.update'), ['section' => 'stations', 'exit_portal_label' => 'Back Gate'])

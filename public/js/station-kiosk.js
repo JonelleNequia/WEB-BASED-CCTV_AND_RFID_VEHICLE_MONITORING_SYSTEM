@@ -58,25 +58,15 @@
     }
 
     function focusRfidInput() {
-        // Phase 4: do not steal focus from the guest pass pop-up fields.
-        if (!rfidInput || document.activeElement === rfidInput || modalOpen()) {
+        if (!rfidInput || document.activeElement === rfidInput) {
             return;
         }
 
         rfidInput.focus({ preventScroll: true });
     }
 
-    // Phase 4: guest pass pop-ups and alert banner ---------------------------
+    // Phase 4: alert banner -------------------------------------------------
     const alertBox = document.querySelector('[data-station-alert]');
-    const issueModal = document.querySelector('[data-issue-modal]');
-    const issueForm = document.querySelector('[data-issue-form]');
-    const cardReturnModal = document.querySelector('[data-card-return-modal]');
-    let activeIssue = null;
-    let activeCardReturn = null;
-
-    function modalOpen() {
-        return Boolean((issueModal && !issueModal.hidden) || (cardReturnModal && !cardReturnModal.hidden));
-    }
 
     function showAlert(title, message) {
         if (!alertBox) {
@@ -88,129 +78,10 @@
         alertBox.hidden = false;
     }
 
-    function openIssueModal(issue) {
-        if (!issueModal || !issueForm || !issue?.url) {
-            return;
-        }
-
-        activeIssue = issue;
-        issueForm.reset();
-        issueModal.querySelector('[data-issue-pass-label]').textContent = issue.pass_label || 'Guest Pass';
-        issueModal.querySelector('[data-issue-snapshot]').src = issue.prefill?.snapshot_url || '';
-        issueModal.querySelector('[data-issue-id-required]').hidden = !issue.requires_id;
-        issueForm.querySelectorAll('[data-issue-field]').forEach(function (input) {
-            input.value = issue.prefill?.[input.dataset.issueField] || '';
-        });
-
-        const validSelect = issueModal.querySelector('[data-issue-valid]');
-        if (validSelect && issue.valid_minutes) {
-            const exists = Array.from(validSelect.options).some(function (option) {
-                return Number(option.value) === Number(issue.valid_minutes);
-            });
-            if (!exists) {
-                validSelect.add(new Option(`${issue.valid_minutes} minutes (default)`, issue.valid_minutes));
-            }
-            validSelect.value = String(issue.valid_minutes);
-        }
-
-        issueModal.querySelector('[data-issue-error]').hidden = true;
-        issueModal.hidden = false;
-        issueForm.querySelector('[name="plate"]').focus();
-    }
-
-    function closeIssueModal() {
-        if (issueModal) {
-            issueModal.hidden = true;
-        }
-        activeIssue = null;
-        focusRfidInput();
-    }
-
-    async function submitIssueForm(event) {
-        event.preventDefault();
-
-        if (!activeIssue) {
-            return;
-        }
-
-        const errorNode = issueModal.querySelector('[data-issue-error]');
-        const data = Object.fromEntries(new FormData(issueForm).entries());
-        data.rfid_scan_log_id = activeIssue.rfid_scan_log_id;
-
-        if (activeIssue.requires_id && !String(data.id_presented || '').trim()) {
-            errorNode.textContent = 'Record the ID the guest left at the gate.';
-            errorNode.hidden = false;
-            return;
-        }
-
-        try {
-            const response = await fetch(activeIssue.url, {
-                method: 'POST',
-                headers: {
-                    Accept: 'application/json',
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken,
-                },
-                body: JSON.stringify(data),
-            });
-            const body = await response.json().catch(function () {
-                return {};
-            });
-
-            if (!response.ok) {
-                const errors = body.errors ? Object.values(body.errors).flat().join(' ') : '';
-                throw new Error(errors || body.message || 'The pass could not be issued.');
-            }
-
-            setRfidStatus(body.message || 'Guest pass issued.');
-            showScanResult('pass', body.guest_visit?.pass ? `Guest Pass ${body.guest_visit.pass}` : 'Guest pass issued', `ENTRY · ${body.guest_visit?.plate || 'Guest'}`);
-            closeIssueModal();
-            refreshLogs();
-        } catch (error) {
-            errorNode.textContent = error.message;
-            errorNode.hidden = false;
-        }
-    }
-
-    function openCardReturnModal(cardReturn) {
-        if (!cardReturnModal || !cardReturn?.url) {
-            return;
-        }
-
-        activeCardReturn = cardReturn;
-        cardReturnModal.querySelector('[data-card-return-label]').textContent = `Collect ${cardReturn.pass_label || 'the guest pass'}`;
-        cardReturnModal.querySelector('[data-card-return-plate]').textContent = cardReturn.plate || 'N/A';
-        cardReturnModal.querySelector('[data-card-return-driver]').textContent = cardReturn.driver_name || 'N/A';
-        cardReturnModal.querySelector('[data-card-return-id]').textContent = cardReturn.id_presented || 'None recorded';
-        cardReturnModal.hidden = false;
-    }
-
-    async function confirmCardReturned() {
-        const cardReturn = activeCardReturn;
-        cardReturnModal.hidden = true;
-        activeCardReturn = null;
-        focusRfidInput();
-
-        if (!cardReturn?.url) {
-            return;
-        }
-
-        try {
-            await fetch(cardReturn.url, {
-                method: 'POST',
-                headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken },
-            });
-            setRfidStatus('Card return confirmed.');
-        } catch (error) {
-            setRfidStatus('Card return could not be saved.');
-        }
-    }
-
-    /* UI Phase 4: big VERIFIED / GUEST PASS / DENIED / ALERT banner. */
+    /* UI Phase 4: big VERIFIED / DENIED / ALERT banner. */
     const resultBox = document.querySelector('[data-scan-result]');
     const RESULT_LOOK = {
         verified: { word: 'VERIFIED', icon: '✓' },
-        pass: { word: 'GUEST PASS', icon: 'G' },
         denied: { word: 'DENIED', icon: '✕' },
         alert: { word: 'ALERT', icon: '!' },
     };
@@ -235,39 +106,21 @@
     function scanResultFor(body) {
         const status = body.scan?.verification_status || '';
         const plate = body.vehicle?.plate_number;
-        const pass = body.guest_pass?.label || body.guest_pass?.display_number;
         const tag = body.scan?.tag_uid;
 
         if (body.outcome === 'recorded') {
             return ['verified', plate, [body.action_taken, body.vehicle?.owner_name].filter(Boolean).join(' · ')];
         }
-        if (body.outcome === 'guest_pass_exit') {
-            return ['pass', pass, `EXIT · ${body.guest_visit?.plate || 'Guest'} · collect the card, return the ID`];
-        }
-        if (body.outcome === 'issue_required') {
-            return ['pass', pass, 'Fill in the Issue form to let the guest in'];
-        }
-        if (body.outcome === 'ignored') {
-            return ['pass', pass, body.message];
-        }
         if (['guest', 'inactive_vehicle', 'unassigned_tag', 'non_recurring_category'].includes(status)) {
             return ['denied', plate || `Tag ${tag}`, body.anomaly_reason || body.message];
         }
 
-        return ['alert', plate || pass || `Tag ${tag}`, body.anomaly_reason || body.message];
+        return ['alert', plate || `Tag ${tag}`, body.anomaly_reason || body.message];
     }
 
     function handleScanResult(body) {
         if (!body.duplicate_ignored) {
             showScanResult(...scanResultFor(body));
-        }
-
-        if (body.issue) {
-            openIssueModal(body.issue);
-        }
-
-        if (body.card_return) {
-            openCardReturnModal(body.card_return);
         }
 
         if (body.outcome === 'alert') {
@@ -277,11 +130,6 @@
         }
     }
 
-    issueForm?.addEventListener('submit', submitIssueForm);
-    issueModal?.querySelectorAll('[data-issue-cancel]').forEach(function (button) {
-        button.addEventListener('click', closeIssueModal);
-    });
-    cardReturnModal?.querySelector('[data-card-returned]')?.addEventListener('click', confirmCardReturned);
     alertBox?.querySelector('[data-station-alert-close]')?.addEventListener('click', function () {
         alertBox.hidden = true;
     });
@@ -403,9 +251,7 @@
         }
 
         const plate = log.plate_number || 'Unknown plate';
-        const hint = payload.location === 'entrance'
-            ? 'Tap a guest pass to issue it, or check the vehicle.'
-            : 'No tag or guest pass was read. Check the vehicle.';
+        const hint = 'No registered RFID tag was read. Check the vehicle.';
 
         showAlert('Vehicle with no pass', `${plate}: ${hint}`);
         showScanResult('alert', `NO PASS · ${plate}`, hint);
@@ -634,7 +480,7 @@
             }
 
             // Phase 4: typing in the pop-up is not an RFID read.
-            if (modalOpen() || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
                 return;
             }
 

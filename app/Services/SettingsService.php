@@ -36,11 +36,8 @@ class SettingsService
             'exit_portal_label' => 'PHILCST Exit Portal',
             'entrance_rfid_reader_name' => 'Entrance RFID Reader (Simulated)',
             'exit_rfid_reader_name' => 'Exit RFID Reader (Simulated)',
-            // Phase 3: RFID cooldown and guest pass rules (edited in Settings in Phase 4).
+            // Phase 3: RFID cooldown (guest pass rules removed in Phase 0).
             'rfid_cooldown_seconds' => '60',
-            'guest_pass_validity_minutes' => '240',
-            'guest_pass_overstay_grace_minutes' => '0',
-            'guest_pass_require_id' => '1',
             // Phase 4: reader configuration per station (UHF is config only for now).
             'entrance_reader_type' => 'nfc',
             'entrance_reader_ip' => '',

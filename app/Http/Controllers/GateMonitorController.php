@@ -100,7 +100,7 @@ class GateMonitorController extends Controller
     protected function latestScan(string $location): ?array
     {
         $scan = RfidScanLog::query()
-            ->with(['vehicle', 'vehicleRfidTag', 'guestVisit'])
+            ->with(['vehicle', 'vehicleRfidTag'])
             ->where('scan_location', $location)
             ->latest('scan_time')
             ->latest('id')
@@ -110,15 +110,12 @@ class GateMonitorController extends Controller
             return null;
         }
 
-        $isGuestPass = $scan->vehicleRfidTag?->isGuestPass() === true;
-
         return [
             'id' => $scan->id,
-            'title' => $scan->vehicle?->plate_number
-                ?? ($isGuestPass ? ($scan->guestVisit?->plate ?: $scan->vehicleRfidTag->label) : $scan->tag_uid),
+            'title' => $scan->vehicle?->plate_number ?? $scan->tag_uid,
             'subtitle' => $scan->vehicle
                 ? ($scan->vehicle->vehicle_owner_name ?: $scan->vehicle->vehicle_type)
-                : ($isGuestPass ? $scan->vehicleRfidTag->label : 'Tag '.$scan->tag_uid),
+                : 'Tag '.$scan->tag_uid,
             'result' => $scan->verificationLabel,
             'status' => $status = ($scan->is_anomaly ? 'anomaly' : $scan->verification_status),
             'tone' => StatusBadge::tone($status),

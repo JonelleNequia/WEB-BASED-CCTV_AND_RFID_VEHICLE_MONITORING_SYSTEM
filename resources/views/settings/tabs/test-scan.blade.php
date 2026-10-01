@@ -23,21 +23,7 @@
             'plate_search' => strtolower($plate.' '.$category),
             'search' => strtolower($tag->uid.' '.$owner.' '.$plate.' '.$category.' '.($tag->vehicle?->vehicle_type ?: '')),
         ];
-    })->values()->concat($guestPasses->map(fn ($pass) => [
-        // Phase 4: guest passes in the simulation picker.
-        'id' => $pass->id,
-        'uid' => $pass->uid,
-        'owner' => $pass->label,
-        'plate' => ucfirst($pass->status),
-        'category' => 'Guest Pass',
-        'uid_label' => $pass->uid.' - '.$pass->label,
-        'plate_label' => 'Guest Pass - '.ucfirst($pass->status),
-        'label' => $pass->uid.' - '.$pass->label,
-        'description' => 'Guest Pass - '.ucfirst($pass->status),
-        'uid_search' => strtolower($pass->uid.' '.$pass->display_number),
-        'plate_search' => strtolower('guest pass '.$pass->display_number),
-        'search' => strtolower($pass->uid.' guest pass '.$pass->display_number.' '.$pass->status),
-    ]))->values())
+    })->values())
     @php($selectedRegisteredTagId = (string) old('vehicle_rfid_tag_id', ''))
     @php($selectedRegisteredTag = $registeredTagOptions->first(fn ($option) => (string) $option['id'] === $selectedRegisteredTagId))
 
@@ -45,7 +31,7 @@
         <x-stat label="Registered Vehicles" :value="$rfidStats['registered_vehicles'] ?? 0" />
         {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
         <x-stat label="Inside Campus" :value="$rfidStats['vehicles_inside'] ?? 0"
-                :hint="($rfidStats['registered_inside'] ?? 0).' registered · '.($rfidStats['guests_inside'] ?? 0).' guests'" />
+                hint="Registered vehicles" />
         <x-stat label="Registered Scans Today" :value="$rfidStats['registered_scans_today'] ?? 0" tone="success" />
         <x-stat label="Needs Attention" :value="$rfidStats['attention_today'] ?? 0" tone="danger"
                 :href="($rfidStats['attention_today'] ?? 0) > 0 ? route('logs.index', ['tab' => 'scans', 'verification_status' => 'anomaly']) : null"
@@ -79,7 +65,7 @@
 
                 <div class="form-grid">
                     <div class="field span-full">
-                        <label for="registered_tag_search">Registered Tag or Guest Pass</label>
+                        <label for="registered_tag_search">Registered Tag</label>
                         <input id="vehicle_rfid_tag_id" type="hidden" name="vehicle_rfid_tag_id" value="{{ $selectedRegisteredTagId }}" data-rfid-combobox-value>
                         <div class="combobox" data-rfid-combobox>
                             <input
@@ -124,8 +110,7 @@
                     <strong>Station readers decide the direction.</strong>
                     <p>
                         At the stations, Entrance always records ENTRY and Exit always records EXIT; a mismatch is flagged for review.
-                        Test Scan keeps the inside/outside toggle for registered vehicles. Guest passes follow the station rules:
-                        an available pass at Entrance must be issued (Entrance Station or the Guests page), and an issued pass at Exit closes the visit.
+                        Test Scan keeps the inside/outside toggle for registered vehicles.
                         The same tag at the same station is ignored for {{ $settings['rfid_cooldown_seconds'] ?? 60 }} seconds.
                     </p>
                 </div>

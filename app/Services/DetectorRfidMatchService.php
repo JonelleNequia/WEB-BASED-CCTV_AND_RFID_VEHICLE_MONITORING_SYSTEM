@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Cache;
 
 /**
  * Phase 5: decide whether a vehicle the detector saw crossing the trigger
- * line had a pass (registered vehicle tag or guest pass).
+ * line had a registered RFID tag (guest passes were removed in Phase 0).
  *
  * - Lookback: scans from ~10 seconds BEFORE the crossing count, because a UHF
  *   reader reads the tag while the vehicle is still approaching.
@@ -32,23 +32,6 @@ class DetectorRfidMatchService
 
     /** Registered vehicle tag reads. */
     public const REGISTERED_STATUSES = ['verified'];
-
-    /** Any guest pass read means the vehicle had a pass (alerts are raised by the Station). */
-    public const GUEST_PASS_STATUSES = [
-        'guest_pass_available',
-        'guest_pass_entry',
-        'guest_pass_exit',
-        'guest_pass_duplicate',
-        'guest_pass_lost',
-        'guest_pass_disabled',
-        'guest_pass_not_issued',
-    ];
-
-    public const GUEST_PASS_ALERT_STATUSES = [
-        'guest_pass_lost',
-        'guest_pass_disabled',
-        'guest_pass_not_issued',
-    ];
 
     public function find(
         string $cameraRole,
@@ -83,11 +66,6 @@ class DetectorRfidMatchService
         return null;
     }
 
-    public function isGuestPassScan(?RfidScanLog $scan): bool
-    {
-        return $scan !== null && in_array($scan->verification_status, self::GUEST_PASS_STATUSES, true);
-    }
-
     /**
      * Label the detector draws on the live feed.
      *
@@ -95,20 +73,6 @@ class DetectorRfidMatchService
      */
     public function overlay(?RfidScanLog $scan, ?int $eventId = null): array
     {
-        if ($this->isGuestPassScan($scan)) {
-            $label = $scan->vehicleRfidTag?->label ?? 'Guest Pass';
-            $alert = in_array($scan->verification_status, self::GUEST_PASS_ALERT_STATUSES, true);
-
-            return [
-                'verification' => $alert ? 'pass_alert' : 'guest_pass',
-                'label' => ($alert ? 'PASS ALERT - ' : 'GUEST PASS - ').$this->shortPassLabel($label),
-                'color' => $alert ? 'red' : 'green',
-                'event_id' => $eventId ?? $scan->correlated_vehicle_event_id,
-                'rfid_scan_id' => $scan->id,
-                'vehicle' => null,
-            ];
-        }
-
         if (! $scan || ! $scan->vehicle) {
             return self::noPassOverlay(['event_id' => $eventId, 'rfid_scan_id' => null]);
         }
@@ -150,14 +114,13 @@ class DetectorRfidMatchService
     }
 
     /**
-     * Scans that prove a pass, newest first. updated_at covers a guest pass
-     * whose Issue form was submitted after the card was tapped.
+     * Registered tag reads, newest first.
      */
     protected function candidates(Carbon $from, Carbon $to)
     {
         return RfidScanLog::query()
             ->with(['vehicle.rfidTag', 'vehicleRfidTag'])
-            ->whereIn('verification_status', [...self::REGISTERED_STATUSES, ...self::GUEST_PASS_STATUSES])
+            ->whereIn('verification_status', self::REGISTERED_STATUSES)
             ->where(function ($query) use ($from, $to): void {
                 $query->whereBetween('scan_time', [$from, $to])
                     ->orWhereBetween('created_at', [$from, $to])
@@ -188,10 +151,5 @@ class DetectorRfidMatchService
         }
 
         return abs(((int) ($existing['event_time'] ?? 0)) - $eventTime->getTimestamp()) <= self::SAME_VEHICLE_REUSE_SECONDS;
-    }
-
-    protected function shortPassLabel(string $label): string
-    {
-        return trim((string) preg_replace('/^Guest Pass\s*#?/i', '', $label)) ?: $label;
     }
 }

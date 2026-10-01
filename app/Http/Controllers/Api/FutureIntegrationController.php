@@ -384,8 +384,8 @@ class FutureIntegrationController extends Controller
                 'event_key' => ['nullable', 'string', 'max:120'],
             ]);
 
-            // Phase 5: registered tags AND guest passes count; scans from ~10s
-            // before the crossing are accepted (UHF reads on approach).
+            // Phase 5: registered tag reads from ~10s before the crossing are
+            // accepted (UHF reads on approach).
             $eventTime = Carbon::parse($validated['event_time']);
             $windowSeconds = (int) ($validated['window_seconds'] ?? 4);
             $lookbackSeconds = (int) ($validated['lookback_seconds'] ?? DetectorRfidMatchService::DEFAULT_LOOKBACK_SECONDS);
@@ -396,15 +396,12 @@ class FutureIntegrationController extends Controller
                 $lookbackSeconds,
                 $validated['event_key'] ?? null
             );
-            $isGuestPass = $matchService->isGuestPassScan($rfidScan);
 
             return response()->json([
                 'matched' => $rfidScan !== null,
-                'message' => match (true) {
-                    $isGuestPass => 'Guest pass scan found for this detector window.',
-                    $rfidScan !== null => 'Verified RFID scan found for this detector window.',
-                    default => 'No RFID tag or guest pass found for this detector window yet.',
-                },
+                'message' => $rfidScan !== null
+                    ? 'Verified RFID scan found for this detector window.'
+                    : 'No registered RFID tag found for this detector window yet.',
                 'overlay' => $matchService->overlay($rfidScan),
                 'vehicle' => $rfidScan?->vehicle ? [
                     'id' => $rfidScan->vehicle->id,
@@ -416,15 +413,7 @@ class FutureIntegrationController extends Controller
                 ] : null,
                 'action_taken' => $rfidScan?->resolved_event_type,
                 'new_state' => $rfidScan?->resulting_state,
-                'status' => match (true) {
-                    $isGuestPass => 'guest_pass',
-                    $rfidScan !== null => 'registered',
-                    default => 'no_pass',
-                },
-                'guest_pass' => $isGuestPass ? [
-                    'label' => $rfidScan->vehicleRfidTag?->label,
-                    'guest_visit_id' => $rfidScan->guest_visit_id,
-                ] : null,
+                'status' => $rfidScan !== null ? 'registered' : 'no_pass',
                 'scan' => $rfidScan ? [
                     'id' => $rfidScan->id,
                     'verification_status' => $rfidScan->verification_status,
@@ -590,7 +579,7 @@ class FutureIntegrationController extends Controller
             ]);
 
             // Phase 3: same rules as the Station page (fixed direction,
-            // cooldown, guest passes). Ready for the UHF TCP listener.
+            // cooldown). Used by the UHF listener.
             $result = $rfidIngestService->ingest($validated, 'hardware_placeholder', RfidIngestService::DIRECTION_STATION);
             $scanLog = $result->scanLog;
 

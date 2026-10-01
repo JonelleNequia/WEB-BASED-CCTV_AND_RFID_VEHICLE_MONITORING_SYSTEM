@@ -90,95 +90,12 @@
         </aside>
     </main>
 
-    {{-- Phase 4: red banner for anomalies and lost/disabled pass alerts. --}}
+    {{-- Phase 4: red banner for anomalies and lost/disabled tag alerts. --}}
     <div class="station-alert" data-station-alert hidden role="alert">
         <strong data-station-alert-title>Needs attention</strong>
         <span data-station-alert-message></span>
         <button type="button" class="station-alert-close" data-station-alert-close aria-label="Dismiss">&times;</button>
     </div>
-
-    @if ($location === 'entrance')
-        {{-- Phase 4: Issue Guest Pass pop-up (opens when an available pass is tapped). --}}
-        <div class="station-modal" data-issue-modal hidden>
-            <form class="station-modal-card" data-issue-form novalidate>
-                <input type="hidden" name="guest_observation_id" data-issue-field="observation_id">
-                <div class="station-modal-head">
-                    <div>
-                        <span class="station-kicker">Issue Guest Pass</span>
-                        <h2 data-issue-pass-label>Guest Pass</h2>
-                    </div>
-                    <button type="button" class="station-modal-close" data-issue-cancel aria-label="Cancel">&times;</button>
-                </div>
-
-                <div class="station-modal-body">
-                    <img class="station-modal-snapshot" data-issue-snapshot alt="Entrance snapshot">
-
-                    <div class="station-modal-fields">
-                        <label>Plate Number <small>(from camera, editable)</small>
-                            <input type="text" name="plate" data-issue-field="plate" autocomplete="off">
-                        </label>
-                        <label>Driver Name
-                            <input type="text" name="driver_name" autocomplete="off">
-                        </label>
-                        <label>Vehicle Type
-                            <input type="text" name="vehicle_type" data-issue-field="vehicle_type" placeholder="Car, Van, Motorcycle" autocomplete="off">
-                        </label>
-                        <label>Color
-                            <input type="text" name="color" data-issue-field="color" autocomplete="off">
-                        </label>
-                        <label>Purpose
-                            <input type="text" name="purpose" placeholder="Delivery, visit" autocomplete="off">
-                        </label>
-                        <label>Destination
-                            <input type="text" name="destination" placeholder="Registrar, Admin Office" autocomplete="off">
-                        </label>
-                        <label>ID Presented <span data-issue-id-required>*</span>
-                            <input type="text" name="id_presented" placeholder="Driver's License" autocomplete="off">
-                        </label>
-                        <label>Valid For
-                            <select name="valid_minutes" data-issue-valid>
-                                <option value="60">1 hour</option>
-                                <option value="120">2 hours</option>
-                                <option value="240">4 hours</option>
-                                <option value="480">8 hours</option>
-                                <option value="720">12 hours</option>
-                            </select>
-                        </label>
-                    </div>
-                </div>
-
-                <p class="station-modal-error" data-issue-error hidden></p>
-
-                <div class="station-modal-actions">
-                    <button type="button" class="station-button station-button-secondary" data-issue-cancel>Cancel</button>
-                    <button type="submit" class="station-button">Issue Pass &amp; Record Entry</button>
-                </div>
-            </form>
-        </div>
-    @else
-        {{-- Phase 4: Exit reminder when a guest pass is returned. --}}
-        <div class="station-modal" data-card-return-modal hidden>
-            <div class="station-modal-card station-modal-card-sm">
-                <div class="station-modal-head">
-                    <div>
-                        <span class="station-kicker">Guest Exit</span>
-                        <h2 data-card-return-label>Collect the guest pass</h2>
-                    </div>
-                </div>
-                <div class="station-modal-body station-modal-body-stack">
-                    <p>Collect the card and return the guest's ID.</p>
-                    <div class="station-log-detail-grid">
-                        <div><span>Plate</span><strong data-card-return-plate>N/A</strong></div>
-                        <div><span>Driver</span><strong data-card-return-driver>N/A</strong></div>
-                        <div><span>Return ID</span><strong data-card-return-id>None</strong></div>
-                    </div>
-                </div>
-                <div class="station-modal-actions">
-                    <button type="button" class="station-button" data-card-returned>Card returned</button>
-                </div>
-            </div>
-        </div>
-    @endif
 
     @php($stationPayload = [
         'location' => $location,
