@@ -96,6 +96,37 @@ class SettingsController extends Controller
     }
 
     /**
+     * Settings › System Status › "Reset activity data": the same as
+     * `php artisan system:reset --activity`, with "RESET" typed to confirm
+     * and a dated backup first.
+     */
+    public function resetActivity(Request $request, \App\Services\SystemResetService $resetService): RedirectResponse
+    {
+        $request->validate(
+            ['confirm' => ['required', 'in:RESET']],
+            ['confirm.required' => 'Type RESET to confirm.', 'confirm.in' => 'Type RESET (in capital letters) to confirm.']
+        );
+
+        try {
+            $backup = $resetService->backup();
+            $removed = collect($resetService->reset(\App\Services\SystemResetService::LEVEL_ACTIVITY));
+        } catch (\Throwable $exception) {
+            return redirect()->route('settings.index', ['tab' => 'status'])
+                ->withErrors(['confirm' => 'Reset stopped, nothing more was removed: '.$exception->getMessage()]);
+        }
+
+        $rows = $removed->where('kind', 'rows')->where('action', 'delete')->sum('count');
+        $files = $removed->where('kind', 'files')->where('action', 'delete')->sum('count');
+
+        return redirect()->route('settings.index', ['tab' => 'status'])->with('status', sprintf(
+            'Activity data reset: %d records and %d files removed; vehicles set to Outside. Backup: %s',
+            $rows,
+            $files,
+            str_replace(base_path().DIRECTORY_SEPARATOR, '', $backup)
+        ));
+    }
+
+    /**
      * Phase 1: add a gate (ready for Gate 2, 3... at deployment). It gets a
      * camera slot, a kiosk and a reader slot; assign devices in Devices.
      */

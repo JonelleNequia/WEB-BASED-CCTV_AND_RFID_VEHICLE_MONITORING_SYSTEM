@@ -77,7 +77,42 @@
         @endforeach
     </div>
 
+    {{-- Fresh start: removes activity data after a backup (same as `php artisan system:reset`). --}}
+    <section class="panel reset-panel">
+        <div class="panel-header panel-header-modern">
+            <div>
+                <h2 class="panel-title">Reset activity data</h2>
+                <p class="field-help">Removes vehicle logs, RFID scans, visitor records, plate profiles, alerts, snapshots and logs, and sets every registered vehicle to Outside. Keeps users, settings, gates, calibration, cameras, devices, registered vehicles and RFID tags. A backup is saved first.</p>
+            </div>
+            <button type="button" class="button button-secondary button-sm" data-drawer-open="reset-activity-modal">Reset activity data</button>
+        </div>
+        @error('confirm')<p class="field-error">{{ $message }}</p>@enderror
+    </section>
+
+    <x-modal id="reset-activity-modal" title="Reset activity data" :open="$errors->has('confirm')">
+        <form method="POST" action="{{ route('settings.system.reset-activity') }}" class="stack-form" data-reset-form>
+            @csrf
+            <p>This removes all activity (logs, scans, visitor records, snapshots) and cannot be undone here. The database and snapshots are backed up first to <code>storage/backups/reset-…</code>.</p>
+            <div class="field">
+                <label for="reset_confirm">Type <strong>RESET</strong> to confirm</label>
+                <input id="reset_confirm" type="text" name="confirm" autocomplete="off" required pattern="RESET" data-reset-confirm>
+                @error('confirm')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
+            <div class="button-row">
+                <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
+                <button type="submit" class="button button-danger" data-reset-submit disabled>Back up and reset</button>
+            </div>
+        </form>
+    </x-modal>
+
 @push('scripts')
+    <script>
+        // The reset button only works once RESET is typed.
+        document.querySelector('[data-reset-confirm]')?.addEventListener('input', function (event) {
+            document.querySelector('[data-reset-submit]').disabled = event.target.value !== 'RESET';
+        });
+    </script>
+
     <script>
         // Refresh the measured pipeline every 3 seconds.
         (function () {

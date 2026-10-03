@@ -156,6 +156,8 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('settings.update');
         Route::post('/settings/gates', [SettingsController::class, 'storeGate'])->name('settings.gates.store');
+        // Fresh start: activity data only, after a backup (same as `system:reset`).
+        Route::post('/settings/system/reset-activity', [SettingsController::class, 'resetActivity'])->name('settings.system.reset-activity');
         // Plug-and-detect: Settings › Stations & Readers › Devices.
         Route::get('/settings/devices', [DeviceController::class, 'index'])->name('settings.devices.index');
         Route::post('/settings/devices/scan', [DeviceController::class, 'scan'])->name('settings.devices.scan');

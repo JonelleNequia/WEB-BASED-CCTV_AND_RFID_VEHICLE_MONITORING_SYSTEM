@@ -6192,3 +6192,25 @@ button[aria-busy="true"] {
     opacity: 0.7;
     padding-top: 0.8rem;
 }
+
+/* Data reset (Settings › System Status): the one destructive button. */
+.button-danger {
+    background: #b42318;
+    border-color: #b42318;
+    color: #ffffff;
+}
+
+.button-danger:hover:not(:disabled) {
+    background: #912018;
+    border-color: #912018;
+}
+
+.button-danger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.reset-panel .panel-header {
+    align-items: flex-start;
+    gap: 1rem;
+}
