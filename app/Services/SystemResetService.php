@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\DeviceAssignment;
 use App\Models\Vehicle;
 use App\Support\CameraFiles;
 use App\Support\DeviceFiles;
@@ -25,8 +26,13 @@ use ZipArchive;
  *   "last scanned".
  * - full: activity + registered vehicles and RFID tags.
  *
- * Always kept: users, settings, gates, calibration (cameras, zones),
- * camera credentials, device assignments and discovered devices.
+ * - devices (added to either level): saved devices and the camera / reader
+ *   assignments of the gates; the cameras keep their last address as a
+ *   manual source, the gates stay UHF gates waiting for a reader. Scan and
+ *   assign again in Settings › Devices.
+ *
+ * Always kept: users, settings, gates, calibration (cameras, zones) and
+ * camera credentials (and without "devices", the devices and assignments).
  * IDs of the emptied tables start at 1 again.
  */
 class SystemResetService
@@ -64,9 +70,15 @@ class SystemResetService
      *
      * @return list<array{item: string, count: int, kind: string, action: string}>
      */
-    public function plan(string $level = self::LEVEL_ACTIVITY): array
+    public function plan(string $level = self::LEVEL_ACTIVITY, bool $devices = false): array
     {
         $rows = [];
+
+        if ($devices) {
+            $rows[] = ['item' => 'device_assignments (camera / reader per gate)', 'count' => (int) DB::table('device_assignments')->count(), 'kind' => 'rows', 'action' => 'unassign'];
+            $rows[] = ['item' => 'network_devices (saved devices)', 'count' => (int) DB::table('network_devices')->count(), 'kind' => 'rows', 'action' => 'delete'];
+            $rows[] = ['item' => 'device scan result file', 'count' => File::exists(DeviceFiles::scanResultPath()) ? 1 : 0, 'kind' => 'files', 'action' => 'delete'];
+        }
 
         foreach ($this->tables($level) as $table) {
             $rows[] = ['item' => $table, 'count' => (int) DB::table($table)->count(), 'kind' => 'rows', 'action' => 'delete'];
@@ -188,6 +200,41 @@ class SystemResetService
 
         Cache::flush();
         $this->localStorageService->ensureBaseDirectories();
+
+        return $done;
+    }
+
+    /**
+     * Remove the saved devices and the gates' assignments, the same way as
+     * "Unassign" in Settings › Devices (cameras keep their last address as a
+     * manual source), then export the device and camera runtime files.
+     *
+     * @return list<array{item: string, count: int, kind: string, action: string}>
+     */
+    public function resetDevices(): array
+    {
+        $done = array_slice($this->plan(self::LEVEL_ACTIVITY, true), 0, 3);
+        $registry = app(DeviceRegistryService::class);
+
+        foreach (DeviceAssignment::query()->get(['station', 'role']) as $assignment) {
+            $registry->unassign($assignment->station, $assignment->role);
+        }
+
+        Schema::disableForeignKeyConstraints();
+
+        try {
+            DB::transaction(function (): void {
+                DB::table('device_assignments')->delete();
+                DB::table('network_devices')->delete();
+                $this->restartIds(['device_assignments', 'network_devices']);
+            });
+        } finally {
+            Schema::enableForeignKeyConstraints();
+        }
+
+        // Otherwise the last scan would be read back into the device list.
+        File::delete(DeviceFiles::scanResultPath());
+        $registry->exportRuntimeConfig();
 
         return $done;
     }

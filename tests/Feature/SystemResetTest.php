@@ -106,6 +106,42 @@ class SystemResetTest extends TestCase
         $this->assertGreaterThan(0, DB::table('system_settings')->count());
     }
 
+    public function test_devices_option_removes_saved_devices_and_assignments_the_unassign_way(): void
+    {
+        $camera = DB::table('network_devices')->insertGetId(['device_key' => 'AA:BB:CC:00:00:01', 'mac' => 'AA:BB:CC:00:00:01', 'ip' => '192.168.1.126', 'kind' => 'camera', 'created_at' => now(), 'updated_at' => now()]);
+        $reader = DB::table('network_devices')->insertGetId(['device_key' => 'AA:BB:CC:00:00:02', 'mac' => 'AA:BB:CC:00:00:02', 'ip' => '192.168.2.116', 'kind' => 'rfid_reader', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('network_devices')->insert(['device_key' => 'ip:192.168.2.116', 'ip' => '192.168.2.116', 'kind' => 'rfid_reader', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('device_assignments')->insert([
+            ['station' => 'gate-1', 'role' => 'camera', 'network_device_id' => $camera, 'created_at' => now(), 'updated_at' => now()],
+            ['station' => 'gate-1', 'role' => 'reader', 'network_device_id' => $reader, 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        Gate::query()->where('code', 'gate-1')->update(['reader_type' => 'uhf_ethernet', 'reader_name' => 'Gate 1 UHF Reader']);
+        DB::table('cameras')->where('camera_role', 'gate-1')->update(['source_type' => 'rtsp', 'source_value' => 'rtsp://192.168.1.126:554/stream1']);
+        File::ensureDirectoryExists(\App\Support\DeviceFiles::directory());
+        File::put(\App\Support\DeviceFiles::scanResultPath(), '{"devices": []}');
+
+        // Without --devices they stay.
+        $this->artisan('system:reset', ['--force' => true])->assertSuccessful();
+        $this->assertSame([2, 3], [DB::table('device_assignments')->count(), DB::table('network_devices')->count()]);
+
+        $this->artisan('system:reset', ['--devices' => true, '--dry-run' => true])
+            ->expectsOutputToContain('network_devices (saved devices)')
+            ->assertSuccessful();
+        $this->assertSame(3, DB::table('network_devices')->count());
+
+        $this->artisan('system:reset', ['--devices' => true, '--force' => true])
+            ->expectsOutputToContain('must be assigned again in Settings > Devices')
+            ->assertSuccessful();
+
+        $this->assertSame([0, 0], [DB::table('device_assignments')->count(), DB::table('network_devices')->count()]);
+        $this->assertFileDoesNotExist(\App\Support\DeviceFiles::scanResultPath());
+        // Gate still a UHF gate (waiting for a reader); camera keeps its last address.
+        $this->assertSame('uhf_ethernet', Gate::query()->where('code', 'gate-1')->value('reader_type'));
+        $this->assertSame('rtsp://192.168.1.126:554/stream1', DB::table('cameras')->where('camera_role', 'gate-1')->value('source_value'));
+        // Vehicles and tags untouched by --devices.
+        $this->assertSame(1, Vehicle::query()->count());
+    }
+
     public function test_reset_needs_reset_typed_unless_forced(): void
     {
         $this->artisan('system:reset')
