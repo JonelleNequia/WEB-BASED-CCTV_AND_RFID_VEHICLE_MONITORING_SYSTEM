@@ -6152,3 +6152,43 @@ button[aria-busy="true"] {
     margin-top: 0.4rem;
     min-width: 14rem;
 }
+
+/* Phase 7 (visitor model): dashboard IN / OUT counts table. */
+.movement-counts-panel {
+    margin-bottom: 1.25rem;
+}
+
+.movement-counts {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+}
+
+.movement-counts th,
+.movement-counts td {
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    text-align: center;
+}
+
+.movement-counts tbody th[scope="row"] {
+    text-align: left;
+    font-weight: 600;
+}
+
+.movement-counts .movement-period {
+    border-bottom: none;
+}
+
+.movement-counts .movement-total td {
+    font-weight: 700;
+}
+
+.movement-counts .movement-group th {
+    text-align: left;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.7;
+    padding-top: 0.8rem;
+}

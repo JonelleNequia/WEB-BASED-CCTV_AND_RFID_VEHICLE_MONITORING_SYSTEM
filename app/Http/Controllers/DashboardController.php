@@ -11,7 +11,9 @@ use App\Models\VehicleEvent;
 use App\Services\AlertSummaryService;
 use App\Services\CalibrationService;
 use App\Services\GuestObservationService;
+use App\Services\MovementCountService;
 use App\Services\RfidService;
+use App\Services\VehicleOccupancyService;
 use App\Services\VisitorRecordService;
 use App\Support\DisplayTime;
 use App\Support\PhilippineTime;
@@ -63,6 +65,8 @@ class DashboardController extends Controller
             'attention' => $data['attentionItems'],
             'hourly' => $data['hourlyTraffic'],
             'traffic_summary' => $data['trafficSummary'],
+            'movement_counts' => $data['movementCounts'],
+            'inside_by_category' => $data['insideByCategory'],
             'recent_rfid_scans' => $data['recentRfidScans']->values(),
             'latest_events' => $data['latestEvents']->values(),
             'frequent_entry_vehicles' => $data['frequentEntryVehicles']
@@ -105,7 +109,9 @@ class DashboardController extends Controller
         $rfidStats = $rfidService->stats();
         $cameraStatuses = collect($calibrationService->cameraPayload());
         $connectedCameras = $cameraStatuses->where('last_connection_status', 'connected')->count();
-        $trafficSummary = $this->trafficSummary();
+        // Phase 7 (visitor model): one source for every IN / OUT number.
+        $movementCounts = app(MovementCountService::class)->allPeriods();
+        $trafficSummary = $this->trafficSummary($movementCounts);
         $totalTraffic = $trafficSummary['today'];
 
         return [
@@ -130,7 +136,10 @@ class DashboardController extends Controller
             // UI Phase 4: dashboard KPIs, "Needs attention" and hourly chart.
             'alertCounts' => app(AlertSummaryService::class)->counts(),
             'attentionItems' => app(AlertSummaryService::class)->items(8),
-            'hourlyTraffic' => $this->hourlyTrafficToday(),
+            'hourlyTraffic' => app(MovementCountService::class)->hourlyToday(),
+            'movementCounts' => $movementCounts,
+            // Registered vehicles only (unregistered visitors are never "inside").
+            'insideByCategory' => app(VehicleOccupancyService::class)->insideByCategory(),
             'latestEvents' => $this->recentEventActivities(),
             'frequentEntryVehicles' => $this->frequentEntryVehicles(),
             // Phase 6 (visitor model): Visitor Ranking, separate from the registered one.
@@ -188,133 +197,24 @@ class DashboardController extends Controller
     }
 
     /**
-     * UI Phase 4: entries and exits per hour today (Asia/Manila), for the
-     * dashboard chart. Same sources as the Entries/Exits totals.
+     * Phase 7 (visitor model): IN / OUT per period from MovementCountService
+     * (same numbers as the counts panel), with the older summary keys.
      *
-     * @return list<array{hour: int, label: string, entries: int, exits: int}>
+     * @param  array<string, array<string, mixed>>  $movementCounts
+     * @return array<string, array{label: string, entries: int, exits: int, unknown: int, registered_scans: int, guest_observations: int}>
      */
-    protected function hourlyTrafficToday(): array
+    protected function trafficSummary(array $movementCounts): array
     {
-        $window = PhilippineTime::periodWindow('today');
-        $hours = collect(range(0, 23))->mapWithKeys(fn (int $hour) => [$hour => ['entries' => 0, 'exits' => 0]])->all();
-        $bump = function (?\DateTimeInterface $time, string $key) use (&$hours): void {
-            if ($time) {
-                $hours[(int) DisplayTime::format($time, 'G')][$key]++;
-            }
-        };
-
-        VehicleEvent::query()
-            ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
-            ->whereIn('event_type', ['ENTRY', 'EXIT'])
-            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['event_time']))
-            ->get(['event_type', 'event_time'])
-            ->each(fn (VehicleEvent $event) => $bump($event->event_time, $event->event_type === 'EXIT' ? 'exits' : 'entries'));
-
-        $this->unmirroredGuestObservationsQuery()
-            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['observed_at']))
-            ->get(['location', 'observed_at', 'detection_metadata_json'])
-            ->each(fn (GuestVehicleObservation $observation) => $bump(
-                $observation->observed_at,
-                VehicleEvent::eventTypeForDirection(data_get($observation->detection_metadata_json, 'direction')) === 'EXIT' ? 'exits' : 'entries'
-            ));
-
-        return collect($hours)
-            ->map(fn (array $counts, int $hour) => [
-                'hour' => $hour,
-                'label' => DisplayTime::format($window['local_start']->copy()->setTime($hour, 0), 'g A'),
-            ] + $counts)
-            ->values()
+        return collect($movementCounts)
+            ->map(fn (array $counts, string $period): array => [
+                'label' => $counts['label'],
+                'entries' => $counts['in'],
+                'exits' => $counts['out'],
+                'unknown' => $counts['unknown'],
+                'registered_scans' => $this->registeredScanCount($period),
+                'guest_observations' => $this->guestObservationCount($period),
+            ])
             ->all();
-    }
-
-    /**
-     * @return array{entries: int, exits: int}
-     */
-    protected function totalTrafficToday(): array
-    {
-        return $this->totalTrafficForPeriod('today');
-    }
-
-    /**
-     * @return array<string, array{label: string, entries: int, exits: int, registered_scans: int, guest_observations: int}>
-     */
-    protected function trafficSummary(): array
-    {
-        return collect($this->periodOptions())
-            ->mapWithKeys(function (string $label, string $period): array {
-                $traffic = $this->totalTrafficForPeriod($period);
-
-                return [
-                    $period => [
-                        'label' => $label,
-                        'entries' => $traffic['entries'],
-                        'exits' => $traffic['exits'],
-                        'registered_scans' => $this->registeredScanCount($period),
-                        'guest_observations' => $this->guestObservationCount($period),
-                    ],
-                ];
-            })
-            ->all();
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    protected function periodOptions(): array
-    {
-        return [
-            'today' => 'Today',
-            'week' => 'This Week',
-            'month' => 'This Month',
-            'year' => 'This Year',
-        ];
-    }
-
-    /**
-     * @return array{entries: int, exits: int}
-     */
-    protected function totalTrafficForPeriod(string $period): array
-    {
-        $registeredEntries = VehicleEvent::query()
-            ->where('event_type', 'ENTRY')
-            ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
-            ->whereNotIn('event_origin', ['guest_cctv', 'guest_manual'])
-            ->where(fn ($query) => PhilippineTime::constrainPeriodAny($query, ['event_time', 'created_at'], $period))
-            ->count();
-
-        $registeredExits = VehicleEvent::query()
-            ->where('event_type', 'EXIT')
-            ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
-            ->whereNotIn('event_origin', ['guest_cctv', 'guest_manual'])
-            ->where(fn ($query) => PhilippineTime::constrainPeriodAny($query, ['event_time', 'created_at'], $period))
-            ->count();
-
-        // Phase 1 (gates): camera captures count by the crossing direction,
-        // not by the gate (every gate records IN and OUT). A read of an
-        // unknown tag is not a movement and is no longer counted.
-        $guests = $this->guestTrafficByDirection($period);
-
-        return [
-            'entries' => (int) $registeredEntries + $guests['ENTRY'],
-            'exits' => (int) $registeredExits + $guests['EXIT'],
-        ];
-    }
-
-    /**
-     * @return array{ENTRY: int, EXIT: int}
-     */
-    protected function guestTrafficByDirection(string $period = 'today'): array
-    {
-        $counts = ['ENTRY' => 0, 'EXIT' => 0];
-
-        GuestVehicleObservation::query()
-            ->where(fn ($query) => PhilippineTime::constrainPeriodAny($query, ['observed_at', 'created_at'], $period))
-            ->get(['detection_metadata_json'])
-            ->each(function (GuestVehicleObservation $observation) use (&$counts): void {
-                $counts[VehicleEvent::eventTypeForDirection(data_get($observation->detection_metadata_json, 'direction'))]++;
-            });
-
-        return $counts;
     }
 
     protected function registeredScanCount(string $period): int

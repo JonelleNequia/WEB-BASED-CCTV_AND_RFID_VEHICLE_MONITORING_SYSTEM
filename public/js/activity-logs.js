@@ -21,7 +21,7 @@
         ['Category', 'category_label'],
         ['Log type', 'log_type_label'],
         ['Source', 'source_label'],
-        ['Station / Camera', 'station_label'],
+        ['Gate', 'station_label'],
         ['RFID Tag', 'rfid_tag_uid'],
         ['State', 'state_label'],
         ['Status', 'status_label'],
@@ -79,7 +79,7 @@
         tr.append(el('td', null, `${log.vehicle_type || ''}${log.vehicle_color && log.vehicle_color !== 'N/A' ? ' · ' + log.vehicle_color : ''}`));
 
         const movement = el('td');
-        movement.append(el('span', `badge badge-tone-${tone[String(log.event_type).toLowerCase()] || 'neutral'}`, log.event_type));
+        movement.append(el('span', `badge badge-tone-${tone[String(log.event_type).toLowerCase()] || 'neutral'}`, log.movement_label || log.event_type));
         tr.append(movement);
 
         const type = el('td');
@@ -220,13 +220,18 @@
         }
 
         const rows = Array.isArray(report.rows) ? report.rows : [];
-        printSheet.replaceChildren(printHeader(`Activity Logs - ${report.label}`, `${rows.length} record${rows.length === 1 ? '' : 's'}`));
+        // Phase 7: the header says which filters made the report.
+        printSheet.replaceChildren(printHeader(
+            `Activity Logs - ${report.label}`,
+            `${rows.length} record${rows.length === 1 ? '' : 's'} · ${report.filters_label || 'No filters'}`
+        ));
 
         if (rows.length === 0) {
             printSheet.append(el('p', 'event-log-print-empty', 'No records found for this report.'));
         } else {
             const columns = [
-                ['timestamp', 'Timestamp'], ['log_type', 'Log Type'], ['source', 'Source'], ['plate_number', 'Plate Number'],
+                ['timestamp', 'Timestamp'], ['movement', 'IN/OUT'], ['gate', 'Gate'], ['category', 'Category'],
+                ['log_type', 'Log Type'], ['source', 'Source'], ['plate_number', 'Plate Number'],
                 ['owner_name', 'Owner Name'], ['state', 'State'], ['status', 'Status'], ['rfid_tag', 'RFID Tag'],
             ];
             const table = el('table', 'event-log-print-table');

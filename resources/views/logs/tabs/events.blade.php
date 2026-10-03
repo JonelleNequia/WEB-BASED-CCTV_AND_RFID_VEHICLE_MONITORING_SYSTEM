@@ -18,14 +18,14 @@
                 fn ($v) => filled($v)
             )),
         ]);
-    $hasMoreFilters = filled($filters['category'] ?? null) || filled($filters['event_type'] ?? null) || filled($filters['match_status'] ?? null) || filled($filters['vehicle_owner_name'] ?? null);
+    $hasMoreFilters = filled($filters['category'] ?? null) || filled($filters['event_type'] ?? null) || filled($filters['match_status'] ?? null) || filled($filters['vehicle_owner_name'] ?? null) || filled($filters['gate'] ?? null);
 @endphp
 
 <x-stat-row>
     <x-stat :label="$selectedPeriodLabel" :value="$eventLogSummary['total']" hint="Records" data-log-summary="total" />
-    <x-stat label="Entries" :value="$eventLogSummary['entries']" data-log-summary="entries" />
-    <x-stat label="Exits" :value="$eventLogSummary['exits']" data-log-summary="exits" />
-    <x-stat label="Guests" :value="$eventLogSummary['guests']" tone="brand" hint="CCTV and manual" data-log-summary="guests" />
+    <x-stat label="IN" :value="$eventLogSummary['entries']" data-log-summary="entries" />
+    <x-stat label="OUT" :value="$eventLogSummary['exits']" data-log-summary="exits" />
+    <x-stat label="Unregistered" :value="$eventLogSummary['guests']" tone="brand" hint="Camera, no registered tag" data-log-summary="guests" />
     <x-stat label="RFID Only" :value="$eventLogSummary['rfid']" hint="Scans without a linked event" data-log-summary="rfid" />
 </x-stat-row>
 
@@ -69,6 +69,16 @@
                 <label for="plate_text">Plate</label>
                 <input id="plate_text" type="search" name="plate_text" value="{{ $filters['plate_text'] ?? '' }}" placeholder="ABC 1234">
             </div>
+            {{-- Phase 7 (visitor model): gate filter, also used by CSV and Print. --}}
+            <div class="field">
+                <label for="gate">Gate</label>
+                <select id="gate" name="gate">
+                    <option value="">All gates</option>
+                    @foreach ($gateOptions as $code => $name)
+                        <option value="{{ $code }}" @selected(($filters['gate'] ?? '') === $code)>{{ $name }}</option>
+                    @endforeach
+                </select>
+            </div>
             <div class="field">
                 <label for="date_from">From</label>
                 <input id="date_from" type="date" name="date_from" value="{{ $filters['date_from'] ?? '' }}">
@@ -103,8 +113,8 @@
                         <label for="event_type">Movement</label>
                         <select id="event_type" name="event_type">
                             <option value="">All</option>
-                            @foreach (['ENTRY', 'EXIT', 'GUEST', 'RFID'] as $movement)
-                                <option value="{{ $movement }}" @selected(($filters['event_type'] ?? '') === $movement)>{{ $movement }}</option>
+                            @foreach (\App\Http\Controllers\VehicleEventController::MOVEMENT_OPTIONS as $movement => $movementLabel)
+                                <option value="{{ $movement }}" @selected(($filters['event_type'] ?? '') === $movement)>{{ $movementLabel }}</option>
                             @endforeach
                         </select>
                     </div>

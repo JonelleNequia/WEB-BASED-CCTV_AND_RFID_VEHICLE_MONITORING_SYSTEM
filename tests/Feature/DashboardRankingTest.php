@@ -55,6 +55,8 @@ class DashboardRankingTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+        // A Wednesday mid-month: "yesterday" is in the same week, month and year.
+        $this->travelTo(\Carbon\Carbon::parse('2026-10-14 12:00:00', 'Asia/Manila'));
         $vehicle = Vehicle::query()->create([
             'plate_number' => 'TOT-1001',
             'vehicle_owner_name' => 'Traffic Owner',
@@ -117,12 +119,13 @@ class DashboardRankingTest extends TestCase
         $this->actingAs($user)
             ->getJson(route('dashboard.live-state'))
             ->assertOk()
-            // 1 registered + 1 capture IN + 1 capture without a direction (ENTRY);
-            // the unknown-tag read is not a movement.
-            ->assertJsonPath('metrics.total_vehicles_entered_today', 3)
+            // 1 registered + 1 capture IN; the unknown-tag read is not a movement.
+            // Phase 7 (visitor model): a movement counts on the day it happened
+            // (observed yesterday, saved today = yesterday), not the day it was saved.
+            ->assertJsonPath('metrics.total_vehicles_entered_today', 2)
             ->assertJsonPath('metrics.total_vehicles_exited_today', 2)
             ->assertJsonPath('metrics.guest_observations_today', 3)
-            ->assertJsonPath('traffic_summary.today.entries', 3)
+            ->assertJsonPath('traffic_summary.today.entries', 2)
             ->assertJsonPath('traffic_summary.week.entries', 3)
             ->assertJsonPath('traffic_summary.month.entries', 3)
             ->assertJsonPath('traffic_summary.year.entries', 3);

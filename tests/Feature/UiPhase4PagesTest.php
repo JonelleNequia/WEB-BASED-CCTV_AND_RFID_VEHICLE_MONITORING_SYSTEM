@@ -35,7 +35,8 @@ class UiPhase4PagesTest extends TestCase
 
         $html = $this->actingAs($this->admin)->get(route('dashboard.index'))->assertOk()->getContent();
 
-        foreach (['Inside Campus', 'Entries Today', 'Exits Today', 'Alerts', 'Needs attention', 'Live activity', "Today's traffic"] as $text) {
+        // Phase 7 (visitor model): IN / OUT counts.
+        foreach (['Inside Campus', 'IN Today', 'OUT Today', 'IN / OUT Counts', 'Alerts', 'Needs attention', 'Live activity', "Today's traffic"] as $text) {
             $this->assertStringContainsString($text, $html, $text);
         }
         // Phase 0: no guest pass card or overstay items.

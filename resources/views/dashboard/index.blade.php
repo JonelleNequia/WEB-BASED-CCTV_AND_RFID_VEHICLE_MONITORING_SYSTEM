@@ -14,14 +14,83 @@
 
     <x-stat-row data-dashboard-metrics>
         {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
-        <x-stat label="Inside Campus" :value="$vehiclesInside" metric="vehicles_inside" tone="brand"
-                hint="Registered vehicles" />
-        <x-stat label="Entries Today" :value="$totalVehiclesEnteredToday" metric="total_vehicles_entered_today" :href="route('logs.index', ['period' => 'today', 'event_type' => 'ENTRY'])" />
-        <x-stat label="Exits Today" :value="$totalVehiclesExitedToday" metric="total_vehicles_exited_today" :href="route('logs.index', ['period' => 'today', 'event_type' => 'EXIT'])" />
+        <x-stat label="Inside Campus" :value="$vehiclesInside" metric="vehicles_inside" tone="brand">
+            {{-- Phase 7 (visitor model): registered vehicles only; unregistered visitors are counted IN/OUT, never inside. --}}
+            <x-slot:detail>
+                Registered vehicles:
+                @foreach ($insideByCategory as $category => $row)
+                    <span data-dashboard-inside="{{ $category }}">{{ $row['inside'] }}</span> {{ $row['label'] }}@if (! $loop->last) · @endif
+                @endforeach
+            </x-slot:detail>
+        </x-stat>
+        <x-stat label="IN Today" :value="$totalVehiclesEnteredToday" metric="total_vehicles_entered_today" hint="All categories, all gates" :href="route('logs.index', ['period' => 'today', 'event_type' => 'ENTRY'])" />
+        <x-stat label="OUT Today" :value="$totalVehiclesExitedToday" metric="total_vehicles_exited_today" hint="All categories, all gates" :href="route('logs.index', ['period' => 'today', 'event_type' => 'EXIT'])" />
         <x-stat label="Alerts" :value="$alertCounts['total']" metric="alerts_total" :tone="$alertCounts['total'] > 0 ? 'danger' : null" :href="route('logs.index', ['tab' => 'alerts'])">
             <x-slot:detail><span data-dashboard-metric="no_pass_alerts_today">{{ $noPassAlertsToday }}</span> no-pass · <span data-dashboard-metric="pass_alerts_today">{{ $passAlertsToday }}</span> lost/disabled tags</x-slot:detail>
         </x-stat>
     </x-stat-row>
+
+    {{-- Phase 7 (visitor model): IN / OUT per period, category and gate (MovementCountService). --}}
+    <section class="panel movement-counts-panel">
+        <div class="panel-header panel-header-modern">
+            <h2 class="panel-title">IN / OUT Counts</h2>
+            <a href="{{ route('logs.index') }}" class="button button-secondary button-sm">Activity logs</a>
+        </div>
+        <div class="table-responsive">
+            <table class="movement-counts" data-dashboard-movement-counts>
+                <thead>
+                    <tr>
+                        <th rowspan="2"></th>
+                        @foreach ($movementCounts as $period => $counts)
+                            <th colspan="2" class="movement-period">{{ $counts['label'] }}</th>
+                        @endforeach
+                    </tr>
+                    <tr>
+                        @foreach ($movementCounts as $period => $counts)
+                            <th>IN</th><th>OUT</th>
+                        @endforeach
+                    </tr>
+                </thead>
+                <tbody>
+                    @php($first = reset($movementCounts))
+                    <tr class="movement-total">
+                        <th scope="row">All vehicles</th>
+                        @foreach ($movementCounts as $period => $counts)
+                            <td data-movement="{{ $period }}.in">{{ $counts['in'] }}</td>
+                            <td data-movement="{{ $period }}.out">{{ $counts['out'] }}</td>
+                        @endforeach
+                    </tr>
+                    <tr class="movement-group"><th scope="rowgroup" colspan="{{ 1 + 2 * count($movementCounts) }}">By category</th></tr>
+                    @foreach ($first['categories'] as $category => $row)
+                        <tr>
+                            <th scope="row">{{ $row['label'] }}</th>
+                            @foreach ($movementCounts as $period => $counts)
+                                <td data-movement="{{ $period }}.categories.{{ $category }}.in">{{ $counts['categories'][$category]['in'] ?? 0 }}</td>
+                                <td data-movement="{{ $period }}.categories.{{ $category }}.out">{{ $counts['categories'][$category]['out'] ?? 0 }}</td>
+                            @endforeach
+                        </tr>
+                    @endforeach
+                    <tr class="movement-group"><th scope="rowgroup" colspan="{{ 1 + 2 * count($movementCounts) }}">By gate</th></tr>
+                    @foreach ($first['gates'] as $gate => $row)
+                        <tr>
+                            <th scope="row">{{ $row['label'] }}</th>
+                            @foreach ($movementCounts as $period => $counts)
+                                <td data-movement="{{ $period }}.gates.{{ $gate }}.in">{{ $counts['gates'][$gate]['in'] ?? 0 }}</td>
+                                <td data-movement="{{ $period }}.gates.{{ $gate }}.out">{{ $counts['gates'][$gate]['out'] ?? 0 }}</td>
+                            @endforeach
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
+        <p class="field-help">
+            Direction unknown (not counted above):
+            @foreach ($movementCounts as $period => $counts)
+                {{ $counts['label'] }} <strong data-movement="{{ $period }}.unknown">{{ $counts['unknown'] }}</strong>@if (! $loop->last) · @endif
+            @endforeach
+            . Unregistered visitors are counted IN and OUT but never as inside. A registered vehicle whose plate the camera read without a tag read counts for its category.
+        </p>
+    </section>
 
     <div class="dashboard-grid">
         <section class="panel">

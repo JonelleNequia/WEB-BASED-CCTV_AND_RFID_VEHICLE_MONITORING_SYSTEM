@@ -9,10 +9,12 @@ use App\Models\GuestVehicleObservation;
 use App\Models\RfidScanLog;
 use App\Models\Roi;
 use App\Models\VehicleEvent;
+use App\Models\VisitorRecord;
 use App\Services\EventService;
 use App\Services\VehicleRegistryService;
 use App\Support\DisplayTime;
 use App\Support\PhilippineTime;
+use App\Support\VehicleCategory;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
@@ -57,11 +59,13 @@ class VehicleEventController extends Controller
                 'category',
                 'vehicle_owner_name',
                 'log_type',
+                'gate',
             ]),
             'logTypeOptions' => self::LOG_TYPES,
             'logFilterChips' => self::LOG_FILTER_CHIPS,
             'periodOptions' => $this->periodOptions(),
             'categoryOptions' => $this->categoryOptions(),
+            'gateOptions' => \App\Models\Gate::options(),
             'printReports' => $this->printReportPayload($request),
         ]);
     }
@@ -92,7 +96,8 @@ class VehicleEventController extends Controller
                 'Owner',
                 'Vehicle',
                 'Color',
-                'Station',
+                'Category',
+                'Gate',
                 'State',
                 'Time',
                 'Status',
@@ -108,6 +113,7 @@ class VehicleEventController extends Controller
                     $log['owner_name'],
                     $log['vehicle_type'],
                     $log['vehicle_color'],
+                    $log['category_label'] ?? '',
                     $log['station_label'],
                     $log['state_label'],
                     $log['event_time_export'],
@@ -146,6 +152,11 @@ class VehicleEventController extends Controller
                 ->with('camera')
                 ->find($recordId))
                     ? $this->guestLogPayload($observation)
+                    : abort(404),
+            'visitor_record' => ($record = VisitorRecord::query()
+                ->with(['vehicle', 'plateProfile'])
+                ->find($recordId))
+                    ? $this->visitorRecordLogPayload($record, $this->guestAlertStatuses(collect([$record])))
                     : abort(404),
             'rfid_scan' => ($scanLog = RfidScanLog::query()
                 ->with(['vehicle', 'vehicleRfidTag'])
@@ -304,6 +315,8 @@ class VehicleEventController extends Controller
 
                 return [
                     'label' => $report['label'],
+                    // Phase 7: the printed report says which filters made it.
+                    'filters_label' => $this->filtersLabel($reportRequest),
                     'rows' => $this->filteredUnifiedLogs($reportRequest)
                         ->map(fn (array $log): array => $this->compactPrintRow($log))
                         ->values(),
@@ -336,6 +349,9 @@ class VehicleEventController extends Controller
             'source' => (string) ($log['source_label'] ?? ''),
             'plate_number' => (string) ($log['plate_number'] ?: 'GUEST'),
             'owner_name' => (string) ($log['owner_name'] ?: 'N/A'),
+            'movement' => (string) ($log['movement_label'] ?? $log['event_type'] ?? ''),
+            'category' => (string) ($log['category_label'] ?? ''),
+            'gate' => (string) ($log['station_label'] ?? ''),
             'state' => (string) ($log['state_label'] ?: 'N/A'),
             'status' => (string) ($log['status_label'] ?: 'N/A'),
             'rfid_tag' => (string) ($log['rfid_tag_uid'] ?: 'N/A'),
@@ -404,6 +420,13 @@ class VehicleEventController extends Controller
                         ->orWhere('owner_name', 'like', $owner);
                 });
             })
+            // Phase 7: gate = the reader's gate, or the camera's.
+            ->when($this->gateFilter($request) !== null, function ($query) use ($request): void {
+                $gates = $this->gateFilterValues($request);
+                $query->where(fn ($inner) => $inner
+                    ->whereHas('rfidScanLog', fn ($scan) => $scan->whereIn('scan_location', $gates))
+                    ->orWhereHas('camera', fn ($camera) => $camera->whereIn('camera_role', $gates)));
+            })
             ->when($dateFrom !== null, function ($query) use ($dateFrom): void {
                 $query->where('event_time', '>=', $dateFrom->copy()->startOfDay());
             })
@@ -454,6 +477,7 @@ class VehicleEventController extends Controller
         [$dateFrom, $dateUntil] = $this->dateWindowForRequest($request);
 
         $eventLogs = $this->filteredEventsQuery($request, $dateFrom, $dateUntil)
+            ->with('rfidScanLog:id,scan_location,tag_uid')
             ->get()
             ->map(fn (VehicleEvent $event): array => $this->vehicleEventLogPayload($event));
 
@@ -463,10 +487,12 @@ class VehicleEventController extends Controller
         $rfidOnlyLogs = $this->filteredRfidOnlyLogs($request, $dateFrom, $dateUntil)
             ->get()
             ->map(fn (RfidScanLog $scanLog): array => $this->rfidOnlyLogPayload($scanLog));
+        $visitorLogs = $this->filteredVisitorLogs($request, $dateFrom, $dateUntil);
 
         return $eventLogs
             ->concat($guestLogs)
             ->concat($rfidOnlyLogs)
+            ->concat($visitorLogs)
             // Phase 4: Log Type filter (Registered, Guest Pass, Manual, No-pass Alert).
             ->when(
                 array_key_exists((string) $request->query('log_type'), self::LOG_TYPES),
@@ -486,6 +512,7 @@ class VehicleEventController extends Controller
      */
     public const LOG_TYPES = [
         'registered' => 'Registered',
+        'unregistered_visitor' => 'Unregistered Visitor',
         'guest_pass' => 'Guest Pass (old records)',
         'manual' => 'Manual',
         'no_pass_alert' => 'No-pass Alert',
@@ -495,8 +522,18 @@ class VehicleEventController extends Controller
     public const LOG_FILTER_CHIPS = [
         '' => 'All',
         'registered' => 'Registered',
+        'unregistered_visitor' => 'Unregistered Visitors',
         'manual' => 'Manual',
         'alerts' => 'Alerts',
+    ];
+
+    /** Phase 7: Movement filter (ENTRY = IN, EXIT = OUT). */
+    public const MOVEMENT_OPTIONS = [
+        'ENTRY' => 'IN',
+        'EXIT' => 'OUT',
+        'UNKNOWN' => 'Direction unknown',
+        'GUEST' => 'Guest (older camera records)',
+        'RFID' => 'RFID scan only',
     ];
 
     /**
@@ -529,6 +566,11 @@ class VehicleEventController extends Controller
 
         return GuestVehicleObservation::query()
             ->with('camera')
+            // Phase 7: a no-pass alert that has an Unregistered Visitor record
+            // is shown once, as the visitor record.
+            ->where(fn ($query) => $query->whereNull('external_event_key')
+                ->orWhereNotIn('external_event_key', VisitorRecord::query()->select('external_event_key')))
+            ->when($this->gateFilter($request) !== null, fn ($query) => $query->whereIn('location', $this->gateFilterValues($request)))
             ->when(! $showingGuestOnly, function ($query): void {
                 $query->where(function ($query): void {
                     $query->whereNull('external_event_key')
@@ -564,7 +606,9 @@ class VehicleEventController extends Controller
 
                 $query->whereRaw('1 = 0');
             })
-            ->when($request->filled('category') || $request->filled('vehicle_owner_name'), function ($query): void {
+            // Older camera guest records are Unregistered Visitors (Phase 4).
+            ->when(($request->filled('category') && $request->string('category')->value() !== VehicleCategory::UNREGISTERED_VISITOR)
+                || $request->filled('vehicle_owner_name'), function ($query): void {
                 $query->whereRaw('1 = 0');
             })
             ->when($dateFrom !== null, function ($query) use ($dateFrom): void {
@@ -581,6 +625,7 @@ class VehicleEventController extends Controller
             ->with(['vehicle', 'vehicleRfidTag'])
             ->whereNull('correlated_vehicle_event_id')
             ->whereNull('guest_vehicle_observation_id')
+            ->when($this->gateFilter($request) !== null, fn ($query) => $query->whereIn('scan_location', $this->gateFilterValues($request)))
             ->when($request->filled('plate_text'), function ($query) use ($request): void {
                 $term = '%'.$request->string('plate_text')->trim().'%';
 
@@ -665,7 +710,15 @@ class VehicleEventController extends Controller
             'category_label' => $this->displayCategory($event->vehicle_category ?: $vehicle?->category),
             // Phase 4: "Guest Pass #G-03" instead of "Guest CCTV" for guest pass events.
             'source_label' => $event->source_display_label,
-            'station_label' => $event->camera?->camera_name ?: ($event->roi_name ?: 'No camera linked'),
+            // Phase 7: the gate (reader or camera); the camera name only when there is no gate.
+            'station_label' => ($gate = $event->rfidScanLog?->scan_location ?? $event->camera?->camera_role)
+                ? \App\Models\Gate::labelFor($gate)
+                : ($event->camera?->camera_name ?: ($event->roi_name ?: 'No gate')),
+            'movement_label' => match ($event->event_type) {
+                'ENTRY' => 'IN',
+                'EXIT' => 'OUT',
+                default => $event->event_type,
+            },
             'state_label' => $event->resulting_state_label,
             'display_time' => DisplayTime::datetime($time, 'No time'),
             'summary_label' => 'Vehicle Event #'.$event->id.' • '.(DisplayTime::datetime($time, 'No time')),
@@ -772,6 +825,161 @@ class VehicleEventController extends Controller
                 in_array($scanLog->vehicle_category, ['guest_pass', 'guest'], true) || $scanLog->verification_status === 'guest'
             ),
         ];
+    }
+
+    /**
+     * Phase 7 (visitor model): Unregistered Visitor records (camera, no
+     * registered tag read) as log rows, with the same filters.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    protected function filteredVisitorLogs(Request $request, ?Carbon $dateFrom = null, ?Carbon $dateUntil = null): Collection
+    {
+        $eventType = $request->filled('event_type') ? $request->string('event_type')->upper()->value() : null;
+
+        if (($eventType !== null && ! in_array($eventType, ['ENTRY', 'EXIT', 'UNKNOWN'], true)) || $request->filled('match_status')) {
+            return collect();
+        }
+
+        $records = VisitorRecord::query()
+            ->with(['vehicle', 'plateProfile'])
+            ->active()
+            ->when($eventType !== null, fn ($query) => $query->where('direction', match ($eventType) {
+                'ENTRY' => 'IN',
+                'EXIT' => 'OUT',
+                default => 'UNKNOWN',
+            }))
+            ->when($request->filled('plate_text'), function ($query) use ($request): void {
+                $key = '%'.\App\Support\PlateNumber::key($request->string('plate_text')->value()).'%';
+                $query->where(fn ($inner) => $inner->where('plate_key', 'like', $key)
+                    ->orWhereRaw("replace(replace(coalesce(ocr_plate_number, ''), ' ', ''), '-', '') like ?", [$key]));
+            })
+            ->when($this->gateFilter($request) !== null, fn ($query) => $query->whereIn('gate', $this->gateFilterValues($request)))
+            ->when($dateFrom !== null, fn ($query) => $query->where('seen_at', '>=', $dateFrom->copy()->startOfDay()))
+            ->when($dateUntil !== null, fn ($query) => $query->where('seen_at', '<', $dateUntil))
+            ->get();
+
+        $alerts = $this->guestAlertStatuses($records);
+
+        return $records
+            ->map(fn (VisitorRecord $record): array => $this->visitorRecordLogPayload($record, $alerts))
+            ->when($request->filled('category'), fn (Collection $logs) => $logs->where('category', VehicleCategory::normalize($request->string('category')->value())))
+            ->when($request->filled('vehicle_owner_name'), function (Collection $logs) use ($request): Collection {
+                $owner = mb_strtolower($request->string('vehicle_owner_name')->trim()->value());
+
+                return $logs->filter(fn (array $log): bool => $owner !== '' && str_contains(mb_strtolower((string) $log['owner_name']), $owner));
+            })
+            ->values();
+    }
+
+    /**
+     * Open no-pass alerts (older guest records) by event key, so a visitor
+     * record keeps the alert of its crossing.
+     *
+     * @param  Collection<int, VisitorRecord>  $records
+     * @return array<string, bool>
+     */
+    protected function guestAlertStatuses(Collection $records): array
+    {
+        return GuestVehicleObservation::query()
+            ->whereIn('external_event_key', $records->pluck('external_event_key')->filter()->all())
+            ->where('observation_source', 'cctv')
+            ->get(['external_event_key', 'status'])
+            ->mapWithKeys(fn (GuestVehicleObservation $observation): array => [
+                $observation->external_event_key => $observation->status !== GuestVehicleObservation::STATUS_RESOLVED,
+            ])
+            ->all();
+    }
+
+    /**
+     * @param  array<string, bool>  $openAlerts
+     * @return array<string, mixed>
+     */
+    protected function visitorRecordLogPayload(VisitorRecord $record, array $openAlerts = []): array
+    {
+        $time = $record->seen_at;
+        $vehicle = $record->vehicle;
+        // Option A (Phase 7): the plate of a registered vehicle, read without its tag.
+        $plateOnly = $vehicle && $vehicle->created_at && $vehicle->created_at->lte($time);
+        $category = $plateOnly ? VehicleCategory::normalize($vehicle->category) : VehicleCategory::UNREGISTERED_VISITOR;
+
+        return [
+            'record_type' => 'visitor_record',
+            'record_type_label' => 'Unregistered Visitor',
+            'id' => $record->id,
+            'detail_url' => $record->plateProfile
+                ? route('visitors.profiles.show', $record->plateProfile)
+                : route('visitors.index', ['plate_status' => $record->plate_status]).'#visitor-record-'.$record->id,
+            'export_url' => route('vehicle-events.export.csv', [
+                'record_type' => 'visitor_record',
+                'record_id' => $record->id,
+            ]),
+            'event_type' => match ($record->direction) {
+                'IN' => 'ENTRY',
+                'OUT' => 'EXIT',
+                default => 'UNKNOWN',
+            },
+            'movement_label' => $record->direction === 'UNKNOWN' ? 'Direction unknown' : $record->direction,
+            'plate_number' => $record->plateLabel(),
+            'owner_name' => $vehicle?->vehicle_owner_name ?: 'N/A',
+            'vehicle_type' => $record->vehicle_type ?: 'Vehicle',
+            'vehicle_color' => $record->vehicle_color ?: 'N/A',
+            'category' => $category,
+            'category_label' => VehicleCategory::label($category),
+            'source_label' => $plateOnly ? 'Camera · plate only, no tag read' : 'Camera · no registered tag',
+            'station_label' => \App\Models\Gate::labelFor($record->gate),
+            'state_label' => $plateOnly ? 'Not changed (no tag read)' : 'Not tracked (visitor)',
+            'display_time' => DisplayTime::datetime($time, 'No time'),
+            'summary_label' => 'Unregistered Visitor #'.$record->id.' • '.(DisplayTime::datetime($time, 'No time')),
+            'event_time_export' => $time?->toDateTimeString(),
+            'status_label' => $record->plateLabel(),
+            'status_badge_class' => 'secondary',
+            'match_label' => $plateOnly ? 'Registered vehicle (plate only)' : 'Unregistered',
+            'rfid_tag_uid' => 'N/A',
+            'image_url' => $record->snapshot_url,
+            'is_alert' => (bool) ($openAlerts[$record->external_event_key] ?? false),
+            'alert_reason' => ($openAlerts[$record->external_event_key] ?? false) ? 'Vehicle with no pass' : null,
+            'sort_time' => $this->sortTimestamp($record->created_at, $time),
+            ...$this->logTypeFields($plateOnly ? 'registered' : 'unregistered_visitor', ! $plateOnly),
+        ];
+    }
+
+    protected function gateFilter(Request $request): ?string
+    {
+        return $request->filled('gate') ? \App\Models\Gate::resolveCode($request->string('gate')->value()) ?? '__none__' : null;
+    }
+
+    /**
+     * The gate code and the old station name it replaced (older records).
+     *
+     * @return list<string>
+     */
+    protected function gateFilterValues(Request $request): array
+    {
+        $gate = (string) $this->gateFilter($request);
+
+        return array_values(array_unique([$gate, ...array_keys(\App\Models\Gate::LEGACY_CODES, $gate, true)]));
+    }
+
+    /**
+     * Phase 7: "Gate 1 · IN · Faculty & Staff · Today" for printed reports.
+     */
+    protected function filtersLabel(Request $request): string
+    {
+        $parts = array_filter([
+            $request->filled('gate') ? \App\Models\Gate::labelFor($request->string('gate')->value()) : null,
+            $request->filled('event_type') ? (self::MOVEMENT_OPTIONS[$request->string('event_type')->upper()->value()] ?? null) : null,
+            $request->filled('category') ? VehicleCategory::label($request->string('category')->value()) : null,
+            $request->filled('log_type') ? (self::LOG_FILTER_CHIPS[$request->string('log_type')->value()] ?? null) : null,
+            $request->filled('plate_text') ? 'Plate "'.$request->string('plate_text')->trim().'"' : null,
+            $request->filled('vehicle_owner_name') ? 'Owner "'.$request->string('vehicle_owner_name')->trim().'"' : null,
+            $this->selectedPeriodLabel($request) !== 'All Records' ? $this->selectedPeriodLabel($request) : null,
+            $request->filled('date_from') || $request->filled('date_to')
+                ? trim(($request->string('date_from')->value() ?: '…').' to '.($request->string('date_to')->value() ?: '…'))
+                : null,
+        ]);
+
+        return $parts === [] ? 'No filters' : implode(' · ', $parts);
     }
 
     /**

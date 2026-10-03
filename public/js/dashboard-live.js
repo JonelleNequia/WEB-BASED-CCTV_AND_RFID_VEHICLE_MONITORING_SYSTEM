@@ -166,6 +166,29 @@
         });
     }
 
+    // Phase 7 (visitor model): IN / OUT per period, category and gate; inside per category.
+    function renderMovementCounts(counts, inside) {
+        if (counts && typeof counts === 'object') {
+            document.querySelectorAll('[data-movement]').forEach(function (node) {
+                const value = node.dataset.movement.split('.').reduce(function (current, key) {
+                    return current && typeof current === 'object' ? current[key] : undefined;
+                }, counts);
+                if (value !== undefined && value !== null) {
+                    node.textContent = String(value);
+                }
+            });
+        }
+
+        if (inside && typeof inside === 'object') {
+            Object.entries(inside).forEach(function ([category, row]) {
+                const node = document.querySelector(`[data-dashboard-inside="${category}"]`);
+                if (node) {
+                    node.textContent = String(row.inside ?? 0);
+                }
+            });
+        }
+    }
+
     // Phase 6 (visitor model): Visitor Ranking (plates not in the Registry).
     function renderVisitorRanking(rows) {
         const body = document.querySelector('[data-dashboard-visitor-ranking]');
@@ -395,6 +418,7 @@
         );
         renderRanking(body.frequent_entry_vehicles || []);
         renderVisitorRanking(body.frequent_unregistered_visitors || []);
+        renderMovementCounts(body.movement_counts || null, body.inside_by_category || null);
         renderAttention(body.attention);
         renderChart(body.hourly);
     }

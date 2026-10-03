@@ -17,7 +17,8 @@
         @endif
     </td>
     <td>{{ $log['vehicle_type'] }}@if (($log['vehicle_color'] ?? 'N/A') !== 'N/A') · {{ $log['vehicle_color'] }}@endif</td>
-    <td><x-badge :status="strtolower($log['event_type'])" :label="$log['event_type']" /></td>
+    {{-- Phase 7: IN / OUT (the tone still follows ENTRY / EXIT). --}}
+    <td><x-badge :status="strtolower($log['event_type'])" :label="$log['movement_label'] ?? $log['event_type']" /></td>
     <td>
         <span @class(['log-type', 'log-type-alert' => $log['is_alert'] ?? false])>{{ $log['log_type_label'] ?? '' }}</span>
         @if (($log['is_alert'] ?? false) && ($log['alert_reason'] ?? null))

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Vehicle;
+use App\Support\VehicleCategory;
 
 /**
  * Phase 1: the single source of truth for "vehicles inside".
@@ -32,5 +33,26 @@ class VehicleOccupancyService
             'registered' => $registered,
             'total' => $registered,
         ];
+    }
+
+    /**
+     * Phase 7 (visitor model): registered vehicles inside, per category.
+     *
+     * @return array<string, array{label: string, inside: int}>
+     */
+    public function insideByCategory(): array
+    {
+        $inside = Vehicle::query()
+            ->where('status', 'active')
+            ->where('current_state', Vehicle::STATE_INSIDE)
+            ->pluck('category')
+            ->countBy(fn (?string $category): string => VehicleCategory::normalize($category));
+
+        return collect(VehicleCategory::REGISTRY)
+            ->mapWithKeys(fn (string $category): array => [$category => [
+                'label' => VehicleCategory::LABELS[$category],
+                'inside' => (int) ($inside[$category] ?? 0),
+            ]])
+            ->all();
     }
 }
