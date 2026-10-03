@@ -88,7 +88,7 @@
             @foreach ($movementCounts as $period => $counts)
                 {{ $counts['label'] }} <strong data-movement="{{ $period }}.unknown">{{ $counts['unknown'] }}</strong>@if (! $loop->last) · @endif
             @endforeach
-            . Unregistered visitors are counted IN and OUT but never as inside. A registered vehicle whose plate the camera read without a tag read counts for its category.
+            <br>Unregistered visitors are counted IN and OUT but never as inside. A registered vehicle whose plate the camera read without a tag read counts for its category.
         </p>
     </section>
 
