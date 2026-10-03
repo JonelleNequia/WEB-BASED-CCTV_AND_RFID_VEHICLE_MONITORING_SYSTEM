@@ -294,7 +294,7 @@ class LaravelEventClient:
 
     def submit_guest_observation(self, payload, image_bytes=None, filename=None):
         """
-        Submit a "Vehicle with no pass" alert after the RFID window expires.
+        Submit an Unregistered Visitor camera record after the RFID window expires.
         """
         if not self.guest_observation_url:
             return {

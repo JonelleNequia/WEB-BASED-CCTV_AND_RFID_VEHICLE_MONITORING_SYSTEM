@@ -25,7 +25,7 @@ class ActivityLogController extends Controller
     {
         return match ($this->resolveTab($request, self::TABS)) {
             'scans' => app()->call([app(RfidScanController::class), 'history']),
-            'alerts' => app()->call([app(GuestObservationController::class), 'index']),
+            'alerts' => app()->call([app(AlertController::class), 'index']),
             default => app()->call([app(VehicleEventController::class), 'index']),
         };
     }

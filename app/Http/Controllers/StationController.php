@@ -137,7 +137,7 @@ class StationController extends Controller
             ->map(function (VehicleEvent $event): array {
                 $vehicle = $event->vehicle;
                 $scanLog = $event->rfidScanLog;
-                $plateNumber = $event->plate_text ?: $vehicle?->plate_number ?: 'GUEST';
+                $plateNumber = $event->plate_text ?: $vehicle?->plate_number ?: 'No plate';
                 $entriesToday = $event->daily_entries_count
                     ?? $vehicle?->entries_today_count
                     ?? 0;
@@ -155,7 +155,7 @@ class StationController extends Controller
                     'camera_role' => $event->camera?->camera_role,
                     'scan_location' => $scanLog?->scan_location,
                     'verification_label' => $scanLog?->verificationLabel
-                        ?? ($event->vehicle_id ? 'Registered' : 'GUEST'),
+                        ?? ($event->vehicle_id ? 'Registered' : 'Unregistered Visitor'),
                     'resulting_state' => $event->resulting_state ?: 'N/A',
                     'entries_today_count' => (int) $entriesToday,
                     'exits_today_count' => (int) $exitsToday,
@@ -189,19 +189,19 @@ class StationController extends Controller
                 return [
                     'id' => 'guest-'.$observation->id,
                     'record_type' => 'guest_observation',
-                    'event_type' => 'GUEST',
-                    'plate_number' => $observation->plate_number ?: $observation->plate_text ?: 'GUEST',
+                    'event_type' => 'UNREGISTERED',
+                    'plate_number' => $observation->plate_number ?: $observation->plate_text ?: 'No plate',
                     'owner_name' => 'N/A',
                     'vehicle_type' => $observation->vehicle_type ?: 'Vehicle',
                     'camera_role' => $observation->camera?->camera_role,
                     'scan_location' => $observation->location,
-                    'verification_label' => 'GUEST',
-                    'resulting_state' => 'Guest',
+                    'verification_label' => 'Unregistered Visitor',
+                    'resulting_state' => 'Not tracked',
                     'entries_today_count' => 0,
                     'exits_today_count' => 0,
                     'event_time' => $observation->observed_at?->toIso8601String(),
                     'display_time' => DisplayTime::datetimeSeconds($observation->observed_at),
-                    'status' => 'Guest',
+                    'status' => 'Unregistered Visitor',
                     'snapshot_url' => $observation->snapshot_url,
                     'sort_time' => $this->sortTimestamp($observation->created_at, $observation->observed_at),
                 ];

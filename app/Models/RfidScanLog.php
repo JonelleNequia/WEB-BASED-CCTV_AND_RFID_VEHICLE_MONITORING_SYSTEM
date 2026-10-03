@@ -158,24 +158,9 @@ class RfidScanLog extends Model
             return 'Unknown tag';
         }
 
+        // A vehicle still in the old Guest category: its Registry entry needs a category.
         if ($this->verification_status === 'guest') {
-            return 'Guest';
-        }
-
-        // Phase 3: guest pass outcomes.
-        $guestPassLabel = match ($this->verification_status) {
-            'guest_pass_available' => 'Guest Pass (issue)',
-            'guest_pass_entry' => 'Guest Pass Entry',
-            'guest_pass_exit' => 'Guest Pass Exit',
-            'guest_pass_duplicate' => 'Guest Pass (ignored)',
-            'guest_pass_not_issued' => 'Guest Pass not issued',
-            'guest_pass_lost' => 'Lost Guest Pass',
-            'guest_pass_disabled' => 'Disabled Guest Pass',
-            default => null,
-        };
-
-        if ($guestPassLabel !== null) {
-            return $guestPassLabel;
+            return 'Needs category';
         }
 
         return str_replace('_', ' ', ucfirst($this->verification_status));

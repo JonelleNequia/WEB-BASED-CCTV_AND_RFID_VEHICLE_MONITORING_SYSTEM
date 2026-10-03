@@ -54,8 +54,8 @@ class DashboardController extends Controller
                 'total_vehicles_entered_today' => $data['totalVehiclesEnteredToday'],
                 'total_vehicles_exited_today' => $data['totalVehiclesExitedToday'],
                 'guest_observations_today' => $data['guestObservationsToday'],
-                'no_pass_alerts_today' => $data['noPassAlertsToday'],
-                'pass_alerts_today' => $data['passAlertsToday'],
+                'alert_anomalies' => $data['alertCounts']['anomalies'],
+                'alert_unknown_tags' => $data['alertCounts']['unknown_tags'],
                 'registered_scans_today' => $data['rfidStats']['registered_scans_today'] ?? 0,
                 'camera_connected' => $data['cameraSummary']['connected'],
                 'camera_total' => $data['cameraSummary']['total'],
@@ -237,8 +237,7 @@ class DashboardController extends Controller
     }
 
     /**
-     * Camera guest timeouts are operational RFID-adjacent activity, so include
-     * them in the dashboard stream with the same GUEST label as scan rows.
+     * Camera records of unregistered visitors are listed with the scans.
      *
      * @return Collection<int, array<string, mixed>>
      */
@@ -247,15 +246,13 @@ class DashboardController extends Controller
         $scanRows = $rfidService->recentScans(30)
             ->map(function ($scan): array {
                 $time = $scan->scan_time;
-                $plate = $scan->vehicle?->plate_number ?: 'GUEST';
+                $plate = $scan->vehicle?->plate_number ?: ($scan->isUnknownTag() ? 'Unknown tag' : 'No plate');
 
                 return [
-                    'title' => $scan->verification_status === 'guest'
-                        ? 'GUEST'
-                        : $scan->tag_uid.' • '.$scan->resolvedEventTypeLabel,
+                    'title' => $scan->tag_uid.' • '.$scan->resolvedEventTypeLabel,
                     'summary' => $plate.' • '.$scan->scanLocationLabel.' • State: '.$scan->resultingStateLabel,
                     'display_time' => DisplayTime::datetime($time, 'No time'),
-                    'badge_label' => $scan->verification_status === 'guest' ? 'GUEST' : $scan->verificationLabel,
+                    'badge_label' => $scan->verificationLabel,
                     'badge_class' => $scan->verificationBadgeClass,
                     'sort_time' => $scan->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,
                 ];
@@ -272,9 +269,9 @@ class DashboardController extends Controller
 
                 return [
                     'title' => $plate,
-                    'summary' => 'Guest Observation #'.$observation->id.' • '.ucfirst((string) $observation->location).' Station',
+                    'summary' => 'Unregistered Visitor • '.Gate::labelFor($observation->location),
                     'display_time' => DisplayTime::datetime($time, 'No time'),
-                    'badge_label' => 'GUEST',
+                    'badge_label' => 'Unregistered',
                     'badge_class' => 'secondary',
                     'sort_time' => $observation->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,
                 ];
@@ -304,13 +301,18 @@ class DashboardController extends Controller
             ->get()
             ->map(function (VehicleEvent $event): array {
                 $time = $event->event_time;
-                $plate = $event->plate_text ?: $event->vehicle?->plate_number ?: 'GUEST';
+                $plate = $event->plate_text ?: $event->vehicle?->plate_number ?: 'No plate';
+                $movement = match ($event->event_type) {
+                    'ENTRY' => 'IN',
+                    'EXIT' => 'OUT',
+                    default => $event->event_type,
+                };
 
                 return [
-                    'title' => $event->event_type.' • '.$plate,
+                    'title' => $movement.' • '.$plate,
                     'summary' => $event->event_origin_label.' • '.$event->display_vehicle_type,
                     'display_time' => DisplayTime::datetime($time, 'No time'),
-                    'badge_label' => $event->display_status_label,
+                    'badge_label' => in_array($event->event_origin, ['guest_cctv', 'guest_manual'], true) ? 'Unregistered' : $event->display_status_label,
                     'badge_class' => $event->status_badge_class,
                     'sort_time' => $event->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,
                 ];
@@ -326,10 +328,10 @@ class DashboardController extends Controller
                 $eventType = VehicleEvent::eventTypeForDirection(data_get($observation->detection_metadata_json, 'direction'));
 
                 return [
-                    'title' => $eventType.' • '.$this->guestDisplayPlate($observation),
-                    'summary' => 'Guest Observation #'.$observation->id.' • '.Gate::labelFor($observation->location),
+                    'title' => ($eventType === 'EXIT' ? 'OUT' : 'IN').' • '.$this->guestDisplayPlate($observation),
+                    'summary' => 'Unregistered Visitor • '.Gate::labelFor($observation->location),
                     'display_time' => DisplayTime::datetime($time, 'No time'),
-                    'badge_label' => $eventType === 'EXIT' ? 'Exit' : 'Entry',
+                    'badge_label' => 'Unregistered',
                     'badge_class' => 'secondary',
                     'sort_time' => $observation->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,
                 ];
@@ -360,6 +362,6 @@ class DashboardController extends Controller
     {
         return $observation->plate_number
             ?: $observation->plate_text
-            ?: 'Guest Vehicle';
+            ?: 'No plate';
     }
 }

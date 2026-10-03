@@ -52,7 +52,7 @@ class GuestObservationController extends Controller
     /** Phase 5: a pass read this long after the crossing still cancels the alert. */
     protected const DETECTOR_LATE_SCAN_SECONDS = 8;
 
-    public const NO_PASS_NOTE = 'Vehicle with no pass: no registered RFID tag was read within the detector window.';
+    public const NO_PASS_NOTE = 'Unregistered visitor: no registered RFID tag was read within the detector window.';
 
     /**
      * Show guest monitoring form and log history.
@@ -112,10 +112,10 @@ class GuestObservationController extends Controller
 
             return back()
                 ->withInput()
-                ->withErrors(['guest_observation' => 'Guest observation could not be saved. Please try again.']);
+                ->withErrors(['guest_observation' => 'Record could not be saved. Please try again.']);
         }
 
-        return back()->with('status', 'Guest observation saved.');
+        return back()->with('status', 'Camera record saved.');
     }
 
     /**
@@ -147,7 +147,7 @@ class GuestObservationController extends Controller
             }
         });
 
-        return back()->with('status', 'Guest observation updated.');
+        return back()->with('status', 'Record updated.');
     }
 
     /**
@@ -185,7 +185,7 @@ class GuestObservationController extends Controller
             }
         });
 
-        return back()->with('status', 'Guest observation marked as verified.');
+        return back()->with('status', 'Record marked as verified.');
     }
 
     protected function normalizePlate(?string $plate): ?string
@@ -311,7 +311,7 @@ class GuestObservationController extends Controller
                 ]);
 
                 return response()->json([
-                    'message' => 'No-pass alert suppressed because an RFID scan matched this detector window.',
+                    'message' => 'Not an unregistered visitor: an RFID scan matched this detector window.',
                     'duplicate' => true,
                     'suppressed' => true,
                     'rfid_scan_id' => $recentVerifiedScan->id,
@@ -403,7 +403,7 @@ class GuestObservationController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Guest observation saved.',
+                'message' => 'Camera record saved.',
                 'duplicate' => false,
                 'guest_observation_id' => $observation->id,
                 'status' => $observation->status,
@@ -424,7 +424,7 @@ class GuestObservationController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Guest observation payload is invalid.',
+                'message' => 'Camera record payload is invalid.',
                 'errors' => $exception->errors(),
             ], 422);
         } catch (Throwable $exception) {
@@ -447,7 +447,7 @@ class GuestObservationController extends Controller
             }
 
             return response()->json([
-                'message' => 'Guest observation could not be saved. Check storage permissions and laravel.log.',
+                'message' => 'Camera record could not be saved. Check storage permissions and laravel.log.',
             ], 500);
         }
     }
@@ -520,7 +520,7 @@ class GuestObservationController extends Controller
                 'match_score' => null,
                 'match_status' => $resolved ? VehicleEvent::MATCH_NO_PASS_RESOLVED : VehicleEvent::MATCH_NO_PASS_ALERT,
                 'resulting_state' => null,
-                'anomaly_reason' => $resolved ? $observation->notes : 'Vehicle with no pass',
+                'anomaly_reason' => $resolved ? $observation->notes : 'Unregistered visitor',
                 'daily_entries_count' => null,
                 'daily_exits_count' => null,
             ]

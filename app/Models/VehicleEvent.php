@@ -149,11 +149,11 @@ class VehicleEvent extends Model
             return [];
         }
 
-        $passLabel = $visit->rfidTag?->label ?? 'Guest Pass';
+        $passLabel = $visit->rfidTag?->label ?? 'Old pass record';
 
         return [
-            'plate_number' => $visit->plate ?: ($visit->rfidTag?->display_number ?? 'GUEST'),
-            'owner_name' => $visit->driver_name ?: 'Guest',
+            'plate_number' => $visit->plate ?: ($visit->rfidTag?->display_number ?? 'No plate'),
+            'owner_name' => $visit->driver_name ?: 'N/A',
             'verification_label' => $passLabel,
             'resulting_state' => $event->event_type === 'EXIT' ? 'Outside' : 'Inside',
         ];
@@ -184,7 +184,7 @@ class VehicleEvent extends Model
         return [
             'plate_number' => $event->plate_text ?: 'NO PLATE READ',
             'owner_name' => 'Unknown',
-            'verification_label' => 'NO PASS',
+            'verification_label' => 'Unregistered Visitor',
             'resulting_state' => 'N/A',
             // Older CCTV guest rows (before Phase 5) keep their old status and do not alert.
             'no_pass_alert' => $event->match_status === self::MATCH_NO_PASS_ALERT,
@@ -268,8 +268,8 @@ class VehicleEvent extends Model
         return match ($this->display_status) {
             'open' => 'Entry',
             'closed' => 'Exit',
-            self::MATCH_NO_PASS_ALERT => 'No-pass Alert',
-            self::MATCH_NO_PASS_RESOLVED => 'Resolved (pass issued)',
+            self::MATCH_NO_PASS_ALERT => 'Unregistered',
+            self::MATCH_NO_PASS_RESOLVED => 'Registered tag read',
             default => str($this->display_status)->replace('_', ' ')->title()->value(),
         };
     }
@@ -308,12 +308,8 @@ class VehicleEvent extends Model
             return 'Pending';
         }
 
-        if ($this->event_origin === 'guest_cctv') {
-            return 'No pass';
-        }
-
-        if ($this->vehicle_category === 'guest' || $this->event_origin === 'guest_manual') {
-            return 'Guest';
+        if ($this->event_origin === 'guest_cctv' || $this->vehicle_category === 'guest' || $this->event_origin === 'guest_manual') {
+            return 'Unregistered';
         }
 
         if ($this->event_type === 'ENTRY') {
@@ -334,11 +330,11 @@ class VehicleEvent extends Model
     {
         return match ($this->event_origin) {
             'cctv_detected' => 'CCTV Observation',
-            'guest_manual' => 'Guest Manual',
-            'guest_cctv' => 'No-pass Alert',
+            'guest_manual' => 'Manual · no registered tag',
+            'guest_cctv' => 'Camera · no registered tag',
             'rfid_simulated' => 'RFID Scan',
             'rfid_hardware' => 'RFID Reader',
-            'guest_pass' => 'Guest Pass',
+            'guest_pass' => 'Old pass record',
             default => 'Manual Log',
         };
     }

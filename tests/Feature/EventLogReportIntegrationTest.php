@@ -109,11 +109,12 @@ class EventLogReportIntegrationTest extends TestCase
         $this->actingAs($admin)
             ->get(route('logs.index'))
             ->assertOk()
-            ->assertSee('GUEST')
+            ->assertSee('Unregistered')
             ->assertSee('GST-LOG-01')
             ->assertSee('White')
             ->assertSee('/storage/guest_snapshots/event-log-guest.jpg', false)
-            ->assertSee('Guest Observation #'.$observation->id);
+            ->assertSee('Unregistered Visitor #'.$observation->id)
+            ->assertDontSee('Guest Observation');
     }
 
     public function test_event_logs_can_filter_records_by_current_month(): void
@@ -187,12 +188,12 @@ class EventLogReportIntegrationTest extends TestCase
         $this->getJson(route('api.recent-event-logs'))
             ->assertOk()
             ->assertJsonPath('logs.0.plate_number', 'GST-RT-01')
-            ->assertJsonPath('logs.0.event_type', 'GUEST');
+            ->assertJsonPath('logs.0.event_type', 'UNREGISTERED');
 
         $this->getJson(route('api.recent-station-logs'))
             ->assertOk()
             ->assertJsonPath('logs.0.plate_number', 'GST-RT-01')
-            ->assertJsonPath('logs.0.event_type', 'GUEST');
+            ->assertJsonPath('logs.0.event_type', 'UNREGISTERED');
     }
 
     public function test_old_guest_category_tag_read_is_flagged_and_makes_no_guest_record(): void

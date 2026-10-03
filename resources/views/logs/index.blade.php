@@ -16,8 +16,6 @@
         <x-slot:actions>
             @if ($tab === 'events')
                 <a href="{{ route('vehicle-events.create') }}" class="button button-primary">Quick Manual Log</a>
-            @elseif ($tab === 'alerts')
-                <a href="{{ route('visitors.index', ['add' => 1]) }}" class="button button-primary">Add visitor manually</a>
             @endif
         </x-slot:actions>
     </x-page-header>

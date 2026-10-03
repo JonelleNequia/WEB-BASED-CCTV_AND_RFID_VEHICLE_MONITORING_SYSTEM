@@ -1385,7 +1385,7 @@ def default_overlay():
     Label when no registered tag was read in the window.
     """
     return {
-        "label": "NO PASS",
+        "label": "UNREGISTERED",
         "color": "red",
         "verification": "no_pass",
     }
@@ -1832,7 +1832,7 @@ def apply_rfid_match_result(state, track_id, match):
 
 def rfid_detection_window_worker(role, state, track_id, laravel_client):
     """
-    Poll Laravel for a pass read; on timeout send a no-pass alert, all outside
+    Poll Laravel for a pass read; on timeout send an Unregistered Visitor record, all outside
     the frame capture loop. Either way the crossing itself (gate, direction,
     time, track, snapshot) is sent once (Phase 2).
     """
@@ -2158,7 +2158,7 @@ def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None):
 
 def submit_guest_observation_for_window(role, state, track_id, laravel_client):
     """
-    Send one "Vehicle with no pass" alert (snapshot, then color/plate) after
+    Send one Unregistered Visitor camera record (snapshot, then color/plate) after
     the RFID window expires without blocking video. Laravel no longer turns
     this into a guest record or an INSIDE guest session.
     """
@@ -2214,7 +2214,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
 
     if snapshot_frame is None:
         with state["lock"]:
-            state["last_error"] = f"{role.capitalize()} vehicle had no pass read, but no snapshot frame was available."
+            state["last_error"] = f"{role.capitalize()} unregistered vehicle: no snapshot frame was available."
         return
 
     # A full-resolution frame from the moment of the crossing, when available:
@@ -2240,7 +2240,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
 
     if not snapshot:
         with state["lock"]:
-            state["last_error"] = f"{role.capitalize()} vehicle had no pass read, but snapshot encoding failed."
+            state["last_error"] = f"{role.capitalize()} unregistered vehicle: snapshot encoding failed."
         return
 
     base_metadata = {
@@ -2276,7 +2276,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
                 state["crossings_logged"] += 1
             state["last_error"] = ""
         else:
-            state["last_error"] = initial_result.get("message", "No-pass alert could not be saved.")
+            state["last_error"] = initial_result.get("message", "Unregistered visitor record could not be saved.")
             return
 
     if not analysis_frames:
@@ -2310,7 +2310,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
     vehicle_color = reconcile_guest_vehicle_color(vehicle_color, detailed_vehicle_color)
 
     print(
-        f"{role.capitalize()} no-pass alert analysis {window_payload['event_key']}: "
+        f"{role.capitalize()} unregistered visitor analysis {window_payload['event_key']}: "
         f"plate={plate_number or 'unreadable'} (best guess {vote['best_guess'] or '-'}, {vote['reason']}) "
         f"color={vehicle_color or 'None'} "
         f"ocr_frames={analysis_details['frames_checked']} "
@@ -2365,7 +2365,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
         remember_recent_resolution_locked(state, track_id, window_payload.get("live_xyxy", window_payload["xyxy"]), state["track_overlays"][track_id], time.monotonic())
 
         if not result.get("accepted"):
-            state["last_error"] = result.get("message", "No-pass alert could not be saved.")
+            state["last_error"] = result.get("message", "Unregistered visitor record could not be saved.")
 
 
 def update_detection_windows(role, frame, results, state, laravel_client):

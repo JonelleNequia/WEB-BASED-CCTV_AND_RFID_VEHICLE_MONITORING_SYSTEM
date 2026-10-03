@@ -99,7 +99,7 @@ class Phase8CleanupTest extends TestCase
 
         $this->actingAs($guard)->get('/guests')->assertRedirect(route('visitors.index'));
         $this->actingAs($this->admin)->get(route('logs.index', ['tab' => 'alerts']))
-            ->assertOk()->assertDontSee('Add Guest Observation')->assertSee('Add visitor manually');
+            ->assertOk()->assertDontSee('Add Guest Observation');
         $this->actingAs($guard)->get(route('visitors.index', ['add' => 1]))->assertOk()->assertSee('Save visitor');
 
         $this->actingAs($guard)->post(route('visitors.records.store'), [

@@ -359,10 +359,10 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertSame('guest_cctv', $event->event_origin);
         $this->assertNull($event->vehicle_category);
         $this->assertSame('ABC1234', $event->plate_number);
-        // Phase 5: a "Vehicle with no pass" alert, not a guest INSIDE session.
+        // Phase 5: an Unregistered Visitor camera record, not a guest INSIDE session.
         $this->assertSame(VehicleEvent::MATCH_NO_PASS_ALERT, $event->match_status);
         $this->assertNull($event->resulting_state);
-        $this->assertSame('Vehicle with no pass', $event->anomaly_reason);
+        $this->assertSame('Unregistered visitor', $event->anomaly_reason);
         $this->assertSame($observation->snapshot_path, $event->vehicle_image_path);
         $this->assertSame(0, ActiveSession::query()->count());
     }
@@ -700,8 +700,10 @@ class DetectedEventIngestionTest extends TestCase
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
+        // UI Phase 2 (wording): the Alerts tab lists anomalies and unknown
+        // tags only; the camera record (with its snapshot) is in Activity Logs.
         $this->actingAs($admin)
-            ->get(route('logs.index', ['tab' => 'alerts']))
+            ->get(route('logs.index'))
             ->assertOk()
             ->assertSee($observation->snapshot_url, false);
 

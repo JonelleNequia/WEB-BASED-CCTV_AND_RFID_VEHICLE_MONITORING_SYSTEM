@@ -33,9 +33,8 @@
                         @default OCR running
                     @endswitch
                 </div>
-                @if ($record->source !== 'camera')
-                    {{-- Phase 8: recorded by hand, or converted from an older guest record. --}}
-                    <div class="table-subtext">{{ $record->source === 'manual' ? 'Recorded by hand' : 'From an older guest record' }}</div>
+                @if ($record->source === 'manual')
+                    <div class="table-subtext">Recorded by hand</div>
                 @endif
                 @if ($record->vehicle)
                     {{-- Phase 6: the plate is in the Registry (registered later, or its tag was not read). --}}

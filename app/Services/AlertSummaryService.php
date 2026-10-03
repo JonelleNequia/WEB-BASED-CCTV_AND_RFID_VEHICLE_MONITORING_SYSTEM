@@ -2,16 +2,17 @@
 
 namespace App\Services;
 
-use App\Models\GuestVehicleObservation;
 use App\Models\RfidScanLog;
 use App\Support\DisplayTime;
 use App\Support\PhilippineTime;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * UI Phase 2: one count of things a guard/admin should look at.
- * Shown as the sidebar badge and on the Activity Logs "Alerts" tab.
- * Read-only; cached briefly so every page load does not re-count.
+ * UI Phase 2: one count of things a guard/admin should look at today:
+ * anomalies (direction does not fit, lost or disabled tag...) and unknown
+ * tags. Unregistered visitors are normal traffic, not alerts.
+ * Shown as the sidebar badge, the Dashboard and the Activity Logs "Alerts"
+ * tab. Read-only; cached briefly so every page load does not re-count.
  */
 class AlertSummaryService
 {
@@ -20,22 +21,18 @@ class AlertSummaryService
     protected const CACHE_SECONDS = 30;
 
     /**
-     * @return array{anomalies: int, no_pass: int, total: int}
+     * @return array{anomalies: int, unknown_tags: int, total: int}
      */
     public function counts(): array
     {
         return Cache::remember(self::CACHE_KEY, self::CACHE_SECONDS, function (): array {
+            $today = fn () => RfidScanLog::query()
+                ->where('is_anomaly', true)
+                ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']));
             $counts = [
-                // Station anomalies today (direction mismatch, lost/disabled tags...).
-                'anomalies' => RfidScanLog::query()
-                    ->where('is_anomaly', true)
-                    ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))
-                    ->count(),
-                'no_pass' => GuestVehicleObservation::query()
-                    ->where('observation_source', 'cctv')
-                    ->where('status', '!=', GuestVehicleObservation::STATUS_RESOLVED)
-                    ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['observed_at', 'created_at']))
-                    ->count(),
+                // Direction does not fit, lost / disabled tag, inactive vehicle...
+                'anomalies' => $today()->where('verification_status', '!=', 'unknown_tag')->count(),
+                'unknown_tags' => $today()->where('verification_status', 'unknown_tag')->count(),
             ];
 
             return $counts + ['total' => array_sum($counts)];
@@ -59,39 +56,27 @@ class AlertSummaryService
             ->limit($limit)
             ->get()
             ->each(function (RfidScanLog $scan) use ($items): void {
+                $unknown = $scan->verification_status === 'unknown_tag';
                 $items->push([
-                    'kind' => 'anomaly',
-                    'tone' => 'critical',
-                    'label' => 'Anomaly',
+                    'kind' => $unknown ? 'unknown_tag' : 'anomaly',
+                    'tone' => $unknown ? 'warning' : 'critical',
+                    'label' => $unknown ? 'Unknown tag' : 'Anomaly',
                     'title' => ($scan->vehicle?->plate_number ?? $scan->vehicleRfidTag?->label ?? $scan->tag_uid).' · '.\App\Models\Gate::labelFor($scan->scan_location),
                     'detail' => (string) ($scan->anomaly_reason ?: $scan->verificationLabel),
                     'time' => DisplayTime::time($scan->scan_time),
                     'sort' => $scan->scan_time?->getTimestamp() ?? 0,
-                    'action_label' => $scan->correlated_vehicle_event_id ? 'Open log' : 'Review',
-                    'action_url' => $scan->correlated_vehicle_event_id
-                        ? route('vehicle-events.show', $scan->correlated_vehicle_event_id)
-                        : route('logs.index', ['tab' => 'scans', 'history_q' => $scan->tag_uid]),
+                    'action_label' => match (true) {
+                        $unknown => 'Register this tag',
+                        (bool) $scan->correlated_vehicle_event_id => 'Open log',
+                        default => 'Review',
+                    },
+                    'action_url' => match (true) {
+                        $unknown => route('registry.index', ['tab' => 'vehicles', 'register_tag' => $scan->tag_uid]),
+                        (bool) $scan->correlated_vehicle_event_id => route('vehicle-events.show', $scan->correlated_vehicle_event_id),
+                        default => route('logs.index', ['tab' => 'scans', 'history_q' => $scan->tag_uid]),
+                    },
                 ]);
             });
-
-        GuestVehicleObservation::query()
-            ->where('observation_source', 'cctv')
-            ->where('status', '!=', GuestVehicleObservation::STATUS_RESOLVED)
-            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['observed_at', 'created_at']))
-            ->latest('observed_at')
-            ->limit($limit)
-            ->get()
-            ->each(fn (GuestVehicleObservation $observation) => $items->push([
-                'kind' => 'no_pass',
-                'tone' => 'critical',
-                'label' => 'No pass',
-                'title' => ($observation->plate_number ?: $observation->plate_text ?: 'Unknown plate').' · '.ucfirst((string) $observation->location),
-                'detail' => 'Camera saw a vehicle with no RFID tag.',
-                'time' => DisplayTime::time($observation->observed_at),
-                'sort' => $observation->observed_at?->getTimestamp() ?? 0,
-                'action_label' => 'Review',
-                'action_url' => route('logs.index', ['tab' => 'alerts', 'plate_text' => $observation->plate_number ?: $observation->plate_text]),
-            ]));
 
         return $items->sortByDesc('sort')->take($limit)->values()->all();
     }

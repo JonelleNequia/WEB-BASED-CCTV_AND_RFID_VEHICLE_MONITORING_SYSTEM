@@ -45,20 +45,12 @@ final class StatusBadge
 
     /** Labels that read better than the raw status key. */
     public const LABELS = [
-        'no_pass_alert' => 'No-pass alert',
+        'no_pass_alert' => 'Unregistered',
         'no_pass_resolved' => 'Resolved',
         'pending_details' => 'Pending details',
         'pending_review' => 'Needs review',
         'manual_review' => 'Manual review',
         'requires_manual_review' => 'Manual review',
-        'guest_pass' => 'Guest pass',
-        'guest_pass_entry' => 'Guest pass',
-        'guest_pass_exit' => 'Guest pass',
-        'guest_pass_lost' => 'Lost pass',
-        'guest_pass_disabled' => 'Disabled pass',
-        'guest_pass_not_issued' => 'Not issued',
-        'guest_pass_available' => 'Issue required',
-        'guest_pass_duplicate' => 'Duplicate',
         'issue_required' => 'Issue required',
         'no_tag' => 'No tag',
         'open' => 'Entry',

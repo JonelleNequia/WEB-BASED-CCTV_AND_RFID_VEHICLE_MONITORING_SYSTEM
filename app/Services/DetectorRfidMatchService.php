@@ -112,7 +112,7 @@ class DetectorRfidMatchService
     {
         return [
             'verification' => 'no_pass',
-            'label' => 'NO PASS',
+            'label' => 'UNREGISTERED',
             'color' => 'red',
             'vehicle' => null,
             ...$extra,

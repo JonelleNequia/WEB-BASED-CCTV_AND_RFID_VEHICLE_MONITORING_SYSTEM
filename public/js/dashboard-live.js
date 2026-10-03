@@ -280,7 +280,7 @@
         if (items.length === 0) {
             const clear = document.createElement('li');
             clear.className = 'attention-clear';
-            clear.textContent = 'All clear. No anomalies, overstays, lost passes or no-pass alerts.';
+            clear.textContent = 'All clear. No anomalies or unknown tags.';
             list.replaceChildren(clear);
             return;
         }

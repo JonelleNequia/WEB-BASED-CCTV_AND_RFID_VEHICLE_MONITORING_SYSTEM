@@ -66,11 +66,8 @@
                                         <div class="table-subtext"><a href="{{ route('registry.index', ['tab' => 'vehicles', 'register_tag' => $scan->tag_uid]) }}">Register this tag</a></div>
                                     @endif
                                 @else
-                                    <strong>{{ $scan->vehicle?->plate_number ?? 'GUEST' }}</strong>
-                                    <div class="table-subtext">{{ $scan->vehicle ? $scan->vehicle->vehicle_type.' · '.\App\Support\VehicleCategory::label($scan->vehicle->category) : 'Guest record' }}</div>
-                                @endif
-                                @if ($scan->guestVehicleObservation)
-                                    <div class="table-subtext">Guest observation #{{ $scan->guestVehicleObservation->id }}</div>
+                                    <strong>{{ $scan->vehicle?->plate_number ?? ($scan->vehicleRfidTag?->label ?? $scan->tag_uid) }}</strong>
+                                    <div class="table-subtext">{{ $scan->vehicle ? $scan->vehicle->vehicle_type.' · '.\App\Support\VehicleCategory::label($scan->vehicle->category) : 'No vehicle linked' }}</div>
                                 @endif
                             </td>
                             <td>

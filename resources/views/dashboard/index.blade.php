@@ -26,7 +26,7 @@
         <x-stat label="IN Today" :value="$totalVehiclesEnteredToday" metric="total_vehicles_entered_today" hint="All categories, all gates" :href="route('logs.index', ['period' => 'today', 'event_type' => 'ENTRY'])" />
         <x-stat label="OUT Today" :value="$totalVehiclesExitedToday" metric="total_vehicles_exited_today" hint="All categories, all gates" :href="route('logs.index', ['period' => 'today', 'event_type' => 'EXIT'])" />
         <x-stat label="Alerts" :value="$alertCounts['total']" metric="alerts_total" :tone="$alertCounts['total'] > 0 ? 'danger' : null" :href="route('logs.index', ['tab' => 'alerts'])">
-            <x-slot:detail><span data-dashboard-metric="no_pass_alerts_today">{{ $noPassAlertsToday }}</span> no-pass · <span data-dashboard-metric="pass_alerts_today">{{ $passAlertsToday }}</span> lost/disabled tags</x-slot:detail>
+            <x-slot:detail><span data-dashboard-metric="alert_anomalies">{{ $alertCounts['anomalies'] }}</span> anomalies · <span data-dashboard-metric="alert_unknown_tags">{{ $alertCounts['unknown_tags'] }}</span> unknown tags</x-slot:detail>
         </x-stat>
     </x-stat-row>
 
@@ -110,7 +110,7 @@
                         <a href="{{ $item['action_url'] }}" class="button button-secondary button-sm">{{ $item['action_label'] }}</a>
                     </li>
                 @empty
-                    <li class="attention-clear">All clear. No anomalies or no-pass alerts.</li>
+                    <li class="attention-clear">All clear. No anomalies or unknown tags.</li>
                 @endforelse
             </ul>
         </section>

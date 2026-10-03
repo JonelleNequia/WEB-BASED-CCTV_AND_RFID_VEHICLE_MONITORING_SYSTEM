@@ -2355,6 +2355,12 @@ th {
     color: var(--station-brand);
 }
 
+/* The log pane is white: its heading uses the brand color (was white on white). */
+.station-log-header h2 {
+    color: var(--station-brand);
+    font-size: clamp(1.2rem, 1.6vw, 1.6rem);
+}
+
 .station-log-header .station-status-chip {
     color: #f8fafc;
 }
@@ -6213,4 +6219,11 @@ button[aria-busy="true"] {
 .reset-panel .panel-header {
     align-items: flex-start;
     gap: 1rem;
+}
+
+/* Kiosk: small status line (camera, detector) next to the clock. */
+.station-status-line {
+    display: inline-flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
 }

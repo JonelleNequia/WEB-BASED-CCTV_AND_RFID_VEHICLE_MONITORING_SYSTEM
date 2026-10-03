@@ -242,7 +242,7 @@
         item.replaceChildren(...replacement.childNodes);
     }
 
-    // Phase 5: red banner when the camera reports a vehicle with no pass.
+    // A vehicle with no registered tag (Unregistered Visitor): a short notice.
     let logsInitialized = false;
     const announcedAlerts = new Set();
 
@@ -258,10 +258,10 @@
         }
 
         const plate = log.plate_number || 'Unknown plate';
-        const hint = 'No registered RFID tag was read. Check the vehicle.';
+        const hint = 'No registered RFID tag was read.';
 
-        showAlert('Vehicle with no pass', `${plate}: ${hint}`);
-        showScanResult('alert', `NO PASS · ${plate}`, hint);
+        showAlert('Unregistered visitor', `${plate}: ${hint}`);
+        showScanResult('alert', `UNREGISTERED · ${plate}`, hint);
     }
 
     function renderLogs(logs) {
@@ -274,7 +274,7 @@
             stationLogNodes.clear();
             const empty = document.createElement('div');
             empty.className = 'station-log-empty';
-            empty.textContent = `No ${payload.logLabel || 'station logs'} yet`;
+            empty.textContent = 'No vehicles yet';
             logList.replaceChildren(empty);
             return;
         }
@@ -330,8 +330,8 @@
         const detectorOnline = Boolean(runtime.service_running);
         const cameraOnline = Boolean(camera.camera_running);
 
-        setStatusChip(detectorChip, detectorOnline, 'Detector Ready', 'Detector Off');
-        setStatusChip(cameraChip, cameraOnline, 'Live', 'Offline');
+        setStatusChip(detectorChip, detectorOnline, 'Detector', 'Detector off');
+        setStatusChip(cameraChip, cameraOnline, 'Camera', 'Camera offline');
         if (cameraChip) {
             cameraChip.title = cameraOnline ? '' : (camera.last_error || '');
         }
@@ -385,7 +385,7 @@
                 renderLogs(body.logs || []);
             }
         } catch (error) {
-            setStatusChip(detectorChip, false, 'Detector Ready', 'State Offline');
+            setStatusChip(detectorChip, false, 'Detector', 'Detector offline');
         }
     }
 

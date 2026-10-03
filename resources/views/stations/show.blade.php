@@ -26,8 +26,14 @@
                 </div>
                 <div class="station-status-stack">
                     <span class="station-clock" data-station-clock>{{ \App\Support\DisplayTime::datetimeSeconds(now()) }}</span>
-                    <span class="station-status-chip {{ ($cameraStatus['camera_running'] ?? false) ? 'is-online' : 'is-standby' }}" data-camera-status-chip>
-                        {{ ($cameraStatus['camera_running'] ?? false) ? 'Live' : 'Offline' }}
+                    {{-- Small status line (details in Settings › System Status). --}}
+                    <span class="station-status-line">
+                        <span class="station-status-chip {{ ($cameraStatus['camera_running'] ?? false) ? 'is-online' : 'is-standby' }}" data-camera-status-chip>
+                            {{ ($cameraStatus['camera_running'] ?? false) ? 'Camera' : 'Camera offline' }}
+                        </span>
+                        <span class="station-status-chip {{ ($detectorStatus['service_running'] ?? false) ? 'is-online' : 'is-standby' }}" data-detector-status-chip>
+                            {{ ($detectorStatus['service_running'] ?? false) ? 'Detector' : 'Detector off' }}
+                        </span>
                     </span>
                 </div>
             </div>
@@ -48,7 +54,6 @@
                 <span data-camera-source>{{ $camera['source_display'] }}</span>
                 <span data-camera-frames>{{ $cameraStatus['processed_frames'] ?? 0 }} frames</span>
                 <span data-camera-detections>{{ $cameraStatus['active_detections'] ?? 0 }} active / {{ $cameraStatus['detections_seen'] ?? 0 }} detections</span>
-                <span data-rfid-status>RFID Ready</span>
             </div>
         </section>
 
@@ -65,13 +70,7 @@
             </section>
 
             <div class="station-log-header">
-                <div>
-                    <span class="station-kicker">Shared Station Logs</span>
-                    <h2>Recent Activity</h2>
-                </div>
-                <span class="station-status-chip {{ ($detectorStatus['service_running'] ?? false) ? 'is-online' : 'is-standby' }}" data-detector-status-chip>
-                    {{ ($detectorStatus['service_running'] ?? false) ? 'Detector Ready' : 'Detector Off' }}
-                </span>
+                <h2>Recent activity</h2>
             </div>
 
             <div class="station-log-list" data-station-log-list>
@@ -84,13 +83,13 @@
                         <time class="station-log-time">{{ \App\Support\DisplayTime::time($log['event_time'] ?? null) }}</time>
                     </article>
                 @empty
-                    <div class="station-log-empty" data-station-log-empty>No station logs yet</div>
+                    <div class="station-log-empty" data-station-log-empty>No vehicles yet</div>
                 @endforelse
             </div>
         </aside>
     </main>
 
-    {{-- Phase 4: red banner for anomalies and lost/disabled tag alerts. --}}
+    {{-- Banner for anomalies and lost or disabled tags. --}}
     <div class="station-alert" data-station-alert hidden role="alert">
         <strong data-station-alert-title>Needs attention</strong>
         <span data-station-alert-message></span>
@@ -99,7 +98,6 @@
 
     @php($stationPayload = [
         'location' => $location,
-        'logLabel' => 'station logs',
         'camera' => $camera,
         'cameraStatus' => $cameraStatus,
         'detectorStatus' => $detectorStatus,

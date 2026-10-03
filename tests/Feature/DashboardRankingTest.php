@@ -184,11 +184,13 @@ class DashboardRankingTest extends TestCase
             ->assertOk()
             ->json('latest_events'));
 
-        $this->assertTrue($latestEvents->contains(fn (array $event): bool => $event['title'] === 'ENTRY • DPF-233'
-            && $event['badge_label'] === 'Entry'));
-        $this->assertTrue($latestEvents->contains(fn (array $event): bool => $event['title'] === 'EXIT • EXIT-1001'
+        // UI Phase 2 (wording): IN / OUT and "Unregistered" instead of ENTRY / EXIT and GUEST.
+        $this->assertTrue($latestEvents->contains(fn (array $event): bool => $event['title'] === 'IN • DPF-233'
+            && $event['badge_label'] === 'Unregistered'));
+        $this->assertTrue($latestEvents->contains(fn (array $event): bool => $event['title'] === 'OUT • EXIT-1001'
             && $event['badge_label'] === 'Exit'));
-        $this->assertFalse($latestEvents->contains(fn (array $event): bool => $event['title'] === 'GUEST • GUEST'));
+        // The mirrored copy is not listed a second time.
+        $this->assertSame(1, $latestEvents->filter(fn (array $event): bool => str_contains($event['title'], 'DPF-233'))->count());
     }
 
     public function test_dashboard_today_counts_reset_on_philippine_midnight(): void

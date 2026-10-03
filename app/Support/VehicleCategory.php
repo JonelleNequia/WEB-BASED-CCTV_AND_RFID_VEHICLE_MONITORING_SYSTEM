@@ -47,7 +47,7 @@ final class VehicleCategory
         }
 
         return self::LABELS[self::normalize($category)]
-            ?? ($category === 'guest_pass' ? 'Guest pass (removed)' : Str::of($category)->replace('_', ' ')->title()->value());
+            ?? ($category === 'guest_pass' ? 'Old pass record' : Str::of($category)->replace('_', ' ')->title()->value());
     }
 
     /**

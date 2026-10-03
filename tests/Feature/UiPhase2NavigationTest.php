@@ -157,7 +157,7 @@ class UiPhase2NavigationTest extends TestCase
         $this->actingAs($this->admin)
             ->get(route('logs.index', ['tab' => 'alerts']))
             ->assertOk()
-            ->assertSee('Flagged RFID Scans')
+            ->assertSee('Anomalies Today')
             ->assertSee('LOST-TAG-1');
     }
 

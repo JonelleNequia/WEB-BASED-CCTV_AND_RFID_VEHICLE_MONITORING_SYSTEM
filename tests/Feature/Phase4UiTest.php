@@ -87,14 +87,18 @@ class Phase4UiTest extends TestCase
             ->assertDontSee('Active Guests')
             ->assertDontSee('overstay')
             ->assertSee('Needs attention')
-            ->assertSee('no-pass')
+            // UI Phase 2 (wording): alerts are anomalies and unknown tags.
+            ->assertSee('unknown tags')
+            ->assertDontSee('no-pass')
             ->assertDontSee('Guest Observations Today');
 
         $this->actingAs($this->admin)
             ->getJson(route('dashboard.live-state'))
             ->assertJsonMissingPath('metrics.active_guests')
             ->assertJsonMissingPath('metrics.overstay_guests')
-            ->assertJsonPath('metrics.no_pass_alerts_today', 1)
+            // UI Phase 2 (wording): an unregistered visitor is not an alert.
+            ->assertJsonMissingPath('metrics.no_pass_alerts_today')
+            ->assertJsonPath('metrics.alert_unknown_tags', 0)
             ->assertJsonPath('metrics.vehicles_inside', 0);
     }
 

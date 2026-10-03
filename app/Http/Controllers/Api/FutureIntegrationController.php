@@ -183,7 +183,7 @@ class FutureIntegrationController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Guest vehicle capture saved as a GUEST observation.',
+                'message' => 'Unregistered vehicle capture saved.',
                 'duplicate' => false,
                 'requires_capture' => false,
                 'event_id' => null,
@@ -225,7 +225,7 @@ class FutureIntegrationController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Camera entry detection saved as a GUEST observation.',
+                'message' => 'Camera entry detection saved as an unregistered vehicle.',
                 'guest_observation_id' => $guestObservation->id,
                 'event_status' => $guestObservation->status,
                 'overlay' => $this->guestOverlayPayload($guestObservation),
@@ -299,7 +299,7 @@ class FutureIntegrationController extends Controller
         ]);
 
         return response()->json([
-            'message' => 'Camera exit detection saved as a GUEST observation. No matching active session found.',
+            'message' => 'Camera exit detection saved as an unregistered vehicle. No matching active session found.',
             'guest_observation_id' => $guestObservation->id,
             'event_status' => $guestObservation->status,
             'overlay' => $this->guestOverlayPayload($guestObservation),
@@ -358,7 +358,7 @@ class FutureIntegrationController extends Controller
             'observed_at' => now(),
             'camera_id' => $cameraId,
             'snapshot_path' => $imagePath,
-            'notes' => 'Legacy CCTV detection without verified RFID was recorded as GUEST.',
+            'notes' => 'Older camera detection without a registered tag (unregistered vehicle).',
             'created_by' => null,
         ]);
     }
@@ -538,7 +538,7 @@ class FutureIntegrationController extends Controller
         ]);
 
         return response()->json([
-            'message' => 'Guest observation saved.',
+            'message' => 'Camera record saved.',
             'duplicate' => false,
             'guest_observation_id' => $observation->id,
             'status' => $observation->status,

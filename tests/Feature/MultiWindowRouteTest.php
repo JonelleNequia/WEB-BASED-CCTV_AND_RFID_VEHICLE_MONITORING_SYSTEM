@@ -42,8 +42,10 @@ class MultiWindowRouteTest extends TestCase
             ->assertOk()
             ->assertSee('Gate 1')
             ->assertSee('IN and OUT')
-            ->assertSee('Shared Station Logs')
-            ->assertSee('RFID Ready')
+            // UI Phase 2 (wording): "Recent activity"; small status line instead of "RFID Ready".
+            ->assertSee('Recent activity')
+            ->assertDontSee('Shared Station Logs')
+            ->assertDontSee('RFID Ready')
             ->assertSee('data-rfid-input', false)
             ->assertDontSee('Vehicle Registry')
             ->assertDontSee('<canvas', false)
@@ -55,8 +57,10 @@ class MultiWindowRouteTest extends TestCase
             ->get(route('gates.kiosk', 'gate-2'))
             ->assertOk()
             ->assertSee('Gate 2')
-            ->assertSee('Shared Station Logs')
-            ->assertSee('RFID Ready')
+            // UI Phase 2 (wording): "Recent activity"; small status line instead of "RFID Ready".
+            ->assertSee('Recent activity')
+            ->assertDontSee('Shared Station Logs')
+            ->assertDontSee('RFID Ready')
             ->assertSee('data-rfid-input', false)
             ->assertDontSee('RFID Inventory')
             ->assertDontSee('<canvas', false)
@@ -172,9 +176,9 @@ class MultiWindowRouteTest extends TestCase
             ->getJson(route('stations.state', 'gate-1'))
             ->assertOk()
             ->assertJsonFragment([
-                'event_type' => 'GUEST',
-                'verification_label' => 'GUEST',
-                'resulting_state' => 'Guest',
+                'event_type' => 'UNREGISTERED',
+                'verification_label' => 'Unregistered Visitor',
+                'resulting_state' => 'Not tracked',
             ]);
     }
 

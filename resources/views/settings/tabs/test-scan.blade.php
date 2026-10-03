@@ -35,7 +35,7 @@
         <x-stat label="Registered Scans Today" :value="$rfidStats['registered_scans_today'] ?? 0" tone="success" />
         <x-stat label="Needs Attention" :value="$rfidStats['attention_today'] ?? 0" tone="danger"
                 :href="($rfidStats['attention_today'] ?? 0) > 0 ? route('logs.index', ['tab' => 'scans', 'verification_status' => 'anomaly']) : null"
-                hint="Anomalies and lost-pass alerts today" />
+                hint="Anomalies and unknown tags today" />
     </x-stat-row>
 
     {{-- Phase 4: today's anomalies and lost/disabled pass alerts. --}}
@@ -73,7 +73,7 @@
                                 type="search"
                                 value="{{ $selectedRegisteredTag['label'] ?? '' }}"
                                 autocomplete="off"
-                                placeholder="Type owner, plate, RFID UID, or G-01"
+                                placeholder="Type owner, plate or RFID UID"
                                 data-rfid-combobox-input
                             >
                             <button type="button" class="combobox-clear" data-rfid-combobox-clear aria-label="Clear selected RFID tag">Clear</button>
@@ -153,10 +153,7 @@
                                 ? 'Vehicle log #'.$latestScan->correlatedVehicleEvent->id.' linked automatically.'
                                 : 'No vehicle log linked yet.' }}
                         </strong>
-                        <p>{{ $latestScan->vehicle?->vehicle_type ?: 'Check registry details or guest observation for this scan.' }}</p>
-                        @if ($latestScan->guestVehicleObservation)
-                            <p>Guest observation #{{ $latestScan->guestVehicleObservation->id }} was recorded.</p>
-                        @endif
+                        <p>{{ $latestScan->vehicle?->vehicle_type ?: ($latestScan->isUnknownTag() ? 'Unknown tag: register it in the Registry.' : 'Check the Registry details for this tag.') }}</p>
                     </div>
                 </div>
             @else
