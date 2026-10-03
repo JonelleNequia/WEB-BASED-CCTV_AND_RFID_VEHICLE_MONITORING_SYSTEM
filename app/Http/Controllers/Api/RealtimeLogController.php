@@ -67,6 +67,7 @@ class RealtimeLogController extends Controller
     protected function stationLogRows(int $limit): array
     {
         $eventLogs = VehicleEvent::query()
+            ->withoutHiddenGuestCopies()
             ->with(['camera', 'vehicle', 'rfidScanLog', 'guestVisit.rfidTag'])
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->latest('created_at')
@@ -108,6 +109,7 @@ class RealtimeLogController extends Controller
         $cameraId = Camera::query()->forRole($location)->value('id');
 
         $eventLogs = VehicleEvent::query()
+            ->withoutHiddenGuestCopies()
             ->with(['camera', 'vehicle', 'rfidScanLog', 'guestVisit.rfidTag'])
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->where(fn ($query) => $query->where('camera_id', $cameraId)
@@ -145,6 +147,7 @@ class RealtimeLogController extends Controller
     protected function eventLogRows(int $limit): Collection
     {
         $eventLogs = VehicleEvent::query()
+            ->withoutHiddenGuestCopies()
             ->with(['camera', 'vehicle', 'rfidScanLog'])
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->latest('created_at')

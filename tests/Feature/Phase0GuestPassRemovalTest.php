@@ -82,7 +82,8 @@ class Phase0GuestPassRemovalTest extends TestCase
         $this->actingAs($this->admin)->post('/guest-passes/1/issue')->assertNotFound();
         $this->actingAs($this->admin)->post('/guest-passes/visits/1/card-returned')->assertNotFound();
         $this->actingAs($this->admin)->get('/guest-passes/visits/1')->assertNotFound();
-        $this->actingAs($this->admin)->get('/guests')->assertRedirect(route('logs.index', ['tab' => 'alerts']));
+        // Phase 8 (visitor model): the Guests page is the Visitors page.
+        $this->actingAs($this->admin)->get('/guests')->assertRedirect(route('visitors.index'));
 
         $this->actingAs($this->admin)->get(route('dashboard.index'))
             ->assertOk()

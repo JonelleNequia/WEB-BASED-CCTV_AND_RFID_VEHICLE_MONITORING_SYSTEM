@@ -177,7 +177,7 @@ class LaravelEventClient:
 
     def check_rfid_match(self, camera_role, event_time, window_seconds=4, lookback_seconds=10, event_key=None):
         """
-        Poll Laravel for a registered tag or guest pass read at one gate, from
+        Poll Laravel for a registered tag read at one gate, from
         lookback_seconds before the crossing until the detector window ends.
         """
         if not self.rfid_match_url:

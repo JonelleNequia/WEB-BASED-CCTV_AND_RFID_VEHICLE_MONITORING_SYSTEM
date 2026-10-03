@@ -69,6 +69,29 @@ class VisitorController extends Controller
         ]);
     }
 
+    /**
+     * Phase 8 (visitor model): a guard records a vehicle with no registered
+     * tag by hand (replaces "Add Guest Observation").
+     */
+    public function store(Request $request, VisitorRecordService $service): RedirectResponse
+    {
+        $validated = $request->validate([
+            'gate' => ['required', 'string', new \App\Rules\ValidGate],
+            'direction' => ['required', 'in:IN,OUT'],
+            'seen_at' => ['required', 'date', 'before_or_equal:now'],
+            'plate_number' => ['nullable', 'string', 'max:30', 'regex:/^[A-Za-z0-9 -]+$/'],
+            'vehicle_type' => ['nullable', 'string', 'max:50'],
+            'vehicle_color' => ['nullable', 'string', 'max:30'],
+            'note' => ['nullable', 'string', 'max:200'],
+            'snapshot' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
+        ], ['plate_number.regex' => 'Use letters, digits, spaces or a dash.']);
+
+        $record = $service->createManual($validated, $request->user(), $request->file('snapshot'));
+
+        return redirect()->route('visitors.index')
+            ->with('status', 'Unregistered visitor '.($record->plate_number ?: '(no plate)').' recorded '.$record->direction.' at '.Gate::labelFor($record->gate).'.');
+    }
+
     public function correctPlate(Request $request, VisitorRecord $visitorRecord, VisitorRecordService $service): RedirectResponse
     {
         $validated = $request->validate([

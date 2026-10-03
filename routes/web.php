@@ -86,6 +86,9 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
     // Phase 5 (visitor model): Unregistered Visitor records and plate profiles.
     // Guards correct plates and keep notes; merging plates is for admins.
     Route::get('/visitors', [VisitorController::class, 'index'])->name('visitors.index');
+    // Phase 8: the old Guests page is the Visitors page (guards too).
+    Route::get('/guests', $legacyRedirect('visitors.index'))->name('guests.index');
+    Route::post('/visitors/records', [VisitorController::class, 'store'])->name('visitors.records.store');
     Route::get('/visitors/plates/{plateProfile}', [VisitorController::class, 'showProfile'])->name('visitors.profiles.show');
     Route::patch('/visitors/records/{visitorRecord}/plate', [VisitorController::class, 'correctPlate'])->name('visitors.records.plate');
     Route::patch('/visitors/records/{visitorRecord}/dismiss', [VisitorController::class, 'dismiss'])->name('visitors.records.dismiss');
@@ -100,9 +103,6 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         Route::redirect('/dashboard', '/admin')->name('dashboard.legacy');
         // UI Phase 2: the six sidebar pages.
         Route::get('/registry', [RegistryController::class, 'index'])->name('registry.index');
-        // Phase 0: guest passes removed. Until the Visitors page exists, Guests
-        // opens the camera's no-pass alerts (old links keep working).
-        Route::get('/guests', $legacyRedirect('logs.index', ['tab' => 'alerts']))->name('guests.index');
         Route::get('/logs', [ActivityLogController::class, 'index'])->name('logs.index');
 
         // UI Phase 2: old page URLs (names kept so old links keep working).
@@ -138,7 +138,6 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         Route::get('/vehicle-registry/{vehicle}/edit', [VehicleRegistryController::class, 'edit'])->name('vehicle-registry.edit');
         Route::put('/vehicle-registry/{vehicle}', [VehicleRegistryController::class, 'update'])->name('vehicle-registry.update');
         Route::post('/rfid-scans/simulate', [RfidScanController::class, 'store'])->name('rfid-scans.store');
-        Route::post('/guest-observations', [GuestObservationController::class, 'store'])->name('guest-observations.store');
         Route::patch('/guest-observations/{guestVehicleObservation}', [GuestObservationController::class, 'update'])
             ->whereNumber('guestVehicleObservation')
             ->name('guest-observations.update');

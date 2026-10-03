@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\StoresLocalTime;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -104,6 +105,27 @@ class VehicleEvent extends Model
     public function rfidScanLog(): BelongsTo
     {
         return $this->belongsTo(RfidScanLog::class);
+    }
+
+    /**
+     * Phase 8 (visitor model): hide the camera "guest" log copies of archived
+     * guest records (unknown-tag reads); with $visitorCopies also those of
+     * crossings that are shown as Unregistered Visitor records instead.
+     */
+    public function scopeWithoutHiddenGuestCopies(Builder $query, bool $visitorCopies = false): Builder
+    {
+        return $query->where(function (Builder $inner) use ($visitorCopies): void {
+            $inner->whereNotIn('event_origin', ['guest_cctv', 'guest_manual'])
+                ->orWhereNull('external_event_key')
+                ->orWhere(function (Builder $copy) use ($visitorCopies): void {
+                    $copy->whereNotIn('external_event_key', GuestVehicleObservation::query()->withArchived()
+                        ->whereNotNull('archived_at')->whereNotNull('external_event_key')->select('external_event_key'));
+
+                    if ($visitorCopies) {
+                        $copy->whereNotIn('external_event_key', VisitorRecord::query()->select('external_event_key'));
+                    }
+                });
+        });
     }
 
     /**

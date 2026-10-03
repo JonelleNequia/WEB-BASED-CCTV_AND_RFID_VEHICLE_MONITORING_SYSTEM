@@ -24,8 +24,9 @@ class RfidService
     /**
      * Create one simulated RFID scan from the RFID Desk.
      *
-     * Phase 3: the RFID Desk is the only place that keeps the old toggle
-     * (INSIDE -> EXIT, OUTSIDE -> ENTRY). Guest pass rules still apply.
+     * Same rules as a gate read (RfidIngestService): the camera's direction
+     * when it saw the crossing, otherwise the vehicle state toggles
+     * (INSIDE -> EXIT, OUTSIDE -> ENTRY).
      *
      * @param  array<string, mixed>  $data
      */

@@ -36,8 +36,16 @@ class VisitorRecord extends Model
 
     public const CATEGORY = VehicleCategory::UNREGISTERED_VISITOR;
 
+    /** Phase 8: where the record came from. */
+    public const SOURCE_CAMERA = 'camera';
+
+    public const SOURCE_MANUAL = 'manual';
+
+    public const SOURCE_LEGACY = 'legacy';
+
     protected $fillable = [
         'external_event_key',
+        'source',
         'vehicle_crossing_id',
         'gate',
         'camera_id',

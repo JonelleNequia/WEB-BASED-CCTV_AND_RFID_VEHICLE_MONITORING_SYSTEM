@@ -128,8 +128,8 @@ class MatchingService
             }
         }
 
-        // Phase 5: guests are no longer matched by vehicle type + color; a
-        // guest exit needs the plate (guest passes close by RFID instead).
+        // Phase 5: vehicles without a tag are not matched by vehicle type +
+        // color; their exit needs the plate.
         if (! $this->isGuestVehicleEvent($exitEvent)) {
             if ($this->sameText($session->vehicle_type, $exitEvent->vehicle_type)) {
                 $score += 15;

@@ -4,7 +4,11 @@
 @section('title', 'Visitors | PHILCST Vehicle Monitoring')
 
 @section('content')
-    <x-page-header title="Visitors" />
+    <x-page-header title="Visitors">
+        <x-slot:actions>
+            <button type="button" class="button button-primary" data-drawer-open="add-visitor-drawer">Add visitor manually</button>
+        </x-slot:actions>
+    </x-page-header>
 
     <p class="field-help">Unregistered Visitors are vehicles the camera saw cross a gate without a registered RFID tag. They are counted IN and OUT, never as "inside". Correct a wrong or unreadable plate here; the plate profile keeps every visit of that plate.</p>
 
@@ -58,4 +62,60 @@
             @include('visitors.partials.records', ['records' => $records])
         </x-table>
     @endif
+
+    {{-- Phase 8 (visitor model): replaces "Add Guest Observation" (Activity Logs › Alerts). --}}
+    <x-drawer id="add-visitor-drawer" title="Add visitor manually" :open="request()->boolean('add') || $errors->hasAny(['gate', 'direction', 'seen_at', 'plate_number', 'snapshot'])">
+        <form method="POST" action="{{ route('visitors.records.store') }}" enctype="multipart/form-data" class="stack-form">
+            @csrf
+            <p class="field-help">For a vehicle without a registered tag that the camera did not record (camera offline, missed). It is counted as an Unregistered Visitor.</p>
+            <div class="field">
+                <label for="manual_gate">Gate</label>
+                <select id="manual_gate" name="gate" required>
+                    @foreach ($gates as $code => $name)
+                        <option value="{{ $code }}" @selected(old('gate') === $code)>{{ $name }}</option>
+                    @endforeach
+                </select>
+                @error('gate')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
+            <div class="field">
+                <label for="manual_direction">Direction</label>
+                <select id="manual_direction" name="direction" required>
+                    <option value="IN" @selected(old('direction', 'IN') === 'IN')>IN (coming into campus)</option>
+                    <option value="OUT" @selected(old('direction') === 'OUT')>OUT (leaving campus)</option>
+                </select>
+                @error('direction')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
+            <div class="field">
+                <label for="manual_seen_at">Time</label>
+                <input id="manual_seen_at" type="datetime-local" name="seen_at" value="{{ old('seen_at', now()->format('Y-m-d\TH:i')) }}" required>
+                @error('seen_at')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
+            <div class="field">
+                <label for="manual_plate">Plate number (optional)</label>
+                <input id="manual_plate" type="text" name="plate_number" value="{{ old('plate_number') }}" placeholder="ABC 1234" maxlength="30" autocomplete="off">
+                @error('plate_number')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
+            <div class="field">
+                <label for="manual_type">Vehicle type (optional)</label>
+                <input id="manual_type" type="text" name="vehicle_type" value="{{ old('vehicle_type') }}" placeholder="Car, Van, Motorcycle" maxlength="50">
+            </div>
+            <div class="field">
+                <label for="manual_color">Color (optional)</label>
+                <input id="manual_color" type="text" name="vehicle_color" value="{{ old('vehicle_color') }}" maxlength="30">
+            </div>
+            <div class="field">
+                <label for="manual_note">Note (optional)</label>
+                <input id="manual_note" type="text" name="note" value="{{ old('note') }}" maxlength="200" placeholder="e.g. Delivery, camera was offline">
+            </div>
+            <div class="field">
+                <label for="manual_snapshot">Photo (optional)</label>
+                <input id="manual_snapshot" type="file" name="snapshot" accept="image/jpeg,image/png">
+                @error('snapshot')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
+            <div class="button-row">
+                <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
+                <button type="submit" class="button button-primary">Save visitor</button>
+            </div>
+        </form>
+    </x-drawer>
 @endsection

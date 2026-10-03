@@ -28,11 +28,15 @@
                 <div class="table-subtext">
                     @switch($record->plate_status)
                         @case('read') Camera{{ $record->plate_confidence !== null ? ' · '.number_format($record->plate_confidence * 100).'%' : '' }} @break
-                        @case('corrected') Corrected by {{ $record->corrector?->name ?? 'a guard' }}{{ $record->ocr_plate_number && $record->ocr_plate_number !== $record->plate_number ? ' · camera read '.$record->ocr_plate_number : '' }} @break
+                        @case('corrected') {{ $record->source === 'manual' ? 'Typed by' : 'Corrected by' }} {{ $record->corrector?->name ?? 'a guard' }}{{ $record->ocr_plate_number && $record->ocr_plate_number !== $record->plate_number ? ' · camera read '.$record->ocr_plate_number : '' }} @break
                         @case('unreadable') {{ $record->ocr_plate_number ? 'Best guess: '.$record->ocr_plate_number : 'No plate found' }} @break
                         @default OCR running
                     @endswitch
                 </div>
+                @if ($record->source !== 'camera')
+                    {{-- Phase 8: recorded by hand, or converted from an older guest record. --}}
+                    <div class="table-subtext">{{ $record->source === 'manual' ? 'Recorded by hand' : 'From an older guest record' }}</div>
+                @endif
                 @if ($record->vehicle)
                     {{-- Phase 6: the plate is in the Registry (registered later, or its tag was not read). --}}
                     <div class="table-subtext">Registered vehicle{{ $record->seen_at && $record->plateProfile?->registered_at && $record->seen_at->lt($record->plateProfile->registered_at) ? ' (visit before registration)' : ' · tag not read' }}</div>

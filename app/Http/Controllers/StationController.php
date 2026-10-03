@@ -127,6 +127,7 @@ class StationController extends Controller
     protected function recentLogs(int $limit = 14): array
     {
         $eventLogs = VehicleEvent::query()
+            ->withoutHiddenGuestCopies()
             ->with(['camera', 'vehicle', 'rfidScanLog', 'guestVisit.rfidTag'])
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->latest('created_at')

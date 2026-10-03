@@ -384,6 +384,8 @@ class VehicleEventController extends Controller
     {
         return VehicleEvent::query()
             ->with(['camera', 'matchedEntry', 'vehicle', 'rfidScanLog.vehicleRfidTag'])
+            // Phase 8: archived guest copies hidden; a crossing with a visitor record is shown once, as that record.
+            ->withoutHiddenGuestCopies(visitorCopies: true)
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->when($request->filled('plate_text'), function ($query) use ($request): void {
                 $plate = '%'.$request->string('plate_text')->trim().'%';
@@ -570,6 +572,8 @@ class VehicleEventController extends Controller
             // is shown once, as the visitor record.
             ->where(fn ($query) => $query->whereNull('external_event_key')
                 ->orWhereNotIn('external_event_key', VisitorRecord::query()->select('external_event_key')))
+            // Phase 8: converted guest records are shown as their visitor record.
+            ->notConverted()
             ->when($this->gateFilter($request) !== null, fn ($query) => $query->whereIn('location', $this->gateFilterValues($request)))
             ->when(! $showingGuestOnly, function ($query): void {
                 $query->where(function ($query): void {
@@ -926,7 +930,12 @@ class VehicleEventController extends Controller
             'vehicle_color' => $record->vehicle_color ?: 'N/A',
             'category' => $category,
             'category_label' => VehicleCategory::label($category),
-            'source_label' => $plateOnly ? 'Camera · plate only, no tag read' : 'Camera · no registered tag',
+            'source_label' => match (true) {
+                $record->source === VisitorRecord::SOURCE_MANUAL => 'Manual · no registered tag',
+                $plateOnly => 'Camera · plate only, no tag read',
+                $record->source === VisitorRecord::SOURCE_LEGACY => 'Camera · older guest record',
+                default => 'Camera · no registered tag',
+            },
             'station_label' => \App\Models\Gate::labelFor($record->gate),
             'state_label' => $plateOnly ? 'Not changed (no tag read)' : 'Not tracked (visitor)',
             'display_time' => DisplayTime::datetime($time, 'No time'),

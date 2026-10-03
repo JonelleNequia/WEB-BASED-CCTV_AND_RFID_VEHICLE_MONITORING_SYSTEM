@@ -1382,7 +1382,7 @@ def overlay_color(overlay):
 
 def default_overlay():
     """
-    Label when no registered tag or guest pass was read in the window.
+    Label when no registered tag was read in the window.
     """
     return {
         "label": "NO PASS",
@@ -1392,7 +1392,7 @@ def default_overlay():
 
 
 # Overlays that are a final decision and stay on screen briefly after the box is lost.
-RESOLVED_VERIFICATIONS = {"registered", "guest_pass", "pass_alert", "no_pass"}
+RESOLVED_VERIFICATIONS = {"registered", "pass_alert", "no_pass"}
 
 
 def waiting_overlay():
@@ -1744,7 +1744,7 @@ def start_detection_window(
     with state["lock"]:
         tracked = ensure_tracked_vehicle_locked(state, track_id, now_monotonic)
 
-        if tracked.get("status") in {"registered", "guest_pass", "no_pass", "processed"}:
+        if tracked.get("status") in {"registered", "no_pass", "processed"}:
             return
 
         tracked.update({
@@ -1792,8 +1792,7 @@ def start_detection_window(
 
 def apply_rfid_match_result(state, track_id, match):
     """
-    Resolve a pending detection as soon as Laravel finds a registered tag or
-    guest pass read.
+    Resolve a pending detection as soon as Laravel finds a registered tag read.
     """
     now_monotonic = time.monotonic()
 
@@ -1811,7 +1810,7 @@ def apply_rfid_match_result(state, track_id, match):
         vehicle = (match.get("body") or {}).get("vehicle") or {}
         plate_number = vehicle.get("plate_number")
         overlay = match.get("overlay") or registered_overlay(plate_number)
-        status = "guest_pass" if match.get("status") == "guest_pass" else "registered"
+        status = "registered"
         state["track_overlays"][track_id] = overlay
         state["crossed_track_ids"][track_id] = now_monotonic
         state.setdefault("tracked_vehicles", {}).setdefault(track_id, {

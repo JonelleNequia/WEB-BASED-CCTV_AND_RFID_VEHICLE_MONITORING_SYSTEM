@@ -10,7 +10,6 @@ use App\Models\VehicleEvent;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -196,58 +195,30 @@ class EventLogReportIntegrationTest extends TestCase
             ->assertJsonPath('logs.0.event_type', 'GUEST');
     }
 
-    public function test_event_logs_include_guest_rfid_scan_as_guest_observation(): void
+    public function test_old_guest_category_tag_read_is_flagged_and_makes_no_guest_record(): void
     {
-        Storage::fake('public');
+        // Phase 8 (visitor model): the old "Guest" category no longer creates
+        // a guest record; the read is flagged so the Registry entry gets fixed.
         $this->seed(DatabaseSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
-        $sourcePath = \App\Support\CameraFiles::framePath('gate-2');
-        File::ensureDirectoryExists(dirname($sourcePath));
-        File::put($sourcePath, 'guest-event-log-frame');
+        $vehicle = Vehicle::query()->create([
+            'plate_number' => 'GST-EVT-01',
+            'vehicle_owner_name' => 'Guest Event',
+            'category' => 'guest',
+            'vehicle_type' => 'Car',
+        ]);
+        $tag = RfidTag::query()->create(['uid' => 'RFID-GUEST-EVT-01', 'status' => RfidTag::STATUS_ASSIGNED, 'vehicle_id' => $vehicle->id, 'assigned_at' => now()]);
+        $vehicle->forceFill(['rfid_tag_id' => $tag->id, 'rfid_tag_uid' => $tag->uid])->save();
 
-        try {
-            $vehicle = Vehicle::query()->create([
-                'plate_number' => 'GST-EVT-01',
-                'vehicle_owner_name' => 'Guest Event',
-                'category' => 'guest',
-                'vehicle_type' => 'Car',
-            ]);
-            $tag = RfidTag::query()->create([
-                'uid' => 'RFID-GUEST-EVT-01',
-                'status' => RfidTag::STATUS_ASSIGNED,
-                'vehicle_id' => $vehicle->id,
-                'assigned_at' => now(),
-            ]);
-            $vehicle->forceFill([
-                'rfid_tag_id' => $tag->id,
-                'rfid_tag_uid' => $tag->uid,
-            ])->save();
+        $this->actingAs($admin)
+            ->postJson(route('rfid-scans.store'), ['tag_uid' => $tag->uid, 'scan_location' => 'gate-2'])
+            ->assertCreated()
+            ->assertJsonPath('scan.verification_status', 'guest');
 
-            $this->actingAs($admin)
-                ->postJson(route('rfid-scans.store'), [
-                    'tag_uid' => $tag->uid,
-                    'scan_location' => 'gate-2',
-                    'reader_name' => 'Exit RFID Reader',
-                ])
-                ->assertCreated()
-                ->assertJsonPath('scan.verification_status', 'guest');
-
-            $observation = GuestVehicleObservation::query()
-                ->where('plate_number', 'GST-EVT-01')
-                ->firstOrFail();
-
-            Storage::disk('public')->assertExists($observation->snapshot_path);
-
-            $this->actingAs($admin)
-                ->get(route('logs.index'))
-                ->assertOk()
-                ->assertSee('GUEST')
-                ->assertSee('GST-EVT-01')
-                ->assertSee('/storage/'.$observation->snapshot_path, false)
-                ->assertSee('Guest Observation #'.$observation->id);
-        } finally {
-            File::delete($sourcePath);
-        }
+        $this->assertSame(0, GuestVehicleObservation::query()->count());
+        $this->actingAs($admin)->get(route('logs.index', ['tab' => 'alerts']))
+            ->assertOk()
+            ->assertSee('set Faculty &amp; Staff or Registered Visitor in the Registry', false);
     }
 }

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Camera;
 use App\Models\Gate;
+use App\Models\GuestVehicleObservation;
 use App\Models\PlateProfile;
 use App\Models\User;
 use App\Models\Vehicle;
@@ -126,6 +127,108 @@ class VisitorRecordService
             $this->refreshProfiles([$oldProfileId, $record->plate_profile_id]);
 
             return $record->fresh();
+        });
+    }
+
+    /**
+     * Phase 8 (visitor model): an older camera guest record (before visitor
+     * records) becomes an Unregistered Visitor record with the same rules:
+     * plate profile, duplicates (same plate, gate and direction within a
+     * minute), dismissed when its alert was closed by a registered tag.
+     * Running it again does not create a second record.
+     */
+    public function importLegacyObservation(GuestVehicleObservation $observation): VisitorRecord
+    {
+        return DB::transaction(function () use ($observation): VisitorRecord {
+            $key = $observation->external_event_key ?: 'legacy-guest-'.$observation->id;
+            $existing = VisitorRecord::query()->where('external_event_key', $key)->first();
+
+            if ($existing) {
+                // Already a visitor record (the detector sent both since Phase 5).
+                $observation->forceFill(['visitor_record_id' => $existing->id])->save();
+
+                return $existing;
+            }
+
+            $gate = Gate::normalizeCode((string) $observation->location);
+            $direction = strtoupper((string) data_get($observation->detection_metadata_json, 'direction'));
+            $plate = PlateNumber::display($observation->plate_number ?: $observation->plate_text);
+            $resolved = $observation->status === GuestVehicleObservation::STATUS_RESOLVED;
+
+            $record = new VisitorRecord([
+                'external_event_key' => $key,
+                'source' => VisitorRecord::SOURCE_LEGACY,
+                'gate' => $gate,
+                'camera_id' => $observation->camera_id ?? Camera::query()->forRole($gate)->value('id'),
+                // No direction stored = not known (older records guessed IN).
+                'direction' => in_array($direction, ['IN', 'OUT'], true) ? $direction : 'UNKNOWN',
+                'seen_at' => $observation->observed_at ?? $observation->created_at,
+                'status' => $resolved ? VisitorRecord::STATUS_DISMISSED : VisitorRecord::STATUS_ACTIVE,
+                'status_note' => $resolved ? 'Converted from guest record #'.$observation->id.'; its alert was closed (registered tag read).' : 'Converted from guest record #'.$observation->id.'.',
+                'snapshot_path' => $observation->snapshot_path,
+                'plate_status' => $plate ? VisitorRecord::PLATE_READ : VisitorRecord::PLATE_UNREADABLE,
+                'plate_number' => $plate,
+                'plate_key' => PlateNumber::key($plate),
+                'ocr_plate_number' => $plate,
+                'ocr_details_json' => ['source' => 'guest_vehicle_observation', 'id' => $observation->id],
+                'vehicle_type' => $observation->vehicle_type,
+                'vehicle_color' => $observation->vehicle_color,
+            ]);
+
+            $profile = $plate ? $this->profileFor($plate, $record->seen_at) : null;
+            $record->plate_profile_id = $profile?->id;
+            $record->vehicle_id = $profile?->vehicle_id;
+            $record->save();
+
+            if ($plate && $record->status === VisitorRecord::STATUS_ACTIVE) {
+                $this->markDuplicateOfSamePlate($record);
+            }
+
+            $observation->forceFill(['visitor_record_id' => $record->id])->save();
+            $this->refreshProfiles([$record->plate_profile_id]);
+
+            return $record->fresh();
+        });
+    }
+
+    /**
+     * Phase 8: a guard records a vehicle with no registered tag by hand
+     * (replaces "Add Guest Observation").
+     *
+     * @param  array<string, mixed>  $data  gate, direction, seen_at, plate_number?, vehicle_type?, vehicle_color?, note?
+     */
+    public function createManual(array $data, User $user, ?UploadedFile $snapshot = null): VisitorRecord
+    {
+        return DB::transaction(function () use ($data, $user, $snapshot): VisitorRecord {
+            $plate = PlateNumber::display($data['plate_number'] ?? null);
+            $seenAt = Carbon::parse((string) $data['seen_at']);
+            $gate = Gate::normalizeCode((string) $data['gate']);
+            $profile = $plate ? $this->profileFor($plate, $seenAt) : null;
+
+            $record = VisitorRecord::query()->create([
+                'external_event_key' => 'manual-'.\Illuminate\Support\Str::uuid(),
+                'source' => VisitorRecord::SOURCE_MANUAL,
+                'gate' => $gate,
+                'camera_id' => Camera::query()->forRole($gate)->value('id'),
+                'direction' => $data['direction'],
+                'seen_at' => $seenAt,
+                'status' => VisitorRecord::STATUS_ACTIVE,
+                'status_note' => filled($data['note'] ?? null) ? mb_substr((string) $data['note'], 0, 200) : 'Recorded by hand.',
+                'snapshot_path' => $snapshot?->store('visitor_snapshots', 'public'),
+                'plate_status' => $plate ? VisitorRecord::PLATE_CORRECTED : VisitorRecord::PLATE_UNREADABLE,
+                'plate_number' => $plate,
+                'plate_key' => PlateNumber::key($plate),
+                'plate_profile_id' => $profile?->id,
+                'vehicle_id' => $profile?->vehicle_id,
+                'vehicle_type' => $data['vehicle_type'] ?? null,
+                'vehicle_color' => $data['vehicle_color'] ?? null,
+                'corrected_by' => $user->id,
+                'corrected_at' => now(),
+            ]);
+
+            $this->refreshProfiles([$record->plate_profile_id]);
+
+            return $record;
         });
     }
 

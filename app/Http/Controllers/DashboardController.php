@@ -296,6 +296,7 @@ class DashboardController extends Controller
     protected function recentEventActivities(): Collection
     {
         $eventRows = VehicleEvent::query()
+            ->withoutHiddenGuestCopies()
             ->with(['camera', 'vehicle', 'rfidScanLog'])
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->orderBy('created_at', 'desc')

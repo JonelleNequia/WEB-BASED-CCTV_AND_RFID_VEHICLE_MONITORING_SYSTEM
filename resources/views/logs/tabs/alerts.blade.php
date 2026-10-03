@@ -39,70 +39,7 @@
         </tbody>
     </x-table>
 
-    <x-drawer id="add-observation-drawer" title="Add Guest Observation" :open="$errors->any()">
-            <form method="POST" action="{{ route('guest-observations.store') }}" enctype="multipart/form-data" class="stack-form guest-observation-form">
-                @csrf
-                <input type="hidden" name="observation_source" value="manual">
-
-                <div class="stack-form">
-                    <div class="field">
-                        <label for="plate_number">Plate Number</label>
-                        <input id="plate_number" type="text" name="plate_number" value="{{ old('plate_number', old('plate_text')) }}" placeholder="Optional for guest vehicle">
-                    </div>
-
-                    <div class="field">
-                        <label for="vehicle_type">Vehicle Type</label>
-                        <input id="vehicle_type" type="text" name="vehicle_type" value="{{ old('vehicle_type') }}" placeholder="Car, Van, Motorcycle" required>
-                    </div>
-
-                    <div class="field">
-                        <label for="vehicle_color">Vehicle Color</label>
-                        <input id="vehicle_color" type="text" name="vehicle_color" value="{{ old('vehicle_color') }}" placeholder="Optional">
-                    </div>
-
-                    <div class="field">
-                        <label for="location">Gate</label>
-                        <select id="location" name="location" required>
-                            @foreach (\App\Models\Gate::options() as $value => $label)
-                                <option value="{{ $value }}" @selected(old('location', array_key_first(\App\Models\Gate::options())) === $value)>{{ $label }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-
-                    <div class="field">
-                        <label for="camera_id">Camera</label>
-                        <select id="camera_id" name="camera_id">
-                            <option value="">No camera selected</option>
-                            @foreach ($cameras as $camera)
-                                <option value="{{ $camera->id }}" @selected((string) old('camera_id') === (string) $camera->id)>
-                                    {{ $camera->camera_name }}
-                                </option>
-                            @endforeach
-                        </select>
-                    </div>
-
-                    <div class="field">
-                        <label for="observed_at">Observation Time</label>
-                        <input id="observed_at" type="datetime-local" name="observed_at" value="{{ old('observed_at', now()->format('Y-m-d\TH:i')) }}" required>
-                    </div>
-
-                    <div class="field">
-                        <label for="snapshot">Snapshot</label>
-                        <input id="snapshot" type="file" name="snapshot" accept="image/*">
-                    </div>
-
-                    <div class="field span-full">
-                        <label for="notes">Notes</label>
-                        <textarea id="notes" name="notes" rows="3" placeholder="Guard remarks">{{ old('notes') }}</textarea>
-                    </div>
-                </div>
-
-                <div class="button-row">
-                    <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
-                    <button type="submit" class="button button-primary">Save Guest Observation</button>
-                </div>
-            </form>
-    </x-drawer>
+    {{-- Phase 8 (visitor model): vehicles without a tag are recorded on the Visitors page (Add visitor manually). --}}
 
         <section class="panel">
             <div class="panel-header">

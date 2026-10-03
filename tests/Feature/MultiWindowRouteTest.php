@@ -11,8 +11,6 @@ use App\Models\VehicleEvent;
 use App\Services\DetectorRuntimeService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class MultiWindowRouteTest extends TestCase
@@ -302,90 +300,31 @@ class MultiWindowRouteTest extends TestCase
         ]);
     }
 
-    public function test_station_rfid_scan_for_guest_category_creates_guest_observation_for_sidebar(): void
+    public function test_station_rfid_scan_for_old_guest_category_is_flagged_without_a_guest_record(): void
     {
-        Storage::fake('public');
+        // Phase 8 (visitor model): no guest record from a tag read any more.
         $this->seed(DatabaseSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
-        $sourcePath = \App\Support\CameraFiles::framePath('gate-1');
-        File::ensureDirectoryExists(dirname($sourcePath));
-        File::put($sourcePath, 'guest-category-frame');
+        $vehicle = Vehicle::query()->create([
+            'plate_number' => 'GST-1005',
+            'vehicle_owner_name' => 'Guest Visitor',
+            'category' => 'guest',
+            'vehicle_type' => 'Van',
+        ]);
+        $tag = RfidTag::query()->create(['uid' => 'RFID-GUEST-1005', 'status' => RfidTag::STATUS_ASSIGNED, 'vehicle_id' => $vehicle->id, 'assigned_at' => now()]);
+        $vehicle->forceFill(['rfid_tag_id' => $tag->id, 'rfid_tag_uid' => $tag->uid])->save();
 
-        try {
-            $vehicle = Vehicle::query()->create([
-                'plate_number' => 'GST-1005',
-                'vehicle_owner_name' => 'Guest Visitor',
-                'category' => 'guest',
-                'vehicle_type' => 'Van',
-            ]);
-            $tag = RfidTag::query()->create([
-                'uid' => 'RFID-GUEST-1005',
-                'status' => RfidTag::STATUS_ASSIGNED,
-                'vehicle_id' => $vehicle->id,
-                'assigned_at' => now(),
-            ]);
-            $vehicle->forceFill([
-                'rfid_tag_id' => $tag->id,
-                'rfid_tag_uid' => $tag->uid,
-            ])->save();
+        $this->actingAs($admin)
+            ->postJson(route('stations.rfid-scan', 'gate-1'), ['tag_uid' => $tag->uid])
+            ->assertCreated()
+            ->assertJsonPath('scan.verification_status', 'guest')
+            ->assertJsonPath('anomaly', true)
+            ->assertJsonPath('scan.scan_location', 'gate-1');
 
-            $this->actingAs($admin)
-                ->postJson(route('stations.rfid-scan', 'gate-1'), [
-                    'tag_uid' => $tag->uid,
-                ])
-                ->assertCreated()
-                ->assertJsonPath('scan.verification_status', 'guest')
-                ->assertJsonPath('scan.verification_label', 'Guest')
-                ->assertJsonPath('scan.scan_location', 'gate-1');
-
-            $scanLog = RfidScanLog::query()
-                ->with('guestVehicleObservation')
-                ->where('tag_uid', $tag->uid)
-                ->firstOrFail();
-            $observation = $scanLog->guestVehicleObservation;
-
-            $this->assertNotNull($observation);
-            $this->assertSame('GST-1005', $observation->plate_number);
-            $this->assertSame('gate-1', $observation->location);
-            $this->assertNotNull($observation->snapshot_path);
-            Storage::disk('public')->assertExists($observation->snapshot_path);
-
-            $this->mock(DetectorRuntimeService::class, function ($mock): void {
-                $mock->shouldReceive('markStationViewerActive')
-                    ->once()
-                    ->with('gate-1');
-                $mock->shouldReceive('ensureRunning')
-                    ->once()
-                    ->andReturn([
-                        'service_running' => true,
-                        'service_message' => 'Detector service is already running.',
-                        'updated_at' => now()->toIso8601String(),
-                        'cameras' => [
-                            'gate-1' => [
-                                'camera_role' => 'gate-1',
-                                'camera_running' => true,
-                                'detection_ready' => true,
-                                'stream_url' => 'http://127.0.0.1:8765/stream/entrance',
-                            ],
-                        ],
-                    ]);
-                $mock->shouldReceive('withViewerStreamUrls')
-                    ->once()
-                    ->andReturnUsing(fn (array $status, ?string $viewerHost = null): array => $status);
-            });
-
-            $this->actingAs($admin)
-                ->getJson(route('stations.state', 'gate-1'))
-                ->assertOk()
-                ->assertJsonFragment([
-                    'event_type' => 'GUEST',
-                    'plate_number' => 'GST-1005',
-                    'verification_label' => 'GUEST',
-                ]);
-        } finally {
-            File::delete($sourcePath);
-        }
+        $scanLog = RfidScanLog::query()->where('tag_uid', $tag->uid)->firstOrFail();
+        $this->assertNull($scanLog->guest_vehicle_observation_id);
+        $this->assertStringContainsString('old Guest category', (string) $scanLog->anomaly_reason);
     }
 
     public function test_station_rfid_scan_ignores_immediate_duplicate_reads(): void

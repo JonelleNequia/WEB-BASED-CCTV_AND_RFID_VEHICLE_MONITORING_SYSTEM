@@ -45,7 +45,6 @@ class RfidIngestService
         protected LocalStorageService $localStorageService,
         protected VehicleRegistryService $vehicleRegistryService,
         protected EventService $eventService,
-        protected GuestObservationService $guestObservationService,
         protected RfidCameraFusionService $fusionService
     ) {
     }
@@ -155,16 +154,6 @@ class RfidIngestService
             'resulting_state' => $vehicle?->current_state ?: null,
             'anomaly_reason' => $anomalyReason,
         ]);
-
-        if (in_array($verificationStatus, ['guest', 'non_recurring_category'], true)) {
-            $observation = $this->guestObservationService->createFromUnrecognizedRfidScan($scanLog);
-            $scanLog->forceFill([
-                'guest_vehicle_observation_id' => $observation->id,
-                'outcome' => RfidIngestResult::GUEST,
-            ])->save();
-
-            return $this->result($scanLog, RfidIngestResult::GUEST, 'Guest vehicle tag recorded as GUEST. A guest observation was created.');
-        }
 
         $outcome = in_array($verificationStatus, ['inactive_tag'], true) ? RfidIngestResult::ALERT : RfidIngestResult::ANOMALY;
         $scanLog->forceFill(['outcome' => $outcome])->save();
@@ -418,6 +407,8 @@ class RfidIngestService
             'inactive_tag' => ($tag?->label ?? 'Tag').' is '.strtoupper((string) $tag?->status)." but was scanned at the {$station}.",
             'unassigned_tag' => ($tag?->label ?? 'Tag')." is not assigned to any vehicle but was scanned at the {$station}.",
             'inactive_vehicle' => "The vehicle for this tag is inactive but was scanned at the {$station}.",
+            // Phase 8: no guest record any more; the Registry entry needs a category.
+            'guest', 'non_recurring_category' => "The vehicle for this tag has the old Guest category; set Faculty & Staff or Registered Visitor in the Registry.",
             default => null,
         };
     }

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Gate;
 use App\Models\GuestVehicleObservation;
+use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
 use App\Models\VisitorRecord;
 use App\Support\DisplayTime;
@@ -93,11 +94,22 @@ class MovementCountService
                     'direction' => in_array($record->direction, ['IN', 'OUT'], true) ? $record->direction : 'UNKNOWN',
                     'category' => $plateOnly ? VehicleCategory::normalize($record->vehicle->category) : VehicleCategory::UNREGISTERED_VISITOR,
                     'gate' => $this->gate($record->gate),
-                    'source' => $plateOnly ? self::SOURCE_PLATE_ONLY : self::SOURCE_CAMERA,
+                    'source' => match (true) {
+                        $record->source === VisitorRecord::SOURCE_MANUAL => self::SOURCE_MANUAL,
+                        $plateOnly => self::SOURCE_PLATE_ONLY,
+                        default => self::SOURCE_CAMERA,
+                    },
                 ];
             });
 
         $legacy = GuestVehicleObservation::query()
+            // Phase 8: archived (unknown-tag) rows are excluded by the model;
+            // converted ones are counted as their visitor record.
+            ->notConverted()
+            // A guest record made by a tag read is not a vehicle movement
+            // (visitors:cleanup archives them; this holds before it runs too).
+            ->whereNotIn('id', RfidScanLog::query()->whereNotNull('guest_vehicle_observation_id')->select('guest_vehicle_observation_id'))
+            ->where(fn ($query) => $query->whereNull('notes')->orWhere('notes', 'not like', 'Guest RFID tag %'))
             ->whereIn('observation_source', ['cctv', 'manual'])
             ->where(fn ($query) => $query->whereNull('external_event_key')
                 ->orWhereNotIn('external_event_key', VisitorRecord::query()->select('external_event_key')))

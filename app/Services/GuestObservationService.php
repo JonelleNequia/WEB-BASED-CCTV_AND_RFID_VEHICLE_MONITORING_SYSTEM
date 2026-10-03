@@ -3,9 +3,7 @@
 namespace App\Services;
 
 use App\Models\GuestVehicleObservation;
-use App\Models\Camera;
 use App\Models\Gate;
-use App\Models\RfidScanLog;
 use App\Support\PlateNumber;
 use App\Support\PhilippineTime;
 use Illuminate\Http\UploadedFile;
@@ -45,38 +43,6 @@ class GuestObservationService
                 'snapshot_path' => $snapshotPath,
                 'notes' => $data['notes'] ?? null,
                 'created_by' => $userId,
-            ]);
-        });
-    }
-
-    /**
-     * Create a CCTV-supported guest observation record from a guest RFID scan.
-     */
-    public function createFromUnrecognizedRfidScan(RfidScanLog $scanLog): GuestVehicleObservation
-    {
-        return DB::transaction(function () use ($scanLog): GuestVehicleObservation {
-            $scanLog->loadMissing('vehicle');
-
-            $camera = Camera::query()->forRole($scanLog->scan_location)->first();
-            $vehicle = $scanLog->vehicle;
-            $snapshotPath = $this->localStorageService->storeLatestCameraSnapshot($scanLog->scan_location);
-            $plateNumber = $this->normalizePlate($vehicle?->plate_number);
-            $vehicleType = $vehicle?->vehicle_type ?: 'Guest';
-            $statusLabel = str_replace('_', ' ', (string) $scanLog->verification_status);
-
-            return GuestVehicleObservation::query()->create([
-                'plate_text' => $plateNumber,
-                'plate_number' => $plateNumber,
-                'vehicle_type' => $vehicleType,
-                'vehicle_color' => null,
-                'location' => $scanLog->scan_location,
-                'observation_source' => 'cctv',
-                'status' => 'pending_review',
-                'observed_at' => $scanLog->scan_time,
-                'camera_id' => $camera?->id,
-                'snapshot_path' => $snapshotPath,
-                'notes' => 'Guest RFID tag '.$scanLog->tag_uid.' scanned at '.$scanLog->scanLocationLabel.' ('.$statusLabel.').',
-                'created_by' => null,
             ]);
         });
     }

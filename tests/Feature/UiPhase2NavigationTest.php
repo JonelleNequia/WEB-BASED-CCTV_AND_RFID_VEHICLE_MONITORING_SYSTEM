@@ -83,7 +83,8 @@ class UiPhase2NavigationTest extends TestCase
             '/system-status' => '/settings?tab=status',
             // Phase 0: guest pass pages are gone; old links open the camera alerts.
             '/guest-passes?status=overstay' => '/logs?tab=alerts&status=overstay',
-            '/guests' => '/logs?tab=alerts',
+            // Phase 8 (visitor model): Guests became Visitors.
+            '/guests' => '/visitors',
         ];
 
         foreach ($redirects as $from => $to) {
