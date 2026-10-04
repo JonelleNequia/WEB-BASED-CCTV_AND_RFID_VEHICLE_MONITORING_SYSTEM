@@ -2,15 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Api\RealtimeLogController;
 use App\Models\Gate;
-use App\Models\GuestVehicleObservation;
 use App\Models\RfidScanLog;
-use App\Models\VehicleEvent;
 use App\Services\CalibrationService;
 use App\Services\DetectorRuntimeService;
 use App\Services\RfidIngestService;
 use App\Services\SettingsService;
-use App\Support\DisplayTime;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -122,146 +120,14 @@ class StationController extends Controller
     }
 
     /**
+     * Recent activity of every gate (newest first). UI Phase 4: same rows as
+     * the Gate Monitor; the newest one at this gate is the big result.
+     *
      * @return list<array<string, mixed>>
      */
     protected function recentLogs(int $limit = 14): array
     {
-        $eventLogs = VehicleEvent::query()
-            ->withoutHiddenGuestCopies()
-            ->with(['camera', 'vehicle', 'rfidScanLog', 'guestVisit.rfidTag'])
-            ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
-            ->latest('created_at')
-            ->latest('event_time')
-            ->limit($limit * 5)
-            ->get()
-            ->map(function (VehicleEvent $event): array {
-                $vehicle = $event->vehicle;
-                $scanLog = $event->rfidScanLog;
-                $plateNumber = $event->plate_text ?: $vehicle?->plate_number ?: 'No plate';
-                $entriesToday = $event->daily_entries_count
-                    ?? $vehicle?->entries_today_count
-                    ?? 0;
-                $exitsToday = $event->daily_exits_count
-                    ?? $vehicle?->exits_today_count
-                    ?? 0;
-
-                return [
-                    'id' => $event->id,
-                    'record_type' => 'vehicle_event',
-                    'event_type' => $event->event_type,
-                    'plate_number' => $plateNumber,
-                    'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',
-                    'vehicle_type' => $event->display_vehicle_type,
-                    'camera_role' => $event->camera?->camera_role,
-                    'scan_location' => $scanLog?->scan_location,
-                    'verification_label' => $scanLog?->verificationLabel
-                        ?? ($event->vehicle_id ? 'Registered' : 'Unregistered Visitor'),
-                    'resulting_state' => $event->resulting_state ?: 'N/A',
-                    'entries_today_count' => (int) $entriesToday,
-                    'exits_today_count' => (int) $exitsToday,
-                    'event_time' => $event->event_time?->toIso8601String(),
-                    'display_time' => DisplayTime::datetimeSeconds($event->event_time),
-                    'status' => $event->display_status_label,
-                    'anomaly' => filled($event->anomaly_reason) && ! in_array($event->event_origin, ['guest_cctv', 'guest_manual'], true),
-                    'sort_time' => $this->sortTimestamp($event->created_at, $event->event_time),
-                    // Phase 4: guest pass events show the pass number, not "GUEST / Owner N/A".
-                    ...VehicleEvent::guestPassLogFields($event),
-            // Phase 5: detector no-pass alerts.
-            ...VehicleEvent::noPassLogFields($event),
-                ];
-            });
-
-        $guestLogs = GuestVehicleObservation::query()
-            ->with('camera')
-            ->where(function ($query): void {
-                $query->whereNull('external_event_key')
-                    ->orWhereNotExists(function ($subquery): void {
-                        $subquery->selectRaw('1')
-                            ->from('vehicle_events')
-                            ->whereColumn('vehicle_events.external_event_key', 'guest_vehicle_observations.external_event_key')
-                            ->whereIn('vehicle_events.event_origin', ['guest_cctv', 'guest_manual']);
-                    });
-            })
-            ->latest('created_at')
-            ->latest('observed_at')
-            ->limit($limit * 3)
-            ->get()
-            ->map(function (GuestVehicleObservation $observation): array {
-                return [
-                    'id' => 'guest-'.$observation->id,
-                    'record_type' => 'guest_observation',
-                    'event_type' => 'UNREGISTERED',
-                    'plate_number' => $observation->plate_number ?: $observation->plate_text ?: 'No plate',
-                    'owner_name' => 'N/A',
-                    'vehicle_type' => $observation->vehicle_type ?: 'Vehicle',
-                    'camera_role' => $observation->camera?->camera_role,
-                    'scan_location' => $observation->location,
-                    'verification_label' => 'Unregistered Visitor',
-                    'resulting_state' => 'Not tracked',
-                    'entries_today_count' => 0,
-                    'exits_today_count' => 0,
-                    'event_time' => $observation->observed_at?->toIso8601String(),
-                    'display_time' => DisplayTime::datetimeSeconds($observation->observed_at),
-                    'status' => 'Unregistered Visitor',
-                    'snapshot_url' => $observation->snapshot_url,
-                    'sort_time' => $this->sortTimestamp($observation->created_at, $observation->observed_at),
-                ];
-            });
-
-        // Phase 3: tag reads with no IN/OUT (yet): waiting for the camera,
-        // scan only, and unknown tags.
-        $scanLogs = RfidScanLog::query()
-            ->with('vehicle')
-            ->where(function ($query): void {
-                $query->whereIn('fusion_status', [RfidScanLog::FUSION_PENDING, RfidScanLog::FUSION_SCAN_ONLY])
-                    ->orWhere('verification_status', 'unknown_tag');
-            })
-            ->latest('created_at')
-            ->limit($limit)
-            ->get()
-            ->map(function (RfidScanLog $scan): array {
-                $unknown = $scan->verification_status === 'unknown_tag';
-
-                return [
-                    'id' => 'scan-'.$scan->id,
-                    'record_type' => 'rfid_scan',
-                    'event_type' => $unknown ? 'UNKNOWN TAG' : ($scan->fusion_status === RfidScanLog::FUSION_PENDING ? 'WAITING' : 'SCAN ONLY'),
-                    'plate_number' => $scan->vehicle?->plate_number ?: $scan->tag_uid,
-                    'owner_name' => $scan->vehicle?->owner_name ?: 'N/A',
-                    'vehicle_type' => $scan->vehicle?->vehicle_type ?: 'Vehicle',
-                    'camera_role' => null,
-                    'scan_location' => $scan->scan_location,
-                    'verification_label' => $unknown ? 'Unknown tag' : $scan->fusionLabel,
-                    'resulting_state' => $scan->resulting_state ?: 'N/A',
-                    'entries_today_count' => (int) ($scan->vehicle?->entries_today_count ?? 0),
-                    'exits_today_count' => (int) ($scan->vehicle?->exits_today_count ?? 0),
-                    'event_time' => $scan->scan_time?->toIso8601String(),
-                    'display_time' => DisplayTime::datetimeSeconds($scan->scan_time),
-                    'status' => $unknown ? 'Unknown tag' : $scan->fusionLabel,
-                    'unknown_tag' => $unknown,
-                    'sort_time' => $this->sortTimestamp($scan->created_at, $scan->scan_time),
-                ];
-            });
-
-        return $eventLogs
-            ->concat($guestLogs)
-            ->concat($scanLogs)
-            ->sortByDesc('sort_time')
-            ->take($limit)
-            ->map(function (array $log): array {
-                unset($log['sort_time']);
-                // UI Phase 3: one color per row (IN / OUT blue, unregistered gray...).
-                $log['tone'] = \App\Support\StatusBadge::movementTone($log);
-
-                return $log;
-            })
-            ->values()
-            ->all();
-    }
-
-    protected function sortTimestamp($createdAt, $eventAt): float
-    {
-        return (float) ($createdAt?->format('U.u') ?? $eventAt?->format('U.u') ?? 0);
+        return app(RealtimeLogController::class)->stationLogRows($limit);
     }
 
     /**

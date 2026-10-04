@@ -131,18 +131,25 @@ class UiPhase2NavigationTest extends TestCase
         $this->actingAs($this->guard)
             ->getJson(route('gates.state'))
             ->assertOk()
-            ->assertJsonStructure(['detector_running', 'gates' => ['gate-1' => ['camera_running', 'stream_url', 'latest_scan', 'logs'], 'gate-2']]);
+            ->assertJsonStructure(['detector_running', 'gates' => ['gate-1' => ['camera_running', 'stream_url', 'logs'], 'gate-2']]);
     }
 
-    public function test_gate_monitor_shows_the_latest_scan_per_gate(): void
+    public function test_gate_monitor_shows_the_latest_vehicle_per_gate(): void
     {
         RfidTag::query()->create(['uid' => 'GATE-UNKNOWN-1', 'status' => RfidTag::STATUS_AVAILABLE]);
         app(RfidIngestService::class)->ingest(['tag_uid' => 'GATE-UNKNOWN-1', 'scan_location' => 'gate-2'], 'station_reader');
 
         $state = $this->actingAs($this->admin)->getJson(route('gates.state'))->json('gates');
 
-        $this->assertNull($state['gate-1']['latest_scan']);
-        $this->assertNotNull($state['gate-2']['latest_scan']);
+        // UI Phase 4: the newest row is the big result; a tag that is not on a vehicle is a yellow "TAG?".
+        $this->assertSame([], $state['gate-1']['logs']);
+        $this->assertSame(['GATE-UNKNOWN-1', 'TAG?', 'Unknown tag', 'warning'], [
+            $state['gate-2']['logs'][0]['plate_number'], $state['gate-2']['logs'][0]['direction_label'],
+            $state['gate-2']['logs'][0]['category_label'], $state['gate-2']['logs'][0]['tone'],
+        ]);
+        $this->actingAs($this->admin)->get(route('gates.index'))->assertOk()
+            ->assertSee('class="gate-latest result-unknown"', false)
+            ->assertSee('No vehicles have passed yet');
     }
 
     public function test_sidebar_shows_the_alert_count(): void

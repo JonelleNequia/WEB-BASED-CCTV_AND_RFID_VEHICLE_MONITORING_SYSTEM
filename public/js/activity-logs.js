@@ -120,7 +120,10 @@
             const td = el('td');
             td.colSpan = 9;
             const empty = el('div', 'empty-block');
-            empty.append(el('strong', null, 'No records matched the current filters'), el('p', null, 'Adjust the filters to widen the list.'));
+            empty.append(
+                el('strong', null, list.dataset.emptyTitle || 'No records matched the current filters'),
+                el('p', null, list.dataset.emptyText || 'Adjust the filters to widen the list.')
+            );
             td.append(empty);
             tr.append(td);
             list.replaceChildren(tr);

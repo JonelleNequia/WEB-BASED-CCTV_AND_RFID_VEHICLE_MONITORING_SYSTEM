@@ -332,6 +332,126 @@
         }
     }
 
+    /* ---------- UI Phase 4: sidebar status dots (Detector, Cameras, Readers) ---------- */
+
+    async function refreshHealth() {
+        const box = document.querySelector('[data-health-url]');
+        if (!box || document.hidden) {
+            return;
+        }
+        try {
+            const response = await fetch(box.dataset.healthUrl, { headers: { Accept: 'application/json' } });
+            if (!response.ok) {
+                return;
+            }
+            ((await response.json()).health || []).forEach(function (item) {
+                const node = box.querySelector(`[data-health="${item.key}"]`);
+                if (!node) {
+                    return;
+                }
+                node.title = `${item.label}: ${item.detail}`;
+                node.querySelector('.health-dot').className = `health-dot ${item.ok ? 'is-ok' : 'is-down'}`;
+                const detail = node.querySelector('[data-health-detail]');
+                if (detail) {
+                    detail.textContent = `${item.ok ? 'OK' : 'Needs attention'}: ${item.detail}`;
+                }
+            });
+        } catch (error) {
+            // Offline for a moment; the next refresh tries again.
+        }
+    }
+
+    window.setInterval(refreshHealth, 5000);
+
+    /* ---------- UI Phase 4: segmented control (Today / Week / Month / Year, ranking tabs) ---------- */
+    // <div data-segments="key"> with buttons [data-segment="x"] and panels [data-segment-panel="x"].
+
+    function showSegment(root, key) {
+        root.querySelectorAll('[data-segment]').forEach(function (button) {
+            const active = button.dataset.segment === key;
+            button.classList.toggle('is-active', active);
+            button.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        root.querySelectorAll('[data-segment-panel]').forEach(function (panel) {
+            panel.hidden = panel.dataset.segmentPanel !== key;
+        });
+    }
+
+    document.addEventListener('click', function (event) {
+        const button = event.target.closest('[data-segment]');
+        const root = button?.closest('[data-segments]');
+        if (!root) {
+            return;
+        }
+        showSegment(root, button.dataset.segment);
+        try {
+            localStorage.setItem(`ui.segment.${root.dataset.segments}`, button.dataset.segment);
+        } catch (error) {
+            // Not remembered in private mode.
+        }
+    });
+
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('[data-segments]').forEach(function (root) {
+            let saved = null;
+            try {
+                saved = localStorage.getItem(`ui.segment.${root.dataset.segments}`);
+            } catch (error) {
+                saved = null;
+            }
+            if (saved && root.querySelector(`[data-segment="${saved}"]`)) {
+                showSegment(root, saved);
+            }
+        });
+    });
+
+    /* ---------- UI Phase 4: thumbnails open larger ([data-zoom="image url"]) ---------- */
+
+    function closeLightbox() {
+        document.querySelector('[data-lightbox]')?.remove();
+    }
+
+    document.addEventListener('click', function (event) {
+        const trigger = event.target.closest('[data-zoom]');
+        if (!trigger || event.metaKey || event.ctrlKey) {
+            return;
+        }
+        event.preventDefault();
+        closeLightbox();
+        const box = document.createElement('div');
+        box.className = 'lightbox';
+        box.dataset.lightbox = '';
+        box.setAttribute('role', 'dialog');
+        box.setAttribute('aria-label', trigger.dataset.zoomLabel || 'Image');
+        const image = document.createElement('img');
+        image.src = trigger.dataset.zoom || trigger.getAttribute('href');
+        image.alt = trigger.dataset.zoomLabel || '';
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'lightbox-close';
+        close.setAttribute('aria-label', 'Close');
+        close.textContent = '×';
+        box.append(image, close);
+        box.addEventListener('click', closeLightbox);
+        document.body.append(box);
+        close.focus();
+    });
+
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+            closeLightbox();
+        }
+    });
+
+    /* Row "⋯" menus: a click elsewhere closes the open one. */
+    document.addEventListener('click', function (event) {
+        document.querySelectorAll('details.menu[open]').forEach(function (menu) {
+            if (!menu.contains(event.target)) {
+                menu.open = false;
+            }
+        });
+    });
+
     document.addEventListener('DOMContentLoaded', syncSidebarToggle);
 
     window.ui = {

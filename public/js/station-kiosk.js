@@ -11,8 +11,6 @@
     const clock = document.querySelector('[data-station-clock]');
     const cameraChip = document.querySelector('[data-camera-status-chip]');
     const detectorChip = document.querySelector('[data-detector-status-chip]');
-    const cameraFrames = document.querySelector('[data-camera-frames]');
-    const cameraDetections = document.querySelector('[data-camera-detections]');
     const rfidInput = document.querySelector('[data-rfid-input]');
     const rfidStatus = document.querySelector('[data-rfid-status]');
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
@@ -78,33 +76,47 @@
         alertBox.hidden = false;
     }
 
-    /* UI Phase 4: big VERIFIED / DENIED / ALERT banner. */
+    /* UI Phase 4: the big result (latest vehicle at this gate, or a kiosk scan). */
     const resultBox = document.querySelector('[data-scan-result]');
     // UI Phase 3 colors: green registered, gray unregistered, yellow needs a
     // look (unknown tag), red real problem (anomaly, lost tag, inactive vehicle).
-    const RESULT_LOOK = {
-        verified: { word: 'VERIFIED', icon: '✓' },
-        unregistered: { word: 'UNREGISTERED', icon: '•' },
-        unknown: { word: 'UNKNOWN TAG', icon: '?' },
-        denied: { word: 'DENIED', icon: '✕' },
-        alert: { word: 'ALERT', icon: '!' },
+    const RESULT_WORD = {
+        verified: 'VERIFIED',
+        unregistered: 'UNREGISTERED',
+        unknown: 'UNKNOWN TAG',
+        denied: 'DENIED',
+        alert: 'ALERT',
     };
+    const TONE_LOOK = { info: 'verified', neutral: 'unregistered', warning: 'unknown', critical: 'alert' };
 
-    function showScanResult(kind, title, detail) {
+    function setResult(kind, word, title, detail, time) {
         if (!resultBox) {
             return;
         }
 
-        const look = RESULT_LOOK[kind] || RESULT_LOOK.alert;
         resultBox.className = `scan-result is-${kind} is-fresh`;
-        resultBox.querySelector('[data-scan-icon]').textContent = look.icon;
-        resultBox.querySelector('[data-scan-word]').textContent = look.word;
+        resultBox.querySelector('[data-scan-word]').textContent = word;
         resultBox.querySelector('[data-scan-title]').textContent = title || '';
         resultBox.querySelector('[data-scan-detail]').textContent = detail || '';
-        resultBox.querySelector('[data-scan-time]').textContent = window.ui ? window.ui.formatTime(new Date(), '', true) : '';
+        resultBox.querySelector('[data-scan-time]').textContent = time || '';
         window.setTimeout(function () {
             resultBox.classList.remove('is-fresh');
         }, 1200);
+    }
+
+    function showScanResult(kind, title, detail) {
+        setResult(kind, RESULT_WORD[kind] || RESULT_WORD.alert, title, detail, window.ui ? window.ui.formatTime(new Date(), '') : '');
+    }
+
+    // Plate, category, IN / OUT and time of the newest row.
+    function showLatest(log) {
+        setResult(
+            TONE_LOOK[log.tone] || 'unregistered',
+            log.direction_label || '—',
+            log.plate_number || '—',
+            log.category_label || '',
+            window.ui && log.event_time ? window.ui.formatTime(log.event_time) : ''
+        );
     }
 
     function scanResultFor(body) {
@@ -155,9 +167,11 @@
 
     function showFrameMessage(text) {
         if (frameMessage) {
-            frameMessage.textContent = text || '';
+            frameMessage.querySelector('[data-feed-offline-text]').textContent = text || '';
             frameMessage.hidden = !text;
         }
+        // The detector's own "unavailable" picture is hidden behind the small placeholder.
+        frame?.classList.toggle('is-hidden', !!text);
     }
 
     function startLiveStream(streamUrl, forceReload) {
@@ -169,20 +183,17 @@
 
         frame.onload = function () {
             streamBroken = false;
-            frame.classList.remove('is-hidden');
-            showFrameMessage('');
+            showFrameMessage(frameProblem(lastRuntime, lastCamera));
         };
 
         frame.onerror = function () {
             streamBroken = true;
-            frame.classList.add('is-hidden');
             showFrameMessage(frameProblem(lastRuntime, lastCamera));
         };
 
         // An error that happened before this script loaded left a broken image.
         if (!forceReload && frame.src && frame.complete && !frame.naturalWidth) {
             streamBroken = true;
-            frame.classList.add('is-hidden');
         }
 
         if (forceReload) {
@@ -196,14 +207,19 @@
     let lastRuntime = payload.detectorStatus || {};
     let lastCamera = payload.cameraStatus || {};
 
+    // One short line (UI Phase 4); the full reason is in Settings › System Status.
+    function firstSentence(text) {
+        return String(text || '').split(/(?<=\.)\s/)[0];
+    }
+
     function frameProblem(runtime, camera) {
         if (!runtime?.service_running) {
-            return 'Detector not running. It starts by itself; the live view appears when it is ready.';
+            return 'Detector starting…';
         }
-        if (camera && !camera.camera_running && camera.last_error) {
-            return camera.last_error;
+        if (camera && !camera.camera_running) {
+            return camera.last_error ? firstSentence(camera.last_error) : 'Camera offline';
         }
-        return streamBroken ? 'Live view not loaded yet. Retrying…' : '';
+        return streamBroken ? 'Connecting to the camera…' : '';
     }
 
     function stationLogKey(log) {
@@ -225,10 +241,10 @@
 
         item.className = 'station-log-item station-log-compact' + (log.tone === 'critical' ? ' is-alert' : '');
         badge.className = `station-log-badge tone-${log.tone || 'neutral'}`;
-        badge.textContent = log.event_type || 'LOG';
+        badge.textContent = log.direction_label || '—';
         plate.textContent = log.plate_number || '—';
         type.className = 'station-log-type';
-        type.textContent = log.verification_label || '';
+        type.textContent = log.category_label || '';
         time.className = 'station-log-time';
         time.textContent = window.ui && log.event_time ? window.ui.formatTime(log.event_time) : (log.display_time || '');
 
@@ -243,23 +259,21 @@
         item.replaceChildren(...replacement.childNodes);
     }
 
-    // A vehicle with no registered tag (Unregistered Visitor): a short notice.
-    let logsInitialized = false;
-    const announcedAlerts = new Set();
+    // UI Phase 4: a new newest row becomes the big result.
+    // The list shows every gate; the big result is the newest vehicle at this gate.
+    function latestHere(logs) {
+        return (Array.isArray(logs) ? logs : []).find((log) => log.gate === payload.location) || null;
+    }
 
-    function announceNoPassAlert(log) {
-        if (!log.no_pass_alert || announcedAlerts.has(log.id)) {
-            return;
+    let latestKey = latestHere(payload.logs) ? stationLogKey(latestHere(payload.logs)) : null;
+
+    function updateLatest(logs) {
+        const latest = latestHere(logs);
+        const key = latest ? stationLogKey(latest) : null;
+        if (key && key !== latestKey) {
+            showLatest(latest);
         }
-
-        announcedAlerts.add(log.id);
-
-        if (!logsInitialized || log.alert_location !== payload.location) {
-            return;
-        }
-
-        // Normal traffic: a gray result, no alert banner (UI Phase 3).
-        showScanResult('unregistered', log.plate_number || 'No plate', 'No registered RFID tag was read.');
+        latestKey = key;
     }
 
     function renderLogs(logs) {
@@ -268,11 +282,10 @@
         }
 
         if (!Array.isArray(logs) || logs.length === 0) {
-            logsInitialized = true;
             stationLogNodes.clear();
             const empty = document.createElement('div');
             empty.className = 'station-log-empty';
-            empty.textContent = 'No vehicles yet';
+            empty.textContent = 'No vehicles have passed yet';
             logList.replaceChildren(empty);
             return;
         }
@@ -297,7 +310,6 @@
                 item = buildLogItem(log);
                 item.dataset.stationLogKey = key;
                 stationLogNodes.set(key, item);
-                announceNoPassAlert(log);
             } else {
                 updateLogItem(item, log);
             }
@@ -319,7 +331,7 @@
             stationLogNodes.delete(key);
         });
 
-        logsInitialized = true;
+        updateLatest(logs);
     }
 
     function updateStatus(body) {
@@ -336,23 +348,9 @@
 
         lastRuntime = runtime;
         lastCamera = camera;
-        if (streamBroken) {
-            showFrameMessage(frameProblem(runtime, camera));
-            if (detectorOnline && Date.now() - lastStreamRetry > 5000) {
-                startLiveStream(body?.stream_url || null, true);
-            }
-        } else if (!cameraOnline && camera.last_error) {
-            showFrameMessage(camera.last_error);
-        } else {
-            showFrameMessage('');
-        }
-
-        if (cameraFrames) {
-            cameraFrames.textContent = `${camera.processed_frames ?? 0} frames`;
-        }
-
-        if (cameraDetections) {
-            cameraDetections.textContent = `${camera.active_detections ?? 0} active / ${camera.detections_seen ?? 0} detections`;
+        showFrameMessage(frameProblem(runtime, camera));
+        if (streamBroken && detectorOnline && Date.now() - lastStreamRetry > 5000) {
+            startLiveStream(body?.stream_url || null, true);
         }
     }
 
@@ -379,34 +377,9 @@
                 startLiveStream(body.stream_url);
             }
 
-            if (!payload.routes?.recentLogs) {
-                renderLogs(body.logs || []);
-            }
-        } catch (error) {
-            setStatusChip(detectorChip, false, 'Detector', 'Detector offline');
-        }
-    }
-
-    async function refreshLogs() {
-        if (!payload.routes?.recentLogs) {
-            return;
-        }
-
-        try {
-            const response = await fetch(payload.routes.recentLogs, {
-                headers: {
-                    Accept: 'application/json',
-                },
-            });
-
-            if (!response.ok) {
-                throw new Error('Station logs unavailable.');
-            }
-
-            const body = await response.json();
             renderLogs(body.logs || []);
         } catch (error) {
-            // Keep the last visible logs during transient polling failures.
+            setStatusChip(detectorChip, false, 'Detector', 'Detector offline');
         }
     }
 
@@ -455,7 +428,6 @@
             setRfidStatus(body.message || 'RFID scan recorded.');
             handleScanResult(body);
             refreshState();
-            refreshLogs();
         } catch (error) {
             setRfidStatus(error.message || 'RFID scan failed');
             showScanResult('denied', `Tag ${uid}`, error.message || 'RFID scan failed');
@@ -518,8 +490,7 @@
     renderLogs(payload.logs || []);
     startLiveStream(payload.streamUrl);
     bindRfidScanner();
-    refreshLogs();
+    refreshState();
     window.setInterval(updateClock, 1000);
     window.setInterval(refreshState, 2000);
-    window.setInterval(refreshLogs, 2000);
 })();

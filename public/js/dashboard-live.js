@@ -19,10 +19,11 @@
 
     function emptyState(title, copy) {
         const wrapper = document.createElement('div');
-        const heading = document.createElement('h4');
+        const heading = document.createElement('strong');
         const paragraph = document.createElement('p');
 
-        wrapper.className = 'empty-state';
+        // Same look as <x-empty-state>.
+        wrapper.className = 'empty-block';
         heading.textContent = title;
         paragraph.textContent = copy;
         wrapper.append(heading, paragraph);
@@ -81,7 +82,7 @@
             return;
         }
 
-        container.querySelectorAll('.empty-state').forEach(function (node) {
+        container.querySelectorAll('.empty-block').forEach(function (node) {
             node.remove();
         });
 
@@ -132,6 +133,10 @@
         }
 
         body.innerHTML = '';
+        const empty = document.querySelector('[data-dashboard-ranking-empty]');
+        if (empty) {
+            empty.hidden = Array.isArray(rows) && rows.length > 0;
+        }
 
         if (!Array.isArray(rows) || rows.length === 0) {
             return;
@@ -241,8 +246,7 @@
             entries.append(entriesText, seen);
             cell(String(row.entries_today_count));
             cell(row.last_seen || '—');
-            cell(row.note ? (row.note.length > 40 ? row.note.slice(0, 37) + '...' : row.note) : '—');
-            cell(link(row.register_url, 'Register this vehicle', 'button button-secondary button-sm'));
+            cell(link(row.register_url, 'Register this vehicle', 'button button-secondary button-sm')).className = 'row-actions';
             body.appendChild(tr);
         });
     }
@@ -432,8 +436,8 @@
         renderStream(
             'events',
             body.latest_events || [],
-            'No vehicle logs yet',
-            'Event logs will appear after scans and manual entries.'
+            'No vehicles have passed yet',
+            'Vehicles from both gates appear here.'
         );
         renderRanking(body.frequent_entry_vehicles || []);
         renderVisitorRanking(body.frequent_unregistered_visitors || []);

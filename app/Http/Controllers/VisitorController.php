@@ -41,13 +41,19 @@ class VisitorController extends Controller
                     ->with('vehicle')
                     ->withCount(['records as entries_count' => fn ($query) => $query->active()->where('direction', 'IN')])
                     ->when(filled($filters['q'] ?? null), fn (Builder $query) => $query->where('plate_key', 'like', '%'.PlateNumber::key($filters['q']).'%'))
-                    // Phase 6: Visitor Ranking (most entries first) or latest first.
-                    ->when(($filters['sort'] ?? '') === 'entries',
-                        fn (Builder $query) => $query->whereNull('vehicle_id')->orderByDesc('entries_count')->orderByDesc('visit_count'),
-                        fn (Builder $query) => $query->orderByDesc('last_seen_at'))
+                    // UI Phase 4: most entries first by default; "recent" = last seen first;
+                    // "entries" = Phase 6 Visitor Ranking (not registered).
+                    ->when(($filters['sort'] ?? '') === 'entries', fn (Builder $query) => $query->whereNull('vehicle_id'))
+                    ->when(($filters['sort'] ?? '') === 'recent',
+                        fn (Builder $query) => $query->orderByDesc('last_seen_at'),
+                        fn (Builder $query) => $query->orderByDesc('entries_count')->orderByDesc('visit_count')->orderByDesc('last_seen_at'))
                     ->paginate(20)
                     ->withQueryString()
                 : null,
+            // UI Phase 4: "Merge" from the list (admins).
+            'mergeTargets' => $tab === 'plates' && $request->user()?->isAdmin()
+                ? PlateProfile::query()->current()->orderBy('plate_number')->get(['id', 'plate_number', 'visit_count'])
+                : collect(),
             'gates' => Gate::options(),
         ]);
     }

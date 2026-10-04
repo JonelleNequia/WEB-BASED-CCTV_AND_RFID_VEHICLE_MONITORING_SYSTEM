@@ -4468,42 +4468,30 @@ a:focus-visible {
     line-height: 1.4;
 }
 
+/* UI Phase 4: three status dots in one row; the details are in the tooltip. */
 .sidebar-health {
-    list-style: none;
-    margin: 0;
-    padding: 0.6rem 0.7rem;
-    display: grid;
-    gap: 0.35rem;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.08);
-}
-
-.sidebar-health li {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 0.82rem;
+    justify-content: space-between;
+    gap: 0.4rem;
+    padding: 0.5rem 0.65rem;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.08);
     color: rgba(255, 255, 255, 0.9);
+    text-decoration: none;
 }
 
-.sidebar-health small {
-    margin-left: auto;
-    color: rgba(255, 255, 255, 0.66);
-    font-size: 0.74rem;
-    text-align: right;
+a.sidebar-health:hover,
+a.sidebar-health:focus-visible {
+    background: rgba(255, 255, 255, 0.14);
 }
 
-.sidebar-health li.health-uhf {
-    flex-wrap: wrap;
-    row-gap: 0.1rem;
-}
-
-.sidebar-health .health-extra {
-    flex-basis: 100%;
-    margin-left: 1.05rem;
-    text-align: left;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.7rem;
+.sidebar-health-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.76rem;
+    cursor: help;
 }
 
 .health-dot {
@@ -5465,8 +5453,7 @@ html.sidebar-collapsed .nav-link {
 }
 
 html.sidebar-collapsed .nav-label,
-html.sidebar-collapsed .sidebar-health li > span:not(.health-dot),
-html.sidebar-collapsed .sidebar-health small,
+html.sidebar-collapsed .sidebar-health-label,
 html.sidebar-collapsed .sidebar-account {
     position: absolute;
     width: 1px;
@@ -5485,7 +5472,8 @@ html.sidebar-collapsed .nav-badge {
 }
 
 html.sidebar-collapsed .sidebar-health {
-    justify-items: center;
+    flex-direction: column;
+    gap: 0.55rem;
     padding: 0.6rem 0;
 }
 
@@ -5516,8 +5504,7 @@ html.sidebar-collapsed .sidebar-logout-button {
     }
 
     .nav-label,
-    .sidebar-health li > span:not(.health-dot),
-    .sidebar-health small,
+    .sidebar-health-label,
     .sidebar-account {
         position: absolute;
         width: 1px;
@@ -5534,7 +5521,9 @@ html.sidebar-collapsed .sidebar-logout-button {
     }
 
     .sidebar-health {
-        justify-items: center;
+        flex-direction: column;
+        gap: 0.55rem;
+        padding: 0.6rem 0;
     }
 }
 
@@ -6293,4 +6282,522 @@ button[aria-busy="true"] {
     align-items: baseline;
     gap: 0.6rem;
     flex-wrap: wrap;
+}
+
+/* ==========================================================================
+   UI Phase 4 (layout): segmented controls, dashboard, latest-vehicle result,
+   camera placeholder, thumbnails, row menus, Gates & Readers, shorter rows
+   ========================================================================== */
+
+/* Shorter table rows. */
+th,
+td {
+    padding: 0.5rem 0.75rem;
+}
+
+.thumb-sm {
+    width: 64px;
+    height: 44px;
+    border-radius: 8px;
+}
+
+img.thumb-plate {
+    width: 56px;
+    height: 22px;
+    border-radius: 4px;
+    background: #f4f5f7;
+    border-color: var(--border);
+}
+
+.thumb-button:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: 8px;
+}
+
+.plate-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Thumbnails open larger. */
+.lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: grid;
+    place-items: center;
+    padding: 2rem;
+    background: rgba(17, 24, 39, 0.82);
+    cursor: zoom-out;
+}
+
+.lightbox img {
+    max-width: min(1100px, 100%);
+    max-height: 100%;
+    border-radius: 10px;
+    background: #ffffff;
+    box-shadow: var(--shadow-lg);
+}
+
+.lightbox-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 0;
+    border-radius: 999px;
+    background: #ffffff;
+    color: var(--text);
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+/* Segmented control (Today / Week / Month / Year, ranking tabs). */
+.segmented {
+    display: inline-flex;
+    padding: 0.2rem;
+    gap: 0.15rem;
+    border-radius: 10px;
+    background: #f1f2f6;
+}
+
+.segmented-option {
+    padding: 0.3rem 0.75rem;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.84rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.segmented-option.is-active {
+    background: #ffffff;
+    color: var(--purple-deep);
+    box-shadow: var(--shadow-sm);
+}
+
+.segmented-option:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* Dashboard. */
+.dashboard-grid {
+    margin-top: 1.25rem;
+    align-items: start;
+}
+
+.dashboard-wide {
+    grid-column: 1 / -1;
+}
+
+.movement-counts-panel {
+    margin-bottom: 0;
+}
+
+.movement-totals {
+    display: flex;
+    gap: 2rem;
+    margin-bottom: 0.75rem;
+}
+
+.movement-totals div {
+    display: grid;
+}
+
+.movement-totals span {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+}
+
+.movement-totals strong {
+    font-size: 1.8rem;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
+.movement-split {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.movement-counts thead th {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.movement-counts thead th:first-child {
+    text-align: left;
+}
+
+.dashboard-stream {
+    display: grid;
+}
+
+.dashboard-stream .stream-item {
+    padding: 0.5rem 0;
+    border: 0;
+    border-bottom: 1px solid #f1f2f4;
+    border-radius: 0;
+    justify-content: space-between;
+}
+
+.dashboard-stream .stream-item:last-child {
+    border-bottom: 0;
+}
+
+.dashboard-stream .stream-item strong {
+    margin-bottom: 0;
+}
+
+.dashboard-stream .stream-item p,
+.dashboard-stream .stream-item small {
+    margin: 0;
+    font-size: 0.8rem;
+}
+
+.empty-inline {
+    margin: 0;
+    padding: 1rem 0.25rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.panel-footer-link {
+    margin-top: 0.5rem;
+    font-size: 0.86rem;
+    text-align: right;
+}
+
+@media (max-width: 700px) {
+    .movement-split {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* Camera with no picture: a small clean placeholder. */
+.feed-offline {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 1rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.feed-offline[hidden] {
+    display: none;
+}
+
+.feed-offline svg {
+    width: 1.75rem;
+    height: 1.75rem;
+    fill: #9ca3af;
+}
+
+.feed-offline a {
+    font-size: 0.84rem;
+    font-weight: 600;
+}
+
+.gate-feed.is-offline {
+    aspect-ratio: auto;
+    min-height: 120px;
+    display: grid;
+    place-items: center;
+    background: #f4f5f7;
+    border: 1px dashed #d1d5db;
+}
+
+.gate-feed.is-offline img {
+    display: none;
+}
+
+.station-frame-stage .feed-offline {
+    position: absolute;
+    inset: 50% auto auto 50%;
+    transform: translate(-50%, -50%);
+    min-width: 260px;
+    padding: 1.25rem 1.5rem;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #e5e7eb;
+    font-size: 1.05rem;
+}
+
+.station-frame-stage .feed-offline a {
+    color: #c4b5fd;
+}
+
+.station-frame-stage .frame-message,
+.gate-feed-fallback {
+    display: none;
+}
+
+/* Gate Monitor: the latest vehicle, readable from a distance. */
+.gate-card-head {
+    align-items: center;
+}
+
+.gate-latest {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.9rem;
+    padding: 0.8rem 1rem;
+    border: 0;
+    color: #ffffff;
+    background: #6b7280;
+}
+
+.gate-latest-direction {
+    min-width: 3.6rem;
+    font-size: 1.9rem;
+    font-weight: 900;
+    letter-spacing: 0.03em;
+    line-height: 1;
+}
+
+.gate-latest-text {
+    display: grid;
+    min-width: 0;
+}
+
+.gate-latest-text strong {
+    font-size: 1.6rem;
+    line-height: 1.15;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gate-latest-text span {
+    font-size: 0.95rem;
+    opacity: 0.92;
+}
+
+.gate-latest time {
+    font-size: 1rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.gate-latest.result-idle {
+    display: block;
+    color: var(--text-muted);
+    background: #fafafb;
+    border: 1px solid var(--border);
+}
+
+.gate-latest-empty {
+    margin: 0;
+}
+
+.gate-latest.result-verified {
+    background: #15803d;
+}
+
+.gate-latest.result-unknown {
+    background: #f59e0b;
+    color: #1f2937;
+}
+
+.gate-latest.result-alert {
+    background: #dc2626;
+}
+
+.gate-logs li {
+    grid-template-columns: 4.2rem minmax(0, 1fr) auto auto;
+    align-items: center;
+    padding: 0.35rem 0;
+}
+
+.gate-logs li .badge {
+    justify-content: center;
+}
+
+.gate-logs li strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gate-logs .gate-logs-empty {
+    display: block;
+    color: var(--text-muted);
+}
+
+/* Kiosk: the latest vehicle (IN / OUT, plate, category, time). */
+.scan-result {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto;
+    gap: 0.5rem 1.1rem;
+}
+
+.scan-result-word {
+    font-size: clamp(2.4rem, 4vw, 3.6rem);
+}
+
+.scan-result-title {
+    font-size: clamp(1.6rem, 2.6vw, 2.3rem);
+    line-height: 1.1;
+}
+
+.scan-result-detail {
+    font-size: 1.1rem;
+}
+
+.scan-result-time {
+    grid-column: auto;
+    align-self: start;
+    font-size: 1.1rem;
+    font-weight: 800;
+    opacity: 0.95;
+}
+
+.station-log-compact {
+    grid-template-columns: 4.2rem minmax(0, 1fr) auto auto;
+}
+
+.station-log-badge {
+    text-align: center;
+}
+
+/* Row "⋯" menus with links. */
+.menu-panel .menu-link {
+    padding: 0.5rem 0.6rem;
+    border-radius: 6px;
+    color: var(--text);
+    text-decoration: none;
+}
+
+.menu-panel .menu-link:hover,
+.menu-panel .menu-link:focus-visible {
+    background: var(--purple-soft);
+}
+
+.row-actions-inline {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.4rem;
+}
+
+.modal-sm .drawer-panel {
+    width: min(440px, calc(100vw - 2rem));
+}
+
+/* Settings › Gates & Readers. */
+.devices-banner {
+    display: grid;
+    gap: 0.2rem;
+    margin-bottom: 1rem;
+    padding: 0.8rem 1rem;
+    border-radius: 10px;
+    border: 1px solid #fcd34d;
+    background: #fffbeb;
+    color: #78350f;
+}
+
+.devices-banner[hidden] {
+    display: none;
+}
+
+.devices-subtitle {
+    margin: 1.25rem 0 0.5rem;
+    font-size: 0.9rem;
+    color: #2f2250;
+}
+
+.devices-network {
+    margin-top: 1rem;
+}
+
+.devices-guidance-line {
+    margin: 0;
+}
+
+.how-to-fix {
+    margin-top: 0.35rem;
+}
+
+.how-to-fix > summary {
+    cursor: pointer;
+    color: var(--purple-deep);
+    font-weight: 600;
+    font-size: 0.86rem;
+}
+
+/* `.panel-header > div` is a grid: keep the segmented control on one line. */
+.panel-header > .segmented {
+    display: inline-flex;
+    gap: 0.15rem;
+}
+
+.segmented-option {
+    white-space: nowrap;
+}
+
+.movement-counts tbody th[scope="row"] {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.88rem;
+    color: var(--text);
+}
+
+.movement-counts td {
+    font-variant-numeric: tabular-nums;
+}
+
+.panel-header > .button-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+.scan-result-title {
+    overflow-wrap: break-word;
+}
+
+.scan-result.is-idle .scan-result-title {
+    font-size: 1.15rem;
+}
+
+@media (max-width: 600px) {
+    .panel-header-modern {
+        flex-wrap: wrap;
+    }
+
+    .segmented {
+        max-width: 100%;
+        overflow-x: auto;
+    }
+
+    .segmented-option {
+        padding: 0.3rem 0.55rem;
+    }
+}
+
+.image-grid .thumb-button {
+    width: 100%;
+}
+
+.movement-split {
+    align-items: start;
 }

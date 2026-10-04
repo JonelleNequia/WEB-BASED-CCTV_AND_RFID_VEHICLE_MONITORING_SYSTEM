@@ -8,7 +8,7 @@
     <x-stat label="Unknown Tags Today" :value="$alertCounts['unknown_tags'] ?? 0" hint="Tags that are not in the Registry" />
 </x-stat-row>
 
-<x-table title="Alerts" :paginator="$alerts" :empty="$alerts->isEmpty()" empty-title="No alerts." empty-text="Anomalies and unknown tags appear here.">
+<x-table title="Alerts" :paginator="$alerts" :empty="$alerts->isEmpty()" empty-title="No alerts" empty-text="Anomalies and unknown tags appear here.">
     <x-slot:filters>
         <form method="GET" action="{{ route('logs.index') }}" class="form-grid filter-grid">
             <input type="hidden" name="tab" value="alerts">

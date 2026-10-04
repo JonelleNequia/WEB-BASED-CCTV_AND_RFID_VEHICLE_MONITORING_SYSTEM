@@ -10,16 +10,14 @@
         </x-slot:actions>
     </x-page-header>
 
-    <p class="field-help">Unregistered Visitors are vehicles the camera saw cross a gate without a registered RFID tag. They are counted IN and OUT, never as "inside". Correct a wrong or unreadable plate here; the plate profile keeps every visit of that plate.</p>
-
     <x-tabs :tabs="\App\Http\Controllers\VisitorController::TABS" :active="$tab" />
 
     @if ($tab === 'plates')
         @include('visitors.partials.plates')
     @else
-        <x-table title="Unregistered Visitors" :paginator="$records" :empty="$records->isEmpty()" empty-title="No unregistered visitors yet." empty-text="A vehicle that crosses a gate with no registered tag read appears here.">
+        <x-table title="Unregistered Visitors" :paginator="$records" :empty="$records->isEmpty()" empty-title="No unregistered visitors yet" empty-text="Vehicles that cross a gate without a registered tag appear here.">
             <x-slot:filters>
-                <form method="GET" action="{{ route('visitors.index') }}" class="form-grid filter-grid">
+                <form method="GET" action="{{ route('visitors.index') }}" class="log-filter-form">
                     <input type="hidden" name="tab" value="records">
                     <div class="field">
                         <label for="visitor_q">Plate</label>
@@ -51,17 +49,17 @@
                             @endforeach
                         </select>
                     </div>
-                    <div class="field field-actions">
-                        <div class="button-row">
-                            <button type="submit" class="button button-secondary">Filter</button>
-                            <a href="{{ route('visitors.index') }}" class="button button-secondary">Reset</a>
-                        </div>
+                    <div class="log-filter-actions">
+                        <button type="submit" class="button button-secondary">Filter</button>
+                        <a href="{{ route('visitors.index') }}" class="button button-secondary">Reset</a>
                     </div>
                 </form>
             </x-slot:filters>
             @include('visitors.partials.records', ['records' => $records])
         </x-table>
     @endif
+
+    @include('visitors.partials.record-dialogs')
 
     {{-- Phase 8 (visitor model): replaces "Add Guest Observation" (Activity Logs › Alerts). --}}
     <x-drawer id="add-visitor-drawer" title="Add visitor manually" :open="request()->boolean('add') || $errors->hasAny(['gate', 'direction', 'seen_at', 'plate_number', 'snapshot'])">

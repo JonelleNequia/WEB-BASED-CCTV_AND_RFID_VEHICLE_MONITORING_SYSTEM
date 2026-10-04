@@ -36,7 +36,7 @@ class UiPhase4PagesTest extends TestCase
         $html = $this->actingAs($this->admin)->get(route('dashboard.index'))->assertOk()->getContent();
 
         // Phase 7 (visitor model): IN / OUT counts.
-        foreach (['Inside Campus', 'IN Today', 'OUT Today', 'IN / OUT Counts', 'Alerts', 'Needs attention', 'Live activity', "Today's traffic"] as $text) {
+        foreach (['Inside Campus', 'IN Today', 'OUT Today', 'IN / OUT Counts', 'Needs Attention', 'Needs attention', 'Live activity', "Today's traffic"] as $text) {
             $this->assertStringContainsString($text, $html, $text);
         }
         // Phase 0: no guest pass card or overstay items.
@@ -109,9 +109,12 @@ class UiPhase4PagesTest extends TestCase
             ->get(route('gates.kiosk', 'gate-1'))
             ->assertOk()
             ->assertSee('data-scan-result', false)
-            ->assertSee('READY')
+            // UI Phase 4 (layout): the big result is the latest vehicle at this gate.
+            ->assertSee('<strong class="scan-result-word" data-scan-word>IN</strong>', false)
+            ->assertSee('<span class="scan-result-title" data-scan-title>KSK 101</span>', false)
+            ->assertSee('Faculty &amp; Staff', false)
+            ->assertDontSee('READY')
             ->assertSee('station-log-compact', false)
-            ->assertSee('KSK 101')
             ->assertDontSee('Entries Today')
             ->assertDontSee('<span>Owner</span>', false);
     }

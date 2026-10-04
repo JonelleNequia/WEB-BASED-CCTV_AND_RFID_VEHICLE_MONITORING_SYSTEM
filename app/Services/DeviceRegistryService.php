@@ -925,8 +925,10 @@ class DeviceRegistryService
                 'Keep the same work mode and port, then press Scan again: the system finds it by its MAC address.',
             ];
 
+        // UI Phase 4: a short warning; the explanation and steps are under "How to fix".
         return [
-            'title' => 'Different network: works only through an extra address',
+            'title' => 'Different network',
+            'summary' => "Works only until this PC restarts. Move the {$what} to this PC's network.",
             'text' => "This {$what} ({$device->ip}) is on {$warning['network']}, not on this PC's LAN"
                 .($lan ? " ({$lan})" : '').". It answers only because this PC has the extra address {$warning['pc_ip']} on "
                 .($warning['interface_label'] ?? $warning['interface'] ?? 'its network card')
@@ -946,6 +948,7 @@ class DeviceRegistryService
         $platform = PHP_OS_FAMILY === 'Windows' ? 'windows' : (PHP_OS_FAMILY === 'Darwin' ? 'darwin' : 'linux');
 
         return [
+            'summary' => 'Not on this PC\'s network.',
             'text' => "Found at {$device->ip}, but that is not on this PC's network ({$networks}). "
                 .'Set the device to DHCP (automatic IP) in its own settings, then press Scan again.',
             'network' => $suggestion['network'] ?? null,

@@ -16,7 +16,7 @@
             <section class="subpanel">
                 <div class="panel-title-row">
                     <h4>Gates</h4>
-                    <p class="field-help">Every gate records vehicles going IN and OUT. Each gate has its own camera, reader and calibration. Pick the camera and the UHF reader of each gate in Devices above (no IP to type).</p>
+                    <p class="field-help">Every gate records IN and OUT. Assign its camera and UHF reader in Devices above.</p>
                 </div>
                 @error('gates')<span class="field-error">{{ $message }}</span>@enderror
 
@@ -116,7 +116,7 @@
                     <div class="field">
                         <label for="rfid_cooldown_seconds">Same-tag Cooldown (seconds)</label>
                         <input id="rfid_cooldown_seconds" type="number" name="rfid_cooldown_seconds" value="{{ old('rfid_cooldown_seconds', $settings['rfid_cooldown_seconds'] ?? 60) }}" min="10" max="3600">
-                        <span class="field-help">Repeat reads of the same tag at the same gate are ignored for this long (at least 10 s). An unknown tag is reported once per cooldown.</span>
+                        <span class="field-help">Repeat reads of one tag at one gate are ignored this long.</span>
                         @error('rfid_cooldown_seconds')
                             <span class="field-error">{{ $message }}</span>
                         @enderror
@@ -125,13 +125,13 @@
                     <div class="field">
                         <label for="rfid_lookback_seconds">Tag read before the crossing (seconds)</label>
                         <input id="rfid_lookback_seconds" type="number" name="rfid_lookback_seconds" value="{{ old('rfid_lookback_seconds', $settings['rfid_lookback_seconds'] ?? 10) }}" min="1" max="15">
-                        <span class="field-help">The UHF reader reads the tag while the vehicle approaches. A read this long before the camera sees the vehicle cross still belongs to it.</span>
+                        <span class="field-help">A tag read this long before the crossing still counts.</span>
                         @error('rfid_lookback_seconds')<span class="field-error">{{ $message }}</span>@enderror
                     </div>
                     <div class="field">
                         <label for="rfid_lookahead_seconds">Tag read after the crossing (seconds)</label>
                         <input id="rfid_lookahead_seconds" type="number" name="rfid_lookahead_seconds" value="{{ old('rfid_lookahead_seconds', $settings['rfid_lookahead_seconds'] ?? 4) }}" min="1" max="10">
-                        <span class="field-help">How long the camera waits for a tag read after the crossing before it records the vehicle as an Unregistered Visitor.</span>
+                        <span class="field-help">Wait this long for a tag before recording an Unregistered Visitor.</span>
                         @error('rfid_lookahead_seconds')<span class="field-error">{{ $message }}</span>@enderror
                     </div>
                 </div>
@@ -167,6 +167,6 @@
             <input id="new_gate_name" type="text" name="name" placeholder="Gate {{ $gates->count() + 1 }}" maxlength="100">
         </div>
         <button type="submit" class="button button-secondary">Add gate</button>
-        <p class="field-help">The new gate gets a kiosk, a camera slot and a reader slot. Assign its devices in Devices, then draw its zone and line in Calibration.</p>
+        <p class="field-help">Then assign its devices above and calibrate it.</p>
     </form>
 </section>

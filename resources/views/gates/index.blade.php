@@ -7,7 +7,7 @@
     <x-page-header title="Gate Monitor">
         <x-slot:meta>
             <span data-gate-detector>
-                <x-badge :status="$detectorRunning ? 'online' : 'standby'" :label="$detectorRunning ? 'Detector running' : 'Detector standby'" />
+                <x-badge :tone="$detectorRunning ? 'success' : 'warning'" :label="$detectorRunning ? 'Detector running' : 'Detector starting'" />
             </span>
             <x-live-indicator />
         </x-slot:meta>
@@ -15,39 +15,35 @@
 
     <div class="gate-grid">
         @foreach ($gates as $location => $gate)
-            @php($scan = $gate['latest_scan'])
+            @php($latest = $gate['logs'][0] ?? null)
+            @php($cameraLive = (bool) ($gate['camera_status']['camera_running'] ?? false))
             <section class="gate-card" data-gate="{{ $location }}">
                 <header class="gate-card-head">
-                    <div>
-                        <h2>{{ $gate['short_label'] }}</h2>
-                        <span class="text-muted">{{ $gate['label'] }}</span>
-                    </div>
+                    <h2>{{ $gate['short_label'] }}</h2>
                     <div class="gate-card-actions">
                         <span data-gate-camera>
-                            <x-badge :status="($gate['camera_status']['camera_running'] ?? false) ? 'online' : 'standby'" :label="($gate['camera_status']['camera_running'] ?? false) ? 'Live' : 'Offline'" />
+                            <x-badge :tone="$cameraLive ? 'success' : 'critical'" :label="$cameraLive ? 'Live' : 'Offline'" />
                         </span>
                         <a href="{{ $gate['kiosk_url'] }}" target="_blank" rel="noopener" class="button button-secondary button-sm">Open {{ $gate['short_label'] }} Kiosk</a>
                     </div>
                 </header>
 
-                <div class="gate-feed">
+                <div @class(['gate-feed', 'is-offline' => ! $cameraLive])>
                     <img src="{{ $gate['stream_url'] }}" alt="{{ $gate['short_label'] }} live camera" data-gate-feed data-stream="{{ $gate['stream_url'] }}">
-                    <span class="gate-feed-fallback">Waiting for camera…</span>
+                    @include('partials.feed-offline', ['attributes' => 'data-gate-feed-offline'])
                 </div>
 
-                <div class="gate-latest" data-gate-latest>
-                    <span class="gate-section-label">Latest scan</span>
-                    @if ($scan)
-                        <div class="gate-latest-row">
-                            <div>
-                                <strong data-latest-title>{{ $scan['title'] }}</strong>
-                                <span class="text-muted" data-latest-subtitle>{{ $scan['subtitle'] }}</span>
-                            </div>
-                            <span data-latest-badge><x-badge :tone="$scan['tone']" :label="$scan['result']" /></span>
+                {{-- UI Phase 4: the latest vehicle at this gate, big (plate, category, IN/OUT, time). --}}
+                <div class="gate-latest result-{{ \App\Support\MovementRow::resultLook($latest) }}" data-gate-latest>
+                    @if ($latest)
+                        <span class="gate-latest-direction">{{ $latest['direction_label'] }}</span>
+                        <div class="gate-latest-text">
+                            <strong>{{ $latest['plate_number'] }}</strong>
+                            <span>{{ $latest['category_label'] ?? '' }}</span>
                         </div>
-                        <small class="text-muted" data-latest-time>{{ $scan['time'] }}@if ($scan['note']) · {{ $scan['note'] }}@endif</small>
+                        <time>{{ \App\Support\DisplayTime::time($latest['event_time'] ?? null) }}</time>
                     @else
-                        <p class="text-muted" data-latest-empty>No scans at this gate yet.</p>
+                        <p class="gate-latest-empty">No vehicles have passed yet</p>
                     @endif
                 </div>
 
@@ -56,12 +52,13 @@
                     <ul data-gate-logs>
                         @forelse ($gate['logs'] as $log)
                             <li>
+                                <span class="badge badge-tone-{{ $log['tone'] }}">{{ $log['direction_label'] }}</span>
                                 <strong>{{ $log['plate_number'] }}</strong>
-                                <span class="text-muted">{{ $log['verification_label'] }}</span>
+                                <span class="text-muted">{{ $log['category_label'] ?? '' }}</span>
                                 <time>{{ \App\Support\DisplayTime::time($log['event_time']) }}</time>
                             </li>
                         @empty
-                            <li class="text-muted">No activity yet.</li>
+                            <li class="gate-logs-empty">No activity yet.</li>
                         @endforelse
                     </ul>
                 </div>

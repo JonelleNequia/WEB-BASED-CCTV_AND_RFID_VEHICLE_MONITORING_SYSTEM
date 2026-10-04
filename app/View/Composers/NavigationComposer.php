@@ -30,28 +30,16 @@ class NavigationComposer
         return $view->with([
             'navAlertCount' => $isAdmin ? $this->alertSummaryService->counts()['total'] : 0,
             'navHealth' => $this->health(),
-            'navUhf' => $this->uhfReaders(),
         ]);
     }
 
     /**
-     * Assigned UHF readers: connected or not, last EPC, RSSI and time.
+     * UI Phase 4: three dots (Detector, Cameras, Readers); the detail is the
+     * tooltip. Reader details (last tag, RSSI) are in Settings › Gates & Readers.
      *
-     * @return list<array<string, mixed>>
+     * @return list<array{key: string, label: string, ok: bool, detail: string}>
      */
-    protected function uhfReaders(): array
-    {
-        try {
-            return $this->deviceServiceRuntime->uhfReaders();
-        } catch (Throwable) {
-            return [];
-        }
-    }
-
-    /**
-     * @return list<array{label: string, ok: bool, detail: string}>
-     */
-    protected function health(): array
+    public function health(): array
     {
         try {
             $runtime = $this->detectorRuntimeService->readStatus();
@@ -107,9 +95,9 @@ class NavigationComposer
         $readersReady = $readerProblems->isEmpty();
 
         return [
-            ['label' => 'Detector', 'ok' => $detectorOnline, 'detail' => $detectorOnline ? 'Running' : $this->detectorRuntimeService->notRunningReason()],
-            ['label' => 'Cameras', 'ok' => $camerasOnline === $cameraTotal, 'detail' => $camerasOnline.'/'.$cameraTotal.' live'.($cameraReason ? ' · '.$cameraReason : '')],
-            ['label' => 'Readers', 'ok' => $readersReady, 'detail' => $readersReady ? 'Ready' : (string) $readerProblems->first()],
+            ['key' => 'detector', 'label' => 'Detector', 'ok' => $detectorOnline, 'detail' => $detectorOnline ? 'Running' : $this->detectorRuntimeService->notRunningReason()],
+            ['key' => 'cameras', 'label' => 'Cameras', 'ok' => $camerasOnline === $cameraTotal, 'detail' => $camerasOnline.'/'.$cameraTotal.' live'.($cameraReason ? ' · '.$cameraReason : '')],
+            ['key' => 'readers', 'label' => 'Readers', 'ok' => $readersReady, 'detail' => $readersReady ? 'Ready' : (string) $readerProblems->first()],
         ];
     }
 }

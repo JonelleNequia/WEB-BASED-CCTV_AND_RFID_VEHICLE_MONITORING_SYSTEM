@@ -45,7 +45,9 @@ class DashboardRankingTest extends TestCase
         $this->actingAs($user)
             ->get(route('dashboard.index'))
             ->assertOk()
-            ->assertSee('Registered Vehicles · Most Entries') // Phase 6: renamed; the Visitor Ranking is separate
+            // Phase 6: the Visitor Ranking is separate; UI Phase 4: one card, two tabs.
+            ->assertSee('Most Entries')
+            ->assertSee('Registered Vehicles')
             ->assertSee('Total Entries')
             ->assertSee('RANK-1001');
     }

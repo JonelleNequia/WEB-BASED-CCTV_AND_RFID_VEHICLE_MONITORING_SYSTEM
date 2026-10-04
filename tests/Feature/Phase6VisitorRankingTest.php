@@ -44,8 +44,10 @@ class Phase6VisitorRankingTest extends TestCase
 
         $this->actingAs($this->admin)->get(route('dashboard.index'))
             ->assertOk()
-            ->assertSee('Registered Vehicles · Most Entries')
-            ->assertSee('Visitor Ranking · Unregistered Visitors')
+            // UI Phase 4: both rankings in one card with tabs.
+            ->assertSee('Most Entries')
+            ->assertSee('data-segment="registered"', false)
+            ->assertSee('data-segment="visitors"', false)
             ->assertSeeInOrder(['VIS 4321', 'ABC 1234', 'Register this vehicle']);
 
         $live = $this->actingAs($this->admin)->getJson(route('dashboard.live-state'))->assertOk();

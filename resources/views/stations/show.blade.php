@@ -45,28 +45,26 @@
                     data-station-frame
                     data-frame-stream="{{ $streamUrl }}"
                 >
-                {{-- Why there is no picture (detector off, camera login, unreachable). --}}
-                <p class="frame-message" data-frame-message role="status" hidden></p>
+                {{-- UI Phase 4: small placeholder when there is no picture (one line + a link). --}}
+                @include('partials.feed-offline', ['attributes' => 'data-frame-message'])
             </div>
 
             <div class="station-video-footer">
                 <span>{{ $camera['camera_name'] }}</span>
-                <span data-camera-source>{{ $camera['source_display'] }}</span>
-                <span data-camera-frames>{{ $cameraStatus['processed_frames'] ?? 0 }} frames</span>
-                <span data-camera-detections>{{ $cameraStatus['active_detections'] ?? 0 }} active / {{ $cameraStatus['detections_seen'] ?? 0 }} detections</span>
             </div>
         </section>
 
         <aside class="station-log-pane">
-            {{-- UI Phase 4: big scan result the guard can read from a distance. --}}
-            <section class="scan-result is-idle" data-scan-result aria-live="assertive" aria-atomic="true">
-                <span class="scan-result-icon" data-scan-icon aria-hidden="true">•</span>
+            {{-- UI Phase 4: the latest vehicle at this gate, readable from a distance (plate, category, IN/OUT, time). --}}
+            @php($latest = collect($logs)->firstWhere('gate', $location))
+            @php($look = \App\Support\MovementRow::resultLook($latest))
+            <section class="scan-result is-{{ $look }}" data-scan-result aria-live="assertive" aria-atomic="true">
+                <strong class="scan-result-word" data-scan-word>{{ $latest ? $latest['direction_label'] : 'READY' }}</strong>
                 <div class="scan-result-body">
-                    <strong class="scan-result-word" data-scan-word>READY</strong>
-                    <span class="scan-result-title" data-scan-title>Waiting for a tag at the UHF reader</span>
-                    <span class="scan-result-detail" data-scan-detail></span>
+                    <span class="scan-result-title" data-scan-title>{{ $latest ? $latest['plate_number'] : 'Waiting for the next vehicle' }}</span>
+                    <span class="scan-result-detail" data-scan-detail>{{ $latest['category_label'] ?? '' }}</span>
                 </div>
-                <time class="scan-result-time" data-scan-time></time>
+                <time class="scan-result-time" data-scan-time>{{ $latest ? \App\Support\DisplayTime::time($latest['event_time'] ?? null) : '' }}</time>
             </section>
 
             <div class="station-log-header">
@@ -74,16 +72,16 @@
             </div>
 
             <div class="station-log-list" data-station-log-list>
-                {{-- UI Phase 4: one short line per log (plate, type, time). --}}
+                {{-- UI Phase 4: plate, category, IN/OUT and time; colored per UI Phase 3. --}}
                 @forelse ($logs as $log)
                     <article @class(['station-log-item', 'station-log-compact', 'is-alert' => ($log['tone'] ?? '') === 'critical'])>
-                        <span class="station-log-badge tone-{{ $log['tone'] ?? 'neutral' }}">{{ $log['event_type'] }}</span>
+                        <span class="station-log-badge tone-{{ $log['tone'] ?? 'neutral' }}">{{ $log['direction_label'] }}</span>
                         <strong>{{ $log['plate_number'] }}</strong>
-                        <span class="station-log-type">{{ $log['verification_label'] }}</span>
+                        <span class="station-log-type">{{ $log['category_label'] ?? '' }}</span>
                         <time class="station-log-time">{{ \App\Support\DisplayTime::time($log['event_time'] ?? null) }}</time>
                     </article>
                 @empty
-                    <div class="station-log-empty" data-station-log-empty>No vehicles yet</div>
+                    <div class="station-log-empty" data-station-log-empty>No vehicles have passed yet</div>
                 @endforelse
             </div>
         </aside>
@@ -105,7 +103,6 @@
         'logs' => $logs,
         'routes' => [
             'state' => route('stations.state', $location),
-            'recentLogs' => route('api.recent-station-logs', ['location' => $location, 'limit' => 14]),
             'rfidScan' => route('stations.rfid-scan', $location),
         ],
     ])

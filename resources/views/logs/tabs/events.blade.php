@@ -146,11 +146,15 @@
             <th><span class="sr-only">Details</span></th>
         </tr>
     </thead>
-    <tbody data-event-log-list data-event-log-print>
+    {{-- UI Phase 4: after a reset (no filters) say that nothing has passed yet. --}}
+    @php($filtered = collect(request()->except(['tab', 'page']))->filter(fn ($value) => filled($value))->isNotEmpty())
+    @php($emptyTitle = $filtered ? 'No records matched the current filters' : 'No vehicles have passed yet')
+    @php($emptyText = $filtered ? 'Adjust the filters to widen the list.' : 'IN and OUT records from both gates appear here.')
+    <tbody data-event-log-list data-event-log-print data-empty-title="{{ $emptyTitle }}" data-empty-text="{{ $emptyText }}">
         @forelse ($logs as $log)
             @include('logs.partials.event-row', ['log' => $log, 'index' => $loop->index])
         @empty
-            <tr><td colspan="9"><x-empty-state title="No records matched the current filters" text="Adjust the filters to widen the list." /></td></tr>
+            <tr><td colspan="9"><x-empty-state :title="$emptyTitle" :text="$emptyText" /></td></tr>
         @endforelse
     </tbody>
 </x-table>

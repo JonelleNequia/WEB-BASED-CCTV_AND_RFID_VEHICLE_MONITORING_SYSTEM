@@ -56,11 +56,11 @@
                 <div class="image-grid">
                     <div>
                         <label>Vehicle Image</label>
-                        <img src="{{ $vehicleEvent->vehicle_image_url }}" alt="Vehicle image" class="thumb thumb-large">
+                        <button type="button" class="thumb-button" data-zoom="{{ $vehicleEvent->vehicle_image_url }}" data-zoom-label="Vehicle image"><img src="{{ $vehicleEvent->vehicle_image_url }}" alt="Vehicle image" class="thumb thumb-large"></button>
                     </div>
                     <div>
                         <label>Plate Image</label>
-                        <img src="{{ $vehicleEvent->plate_image_url }}" alt="Plate image" class="thumb thumb-large">
+                        <button type="button" class="thumb-button" data-zoom="{{ $vehicleEvent->plate_image_url }}" data-zoom-label="Plate image"><img src="{{ $vehicleEvent->plate_image_url }}" alt="Plate image" class="thumb thumb-large"></button>
                     </div>
                 </div>
             @else

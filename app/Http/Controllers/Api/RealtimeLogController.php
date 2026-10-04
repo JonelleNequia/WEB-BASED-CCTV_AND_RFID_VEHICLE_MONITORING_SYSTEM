@@ -6,8 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Models\Camera;
 use App\Models\GuestVehicleObservation;
 use App\Models\Gate;
+use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
 use App\Support\DisplayTime;
+use App\Support\MovementRow;
+use App\Support\VehicleCategory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -64,7 +67,7 @@ class RealtimeLogController extends Controller
     /**
      * @return list<array<string, mixed>>
      */
-    protected function stationLogRows(int $limit): array
+    public function stationLogRows(int $limit): array
     {
         $eventLogs = VehicleEvent::query()
             ->withoutHiddenGuestCopies()
@@ -86,15 +89,11 @@ class RealtimeLogController extends Controller
 
         return $eventLogs
             ->concat($guestLogs)
+            ->concat($this->tagOnlyRows(null, $limit))
             ->sortByDesc('sort_time')
             ->take($limit)
-            ->map(function (array $log): array {
-                unset($log['sort_time']);
-                // UI Phase 3: one color per row (IN / OUT blue, unregistered gray...).
-                $log['tone'] = \App\Support\StatusBadge::movementTone($log);
-
-                return $log;
-            })
+            // UI Phase 3 color + UI Phase 4 short form (IN / OUT, category).
+            ->map(fn (array $log): array => MovementRow::finish($log))
             ->values()
             ->all();
     }
@@ -130,17 +129,68 @@ class RealtimeLogController extends Controller
             ->get()
             ->map(fn (GuestVehicleObservation $observation): array => $this->stationGuestObservationPayload($observation));
 
+        // UI Phase 4: tag reads with no IN/OUT (yet) too, as on the kiosk.
         return $eventLogs
             ->concat($guestLogs)
+            ->concat($this->tagOnlyRows($location, $limit))
             ->sortByDesc('sort_time')
             ->take($limit)
-            ->map(function (array $log): array {
-                unset($log['sort_time']);
-
-                return $log;
-            })
+            ->map(fn (array $log): array => MovementRow::finish($log))
             ->values()
             ->all();
+    }
+
+    /**
+     * Phase 3: tag reads with no IN/OUT (yet), at one gate or all: waiting
+     * for the camera, scan only, unknown tags and flagged reads.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    protected function tagOnlyRows(?string $location, int $limit): Collection
+    {
+        return RfidScanLog::query()
+            ->with('vehicle')
+            ->when($location !== null, fn ($query) => $query->where('scan_location', $location))
+            ->where(function ($query): void {
+                $query->whereIn('fusion_status', [RfidScanLog::FUSION_PENDING, RfidScanLog::FUSION_SCAN_ONLY])
+                    ->orWhereIn('verification_status', ['unknown_tag', 'unassigned_tag'])
+                    // A flagged read (lost or disabled tag...) that made no IN/OUT.
+                    ->orWhere(fn ($flagged) => $flagged->where('is_anomaly', true)->whereNull('correlated_vehicle_event_id'));
+            })
+            ->latest('created_at')
+            ->limit($limit)
+            ->get()
+            ->map(function (RfidScanLog $scan): array {
+                $unknown = in_array($scan->verification_status, ['unknown_tag', 'unassigned_tag'], true);
+                $flagged = ! $unknown && $scan->is_anomaly && ! $scan->correlated_vehicle_event_id;
+
+                return [
+                    'id' => 'scan-'.$scan->id,
+                    'record_type' => 'rfid_scan',
+                    'event_type' => match (true) {
+                        $unknown => 'UNKNOWN TAG',
+                        $flagged => 'TAG ALERT',
+                        $scan->fusion_status === RfidScanLog::FUSION_PENDING => 'WAITING',
+                        default => 'SCAN ONLY',
+                    },
+                    'anomaly' => $flagged,
+                    'plate_number' => $scan->vehicle?->plate_number ?: $scan->tag_uid,
+                    'owner_name' => $scan->vehicle?->owner_name ?: 'N/A',
+                    'vehicle_type' => $scan->vehicle?->vehicle_type ?: 'Vehicle',
+                    'category_label' => $unknown ? 'Unknown tag' : ($flagged ? $scan->verificationLabel : VehicleCategory::label($scan->vehicle?->category)),
+                    'camera_role' => null,
+                    'scan_location' => $scan->scan_location,
+                    'verification_label' => $unknown ? 'Unknown tag' : ($flagged ? $scan->verificationLabel : $scan->fusionLabel),
+                    'resulting_state' => $scan->resulting_state ?: 'N/A',
+                    'entries_today_count' => (int) ($scan->vehicle?->entries_today_count ?? 0),
+                    'exits_today_count' => (int) ($scan->vehicle?->exits_today_count ?? 0),
+                    'event_time' => $scan->scan_time?->toIso8601String(),
+                    'display_time' => DisplayTime::datetimeSeconds($scan->scan_time),
+                    'status' => $unknown ? 'Unknown tag' : $scan->fusionLabel,
+                    'unknown_tag' => $unknown,
+                    'sort_time' => $this->sortTimestamp($scan->created_at, $scan->scan_time),
+                ];
+            });
     }
 
     /**
@@ -238,6 +288,9 @@ class RealtimeLogController extends Controller
             'scan_location' => $scanLog?->scan_location,
             'verification_label' => $scanLog?->verificationLabel
                 ?? ($event->vehicle_id ? 'Registered' : 'Unregistered Visitor'),
+            // UI Phase 4: short form (category, IN / OUT).
+            'category_label' => MovementRow::eventCategory($event),
+            'direction' => MovementRow::eventDirection($event),
             'resulting_state' => $event->resulting_state ?: 'N/A',
             'entries_today_count' => (int) $entriesToday,
             'exits_today_count' => (int) $exitsToday,
@@ -268,6 +321,8 @@ class RealtimeLogController extends Controller
             'camera_role' => $observation->camera?->camera_role,
             'scan_location' => $observation->location,
             'verification_label' => 'Unregistered Visitor',
+            'category_label' => VehicleCategory::label(VehicleCategory::UNREGISTERED_VISITOR),
+            'direction' => MovementRow::direction(data_get($observation->detection_metadata_json, 'direction')),
             'resulting_state' => 'Not tracked',
             'entries_today_count' => 0,
             'exits_today_count' => 0,

@@ -1,5 +1,5 @@
 {{-- UI Phase 2: Activity Logs › RFID Scans (the old RFID Desk history). --}}
-    <x-table title="RFID Scans" :paginator="$scanLogs" :empty="$scanLogs->isEmpty()" empty-title="No RFID scan history yet.">
+    <x-table title="RFID Scans" :paginator="$scanLogs" :empty="$scanLogs->isEmpty()" empty-title="No tag reads yet" empty-text="Tags read at the gates appear here.">
         <x-slot:filters>
         <form method="GET" action="{{ route('logs.index') }}" class="form-grid filter-grid">
             <input type="hidden" name="tab" value="scans">

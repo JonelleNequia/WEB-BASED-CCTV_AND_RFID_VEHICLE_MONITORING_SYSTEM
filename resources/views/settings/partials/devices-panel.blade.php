@@ -13,7 +13,7 @@
     <div class="panel-header panel-header-modern">
         <div>
             <h2 class="panel-title">Devices</h2>
-            <p class="text-muted devices-intro">Cameras and UHF readers found on this network. Plug in the LAN cable and they appear here. No IP to type.</p>
+            <p class="text-muted devices-intro">Cameras and UHF readers on this PC's network. No IP to type.</p>
         </div>
         <div class="button-row">
             <x-live-indicator />
@@ -25,7 +25,8 @@
         </div>
     </div>
 
-    <div class="devices-network" data-devices-network role="status" aria-live="polite"></div>
+    {{-- UI Phase 4: one clear banner when there is no LAN (Wi-Fi only). --}}
+    <div class="devices-banner" data-devices-banner role="status" hidden></div>
 
     {{-- Find my reader: before/after wizard. --}}
     <div class="devices-find" data-devices-find-box role="status" aria-live="polite" hidden></div>
@@ -33,9 +34,13 @@
     {{-- Identify reader: live progress and result. --}}
     <div class="devices-identify" data-devices-identify-box role="status" aria-live="polite" hidden></div>
 
+    {{-- UI Phase 4: the device list first, then what each gate uses. --}}
+    <div class="devices-list" data-devices-list></div>
+
+    <h3 class="devices-subtitle">Assigned to gates</h3>
     <div class="devices-stations" data-devices-stations></div>
 
-    <div class="devices-list" data-devices-list></div>
+    <div class="devices-network" data-devices-network role="status" aria-live="polite"></div>
 
     {{-- Why a scan found nothing: interfaces scanned, what the OS sees, warnings. --}}
     <details class="advanced-section devices-diagnostics" data-devices-diagnostics-box>
@@ -52,8 +57,7 @@
     </details>
 
     <p class="field-help devices-tip">
-        Tip: set the cameras and readers to <strong>DHCP (automatic IP)</strong> in their own settings. They then join any network
-        (school LAN, DITO, Globe or your own router) and this page follows them even when their address changes.
+        Tip: set cameras and readers to <strong>DHCP (automatic IP)</strong>; this page follows them when their address changes.
     </p>
 
     <script id="devices-panel-data" type="application/json">{!! json_encode($devicesPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>

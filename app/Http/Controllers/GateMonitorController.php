@@ -4,18 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Api\RealtimeLogController;
 use App\Models\Gate;
-use App\Models\RfidScanLog;
 use App\Services\CalibrationService;
 use App\Services\DetectorRuntimeService;
 use App\Services\SettingsService;
-use App\Support\DisplayTime;
-use App\Support\StatusBadge;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 
 /**
- * UI Phase 2: Gate Monitor. Every gate side by side (live feed, latest scan,
+ * UI Phase 2: Gate Monitor. Every gate side by side (live feed, latest vehicle,
  * recent logs); the full-screen kiosks open from here. Phase 1: gates from
  * the gates table instead of the fixed Entrance/Exit.
  */
@@ -40,7 +37,7 @@ class GateMonitorController extends Controller
                 'camera' => $cameras[$location] ?? [],
                 'camera_status' => $runtime['cameras'][$location] ?? [],
                 'stream_url' => $runtime['cameras'][$location]['stream_url'] ?? $detectorRuntimeService->defaultStreamUrl($location),
-                'latest_scan' => $this->latestScan($location),
+                // UI Phase 4: the first row is the big "latest vehicle" result.
                 'logs' => app(RealtimeLogController::class)->gateLogRows($location, 8),
                 'kiosk_url' => route('gates.kiosk', $location),
             ];
@@ -66,7 +63,6 @@ class GateMonitorController extends Controller
                 'camera_running' => (bool) ($camera['camera_running'] ?? false),
                 'camera_error' => ($camera['camera_running'] ?? false) ? null : ($camera['last_error'] ?? null),
                 'stream_url' => $camera['stream_url'] ?? $detectorRuntimeService->defaultStreamUrl($location),
-                'latest_scan' => $this->latestScan($location),
                 'logs' => app(RealtimeLogController::class)->gateLogRows($location, 8),
             ];
         }
@@ -93,37 +89,5 @@ class GateMonitorController extends Controller
             $detectorRuntimeService->ensureRunning(),
             $request->getHost()
         );
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
-    protected function latestScan(string $location): ?array
-    {
-        $scan = RfidScanLog::query()
-            ->with(['vehicle', 'vehicleRfidTag'])
-            ->where('scan_location', $location)
-            ->latest('scan_time')
-            ->latest('id')
-            ->first();
-
-        if (! $scan) {
-            return null;
-        }
-
-        return [
-            'id' => $scan->id,
-            'title' => $scan->vehicle?->plate_number ?? $scan->tag_uid,
-            'subtitle' => $scan->vehicle
-                ? ($scan->vehicle->vehicle_owner_name ?: $scan->vehicle->vehicle_type)
-                : 'Tag '.$scan->tag_uid,
-            'result' => $scan->verificationLabel,
-            'status' => $status = ($scan->is_anomaly ? 'anomaly' : $scan->verification_status),
-            'tone' => StatusBadge::tone($status),
-            'event_type' => $scan->resolved_event_type,
-            'note' => $scan->anomaly_reason,
-            'time' => DisplayTime::datetimeSeconds($scan->scan_time),
-            'scan_time' => $scan->scan_time?->toIso8601String(),
-        ];
     }
 }

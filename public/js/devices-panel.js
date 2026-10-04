@@ -87,6 +87,25 @@
 
     /* ---------- network bar ---------- */
 
+    // UI Phase 4: no LAN (Wi-Fi only, or nothing): one clear banner at the top.
+    function noLan() {
+        const service = data.service || {};
+        return service.running && service.state === 'waiting_for_lan';
+    }
+
+    function renderBanner() {
+        const banner = panel.querySelector('[data-devices-banner]');
+        if (!banner) {
+            return;
+        }
+        const interfaces = (data.network || {}).interfaces || [];
+        banner.hidden = !noLan();
+        banner.replaceChildren(
+            el('strong', null, interfaces.length ? 'Only Wi-Fi is connected' : 'No network connected'),
+            el('span', null, 'Plug the LAN cable from the cameras and UHF readers (their switch or router) into this PC, or use a USB LAN adapter. They appear here by themselves.')
+        );
+    }
+
     function renderNetwork() {
         const box = panel.querySelector('[data-devices-network]');
         const service = data.service || {};
@@ -94,8 +113,12 @@
         const state = service.running ? (scan.running ? 'scanning' : service.state) : 'stopped';
         const [tone, label] = STATE[state] || ['neutral', state];
 
+        renderBanner();
         const head = el('div', 'devices-network-head');
-        head.append(badge(tone, label), el('span', null, scan.running ? (scan.progress || 'Scanning the network…') : service.message));
+        // The banner already says it when there is no LAN.
+        if (!noLan() || scan.running) {
+            head.append(badge(tone, label), el('span', null, scan.running ? (scan.progress || 'Scanning the network…') : service.message));
+        }
         panel.querySelector('[data-devices-scan]').disabled = !!scan.running;
 
         const chips = el('div', 'devices-interfaces');
@@ -113,7 +136,7 @@
         const counts = data.counts || {};
         meta.textContent = `Last scan: ${scan.last_finished_display || 'not yet'} · ${counts.cameras || 0} camera(s) · ${counts.readers || 0} reader(s) · ${counts.other || 0} other`;
 
-        box.replaceChildren(head, chips, meta);
+        box.replaceChildren(...(head.childNodes.length ? [head] : []), chips, meta);
         if (scan.error) {
             box.append(el('p', 'field-error', scan.error));
         }
@@ -146,7 +169,7 @@
         }
 
         if (!assigned) {
-            body.append(el('span', 'text-muted', role === 'camera' ? 'No camera assigned. Pick one below.' : 'No UHF reader assigned. Pick one below.'));
+            body.append(el('span', 'text-muted', role === 'camera' ? 'No camera assigned. Pick one in the list above.' : 'No UHF reader assigned. Pick one in the list above.'));
             row.append(body);
             return row;
         }
@@ -214,12 +237,17 @@
         return row;
     }
 
+    // UI Phase 4: a short warning; the long explanation is under "How to fix".
     function networkWarning(warning) {
         const box = el('div', 'devices-guidance devices-guidance-warning');
-        box.append(el('strong', null, warning.title), el('p', null, warning.text));
+        const line = el('p', 'devices-guidance-line');
+        line.append(el('strong', null, warning.title), document.createTextNode(` · ${warning.summary || ''}`));
+        const fix = el('details', 'how-to-fix');
+        fix.append(el('summary', null, 'How to fix'), el('p', null, warning.text));
         const steps = el('ol');
         (warning.steps || []).forEach((step) => steps.append(el('li', null, step)));
-        box.append(steps);
+        fix.append(steps);
+        box.append(line, fix);
         return box;
     }
 
@@ -299,8 +327,9 @@
 
         panel.querySelector('[data-devices-diagnostics-count]').textContent = serious.length
             ? `(${serious.length} warning${serious.length === 1 ? '' : 's'})` : '(no problems)';
-        // Open by itself when nothing was found and there is a reason to show.
-        if (serious.length && !found && !details.dataset.touched) {
+        // Open by itself when nothing was found and there is a reason to show
+        // (not for "no LAN": the banner at the top already says it).
+        if (serious.length && !found && !noLan() && !details.dataset.touched) {
             details.open = true;
         }
 
@@ -389,8 +418,7 @@
             const empty = el('div', 'empty-block');
             empty.append(
                 el('strong', null, (data.scan || {}).running ? 'Looking for cameras and readers…' : 'No camera or UHF reader found yet'),
-                el('p', null, 'Plug the LAN cable of the camera and the reader into the router/switch (or straight into this PC). They appear here within a few seconds.'),
-                el('p', null, 'Still nothing? Open Diagnostics below: it shows which network was scanned and what this PC can see.')
+                el('p', null, noLan() ? 'Connect the LAN cable (see above).' : 'Plug them into the router or switch. Still nothing? Open Diagnostics below.')
             );
             list.replaceChildren(empty);
         } else {
@@ -532,11 +560,15 @@
         }
         if (device.guidance) {
             const box = el('div', 'devices-guidance');
-            box.append(el('strong', null, 'Found, but not reachable from this PC'), el('p', null, device.guidance.text));
+            const line = el('p', 'devices-guidance-line');
+            line.append(el('strong', null, 'Not reachable'), document.createTextNode(` · ${device.guidance.summary || ''}`));
+            const fix = el('details', 'how-to-fix');
+            fix.append(el('summary', null, 'How to fix'), el('p', null, device.guidance.text));
             if (device.guidance.pc_ip && device.guidance.commands) {
-                box.append(el('p', null, `Or give this PC a second address on ${device.guidance.network} (for example ${device.guidance.pc_ip}) with admin rights:`));
-                box.append(el('pre', 'devices-command', `${device.guidance.commands.add}\n\n# remove it afterwards:\n${device.guidance.commands.remove}`));
+                fix.append(el('p', null, `Or give this PC a second address on ${device.guidance.network} (for example ${device.guidance.pc_ip}) with admin rights:`));
+                fix.append(el('pre', 'devices-command', `${device.guidance.commands.add}\n\n# remove it afterwards:\n${device.guidance.commands.remove}`));
             }
+            box.append(line, fix);
             nodes.push(box);
         }
         return nodes;

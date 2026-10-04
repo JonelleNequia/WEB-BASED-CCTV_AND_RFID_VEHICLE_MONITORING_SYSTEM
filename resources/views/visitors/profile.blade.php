@@ -60,4 +60,6 @@
     <x-table title="Visits" :paginator="$records" :empty="$records->isEmpty()" empty-title="No visits recorded for this plate.">
         @include('visitors.partials.records', ['records' => $records])
     </x-table>
+
+    @include('visitors.partials.record-dialogs')
 @endsection

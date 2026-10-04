@@ -78,30 +78,18 @@
     </div>
 
     <div class="sidebar-footer">
-        {{-- UI Phase 2: small system status (green = OK, red = needs attention). --}}
-        <ul class="sidebar-health" aria-label="System status" @if (! empty($navUhf)) data-uhf-status="{{ route('devices.uhf-status') }}" @endif>
+        {{-- UI Phase 4: three status dots; the details are in the tooltip and in Settings › System Status. --}}
+        @php($statusTag = $isAdmin ? 'a' : 'div')
+        <{{ $statusTag }} class="sidebar-health" aria-label="System status" data-health-url="{{ route('system.health') }}"
+            @if ($isAdmin) href="{{ route('settings.index', ['tab' => 'status']) }}" @endif>
             @foreach ($navHealth ?? [] as $health)
-                <li title="{{ $health['label'] }}: {{ $health['detail'] }}">
+                <span class="sidebar-health-item" data-health="{{ $health['key'] }}" title="{{ $health['label'] }}: {{ $health['detail'] }}">
                     <span class="health-dot {{ $health['ok'] ? 'is-ok' : 'is-down' }}" aria-hidden="true"></span>
-                    <span>{{ $health['label'] }}</span>
-                    <small>{{ $health['detail'] }}</small>
-                </li>
+                    <span class="sidebar-health-label">{{ $health['label'] }}</span>
+                    <span class="sr-only" data-health-detail>{{ $health['ok'] ? 'OK' : 'Needs attention' }}: {{ $health['detail'] }}</span>
+                </span>
             @endforeach
-            {{-- UHF readers: connection and the last tag read (EPC, RSSI, time); refreshed every few seconds. --}}
-            @foreach ($navUhf ?? [] as $reader)
-                <li class="health-uhf" data-uhf-station="{{ $reader['station'] }}" title="{{ $reader['label'] }}: {{ $reader['detail'] }}{{ $reader['epc'] ? ' · last tag '.$reader['epc'] : '' }}">
-                    <span class="health-dot {{ $reader['ok'] ? 'is-ok' : 'is-down' }}" aria-hidden="true"></span>
-                    <span>{{ $reader['label'] }}</span>
-                    <small data-uhf-state>{{ $reader['detail'] }}</small>
-                    <small class="health-extra" data-uhf-tag>{{ $reader['tag_line'] }}</small>
-                </li>
-            @endforeach
-        </ul>
-        @if (! empty($navUhf))
-            @push('scripts')
-                <script src="{{ asset('js/sidebar-uhf.js') }}"></script>
-            @endpush
-        @endif
+        </{{ $statusTag }}>
 
         <div class="sidebar-account">
             <strong>{{ auth()->user()->name ?? 'System User' }}</strong>

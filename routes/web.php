@@ -76,6 +76,7 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
 
     // UI Phase 2: Gate Monitor shows every gate side by side (all signed-in users).
     Route::get('/devices/uhf-status', [DeviceController::class, 'uhfStatus'])->name('devices.uhf-status');
+    Route::get('/system/health', \App\Http\Controllers\SystemHealthController::class)->name('system.health');
     Route::get('/gates', [GateMonitorController::class, 'index'])->name('gates.index');
     Route::get('/gates/state', [GateMonitorController::class, 'state'])->name('gates.state');
     Route::get('/monitoring', fn () => redirect()->route('gates.index'))->name('monitoring.index');

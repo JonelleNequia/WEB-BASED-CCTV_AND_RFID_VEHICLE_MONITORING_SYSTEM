@@ -156,11 +156,15 @@ class UhfReaderIntegrationTest extends TestCase
             ->assertJsonPath('reads.0.epc', self::EPC)
             ->assertJsonPath('reads.0.station', 'gate-1');
 
+        // UI Phase 4: the sidebar shows three dots only; reader details are in Settings › Gates & Readers.
         $this->actingAs($this->admin)->get(route('dashboard.index'))
             ->assertOk()
-            ->assertSee('Gate 1 UHF')
-            ->assertSee('-70 dBm')
-            ->assertSee('js/sidebar-uhf.js');
+            ->assertSee('data-health="readers"', false)
+            ->assertDontSee('-70 dBm')
+            ->assertDontSee('sidebar-uhf.js');
+        $this->actingAs($this->admin)->getJson(route('system.health'))
+            ->assertOk()
+            ->assertJsonPath('health.2.key', 'readers');
 
         $this->actingAs($this->admin)->get(route('registry.index', ['tab' => 'vehicles']))
             ->assertOk()->assertSee('Read with UHF reader');

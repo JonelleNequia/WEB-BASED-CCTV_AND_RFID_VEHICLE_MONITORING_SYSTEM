@@ -302,11 +302,10 @@ class DashboardController extends Controller
             ->map(function (VehicleEvent $event): array {
                 $time = $event->event_time;
                 $plate = $event->plate_text ?: $event->vehicle?->plate_number ?: 'No plate';
-                $movement = match ($event->event_type) {
-                    'ENTRY' => 'IN',
-                    'EXIT' => 'OUT',
-                    default => $event->event_type,
-                };
+                // UI Phase 4: the reported direction (an unknown one is not shown as IN).
+                $movement = in_array($event->event_type, ['ENTRY', 'EXIT'], true)
+                    ? (\App\Support\MovementRow::eventDirection($event) ?? 'Direction unknown')
+                    : $event->event_type;
 
                 return [
                     'title' => $movement.' • '.$plate,
@@ -337,10 +336,11 @@ class DashboardController extends Controller
                 ];
             });
 
+        // UI Phase 4: the latest 8 only ("View all" opens Activity Logs).
         return $eventRows
             ->concat($guestRows)
             ->sortByDesc('sort_time')
-            ->take(30)
+            ->take(8)
             ->values();
     }
 
