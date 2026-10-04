@@ -80,8 +80,12 @@
 
     /* UI Phase 4: big VERIFIED / DENIED / ALERT banner. */
     const resultBox = document.querySelector('[data-scan-result]');
+    // UI Phase 3 colors: green registered, gray unregistered, yellow needs a
+    // look (unknown tag), red real problem (anomaly, lost tag, inactive vehicle).
     const RESULT_LOOK = {
         verified: { word: 'VERIFIED', icon: '✓' },
+        unregistered: { word: 'UNREGISTERED', icon: '•' },
+        unknown: { word: 'UNKNOWN TAG', icon: '?' },
         denied: { word: 'DENIED', icon: '✕' },
         alert: { word: 'ALERT', icon: '!' },
     };
@@ -115,11 +119,8 @@
         if (body.outcome === 'pending') {
             return ['verified', plate, ['Waiting for the camera', body.vehicle?.owner_name].filter(Boolean).join(' · ')];
         }
-        if (body.outcome === 'unknown_tag') {
-            return ['denied', `Unknown tag ${tag || ''}`.trim(), 'Not in the registry. Ask the admin to register this tag.'];
-        }
-        if (['guest', 'inactive_vehicle', 'unassigned_tag', 'non_recurring_category'].includes(status)) {
-            return ['denied', plate || `Tag ${tag}`, body.anomaly_reason || body.message];
+        if (body.outcome === 'unknown_tag' || ['unassigned_tag', 'guest', 'non_recurring_category'].includes(status)) {
+            return ['unknown', plate || `Tag ${tag || ''}`.trim(), body.anomaly_reason || 'Not in the registry. Ask the admin to register this tag.'];
         }
 
         return ['alert', plate || `Tag ${tag}`, body.anomaly_reason || body.message];
@@ -222,8 +223,8 @@
         const type = document.createElement('span');
         const time = document.createElement('time');
 
-        item.className = 'station-log-item station-log-compact' + (log.no_pass_alert ? ' is-alert' : '');
-        badge.className = 'station-log-badge';
+        item.className = 'station-log-item station-log-compact' + (log.tone === 'critical' ? ' is-alert' : '');
+        badge.className = `station-log-badge tone-${log.tone || 'neutral'}`;
         badge.textContent = log.event_type || 'LOG';
         plate.textContent = log.plate_number || '—';
         type.className = 'station-log-type';
@@ -257,11 +258,8 @@
             return;
         }
 
-        const plate = log.plate_number || 'Unknown plate';
-        const hint = 'No registered RFID tag was read.';
-
-        showAlert('Unregistered visitor', `${plate}: ${hint}`);
-        showScanResult('alert', `UNREGISTERED · ${plate}`, hint);
+        // Normal traffic: a gray result, no alert banner (UI Phase 3).
+        showScanResult('unregistered', log.plate_number || 'No plate', 'No registered RFID tag was read.');
     }
 
     function renderLogs(logs) {

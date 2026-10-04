@@ -76,8 +76,8 @@
             <div class="station-log-list" data-station-log-list>
                 {{-- UI Phase 4: one short line per log (plate, type, time). --}}
                 @forelse ($logs as $log)
-                    <article class="station-log-item station-log-compact">
-                        <span class="station-log-badge">{{ $log['event_type'] }}</span>
+                    <article @class(['station-log-item', 'station-log-compact', 'is-alert' => ($log['tone'] ?? '') === 'critical'])>
+                        <span class="station-log-badge tone-{{ $log['tone'] ?? 'neutral' }}">{{ $log['event_type'] }}</span>
                         <strong>{{ $log['plate_number'] }}</strong>
                         <span class="station-log-type">{{ $log['verification_label'] }}</span>
                         <time class="station-log-time">{{ \App\Support\DisplayTime::time($log['event_time'] ?? null) }}</time>

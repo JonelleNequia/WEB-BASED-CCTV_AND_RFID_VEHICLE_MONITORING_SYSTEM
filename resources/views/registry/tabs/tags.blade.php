@@ -58,7 +58,11 @@
                                     <strong>{{ $tag->vehicle->plate_number }}</strong>
                                     <div class="table-subtext">{{ $tag->vehicle->vehicle_owner_name ?: 'No owner' }}</div>
                                 @else
-                                    <span class="table-subtext">Available for assignment</span>
+                                    <span class="table-subtext">{{ match ($tag->status) {
+                                        'disabled' => 'Disabled: cannot be assigned',
+                                        'lost' => 'Lost: scans are flagged',
+                                        default => 'Available for assignment',
+                                    } }}</span>
                                 @endif
                             </td>
                             <td><x-datetime :value="$tag->last_scanned_at" fallback="No scan yet" /></td>

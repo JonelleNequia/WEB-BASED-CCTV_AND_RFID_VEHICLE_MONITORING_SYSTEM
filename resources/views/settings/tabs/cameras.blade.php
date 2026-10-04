@@ -25,26 +25,23 @@
                             $managed = $assignment?->device !== null;
                             $sourceType = old("camera_configs.$role.source_type", $camera['source_type']);
                         @endphp
+                        {{-- UI Phase 3: every gate's card has the same parts: live state badge,
+                             one "Source" line (assigned device or manual address), preview, stream. --}}
+                        @php
+                            $live = $cameraLive['cameras'][$role] ?? [];
+                            $liveReason = ! ($cameraLive['service_running'] ?? false)
+                                ? 'Detector not running yet. It starts by itself.'
+                                : (($live['camera_running'] ?? false) ? null : ($live['last_error'] ?? 'Connecting to the camera…'));
+                        @endphp
                         <article class="camera-card">
                             <div class="camera-card-head">
                                 <div>
                                     <h4>{{ $label }}</h4>
-                                    <p>{{ $camera['source_display'] }}</p>
+                                    <p>Source: {{ $managed ? 'assigned device · '.($assignment->device->name ?: $assignment->device->ip) : 'manual address' }}</p>
                                 </div>
-                                @if ($managed)
-                                    <x-badge tone="success" :label="'Assigned · '.($assignment->device->name ?: $assignment->device->ip)" />
-                                @else
-                                    <x-badge tone="neutral" label="Manual source" />
-                                @endif
+                                <x-badge :tone="$liveReason ? 'critical' : 'success'" :label="$liveReason ? 'Offline' : 'OK'" />
                             </div>
-
-                            {{-- Live preview with the detector's own reason when there is no video. --}}
-                            @php
-                                $live = $cameraLive['cameras'][$role] ?? [];
-                                $liveReason = ! ($cameraLive['service_running'] ?? false)
-                                    ? 'Detector not running yet. It starts by itself.'
-                                    : (($live['camera_running'] ?? false) ? null : ($live['last_error'] ?? 'Connecting to the camera…'));
-                            @endphp
+                            <p class="field-help one-line" title="{{ $camera['source_display'] }}">{{ $camera['source_display'] }}</p>
                             <div class="camera-preview">
                                 <img src="{{ $live['stream_url'] ?? '' }}" alt="{{ $label }} live preview" data-camera-preview loading="lazy">
                                 @if ($liveReason)
@@ -88,6 +85,8 @@
                                         <button type="button" class="button button-secondary button-sm" data-encoder-apply disabled>Optimize camera settings</button>
                                     </div>
                                 </details>
+                            @else
+                                <p class="field-help">Stream and snapshot options appear when a camera is assigned in <a href="{{ route('settings.index', ['tab' => 'stations']) }}">Gates &amp; Readers › Devices</a>.</p>
                             @endif
 
                             <div class="form-grid">

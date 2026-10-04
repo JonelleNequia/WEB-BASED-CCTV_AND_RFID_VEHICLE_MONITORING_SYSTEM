@@ -5,6 +5,9 @@ namespace App\Support;
 /**
  * Live-latency work: turns the detector's pipeline metrics into rows and a
  * plain-language "where does the time go" verdict for Settings › System Status.
+ *
+ * UI Phase 3: one state per gate, OK / Delayed / Offline with a short
+ * reason, so the page never says "no bottleneck" next to a 5 s delay.
  */
 final class PipelineReport
 {
@@ -13,10 +16,14 @@ final class PipelineReport
      * @param  array<string, int|float|string>  $performance  exported performance settings
      * @return array<string, mixed>
      */
+    /** Frames older than this when they reach the browser = Delayed. */
+    public const DELAYED_AFTER_MS = 1000;
+
     public static function build(array $status, array $performance): array
     {
         $cameras = [];
         $findings = [];
+        $gateFindings = [];
         $metrics = (array) ($status['metrics'] ?? []);
         $cpu = (array) ($status['cpu'] ?? []);
         $streamBudget = 1000 / max(1, (float) ($performance['stream_fps'] ?? 15));
@@ -40,16 +47,16 @@ final class PipelineReport
             $label = \App\Models\Gate::labelFor((string) $role);
 
             if ($backlog !== null && $backlog > 500) {
-                $findings[] = "{$label}: decoding falls behind the camera by {$backlog} ms. Use the sub stream for the live view.";
+                $findings[] = $gateFindings[$role][] = "{$label}: decoding falls behind the camera by {$backlog} ms. Use the sub stream for the live view.";
             }
             if ($publishCost > $streamBudget) {
-                $findings[] = sprintf('%s: making each live JPEG takes %.0f ms, more than the %.0f ms per frame budget. Lower the live view width or quality.', $label, $publishCost, $streamBudget);
+                $findings[] = $gateFindings[$role][] = sprintf('%s: making each live JPEG takes %.0f ms, more than the %.0f ms per frame budget. Lower the live view width or quality.', $label, $publishCost, $streamBudget);
             }
             if (($avg('yolo') ?? 0) > $detectBudget) {
-                $findings[] = sprintf('%s: detection takes %.0f ms, so it cannot reach %s runs per second. Lower the detection input size or rate.', $label, $avg('yolo'), $performance['detection_fps'] ?? 8);
+                $findings[] = $gateFindings[$role][] = sprintf('%s: detection takes %.0f ms, so it cannot reach %s runs per second. Lower the detection input size or rate.', $label, $avg('yolo'), $performance['detection_fps'] ?? 8);
             }
             if (($values['decoder_threads'] ?? null) === 'auto') {
-                $findings[] = "{$label}: the live stream is decoded with FFmpeg's frame threads, which hold frames back about 0.35 s. Use the sub stream.";
+                $findings[] = $gateFindings[$role][] = "{$label}: the live stream is decoded with FFmpeg's frame threads, which hold frames back about 0.35 s. Use the sub stream.";
             }
 
             $cameras[$role] = [
@@ -83,19 +90,65 @@ final class PipelineReport
             $findings[] = 'The detector uses almost all CPU cores.';
         }
 
-        if ($cameras !== [] && $findings === []) {
-            $worst = collect($cameras)->map(fn (array $camera): float => (float) ($camera['pipeline'][0] ?? 0))->max();
-            $findings[] = sprintf(
-                'No bottleneck on this PC: each frame reaches the browser %.0f ms after it is decoded. Any delay left comes from the camera\'s own encoder (see the recommended camera settings).',
-                $worst
-            );
+        $gates = self::gateStates($status, $cameras, $gateFindings);
+
+        // Only when every gate is OK (it used to say this next to a 5 s delay).
+        if ($cameras !== [] && $findings === [] && collect($gates)->every(fn (array $gate): bool => $gate['state'] === 'ok')) {
+            $findings[] = 'No delay on this PC. Any delay left comes from the camera\'s own encoder (see the recommended camera settings).';
         }
 
         return [
+            'gates' => $gates,
             'cameras' => $cameras,
             'cpu' => $cpu,
             'findings' => $findings,
             'performance' => $performance,
         ];
+    }
+
+    /**
+     * OK / Delayed / Offline per gate, with one short reason.
+     *
+     * @param  array<string, mixed>  $status
+     * @param  array<string, array<string, mixed>>  $cameras
+     * @param  array<string, list<string>>  $gateFindings
+     * @return array<string, array{label: string, state: string, state_label: string, tone: string, reason: string}>
+     */
+    protected static function gateStates(array $status, array $cameras, array $gateFindings): array
+    {
+        $gates = [];
+
+        foreach (\App\Models\Gate::options() as $code => $name) {
+            $camera = (array) ($status['cameras'][$code] ?? []);
+            $pipeline = $cameras[$code]['pipeline'][0] ?? null;
+            $backlog = $cameras[$code]['backlog'] ?? null;
+
+            [$state, $reason] = match (true) {
+                ! ($status['service_running'] ?? false) => ['offline', 'The detector is not running.'],
+                ! ($camera['camera_running'] ?? false) => ['offline', self::short((string) ($camera['last_error'] ?? '')) ?: 'The camera is not connected.'],
+                ($gateFindings[$code] ?? []) !== [] => ['delayed', self::short(preg_replace('/^[^:]+:\s*/', '', $gateFindings[$code][0]) ?? '')],
+                $pipeline !== null && $pipeline > self::DELAYED_AFTER_MS => ['delayed', sprintf('The live view is %.1f s behind.', $pipeline / 1000)],
+                $pipeline !== null => ['ok', sprintf('Live view about %.0f ms behind.', $pipeline)],
+                default => ['ok', 'Running.'],
+            };
+
+            $gates[$code] = [
+                'label' => $name,
+                'state' => $state,
+                'state_label' => ['ok' => 'OK', 'delayed' => 'Delayed', 'offline' => 'Offline'][$state],
+                'tone' => ['ok' => 'success', 'delayed' => 'warning', 'offline' => 'critical'][$state],
+                'reason' => $reason,
+            ];
+        }
+
+        return $gates;
+    }
+
+    /** First sentence, at most 140 characters. */
+    protected static function short(string $text): string
+    {
+        $text = trim(preg_split('/(?<=\.)\s/', trim($text))[0] ?? '');
+
+        return mb_strlen($text) > 140 ? mb_substr($text, 0, 137).'…' : $text;
     }
 }

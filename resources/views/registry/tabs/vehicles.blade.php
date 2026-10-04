@@ -84,23 +84,33 @@
                     @endif
                 </td>
                 <td>
-                    <x-badge :status="strtolower($vehicle->current_state ?? 'outside')" />
+                    {{-- One status: an inactive vehicle is not "Inside" (its tag is flagged). --}}
                     @if ($vehicle->status !== 'active')
-                        <x-badge :status="$vehicle->status" />
+                        <x-badge status="inactive" label="Inactive" />
+                    @else
+                        <x-badge :status="strtolower($vehicle->current_state ?? 'outside')" />
                     @endif
                 </td>
                 <td><x-datetime :value="$vehicle->last_seen_at" fallback="Never" /></td>
                 <td class="row-actions">
-                    <button type="button" class="button button-secondary button-sm" data-vehicle-action="edit" data-vehicle-url="{{ route('registry.vehicles.show', $vehicle) }}">Edit</button>
-                    <button type="button" class="button button-secondary button-sm" data-vehicle-action="replace" data-vehicle-url="{{ route('registry.vehicles.show', $vehicle) }}">{{ $vehicle->rfidTag ? 'Replace Tag' : 'Assign Tag' }}</button>
-                    <form method="POST" action="{{ route('registry.vehicles.status', $vehicle) }}"
-                          data-confirm="{{ $vehicle->status === 'active' ? 'Deactivate '.$vehicle->plate_number.'? Scans of its tag will be flagged.' : 'Activate '.$vehicle->plate_number.' again?' }}">
-                        @csrf
-                        <input type="hidden" name="status" value="{{ $vehicle->status === 'active' ? 'inactive' : 'active' }}">
-                        <button type="submit" class="button {{ $vehicle->status === 'active' ? 'button-subtle-danger' : 'button-secondary' }} button-sm">
-                            {{ $vehicle->status === 'active' ? 'Deactivate' : 'Activate' }}
-                        </button>
-                    </form>
+                    {{-- One menu per vehicle; deactivating asks first. --}}
+                    <details class="menu row-menu">
+                        <summary class="button button-secondary button-sm" aria-label="Actions for {{ $vehicle->plate_number }}">⋯</summary>
+                        <div class="menu-panel" role="menu">
+                            <button type="button" role="menuitem" data-vehicle-action="edit" data-vehicle-url="{{ route('registry.vehicles.show', $vehicle) }}">Edit details</button>
+                            <button type="button" role="menuitem" data-vehicle-action="replace" data-vehicle-url="{{ route('registry.vehicles.show', $vehicle) }}">{{ $vehicle->rfidTag ? 'Replace tag' : 'Assign tag' }}</button>
+                            <form method="POST" action="{{ route('registry.vehicles.status', $vehicle) }}"
+                                  data-confirm="{{ $vehicle->status === 'active'
+                                      ? 'Deactivate '.$vehicle->plate_number.'? Its tag will no longer let it in: scans are flagged as anomalies. You can activate it again later.'
+                                      : 'Activate '.$vehicle->plate_number.' again? Its tag will be accepted at the gates.' }}">
+                                @csrf
+                                <input type="hidden" name="status" value="{{ $vehicle->status === 'active' ? 'inactive' : 'active' }}">
+                                <button type="submit" role="menuitem" @class(['menu-item-danger' => $vehicle->status === 'active'])>
+                                    {{ $vehicle->status === 'active' ? 'Deactivate vehicle…' : 'Activate vehicle…' }}
+                                </button>
+                            </form>
+                        </div>
+                    </details>
                 </td>
             </tr>
         @endforeach

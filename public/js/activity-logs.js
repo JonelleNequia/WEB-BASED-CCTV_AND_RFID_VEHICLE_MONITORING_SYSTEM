@@ -30,8 +30,9 @@
         ['Time', 'display_time'],
     ];
 
+    // UI Phase 3: IN / OUT blue, unregistered gray, needs a look yellow.
     const tone = {
-        entry: 'info', exit: 'neutral', guest: 'brand', rfid: 'neutral',
+        entry: 'info', exit: 'info', guest: 'neutral', unregistered: 'neutral', unknown: 'warning', rfid: 'neutral',
     };
 
     function el(tag, className, text) {

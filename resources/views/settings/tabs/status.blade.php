@@ -12,6 +12,9 @@
 
     @include('settings.partials.pipeline-metrics')
 
+    {{-- UI Phase 3: per-camera details are diagnostics too. --}}
+    <details class="advanced-section">
+        <summary>Camera details</summary>
     <div class="camera-grid">
         @foreach (\App\Models\Gate::options() as $role => $gateName)
             @php($cameraStatus = $runtime['cameras'][$role] ?? null)
@@ -21,7 +24,7 @@
                         <h4>{{ $gateName }} Camera</h4>
                         <p>{{ $cameraStatus['camera_name'] ?? $gateName.' Camera' }}</p>
                     </div>
-                    <x-badge :status="($cameraStatus['camera_running'] ?? false) ? 'online' : 'standby'" :label="($cameraStatus['camera_running'] ?? false) ? 'Running' : 'Standby'" />
+                    <x-badge :status="($cameraStatus['camera_running'] ?? false) ? 'online' : 'offline'" :label="($cameraStatus['camera_running'] ?? false) ? 'OK' : 'Offline'" />
                 </div>
 
                 <div class="camera-detail-grid">
@@ -76,6 +79,7 @@
             </article>
         @endforeach
     </div>
+    </details>
 
     {{-- Fresh start: removes activity data after a backup (same as `php artisan system:reset`). --}}
     <section class="panel reset-panel">
@@ -133,6 +137,9 @@
                         holder.innerHTML = await response.text();
                         const fresh = holder.querySelector('[data-pipeline-metrics]');
                         if (current && fresh) {
+                            // Keep "Advanced diagnostics" open if it was opened.
+                            const wasOpen = current.querySelector('[data-advanced-diagnostics]')?.open;
+                            fresh.querySelector('[data-advanced-diagnostics]')?.toggleAttribute('open', Boolean(wasOpen));
                             current.replaceWith(fresh);
                         }
                     }

@@ -3950,8 +3950,7 @@ summary:focus-visible,
 
 /* success: light green, dark text */
 .badge-tone-success,
-.badge-matched,
-.badge-closed {
+.badge-matched {
     background: #dcfce7;
     color: #14532d;
     border-color: #86efac;
@@ -3965,8 +3964,10 @@ summary:focus-visible,
 }
 
 /* info: light blue, dark text */
+/* UI Phase 3: IN and OUT are both movements (blue). */
 .badge-tone-info,
-.badge-open {
+.badge-open,
+.badge-closed {
     background: #dbeafe;
     color: #1e3a8a;
     border-color: #93c5fd;
@@ -4994,6 +4995,20 @@ fieldset.field legend {
 .menu-panel button:hover,
 .menu-panel button:focus-visible {
     background: var(--purple-soft);
+}
+
+/* UI Phase 3: row "⋯" menus (Registry). */
+.menu-panel form {
+    display: grid;
+}
+
+.menu-panel .menu-item-danger {
+    color: #b42318;
+}
+
+.row-menu > summary {
+    min-width: 2.25rem;
+    justify-content: center;
 }
 
 .log-filter-form {
@@ -6225,5 +6240,57 @@ button[aria-busy="true"] {
 .station-status-line {
     display: inline-flex;
     gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+/* UI Phase 3: one color system on the kiosk (same rules as the badges):
+   blue IN / OUT, gray unregistered, yellow needs a look, red real problem. */
+.station-log-badge.tone-info {
+    background: #1d4ed8;
+    color: #ffffff;
+}
+
+.station-log-badge.tone-neutral {
+    background: #6b7280;
+    color: #ffffff;
+}
+
+.station-log-badge.tone-warning {
+    background: #f59e0b;
+    color: #1f2937;
+}
+
+.station-log-badge.tone-critical {
+    background: #b91c1c;
+    color: #ffffff;
+}
+
+.station-log-badge.tone-success {
+    background: #15803d;
+    color: #ffffff;
+}
+
+.scan-result.is-unregistered {
+    background: #6b7280;
+}
+
+.scan-result.is-unknown {
+    background: #f59e0b;
+    color: #1f2937;
+}
+
+/* UI Phase 3: System Status, one line per gate (OK / Delayed / Offline). */
+.gate-state-list {
+    list-style: none;
+    margin: 0 0 0.75rem;
+    padding: 0;
+    display: grid;
+    gap: 0.5rem;
+}
+
+.gate-state-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
     flex-wrap: wrap;
 }

@@ -311,6 +311,18 @@
     }
 
     /* UI Phase 4: entries and exits per hour today (plain SVG, works offline). */
+    // Step between y-axis labels: every whole number up to 4, then 1, 2, 5,
+    // 10, 20, 50... so there are at most 4 steps.
+    function axisStep(peak) {
+        if (peak <= 4) {
+            return 1;
+        }
+        const rough = peak / 4;
+        const power = Math.pow(10, Math.floor(Math.log10(rough)));
+        const nice = [1, 2, 5, 10].find((factor) => factor * power >= rough);
+        return nice * power;
+    }
+
     function renderChart(hourly) {
         const box = document.querySelector('[data-dashboard-chart]');
 
@@ -327,15 +339,22 @@
         const plotHeight = height - top - bottom;
         const slot = (width - left) / hourly.length;
         const barWidth = Math.max(2, (slot - 3) / 2);
-        const max = Math.max(1, ...hourly.map((row) => Math.max(row.entries, row.exits)));
+        // UI Phase 3: whole-number axis (it showed 0, 1, 1 when the peak was 1).
+        const peak = Math.max(0, ...hourly.map((row) => Math.max(row.entries, row.exits)));
+        const step = axisStep(peak);
+        const max = Math.max(step, Math.ceil(peak / step) * step);
+        const ticks = [];
+        for (let value = 0; value <= max; value += step) {
+            ticks.push(value);
+        }
         const svg = document.createElementNS(ns, 'svg');
         const nowHour = Number(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Manila' }).format(new Date())) % 24;
 
         svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
         svg.setAttribute('preserveAspectRatio', 'none');
 
-        [0, 0.5, 1].forEach(function (ratio) {
-            const y = top + plotHeight - plotHeight * ratio;
+        ticks.forEach(function (value) {
+            const y = top + plotHeight - plotHeight * (value / max);
             const line = document.createElementNS(ns, 'line');
             line.setAttribute('x1', left);
             line.setAttribute('x2', width);
@@ -348,7 +367,7 @@
             label.setAttribute('x', 0);
             label.setAttribute('y', y + 3);
             label.setAttribute('class', 'chart-axis');
-            label.textContent = Math.round(max * ratio);
+            label.textContent = String(value);
             svg.append(label);
         });
 

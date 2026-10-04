@@ -690,9 +690,7 @@ class DeviceRegistryService
             ->values()
             ->all();
 
-        $devices = NetworkDevice::query()
-            ->with('assignments')
-            ->get()
+        $devices = $this->withoutDuplicateRows(NetworkDevice::query()->with('assignments')->get())
             ->sortBy(fn (NetworkDevice $device): string => $this->sortKey($device))
             ->values()
             ->map(fn (NetworkDevice $device): array => $this->devicePayload($device, $suggestions, $interfaces));
@@ -826,6 +824,33 @@ class DeviceRegistryService
      * @param  array<int, array<string, mixed>>  $interfaces
      * @return array<string, mixed>
      */
+    /**
+     * UI Phase 3: one row per device in the Devices list. A device saved once
+     * by its MAC and once by its IP only (no MAC yet) is the same device; the
+     * IP-only row is not shown (unless it is the assigned one). Rows with
+     * different MACs are different devices, even with the same IP.
+     * Display only: device detection and the saved rows are unchanged.
+     *
+     * @param  Collection<int, NetworkDevice>  $devices
+     * @return Collection<int, NetworkDevice>
+     */
+    protected function withoutDuplicateRows(Collection $devices): Collection
+    {
+        return $devices
+            ->groupBy(fn (NetworkDevice $device): string => filled($device->ip) ? (string) $device->ip : 'key:'.$device->device_key)
+            ->flatMap(function (Collection $group): Collection {
+                $withMac = $group->filter(fn (NetworkDevice $device): bool => filled($device->mac));
+
+                if ($withMac->isEmpty() || $withMac->count() === $group->count()) {
+                    return $group;
+                }
+
+                // Keep an assigned IP-only row (its assignment must stay visible).
+                return $withMac->concat($group->filter(fn (NetworkDevice $device): bool => blank($device->mac) && $device->assignments->isNotEmpty()));
+            })
+            ->values();
+    }
+
     protected function devicePayload(NetworkDevice $device, Collection $suggestions, array $interfaces): array
     {
         $details = (array) $device->details;

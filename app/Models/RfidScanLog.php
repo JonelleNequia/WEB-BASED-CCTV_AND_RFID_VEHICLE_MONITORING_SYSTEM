@@ -171,11 +171,13 @@ class RfidScanLog extends Model
      */
     public function getVerificationBadgeClassAttribute(): string
     {
-        return match ($this->verification_status) {
-            'verified', 'guest_pass_entry', 'guest_pass_exit' => 'matched',
-            'guest', 'unknown_tag', 'inactive_tag', 'inactive_vehicle', 'non_recurring_category', 'unassigned_tag',
-            'guest_pass_available', 'guest_pass_duplicate' => 'manual-review',
-            default => 'unmatched',
+        // UI Phase 3: red only for a real problem (anomaly, lost / disabled tag,
+        // inactive vehicle); yellow for an unknown or unassigned tag.
+        return match (true) {
+            $this->isUnknownTag(), in_array($this->verification_status, ['unassigned_tag', 'guest', 'non_recurring_category'], true) => 'manual-review',
+            (bool) $this->is_anomaly, in_array($this->verification_status, ['inactive_tag', 'inactive_vehicle'], true) => 'unmatched',
+            $this->verification_status === 'verified' => 'matched',
+            default => 'secondary',
         };
     }
 

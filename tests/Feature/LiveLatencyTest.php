@@ -176,7 +176,10 @@ class LiveLatencyTest extends TestCase
 
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'status']))
             ->assertOk()
-            ->assertSee('Live video pipeline')
+            // UI Phase 3: one line per gate on top, the measurements in "Advanced diagnostics".
+            ->assertSee('Live video')
+            ->assertSeeInOrder(['Gate 1', 'Live view about 2 ms behind.', 'Delayed', 'Gate 2', 'decoding falls behind the camera by 900 ms.', 'Advanced diagnostics'])
+            ->assertDontSee('No delay on this PC')
             ->assertSee('736x416 · 1 thread (low delay)')
             ->assertSee('Gate 2: decoding falls behind the camera by 900 ms')
             ->assertSee('frame threads, which hold frames back');

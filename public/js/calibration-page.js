@@ -431,7 +431,7 @@
             crossings.forEach((crossing) => {
                 const item = document.createElement('li');
                 const badge = document.createElement('span');
-                badge.className = `badge ${crossing.direction === 'IN' ? 'badge-matched' : (crossing.direction === 'OUT' ? 'badge-secondary' : 'badge-manual-review')}`;
+                badge.className = `badge ${['IN', 'OUT'].includes(crossing.direction) ? 'badge-open' : 'badge-manual-review'}`;
                 badge.textContent = crossing.direction_label;
                 item.appendChild(badge);
                 const details = [crossing.time, `track #${crossing.track_id ?? '—'}`];

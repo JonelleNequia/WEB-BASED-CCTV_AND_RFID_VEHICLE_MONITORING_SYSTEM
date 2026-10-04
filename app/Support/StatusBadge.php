@@ -7,6 +7,11 @@ use Illuminate\Support\Str;
 /**
  * UI Phase 1: one status → badge look for the whole system.
  *
+ * UI Phase 3 color rules: green = OK / registered, blue = IN / OUT movement,
+ * gray = unregistered visitor (normal traffic), yellow = needs a look
+ * (unknown tag, plate unreadable, direction unknown), red = a real problem
+ * only (anomaly, lost tag, offline device).
+ *
  * Tones differ in lightness and shape, not only color:
  * - critical: dark solid fill, white text, "!" mark (needs action)
  * - warning:  light amber fill, dark text, half-filled mark
@@ -19,27 +24,29 @@ final class StatusBadge
 {
     public const TONES = [
         'critical' => [
-            'lost', 'anomaly', 'overstay', 'alert', 'denied', 'no_pass', 'no_pass_alert',
-            'unmatched', 'pass_alert', 'guest_pass_lost', 'guest_pass_disabled', 'guest_pass_not_issued',
+            'lost', 'anomaly', 'alert', 'denied', 'pass_alert', 'inactive_tag', 'inactive_vehicle',
             'unauthorized', 'failed', 'error', 'offline',
         ],
         'warning' => [
-            'pending', 'pending_details', 'pending_review', 'manual_review', 'requires_manual_review',
-            'review', 'needs_review', 'issue_required', 'guest_pass_available', 'stale', 'standby',
+            'pending_details', 'pending_review', 'manual_review', 'requires_manual_review',
+            'review', 'needs_review', 'stale', 'standby', 'unmatched',
+            'unknown_tag', 'unassigned_tag', 'guest', 'non_recurring_category',
+            'unreadable', 'plate_unreadable', 'direction_unknown', 'scan_only',
         ],
         'success' => [
             'inside', 'active', 'assigned', 'verified', 'registered', 'matched', 'completed',
-            'resolved', 'no_pass_resolved', 'online', 'connected', 'ready', 'recorded',
+            'resolved', 'no_pass_resolved', 'online', 'connected', 'ready', 'recorded', 'read', 'corrected',
         ],
         'brand' => [
-            'issued', 'guest_pass', 'guest_pass_entry', 'guest_pass_exit', 'guest', 'guest_visit',
+            'issued',
         ],
         'info' => [
-            'entry', 'open', 'in',
+            'entry', 'open', 'in', 'exit', 'out', 'closed',
         ],
         'neutral' => [
-            'outside', 'available', 'inactive', 'disabled', 'exit', 'out', 'closed', 'archived',
-            'duplicate', 'ignored', 'guest_pass_duplicate', 'unknown', 'none', 'no_tag', 'reviewed',
+            'outside', 'available', 'inactive', 'disabled', 'archived', 'pending', 'waiting',
+            'duplicate', 'ignored', 'dismissed', 'unknown', 'none', 'no_tag', 'reviewed',
+            'unregistered', 'unregistered_visitor', 'no_pass', 'no_pass_alert',
         ],
     ];
 
@@ -56,6 +63,25 @@ final class StatusBadge
         'open' => 'Entry',
         'closed' => 'Exit',
     ];
+
+    /**
+     * UI Phase 3: tone of one kiosk / live-feed row (IN / OUT blue,
+     * unregistered gray, unknown tag and scan only yellow, anomaly red).
+     *
+     * @param  array<string, mixed>  $log
+     */
+    public static function movementTone(array $log): string
+    {
+        $type = strtoupper((string) ($log['event_type'] ?? ''));
+
+        return match (true) {
+            ! empty($log['anomaly']) => 'critical',
+            in_array($type, ['UNKNOWN TAG', 'SCAN ONLY'], true) => 'warning',
+            $type === 'UNREGISTERED', ! empty($log['no_pass_alert']), ($log['verification_label'] ?? '') === 'Unregistered Visitor' => 'neutral',
+            in_array($type, ['ENTRY', 'EXIT', 'IN', 'OUT'], true) => 'info',
+            default => 'neutral',
+        };
+    }
 
     public static function key(?string $status): string
     {

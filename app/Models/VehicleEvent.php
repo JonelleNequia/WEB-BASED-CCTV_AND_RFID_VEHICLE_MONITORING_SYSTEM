@@ -373,11 +373,12 @@ class VehicleEvent extends Model
         return match ($this->display_status) {
             self::STATUS_PENDING_DETAILS => 'pending-details',
             'manual_review' => 'manual-review',
-            'guest' => 'manual-review',
-            self::MATCH_NO_PASS_ALERT => 'unmatched',
-            self::MATCH_NO_PASS_RESOLVED => 'closed',
+            // UI Phase 3: an unregistered visitor is gray (normal traffic), not red.
+            'guest' => 'secondary',
+            self::MATCH_NO_PASS_ALERT => 'secondary',
+            self::MATCH_NO_PASS_RESOLVED => 'matched',
             'matched' => 'matched',
-            'unmatched' => 'unmatched',
+            'unmatched' => 'manual-review',
             'closed' => 'closed',
             'open' => 'open',
             default => 'secondary',

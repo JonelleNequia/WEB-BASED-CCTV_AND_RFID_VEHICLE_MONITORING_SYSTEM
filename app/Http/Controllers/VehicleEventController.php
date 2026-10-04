@@ -724,8 +724,8 @@ class VehicleEventController extends Controller
             'display_time' => DisplayTime::datetime($time, 'No time'),
             'summary_label' => 'Vehicle Event #'.$event->id.' • '.(DisplayTime::datetime($time, 'No time')),
             'event_time_export' => $time?->toDateTimeString(),
-            'status_label' => $event->display_status_label,
-            'status_badge_class' => $event->status_badge_class,
+            // UI Phase 3: the real status (not Entry / Exit again, which the movement shows).
+            ...$this->vehicleEventStatus($event),
             'match_label' => $event->match_display,
             'rfid_tag_uid' => $event->rfidScanLog?->tag_uid ?: 'N/A',
             'image_url' => $event->has_visual_evidence ? $event->vehicle_image_url : null,
@@ -771,7 +771,7 @@ class VehicleEventController extends Controller
             'display_time' => DisplayTime::datetime($time, 'No time'),
             'summary_label' => 'Unregistered Visitor #'.$observation->id.' • '.(DisplayTime::datetime($time, 'No time')),
             'event_time_export' => $time?->toDateTimeString(),
-            'status_label' => 'Unregistered Visitor',
+            'status_label' => 'Unregistered',
             'status_badge_class' => 'secondary',
             'match_label' => 'Unregistered',
             'rfid_tag_uid' => 'N/A',
@@ -920,8 +920,15 @@ class VehicleEventController extends Controller
             'display_time' => DisplayTime::datetime($time, 'No time'),
             'summary_label' => 'Unregistered Visitor #'.$record->id.' • '.(DisplayTime::datetime($time, 'No time')),
             'event_time_export' => $time?->toDateTimeString(),
-            'status_label' => $record->plateLabel(),
-            'status_badge_class' => 'secondary',
+            // UI Phase 3: what needs a look (yellow) or the plate result.
+            ...match (true) {
+                $record->plate_status === VisitorRecord::PLATE_UNREADABLE => ['status_label' => 'Plate unreadable', 'status_badge_class' => 'manual-review'],
+                $record->direction === 'UNKNOWN' => ['status_label' => 'Direction unknown', 'status_badge_class' => 'manual-review'],
+                $plateOnly => ['status_label' => 'Tag not read', 'status_badge_class' => 'manual-review'],
+                $record->plate_status === VisitorRecord::PLATE_PENDING => ['status_label' => 'Reading plate…', 'status_badge_class' => 'secondary'],
+                $record->plate_status === VisitorRecord::PLATE_CORRECTED => ['status_label' => 'Plate corrected', 'status_badge_class' => 'matched'],
+                default => ['status_label' => 'Plate read', 'status_badge_class' => 'matched'],
+            },
             'match_label' => $plateOnly ? 'Registered vehicle (plate only)' : 'Unregistered',
             'rfid_tag_uid' => 'N/A',
             'image_url' => $record->snapshot_url,
@@ -931,6 +938,24 @@ class VehicleEventController extends Controller
             'sort_time' => $this->sortTimestamp($record->created_at, $time),
             ...$this->logTypeFields($plateOnly ? 'registered' : 'unregistered_visitor', ! $plateOnly),
         ];
+    }
+
+    /**
+     * UI Phase 3: status of a vehicle log row: Anomaly (red), Unregistered
+     * (gray), or the vehicle's state after the movement.
+     *
+     * @return array{status_label: string, status_badge_class: string}
+     */
+    protected function vehicleEventStatus(VehicleEvent $event): array
+    {
+        return match (true) {
+            filled($event->anomaly_reason) && ! in_array($event->event_origin, ['guest_cctv', 'guest_manual'], true)
+                && $event->match_status !== VehicleEvent::MATCH_NO_PASS_RESOLVED => ['status_label' => 'Anomaly', 'status_badge_class' => 'unmatched'],
+            in_array($event->event_origin, ['guest_cctv', 'guest_manual'], true) || ! $event->vehicle_id => ['status_label' => 'Unregistered', 'status_badge_class' => 'secondary'],
+            strtoupper((string) $event->resulting_state) === 'INSIDE' => ['status_label' => 'Inside', 'status_badge_class' => 'matched'],
+            strtoupper((string) $event->resulting_state) === 'OUTSIDE' => ['status_label' => 'Outside', 'status_badge_class' => 'secondary'],
+            default => ['status_label' => 'Recorded', 'status_badge_class' => 'secondary'],
+        };
     }
 
     protected function gateFilter(Request $request): ?string

@@ -66,8 +66,18 @@ class UiPhase1DesignSystemTest extends TestCase
 
     public function test_status_badges_share_one_tone_system(): void
     {
-        foreach (['Lost', 'Anomaly', 'Overstay', 'alert'] as $status) {
+        // UI Phase 3: red only for real problems ("overstay" left with guest passes).
+        foreach (['Lost', 'Anomaly', 'alert', 'offline'] as $status) {
             $this->assertSame('critical', StatusBadge::tone($status), $status);
+        }
+        foreach (['entry', 'exit', 'IN', 'OUT'] as $status) {
+            $this->assertSame('info', StatusBadge::tone($status), $status);
+        }
+        foreach (['unregistered', 'no_pass_alert'] as $status) {
+            $this->assertSame('neutral', StatusBadge::tone($status), $status);
+        }
+        foreach (['unknown_tag', 'plate_unreadable', 'direction_unknown'] as $status) {
+            $this->assertSame('warning', StatusBadge::tone($status), $status);
         }
 
         $this->assertSame('success', StatusBadge::tone('Inside'));

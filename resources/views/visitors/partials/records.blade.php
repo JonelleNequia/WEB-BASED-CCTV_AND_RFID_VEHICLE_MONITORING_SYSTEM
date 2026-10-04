@@ -21,7 +21,11 @@
                 @endif
             </td>
             <td>
-                <strong>{{ $record->plateLabel() }}</strong>
+                @if ($record->plate_status === 'unreadable')
+                    <x-badge tone="warning" label="Plate unreadable" />
+                @else
+                    <strong>{{ $record->plateLabel() }}</strong>
+                @endif
                 @if ($record->plate_image_url)
                     <div><a href="{{ $record->plate_image_url }}" target="_blank" rel="noopener"><img src="{{ $record->plate_image_url }}" alt="Plate image" class="thumb thumb-xs"></a></div>
                 @endif
@@ -46,7 +50,7 @@
                 @endif
             </td>
             <td>{{ \App\Models\Gate::labelFor($record->gate) }}</td>
-            <td><x-badge :tone="$record->direction === 'UNKNOWN' ? 'warning' : 'success'" :label="$record->direction === 'UNKNOWN' ? 'Direction unknown' : $record->direction" /></td>
+            <td><x-badge :tone="$record->direction === 'UNKNOWN' ? 'warning' : 'info'" :label="$record->direction === 'UNKNOWN' ? 'Direction unknown' : $record->direction" /></td>
             <td><x-datetime :value="$record->seen_at" /></td>
             <td>
                 @if ($record->plateProfile)

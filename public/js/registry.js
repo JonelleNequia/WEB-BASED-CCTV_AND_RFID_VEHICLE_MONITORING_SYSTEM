@@ -193,7 +193,7 @@
         const tone = {
             inside: 'success', active: 'success', assigned: 'success',
             outside: 'neutral', inactive: 'neutral', available: 'neutral', disabled: 'neutral',
-            lost: 'critical', entry: 'info', exit: 'neutral',
+            lost: 'critical', entry: 'info', exit: 'info',
         }[String(status).toLowerCase()] || 'neutral';
         return el('span', `badge badge-tone-${tone}`, label || status);
     }
@@ -203,10 +203,10 @@
         document.getElementById('vehicle-panel-title').textContent = vehicle.plate_number;
 
         const head = el('div', 'vehicle-panel-head');
-        head.append(
-            badge(vehicle.current_state, vehicle.current_state === 'inside' ? 'Inside' : 'Outside'),
-            badge(vehicle.status, vehicle.status === 'active' ? 'Active' : 'Inactive')
-        );
+        // One status: Inactive, otherwise Inside / Outside.
+        head.append(vehicle.status !== 'active'
+            ? badge('inactive', 'Inactive')
+            : badge(vehicle.current_state, vehicle.current_state === 'inside' ? 'Inside' : 'Outside'));
 
         const details = el('dl', 'vehicle-panel-details');
         [
@@ -322,7 +322,7 @@
 
     document.querySelectorAll('[data-vehicle-row]').forEach(function (row) {
         function open(event) {
-            if (event.target.closest('button, a, form, input, select')) {
+            if (event.target.closest('button, a, form, input, select, summary, details')) {
                 return;
             }
             const panel = document.querySelector('[data-vehicle-panel]');
@@ -345,6 +345,8 @@
 
     document.querySelectorAll('[data-vehicle-action]').forEach(function (button) {
         button.addEventListener('click', async function () {
+            // UI Phase 3: close the row "⋯" menu the action came from.
+            button.closest('details')?.removeAttribute('open');
             // UI Phase 5: show that the drawer is loading.
             button.disabled = true;
             button.setAttribute('aria-busy', 'true');

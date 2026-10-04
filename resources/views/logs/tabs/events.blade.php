@@ -25,7 +25,7 @@
     <x-stat :label="$selectedPeriodLabel" :value="$eventLogSummary['total']" hint="Records" data-log-summary="total" />
     <x-stat label="IN" :value="$eventLogSummary['entries']" data-log-summary="entries" />
     <x-stat label="OUT" :value="$eventLogSummary['exits']" data-log-summary="exits" />
-    <x-stat label="Unregistered" :value="$eventLogSummary['guests']" tone="brand" hint="Camera, no registered tag" data-log-summary="guests" />
+    <x-stat label="Unregistered" :value="$eventLogSummary['guests']" hint="Camera, no registered tag" data-log-summary="guests" />
     <x-stat label="RFID Only" :value="$eventLogSummary['rfid']" hint="Scans without a linked event" data-log-summary="rfid" />
 </x-stat-row>
 

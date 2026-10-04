@@ -90,6 +90,8 @@ class RealtimeLogController extends Controller
             ->take($limit)
             ->map(function (array $log): array {
                 unset($log['sort_time']);
+                // UI Phase 3: one color per row (IN / OUT blue, unregistered gray...).
+                $log['tone'] = \App\Support\StatusBadge::movementTone($log);
 
                 return $log;
             })
@@ -242,6 +244,7 @@ class RealtimeLogController extends Controller
             'event_time' => $event->event_time?->toIso8601String(),
             'display_time' => DisplayTime::datetimeSeconds($event->event_time),
             'status' => $event->display_status_label,
+            'anomaly' => filled($event->anomaly_reason) && ! in_array($event->event_origin, ['guest_cctv', 'guest_manual'], true),
             'sort_time' => $this->sortTimestamp($event->created_at, $event->event_time),
             // Phase 4: guest pass events show the pass number.
             ...VehicleEvent::guestPassLogFields($event),

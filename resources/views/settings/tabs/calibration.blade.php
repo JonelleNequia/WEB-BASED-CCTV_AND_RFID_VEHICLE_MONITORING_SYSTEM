@@ -101,7 +101,7 @@
                     <ul class="calibration-crossing-list" data-crossings>
                         @forelse ($recentCrossings[$role] ?? [] as $crossing)
                             <li>
-                                <span class="badge {{ $crossing['direction'] === 'IN' ? 'badge-matched' : ($crossing['direction'] === 'OUT' ? 'badge-secondary' : 'badge-manual-review') }}">{{ $crossing['direction_label'] }}</span>
+                                <span class="badge {{ in_array($crossing['direction'], ['IN', 'OUT'], true) ? 'badge-open' : 'badge-manual-review' }}">{{ $crossing['direction_label'] }}</span>
                                 {{ $crossing['time'] }} · track #{{ $crossing['track_id'] ?? '—' }}{{ $crossing['confidence'] !== null ? ' · '.number_format($crossing['confidence'], 2) : '' }}{{ $crossing['reason'] ? ' · '.$crossing['reason'] : '' }}
                             </li>
                         @empty
