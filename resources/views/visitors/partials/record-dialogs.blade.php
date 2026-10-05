@@ -15,6 +15,27 @@
     </form>
 </x-modal>
 
+{{-- A2 (detection): a guard's type correction is logged to measure the camera. --}}
+<x-modal id="visitor-type-modal" title="Correct vehicle type" size="sm">
+    <form method="POST" action="" class="stack-form" data-visitor-form="type">
+        @csrf
+        @method('PATCH')
+        <fieldset class="field type-choice">
+            <legend>What vehicle was it?</legend>
+            @foreach (\App\Support\VehicleType::HINTS as $type => $hint)
+                <label class="type-option">
+                    <input type="radio" name="vehicle_type" value="{{ $type }}" required>
+                    <span><strong>{{ $type }}</strong><small>{{ $hint }}</small></span>
+                </label>
+            @endforeach
+        </fieldset>
+        <div class="button-row button-row-end">
+            <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
+            <button type="submit" class="button button-primary">Save type</button>
+        </div>
+    </form>
+</x-modal>
+
 <x-modal id="visitor-note-modal" title="Add note" size="sm">
     <form method="POST" action="" class="stack-form" data-visitor-form="note">
         @csrf

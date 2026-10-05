@@ -260,6 +260,31 @@ class VisitorRecordService
         });
     }
 
+    /**
+     * A2 (detection): a guard sets the vehicle type; what the camera said is
+     * logged (VehicleTypeCorrection) to measure how often it is wrong.
+     */
+    public function correctType(VisitorRecord $record, string $type, User $user): VisitorRecord
+    {
+        return DB::transaction(function () use ($record, $type, $user): VisitorRecord {
+            // The camera's own answer (the crossing keeps it after a correction).
+            $detected = $record->crossing?->vehicle_type ?? ($record->source === VisitorRecord::SOURCE_MANUAL ? null : $record->vehicle_type);
+
+            \App\Models\VehicleTypeCorrection::query()->create([
+                'visitor_record_id' => $record->id,
+                'vehicle_crossing_id' => $record->vehicle_crossing_id,
+                'gate' => $record->gate,
+                'detected_type' => $detected,
+                'corrected_type' => $type,
+                'corrected_by' => $user->id,
+            ]);
+            $record->forceFill(['vehicle_type' => $type])->save();
+            $this->refreshProfiles([$record->plate_profile_id]);
+
+            return $record->fresh();
+        });
+    }
+
     public function dismiss(VisitorRecord $record, string $reason): VisitorRecord
     {
         $record->forceFill(['status' => VisitorRecord::STATUS_DISMISSED, 'status_note' => mb_substr($reason, 0, 200)])->save();

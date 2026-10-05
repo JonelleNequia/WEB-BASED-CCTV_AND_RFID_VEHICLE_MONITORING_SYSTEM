@@ -70,6 +70,12 @@ PERFORMANCE_DEFAULTS = {
     "roi_crop": 1,             # run YOLO only on the calibrated zone when it is smaller than the frame
     "hires_on_trigger": 1,     # fetch a full-resolution frame from the snapshot stream on each trigger
     "debug_overlay": 0,        # draw raw detections, zone, line, tracks and counters on the live view
+    # A2: vehicle type (vehicle_type.py).
+    "type_second_pass": 1,          # second check on the best full-resolution crop
+    "type_model": "yolov8s.pt",     # model of the second check (once per vehicle; yolov8n.pt when missing)
+    "type_second_pass_imgsz": 960,  # input size of the second check
+    "type_truck_min_height": 0.55,  # Truck/Bus needs a back at least this share of the zone's height...
+    "type_car_min_aspect": 1.25,    # ...or narrower (width / height) than this; otherwise it is a Car
 }
 # The full-resolution stream is decoded with more threads, which delays it by
 # about this much against the low-delay live stream (measured on the VIGI C240).

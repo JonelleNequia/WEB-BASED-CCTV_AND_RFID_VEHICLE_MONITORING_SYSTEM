@@ -41,6 +41,10 @@
                     @endif
                 </div>
                 <div class="table-subtext">
+                    {{-- A2: the vehicle type (Car / Motorcycle / Truck/Bus). --}}
+                    @if ($record->vehicle_type)
+                        <span data-vehicle-type>{{ \App\Support\VehicleType::category($record->vehicle_type) ?? $record->vehicle_type }}</span> ·
+                    @endif
                     @switch($record->plate_status)
                         @case('read') Camera{{ $record->plate_confidence !== null ? ' · '.number_format($record->plate_confidence * 100).'%' : '' }} @break
                         @case('corrected') {{ $record->source === 'manual' ? 'Typed by' : 'Corrected by' }} {{ $record->corrector?->name ?? 'a guard' }}{{ $record->ocr_plate_number && $record->ocr_plate_number !== $record->plate_number ? ' · camera read '.$record->ocr_plate_number : '' }} @break
@@ -73,6 +77,9 @@
                         <button type="button" role="menuitem" data-visitor-action="plate"
                                 data-action-url="{{ route('visitors.records.plate', $record) }}"
                                 data-value="{{ $record->plate_number ?? $record->ocr_plate_number }}">Correct plate</button>
+                        <button type="button" role="menuitem" data-visitor-action="type"
+                                data-action-url="{{ route('visitors.records.type', $record) }}"
+                                data-value="{{ \App\Support\VehicleType::category($record->vehicle_type) }}">Correct type</button>
                         @if ($record->plateProfile)
                             <button type="button" role="menuitem" data-visitor-action="note"
                                     data-action-url="{{ route('visitors.profiles.note', $record->plateProfile) }}"

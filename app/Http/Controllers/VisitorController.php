@@ -119,6 +119,17 @@ class VisitorController extends Controller
         return back()->with('status', $message);
     }
 
+    /**
+     * A2 (detection): Car / Motorcycle / Truck/Bus, set by a guard (logged).
+     */
+    public function correctType(Request $request, VisitorRecord $visitorRecord, VisitorRecordService $service): RedirectResponse
+    {
+        $validated = $request->validate(['vehicle_type' => ['required', \Illuminate\Validation\Rule::in(\App\Support\VehicleType::TYPES)]]);
+        $record = $service->correctType($visitorRecord, $validated['vehicle_type'], $request->user());
+
+        return back()->with('status', "Record #{$record->id} is now a {$record->vehicle_type}.");
+    }
+
     public function dismiss(Request $request, VisitorRecord $visitorRecord, VisitorRecordService $service): RedirectResponse
     {
         $validated = $request->validate(['reason' => ['required', 'string', 'max:150']]);

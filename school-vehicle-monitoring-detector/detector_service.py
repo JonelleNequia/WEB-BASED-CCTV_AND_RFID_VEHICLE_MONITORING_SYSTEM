@@ -71,6 +71,7 @@ from plate_voting import frames_agree, vote_plate
 from camera_health import ReconnectBackoff, RtspDiagnosis, short_reason, strip_credentials, take_over_stale_detector
 import metrics
 from hires import HiResGrabber, scale_box
+import vehicle_type as vtype
 
 # Phase 1: one camera per gate; the gate codes come from Laravel's runtime
 # config (camera_roles()) and can change while the detector runs.
@@ -578,7 +579,10 @@ def resolve_allowed_vehicle_classes(model):
         if normalized_name not in ALLOWED_VEHICLE_CLASS_NAMES:
             continue
 
-        supported[int(class_id)] = display_vehicle_label(normalized_name)
+        # A2: Car / Motorcycle / Truck/Bus (vehicle_type.py), never "Pickup" or "Truck".
+        vehicle_type = vtype.type_for_label(normalized_name)
+        if vehicle_type:
+            supported[int(class_id)] = vehicle_type
 
     return supported
 
@@ -974,6 +978,8 @@ def initial_camera_state():
         # the ROI overlays), so a crossing between two frames is not lost.
         "track_points": {},
         "confirmed_tracks": {},
+        # A2: every frame of a track votes for its type (vehicle_type.TrackVote).
+        "track_votes": {},
         "line_crossings": 0,
         # Phase 2: crossings whose direction is still being decided / sent,
         # and the latest decided ones (debug view).
@@ -1298,6 +1304,7 @@ def cleanup_stale_tracks(state):
             state["processed_as_guest"].pop(track_id, None)
             state["tracked_vehicles"].pop(track_id, None)
             state["track_overlays"].pop(track_id, None)
+            state["track_votes"].pop(track_id, None)
 
 
 def forget_track_locked(state, track_id):
@@ -1314,6 +1321,7 @@ def forget_track_locked(state, track_id):
     state["processed_as_guest"].pop(track_id, None)
     state["tracked_vehicles"].pop(track_id, None)
     state["track_overlays"].pop(track_id, None)
+    state["track_votes"].pop(track_id, None)
 
 
 def cleanup_tracks_outside_roi(state, visible_roi_track_ids):
@@ -1917,7 +1925,13 @@ def start_detection_window(
             "event_key": event_key,
             "event_time": event_time,
         })
+        frame_height, frame_width = frame.shape[:2]
+        zone = normalized_polygon_to_pixels(camera_config.get("calibration_mask"), frame_width, frame_height) or []
         state["pending_windows"][track_id] = {
+            # A2: the track's type votes (still filled while it is in view) and
+            # the zone height in pixels (size rule).
+            "vote": state["track_votes"].setdefault(track_id, vtype.TrackVote()),
+            "zone_height": (max(point[1] for point in zone) - min(point[1] for point in zone)) if zone else float(frame_height),
             "event_key": event_key,
             "camera_role": role,
             "camera_id": camera_config.get("camera_id"),
@@ -2102,6 +2116,74 @@ def final_direction_locked(window):
     return "UNKNOWN", "never reached the other side"
 
 
+_SECOND_PASS = {"path": None, "model": None, "labels": {}, "lock": threading.Lock()}
+
+
+def second_pass_model(model_path):
+    """A2: the model of the second check (loaded once; yolov8n.pt when the chosen file is missing)."""
+    path = Path(__file__).resolve().parent / str(model_path or MODEL_PATH)
+    if not path.exists():
+        path = Path(__file__).resolve().parent / MODEL_PATH
+    if _SECOND_PASS["path"] != str(path):
+        from ultralytics import YOLO
+
+        model = YOLO(str(path))
+        _SECOND_PASS.update({"path": str(path), "model": model, "labels": resolve_allowed_vehicle_classes(model)})
+    return _SECOND_PASS["model"], _SECOND_PASS["labels"]
+
+
+def second_pass_type(crop, settings):
+    """
+    A2: the type on the best full-resolution crop at a larger input size:
+    {"type", "confidence", "model", "imgsz"} or None.
+    """
+    if crop is None or crop.size == 0:
+        return None
+    imgsz = int(settings.get("type_second_pass_imgsz") or vtype.DEFAULTS["type_second_pass_imgsz"])
+    with _SECOND_PASS["lock"]:
+        model, labels = second_pass_model(settings.get("type_model"))
+        results = model.predict(crop, imgsz=imgsz, conf=0.2, verbose=False, device=yolo_device("auto"))
+    boxes = results[0].boxes if results else None
+    best = None
+    if boxes is not None:
+        for class_id, confidence, xyxy in zip(boxes.cls.int().tolist(), boxes.conf.tolist(), boxes.xyxy.tolist()):
+            if class_id not in labels:
+                continue
+            area = (xyxy[2] - xyxy[0]) * (xyxy[3] - xyxy[1])
+            if best is None or area > best[0]:
+                best = (area, labels[class_id], confidence)
+    if best is None:
+        return None
+    return {"type": best[1], "confidence": round(float(best[2]), 3), "model": Path(_SECOND_PASS["path"]).name, "imgsz": imgsz}
+
+
+def best_vehicle_crop(window, hires_frame):
+    """The vehicle at its largest: from the full-resolution frame when there is one."""
+    snapshot = window.get("snapshot_frame")
+    if hires_frame is not None and snapshot is not None:
+        x1, y1, x2, y2 = scale_box(window["xyxy"], snapshot.shape, hires_frame.shape, pad=0.1)
+        return hires_frame[y1:y2, x1:x2]
+    frames = [(frame, xyxy) for frame, xyxy in window.get("analysis_frames", []) if frame is not None]
+    if not frames:
+        return None
+    frame, xyxy = max(frames, key=lambda item: (item[1][2] - item[1][0]) * (item[1][3] - item[1][1]))
+    x1, y1, x2, y2 = scale_box(xyxy, frame.shape, frame.shape, pad=0.1)
+    return frame[y1:y2, x1:x2]
+
+
+def final_vehicle_type(window, hires_frame):
+    """A2: votes of every frame + second check + size/shape rule (vehicle_type.decide)."""
+    settings = {**vtype.DEFAULTS, **performance_settings(load_runtime_config())}
+    second = None
+    if int(settings.get("type_second_pass") or 0):
+        try:
+            second = second_pass_type(best_vehicle_crop(window, hires_frame), settings)
+        except Exception as error:  # the frame votes still decide
+            print(f"Second type check failed: {error}", flush=True)
+    vote = window.get("vote") or vtype.TrackVote()
+    return vtype.decide(vote, second, float(window.get("zone_height") or 0.0), settings, fallback=window.get("detected_vehicle_type"))
+
+
 def submit_crossing_for_window(role, state, track_id, window, rfid_status, laravel_client):
     """
     Phase 2: send one crossing (gate, IN / OUT / UNKNOWN, time, track ID,
@@ -2117,9 +2199,15 @@ def submit_crossing_for_window(role, state, track_id, window, rfid_status, larav
                 break
             time.sleep(0.2)
 
+        # The full-resolution frame from the moment of the crossing when there is one.
+        hires_frame = HIRES[role].frame_near(window["started_at"]) if role in HIRES else None
+        # A2: the final type from every frame, a second check and the size rule.
+        type_decision = final_vehicle_type(window, hires_frame)
+
         with state["lock"]:
             direction, reason = final_direction_locked(window)
             window["direction"], window["direction_reason"] = direction, reason
+            window["detected_vehicle_type"] = type_decision["type"] or window.get("detected_vehicle_type")
             snapshot_frame = window.get("snapshot_frame")
             snapshot_frame = snapshot_frame.copy() if snapshot_frame is not None else None
             payload = {
@@ -2136,16 +2224,15 @@ def submit_crossing_for_window(role, state, track_id, window, rfid_status, larav
                     "bbox_xyxy": [round(float(value), 1) for value in window.get("xyxy", ())],
                     "in_side": window.get("in_side", 1),
                     "rfid_status": rfid_status,
+                    "vehicle_type": {key: value for key, value in type_decision.items() if key != "type"},
                 },
             }
             state["direction_counts"][direction] = state["direction_counts"].get(direction, 0) + 1
             state["recent_crossings"].append({"track_id": track_id, "direction": direction, "at": time.monotonic()})
             del state["recent_crossings"][:-5]
 
-        print(f"{role} crossing track {track_id}: {direction} ({reason})", flush=True)
+        print(f"{role} crossing track {track_id}: {direction} ({reason}), {payload['detected_vehicle_type']} ({type_decision['rule']})", flush=True)
 
-        # The full-resolution frame from the moment of the crossing when there is one.
-        hires_frame = HIRES[role].frame_near(window["started_at"]) if role in HIRES else None
         snapshot = encode_frame_snapshot(role, hires_frame if hires_frame is not None else snapshot_frame, f"crossing-{window['event_key']}") \
             if (hires_frame is not None or snapshot_frame is not None) else None
         submit = getattr(laravel_client, "submit_crossing", None)
@@ -2653,6 +2740,10 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
 
         with state["lock"]:
             state["detections_seen"] += 1
+            # A2: this frame's vote for the vehicle's type.
+            state["track_votes"].setdefault(track_id, vtype.TrackVote()).add(
+                vehicle_labels[class_id], confidence, xyxy, (frame_width, frame_height)
+            )
             state["track_last_seen"][track_id] = now_monotonic
             state["track_boxes"][track_id] = {
                 "class_id": class_id,

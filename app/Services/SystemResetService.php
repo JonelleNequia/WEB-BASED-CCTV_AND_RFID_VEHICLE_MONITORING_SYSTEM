@@ -43,6 +43,7 @@ class SystemResetService
 
     /** Activity tables, emptied in this order. */
     protected const ACTIVITY_TABLES = [
+        'vehicle_type_corrections',
         'active_sessions',
         'visitor_records',
         'plate_profiles',

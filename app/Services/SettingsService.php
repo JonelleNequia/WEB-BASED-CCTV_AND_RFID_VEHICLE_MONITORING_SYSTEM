@@ -49,6 +49,11 @@ class SettingsService
             'perf_yolo_device' => 'auto',
             'perf_roi_crop' => '1',
             'perf_hires_on_trigger' => '1',
+            // A2 (detection): vehicle type (Car / Motorcycle / Truck/Bus).
+            'perf_type_second_pass' => '1',
+            'perf_type_model' => 'yolov8s.pt',
+            'perf_type_truck_min_height' => '55',
+            'perf_type_car_min_aspect' => '1.25',
             // Detector debug view (Settings › Calibration): raw detections on the live view.
             'detector_debug_overlay' => '0',
         ];
@@ -365,6 +370,10 @@ class SettingsService
             'roi_crop' => (int) ($settings['perf_roi_crop'] ?? 1),
             'hires_on_trigger' => (int) ($settings['perf_hires_on_trigger'] ?? 1),
             'debug_overlay' => (int) ($settings['detector_debug_overlay'] ?? 0),
+            'type_second_pass' => (int) ($settings['perf_type_second_pass'] ?? 1),
+            'type_model' => (string) ($settings['perf_type_model'] ?? 'yolov8s.pt'),
+            'type_truck_min_height' => round(((float) ($settings['perf_type_truck_min_height'] ?? 55)) / 100, 3),
+            'type_car_min_aspect' => (float) ($settings['perf_type_car_min_aspect'] ?? 1.25),
         ];
     }
 

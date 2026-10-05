@@ -21,6 +21,10 @@
         if (value) {
             value.value = item.dataset.value || '';
         }
+        // Correct type: the current type is selected.
+        form.querySelectorAll('input[type="radio"]').forEach(function (radio) {
+            radio.checked = radio.value === item.dataset.value;
+        });
         form.querySelectorAll('[data-visitor-label]').forEach(function (node) {
             node.textContent = item.dataset.label || '';
         });

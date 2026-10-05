@@ -237,6 +237,40 @@
                 </div>
             </section>
 
+            {{-- A2 (detection): how the vehicle type is decided (moves to Advanced in the new Settings). --}}
+            <section class="subpanel">
+                <div class="panel-title-row">
+                    <h4>Vehicle type</h4>
+                    <p class="field-help">Types: Car (sedan, SUV, AUV, pickup, van), Motorcycle (motorcycle, e-bike, tricycle), Truck/Bus (truck, bus, jeepney). Every frame of a vehicle votes; the camera sees vehicles from behind, so a wide, low back counts as a Car.</p>
+                </div>
+                <div class="form-grid">
+                    <div class="field">
+                        <label for="perf_type_truck_min_height">Truck/Bus: back at least this tall (% of the zone)</label>
+                        <input id="perf_type_truck_min_height" type="number" name="perf_type_truck_min_height" min="20" max="95" step="1" value="{{ old('perf_type_truck_min_height', $settings['perf_type_truck_min_height']) }}">
+                        <span class="field-help">Lower it if real trucks are saved as Car; raise it if cars are saved as Truck/Bus.</span>
+                    </div>
+                    <div class="field">
+                        <label for="perf_type_car_min_aspect">Car: back at least this wide (width ÷ height)</label>
+                        <input id="perf_type_car_min_aspect" type="number" name="perf_type_car_min_aspect" min="0.8" max="2.5" step="0.05" value="{{ old('perf_type_car_min_aspect', $settings['perf_type_car_min_aspect']) }}">
+                        <span class="field-help">A truck's back is about as tall as it is wide (below this); a car's is wider.</span>
+                    </div>
+                    <div class="field">
+                        <label for="perf_type_model">Second check model</label>
+                        <select id="perf_type_model" name="perf_type_model">
+                            <option value="yolov8n.pt" @selected(old('perf_type_model', $settings['perf_type_model']) === 'yolov8n.pt')>Fast (yolov8n)</option>
+                            <option value="yolov8s.pt" @selected(old('perf_type_model', $settings['perf_type_model']) === 'yolov8s.pt')>More accurate (yolov8s, recommended)</option>
+                        </select>
+                    </div>
+                    <div class="field span-full">
+                        <label class="checkbox-row">
+                            <input type="hidden" name="perf_type_second_pass" value="0">
+                            <input type="checkbox" name="perf_type_second_pass" value="1" @checked(old('perf_type_second_pass', $settings['perf_type_second_pass']) === '1')>
+                            Check the type again on the sharpest full-size picture of each vehicle
+                        </label>
+                    </div>
+                </div>
+            </section>
+
         <div class="button-row button-row-end">
             <button type="submit" class="button button-primary">Save Cameras</button>
         </div>

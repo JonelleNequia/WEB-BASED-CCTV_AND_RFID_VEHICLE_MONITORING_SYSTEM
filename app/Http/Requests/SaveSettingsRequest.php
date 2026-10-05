@@ -53,6 +53,7 @@ class SaveSettingsRequest extends FormRequest
             'camera_configs', 'camera_source_placeholder', 'camera_streams',
             'perf_stream_fps', 'perf_stream_width', 'perf_jpeg_quality', 'perf_detection_fps',
             'perf_yolo_imgsz', 'perf_yolo_device', 'perf_roi_crop', 'perf_hires_on_trigger',
+            'perf_type_second_pass', 'perf_type_model', 'perf_type_truck_min_height', 'perf_type_car_min_aspect',
         ],
     ];
 
@@ -106,6 +107,11 @@ class SaveSettingsRequest extends FormRequest
             'perf_yolo_device' => ['sometimes', 'in:auto,cpu,mps,cuda:0'],
             'perf_roi_crop' => ['sometimes', 'in:0,1'],
             'perf_hires_on_trigger' => ['sometimes', 'in:0,1'],
+            // A2 (detection): vehicle type.
+            'perf_type_second_pass' => ['sometimes', 'in:0,1'],
+            'perf_type_model' => ['sometimes', 'in:yolov8n.pt,yolov8s.pt'],
+            'perf_type_truck_min_height' => ['sometimes', 'integer', 'between:20,95'],
+            'perf_type_car_min_aspect' => ['sometimes', 'numeric', 'between:0.8,2.5'],
         ];
     }
 

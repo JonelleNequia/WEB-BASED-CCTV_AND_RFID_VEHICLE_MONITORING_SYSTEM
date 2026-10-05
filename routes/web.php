@@ -93,6 +93,7 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
     Route::get('/visitors/plates/{plateProfile}', [VisitorController::class, 'showProfile'])->name('visitors.profiles.show');
     Route::patch('/visitors/records/{visitorRecord}/plate', [VisitorController::class, 'correctPlate'])->name('visitors.records.plate');
     Route::patch('/visitors/records/{visitorRecord}/dismiss', [VisitorController::class, 'dismiss'])->name('visitors.records.dismiss');
+    Route::patch('/visitors/records/{visitorRecord}/type', [VisitorController::class, 'correctType'])->name('visitors.records.type');
     Route::patch('/visitors/plates/{plateProfile}/note', [VisitorController::class, 'updateNote'])->name('visitors.profiles.note');
     Route::post('/visitors/plates/{plateProfile}/merge', [VisitorController::class, 'merge'])
         ->middleware('admin')
