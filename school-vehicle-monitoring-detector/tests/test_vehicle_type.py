@@ -112,7 +112,7 @@ class PipelineTests(unittest.TestCase):
         line_y = 0.6 * 416
         self.step(line_y - 140, line_y - 60, 2)          # Car, above the line
         self.step(line_y - 100, line_y - 10, 2)          # Car
-        self.step(line_y - 40, line_y + 50, 7, 0.55)     # "truck" on the line (the trigger frame)
+        self.step(line_y - 20, line_y + 70, 7, 0.55)     # "truck" just past the line (the trigger frame)
         self.step(line_y + 20, line_y + 120, 2)          # Car, below
         window = self.state["pending_windows"][7]
         self.assertEqual(window["detected_vehicle_type"], vtype.TRUCK_BUS)  # the trigger frame alone said truck

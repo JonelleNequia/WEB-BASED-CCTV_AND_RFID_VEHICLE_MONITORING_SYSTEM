@@ -291,6 +291,67 @@ def trail_direction(points, line, in_side):
     return crossing_direction(sides[-1], in_side)
 
 
+def signed_distance(point, line):
+    """Distance in pixels from the trigger line (its sign = point_side_of_line)."""
+    dx, dy = line["x2"] - line["x1"], line["y2"] - line["y1"]
+    length = (dx * dx + dy * dy) ** 0.5
+    if not length:
+        return 0.0
+    return (dx * (point[1] - line["y1"]) - dy * (point[0] - line["x1"])) / length
+
+
+def within_line_span(point, line, tolerance=0.1):
+    """The point is beside the drawn line, not beyond its ends (10% slack)."""
+    dx, dy = line["x2"] - line["x1"], line["y2"] - line["y1"]
+    length_squared = dx * dx + dy * dy
+    if not length_squared:
+        return False
+    t = ((point[0] - line["x1"]) * dx + (point[1] - line["y1"]) * dy) / length_squared
+    return -tolerance <= t <= 1 + tolerance
+
+
+class LineCrossing:
+    """
+    A3 (detection): one vehicle = one crossing.
+
+    - The side the vehicle came from is where it was first seen.
+    - It counts only when its centre is clearly on the other side: at least
+      `margin` pixels past the line (hysteresis), so a vehicle that stops on
+      the line, rocks or backs up there is not counted twice.
+    - It needs `min_points` sightings and `min_move` pixels of movement, so a
+      parked vehicle (or one detected for a moment) is never counted.
+    - Once counted, the same track is not counted again.
+    """
+
+    def __init__(self):
+        self.start_side = None
+        self.first_point = None
+        self.sightings = 0
+        self.counted = False
+
+    def update(self, point, line, margin, min_points, min_move):
+        """Return the side the vehicle moved to (+1 / -1) when it now counts, else 0."""
+        if not line:
+            return 0
+        distance = signed_distance(point, line)
+        side = 1 if distance > 0 else (-1 if distance < 0 else 0)
+        self.sightings += 1
+        if self.first_point is None:
+            self.first_point = (float(point[0]), float(point[1]))
+        if self.start_side is None:
+            self.start_side = side or None
+            return 0
+        if self.counted or not side or side == self.start_side or abs(distance) < margin:
+            return 0
+        if self.sightings < min_points or not within_line_span(point, line):
+            return 0
+        moved = ((point[0] - self.first_point[0]) ** 2 + (point[1] - self.first_point[1]) ** 2) ** 0.5
+        if moved < min_move:
+            return 0
+        self.counted = True
+        return side
+
+
 def calibration_ready(camera_config):
     """
     Auto logging requires both an ROI mask and a trigger line.

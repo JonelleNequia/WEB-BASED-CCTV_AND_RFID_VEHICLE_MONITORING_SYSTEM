@@ -54,6 +54,10 @@ class SettingsService
             'perf_type_model' => 'yolov8s.pt',
             'perf_type_truck_min_height' => '55',
             'perf_type_car_min_aspect' => '1.25',
+            // A3 (detection): one vehicle = one event.
+            'perf_cross_margin' => '5',
+            'perf_cross_min_points' => '3',
+            'perf_cross_min_move' => '10',
             // Detector debug view (Settings › Calibration): raw detections on the live view.
             'detector_debug_overlay' => '0',
         ];
@@ -374,6 +378,9 @@ class SettingsService
             'type_model' => (string) ($settings['perf_type_model'] ?? 'yolov8s.pt'),
             'type_truck_min_height' => round(((float) ($settings['perf_type_truck_min_height'] ?? 55)) / 100, 3),
             'type_car_min_aspect' => (float) ($settings['perf_type_car_min_aspect'] ?? 1.25),
+            'cross_margin' => round(((float) ($settings['perf_cross_margin'] ?? 5)) / 100, 3),
+            'cross_min_points' => (int) ($settings['perf_cross_min_points'] ?? 3),
+            'cross_min_move' => round(((float) ($settings['perf_cross_min_move'] ?? 10)) / 100, 3),
         ];
     }
 

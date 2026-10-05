@@ -23,6 +23,10 @@ CAPTURE_STALL_SECONDS = 5.0
 CAPTURE_FIRST_FRAME_SECONDS = 15.0
 RECONNECT_DELAY_SECONDS = 3.0
 TRACK_STALE_AFTER_SECONDS = 1.5
+# A3: a track's path is remembered through a short gap (a person or another
+# vehicle passing in front) as long as ByteTrack keeps its ID: track_buffer 30
+# at 7-8 detections per second is about 4 s.
+TRACK_MEMORY_SECONDS = 4.0
 STATUS_WRITE_INTERVAL_SECONDS = 1.0
 API_TIMEOUT_SECONDS = 10
 RFID_MATCH_TIMEOUT_SECONDS = 0.45
@@ -76,6 +80,10 @@ PERFORMANCE_DEFAULTS = {
     "type_second_pass_imgsz": 960,  # input size of the second check
     "type_truck_min_height": 0.55,  # Truck/Bus needs a back at least this share of the zone's height...
     "type_car_min_aspect": 1.25,    # ...or narrower (width / height) than this; otherwise it is a Car
+    # A3: one vehicle = one crossing (tracking.LineCrossing).
+    "cross_margin": 0.05,           # the centre must be this far past the line (share of the zone's height)
+    "cross_min_points": 3,          # sightings of the track before it can count
+    "cross_min_move": 0.10,         # movement since it was first seen (share of the zone's height)
 }
 # The full-resolution stream is decoded with more threads, which delays it by
 # about this much against the low-delay live stream (measured on the VIGI C240).

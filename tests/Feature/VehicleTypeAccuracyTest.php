@@ -82,6 +82,11 @@ class VehicleTypeAccuracyTest extends TestCase
 
         $performance = app(SettingsService::class)->performanceSettings(['perf_type_truck_min_height' => '60', 'perf_type_car_min_aspect' => '1.4']);
         $this->assertSame([0.6, 1.4, 'yolov8s.pt', 1], [$performance['type_truck_min_height'], $performance['type_car_min_aspect'], $performance['type_model'], $performance['type_second_pass']]);
+        // A3 (detection): counting limits, as shares of the zone's height.
+        $counting = app(SettingsService::class)->performanceSettings(['perf_cross_margin' => '8', 'perf_cross_min_points' => '4', 'perf_cross_min_move' => '12']);
+        $this->assertSame([0.08, 4, 0.12], [$counting['cross_margin'], $counting['cross_min_points'], $counting['cross_min_move']]);
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'cameras']))->assertOk()
+            ->assertSee('Counting')->assertSee('perf_cross_margin', false);
     }
 
     protected function visitorRecord(string $detected): VisitorRecord

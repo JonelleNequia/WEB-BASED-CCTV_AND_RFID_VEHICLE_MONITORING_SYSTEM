@@ -29,6 +29,7 @@ from config import (
     MJPEG_STREAM_HOST,
     MJPEG_STREAM_PORT,
     MODEL_PATH,
+    PERFORMANCE_DEFAULTS,
     RECONNECT_DELAY_SECONDS,
     RFID_DETECTION_WINDOW_SECONDS,
     RFID_LOOKBACK_SECONDS,
@@ -41,6 +42,7 @@ from config import (
     STATUS_FILE_PATH,
     STATUS_WRITE_INTERVAL_SECONDS,
     STREAM_FRAME_MAX_WIDTH,
+    TRACK_MEMORY_SECONDS,
     TRACK_STALE_AFTER_SECONDS,
     TRACK_TRAIL_POINTS,
     TRACKER_CONFIG,
@@ -54,6 +56,7 @@ from config import (
 )
 from laravel_client import LaravelEventClient
 from tracking import (
+    LineCrossing,
     bbox_intersects_line,
     bbox_center,
     calibration_ready,
@@ -980,6 +983,8 @@ def initial_camera_state():
         "confirmed_tracks": {},
         # A2: every frame of a track votes for its type (vehicle_type.TrackVote).
         "track_votes": {},
+        # A3: per track, where it came from and whether it was counted (tracking.LineCrossing).
+        "track_crossings": {},
         "line_crossings": 0,
         # Phase 2: crossings whose direction is still being decided / sent,
         # and the latest decided ones (debug view).
@@ -2670,10 +2675,12 @@ def remember_track_point(state, track_id, point):
         entry = state["track_points"].get(track_id)
         previous = None
 
-        if entry and now_monotonic - entry["last_seen"] <= TRACK_STALE_AFTER_SECONDS:
+        # A3: kept through a short gap (TRACK_MEMORY_SECONDS), like ByteTrack keeps the ID.
+        if entry and now_monotonic - entry["last_seen"] <= TRACK_MEMORY_SECONDS:
             previous = entry["points"][-1]
         elif entry:
             entry["points"] = []
+            state["track_crossings"].pop(track_id, None)
 
         entry = entry or {"points": []}
         entry["points"].append((float(point[0]), float(point[1])))
@@ -2682,14 +2689,27 @@ def remember_track_point(state, track_id, point):
         state["track_points"][track_id] = entry
 
         for stale_id, stale in list(state["track_points"].items()):
-            if now_monotonic - stale["last_seen"] > max(TRACK_STALE_AFTER_SECONDS * 4, 6.0):
+            if now_monotonic - stale["last_seen"] > max(TRACK_MEMORY_SECONDS * 1.5, 6.0):
                 state["track_points"].pop(stale_id, None)
                 state["confirmed_tracks"].pop(stale_id, None)
+                state["track_crossings"].pop(stale_id, None)
 
     return previous
 
 
-def process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels):
+def crossing_limits(perf, mask_polygon, frame_height):
+    """A3: hysteresis margin and minimum movement in pixels, from shares of the zone's height."""
+    settings = {**PERFORMANCE_DEFAULTS, **(perf or {})}
+    ys = [point[1] for point in mask_polygon or []]
+    zone_height = (max(ys) - min(ys)) if ys else float(frame_height)
+    return (
+        float(settings["cross_margin"]) * zone_height,
+        max(1, int(settings["cross_min_points"])),
+        float(settings["cross_min_move"]) * zone_height,
+    )
+
+
+def process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels, perf=None):
     """
     Filter detections to supported vehicle classes, track them, and log one
     event per valid crossing. Uses ANPR for license plate detection.
@@ -2697,6 +2717,7 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
     frame_height, frame_width = frame.shape[:2]
     mask_polygon = normalized_polygon_to_pixels(camera_config.get("calibration_mask"), frame_width, frame_height)
     line = normalized_line_to_pixels(camera_config.get("calibration_line"), frame_width, frame_height)
+    margin, min_points, min_move = crossing_limits(perf, mask_polygon, frame_height)
     boxes = results.boxes
 
     if not mask_polygon or not line:
@@ -2759,19 +2780,16 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
                 continue
 
         current_side = point_side_of_line(center_point, line)
-        previous_side = point_side_of_line(previous_point, line) if previous_point is not None else None
 
         with state["lock"]:
             state["track_sides"][track_id] = current_side
+            # A3: counted only once it is clearly past the line (hysteresis),
+            # after enough sightings and movement; never twice per track.
+            # Touching the line, stopping or backing up on it is not a crossing.
+            crossing = state["track_crossings"].setdefault(track_id, LineCrossing())
+            moved_to = crossing.update(center_point, line, margin, min_points, min_move)
 
-        # The path from the previous to the current position crosses the
-        # line segment (also when the vehicle jumped over it between frames),
-        # or the box touches the line (a track that starts on the line).
-        crossed = path_crosses_line(previous_point, center_point, line)
-        line_touched = bbox_intersects_line(xyxy, line)
-        triggered = bool(crossed) or line_touched
-
-        if not triggered:
+        if not moved_to:
             continue
 
         with state["lock"]:
@@ -2793,18 +2811,13 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
             state["line_crossings"] += 1
 
         # Phase 2: the direction is the side of the line the vehicle moved TO
-        # (the gate's calibration says which side is IN). A box that only
-        # touches the line has not crossed yet: its direction is decided
-        # while the window is open, or stays unknown.
+        # (the gate's calibration says which side is IN). A3: it is known
+        # whenever a crossing counts.
         in_side = line_in_side(camera_config)
         with state["lock"]:
             trail = list((state["track_points"].get(track_id) or {}).get("points") or [])
 
-        if crossed:
-            direction, direction_reason = crossing_direction(crossed, in_side), "crossed the line"
-        else:
-            direction = trail_direction(trail, line, in_side)
-            direction_reason = "trail crossed the line" if direction else None
+        direction, direction_reason = crossing_direction(moved_to, in_side), "crossed the line"
 
         start_detection_window(
             role,
@@ -2819,8 +2832,8 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
                 "reason": direction_reason,
                 "line": line,
                 "in_side": in_side,
-                "start_side": next((side for side in (point_side_of_line(point, line) for point in trail) if side), previous_side or current_side),
-                "trail_length": len(trail) - 1,  # this frame is counted by update_detection_windows
+                "start_side": crossing.start_side,
+                "trail_length": crossing.sightings,
             },
             camera_config,
             vehicle_labels,
@@ -3314,7 +3327,7 @@ def handle_detection(role, frame, results, crop, camera_config, perf, state, lar
     crossings_before = state["line_crossings"]
 
     with metrics.timed(role, "process"):
-        process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels)
+        process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels, perf)
 
     now_monotonic = time.monotonic()
     with state["lock"]:

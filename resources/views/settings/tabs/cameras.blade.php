@@ -271,6 +271,31 @@
                 </div>
             </section>
 
+            {{-- A3 (detection): when a vehicle counts (moves to Advanced in the new Settings). --}}
+            <section class="subpanel">
+                <div class="panel-title-row">
+                    <h4>Counting</h4>
+                    <p class="field-help">A vehicle counts once, when it is clearly past the trigger line. Stopping, rocking or backing up on the line and parked vehicles are not counted.</p>
+                </div>
+                <div class="form-grid">
+                    <div class="field">
+                        <label for="perf_cross_margin">Past the line by (% of the zone's height)</label>
+                        <input id="perf_cross_margin" type="number" name="perf_cross_margin" min="0" max="30" step="1" value="{{ old('perf_cross_margin', $settings['perf_cross_margin']) }}">
+                        <span class="field-help">Raise it if a vehicle stopping on the line is counted twice.</span>
+                    </div>
+                    <div class="field">
+                        <label for="perf_cross_min_points">Seen at least (times)</label>
+                        <input id="perf_cross_min_points" type="number" name="perf_cross_min_points" min="1" max="10" step="1" value="{{ old('perf_cross_min_points', $settings['perf_cross_min_points']) }}">
+                        <span class="field-help">Lower it if fast vehicles are missed.</span>
+                    </div>
+                    <div class="field">
+                        <label for="perf_cross_min_move">Moved at least (% of the zone's height)</label>
+                        <input id="perf_cross_min_move" type="number" name="perf_cross_min_move" min="0" max="60" step="1" value="{{ old('perf_cross_min_move', $settings['perf_cross_min_move']) }}">
+                        <span class="field-help">Keeps parked vehicles from being counted.</span>
+                    </div>
+                </div>
+            </section>
+
         <div class="button-row button-row-end">
             <button type="submit" class="button button-primary">Save Cameras</button>
         </div>

@@ -54,6 +54,7 @@ class SaveSettingsRequest extends FormRequest
             'perf_stream_fps', 'perf_stream_width', 'perf_jpeg_quality', 'perf_detection_fps',
             'perf_yolo_imgsz', 'perf_yolo_device', 'perf_roi_crop', 'perf_hires_on_trigger',
             'perf_type_second_pass', 'perf_type_model', 'perf_type_truck_min_height', 'perf_type_car_min_aspect',
+            'perf_cross_margin', 'perf_cross_min_points', 'perf_cross_min_move',
         ],
     ];
 
@@ -112,6 +113,10 @@ class SaveSettingsRequest extends FormRequest
             'perf_type_model' => ['sometimes', 'in:yolov8n.pt,yolov8s.pt'],
             'perf_type_truck_min_height' => ['sometimes', 'integer', 'between:20,95'],
             'perf_type_car_min_aspect' => ['sometimes', 'numeric', 'between:0.8,2.5'],
+            // A3 (detection): one vehicle = one event.
+            'perf_cross_margin' => ['sometimes', 'integer', 'between:0,30'],
+            'perf_cross_min_points' => ['sometimes', 'integer', 'between:1,10'],
+            'perf_cross_min_move' => ['sometimes', 'integer', 'between:0,60'],
         ];
     }
 
