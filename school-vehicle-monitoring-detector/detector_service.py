@@ -68,7 +68,7 @@ from tracking import (
 )
 from anpr import detect_vehicle_color, ocr_runtime_status, read_license_plate_details
 from plate_voting import frames_agree, vote_plate
-from camera_health import RtspDiagnosis, take_over_stale_detector
+from camera_health import ReconnectBackoff, RtspDiagnosis, short_reason, strip_credentials, take_over_stale_detector
 import metrics
 from hires import HiResGrabber, scale_box
 
@@ -676,6 +676,12 @@ def camera_open_error(camera_config, capture_source, state):
         state["error_code"] = "invalid_source"
         return state["source_validation_error"]
 
+    # A1: the reason found by the last connection attempt (pre-check or open
+    # time-limit), so the status does not probe the camera again.
+    if state.get("open_problem"):
+        state["error_code"] = state["open_problem"]["code"]
+        return state["open_problem"]["message"]
+
     if camera_config["source_type"] == "rtsp":
         diagnosis = RTSP_DIAGNOSIS.get(
             camera_config["camera_role"],
@@ -688,7 +694,7 @@ def camera_open_error(camera_config, capture_source, state):
             return diagnosis["message"]
 
     state["error_code"] = "open_failed"
-    return f"Could not open camera source: {capture_source}"
+    return f"Could not open camera source: {strip_credentials(capture_source)}"
 
 
 def build_connection_source(camera_config, capture_source):
@@ -874,6 +880,46 @@ def open_capture(camera_config, decoder_threads=None):
     return capture, capture_source
 
 
+# A1: the longest a camera connection may take before the worker gives up on
+# it (the FFmpeg RTSP timeout is 5 s; webcams and HTTP streams have none).
+CAMERA_OPEN_TIMEOUT_SECONDS = 12.0
+
+
+def open_capture_with_deadline(camera_config, decoder_threads=None, timeout=None):
+    """
+    Open a camera in a helper thread. Returns (capture, source, timed_out).
+    A camera that hangs while connecting no longer freezes its gate's worker
+    (and its status): the late capture is released when it finally returns.
+    """
+    box = {}
+
+    def target():
+        try:
+            box["result"] = open_capture(camera_config, decoder_threads)
+        except Exception as error:  # reported by the worker like any open error
+            box["error"] = error
+
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    thread.join(CAMERA_OPEN_TIMEOUT_SECONDS if timeout is None else timeout)
+
+    if thread.is_alive():
+        def release_late():
+            thread.join()
+            late = box.get("result")
+            if late and late[0] is not None:
+                late[0].release()
+
+        threading.Thread(target=release_late, daemon=True).start()
+        return None, resolve_capture_source(camera_config), True
+
+    if "error" in box:
+        raise box["error"]
+
+    capture, capture_source = box["result"]
+    return capture, capture_source, False
+
+
 def camera_signature(camera_config):
     """
     Detect when Laravel settings changed and the detector should reconnect.
@@ -910,6 +956,11 @@ def initial_camera_state():
         "active_detections": 0,
         "crossings_logged": 0,
         "retry_after": 0.0,
+        # A1: reconnect with a growing wait; the last connection problem; the
+        # status code last written to the log.
+        "backoff": ReconnectBackoff(),
+        "open_problem": None,
+        "logged_status": None,
         "track_sides": {},
         "track_last_seen": {},
         "track_boxes": {},
@@ -952,22 +1003,36 @@ def release_capture(state):
 def ensure_capture(camera_config, state):
     """
     Reconnect when the configured source changed or the capture dropped.
+
+    A1: a failed connection waits longer each time (ReconnectBackoff); a new
+    camera setting retries at once; an RTSP camera is asked first whether it
+    answers (a few hundred ms) instead of letting OpenCV wait 5 s; the open
+    itself has a time limit.
     """
     signature = camera_signature(camera_config)
     now_monotonic = time.monotonic()
     capture_source = resolve_capture_source(camera_config)
     validation_error = validate_camera_source(camera_config, capture_source)
+    backoff = state["backoff"]
+
+    if state["signature"] is not None and state["signature"] != signature or state.get("wanted_signature") not in (None, signature):
+        # New source or login from Settings: try it now.
+        backoff.reset()
+        state["open_problem"] = None
+        RTSP_DIAGNOSIS.forget(camera_config["camera_role"])
+    state["wanted_signature"] = signature
 
     if validation_error:
         release_capture(state)
         state["source_validation_error"] = validation_error
-        state["retry_after"] = now_monotonic + CAMERA_RETRY_DELAY_SECONDS
+        if backoff.ready(now_monotonic):
+            backoff.failed(now_monotonic)
 
         return None, capture_source
 
     state["source_validation_error"] = ""
 
-    if state["capture"] is None and now_monotonic < state.get("retry_after", 0.0):
+    if state["capture"] is None and not backoff.ready(now_monotonic):
         return None, capture_source
 
     current = state["capture"]
@@ -982,14 +1047,43 @@ def ensure_capture(camera_config, state):
         return current, capture_source
 
     release_capture(state)
-    capture, capture_source = open_capture(camera_config, state.get("decoder_threads_override", {}).get(signature))
+
+    if camera_config["source_type"] == "rtsp":
+        diagnosis = rtsp_precheck(camera_config, capture_source)
+        if diagnosis["code"] not in ("ok", "error"):
+            # Not reachable, no answer, wrong login or path: OpenCV would only
+            # fail more slowly ("error" = an odd answer; OpenCV may still work).
+            state["open_problem"] = diagnosis
+            backoff.failed(now_monotonic)
+            return None, capture_source
+
+    capture, capture_source, timed_out = open_capture_with_deadline(
+        camera_config, state.get("decoder_threads_override", {}).get(signature)
+    )
+
+    if timed_out:
+        state["open_problem"] = {
+            "code": "timeout",
+            "message": f"The camera did not answer within {CAMERA_OPEN_TIMEOUT_SECONDS:.0f} s. Check its cable and network.",
+        }
+        backoff.failed(now_monotonic)
+        return None, capture_source
+
     state["capture"] = capture
     state["signature"] = signature
 
     if not capture.isOpened():
-        state["retry_after"] = now_monotonic + CAMERA_RETRY_DELAY_SECONDS
+        state["open_problem"] = None  # camera_open_error asks the camera why
+        backoff.failed(now_monotonic)
 
     return capture, capture_source
+
+
+def rtsp_precheck(camera_config, capture_source):
+    """Fresh RTSP DESCRIBE before opening (cached for camera_open_error)."""
+    role = camera_config["camera_role"]
+    RTSP_DIAGNOSIS.forget(role)
+    return RTSP_DIAGNOSIS.get(role, str(capture_source), camera_config["source_username"], camera_config["source_password"])
 
 
 def read_fresh_frame(capture):
@@ -1049,6 +1143,10 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
         camera_config = runtime_config["cameras"][role]
         state = camera_states[role]
         model_info = detector_models.get(role, {})
+        status = detection_status(role, state, camera_config, model_info)
+        if service_running and state.get("logged_status") != status["code"]:
+            state["logged_status"] = status["code"]
+            print(log_status_change(role, status), flush=True)
 
         payload["cameras"][role] = {
             "camera_role": role,
@@ -1071,9 +1169,76 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
             "crossings_logged": state["crossings_logged"],
             # Debug counters (also drawn on the live view in debug mode).
             "detection": detection_counters(state),
+            # A1: one line: what the gate is doing, why, and what to do.
+            "detection_status": status,
+            "offline_since": datetime.fromtimestamp(state["backoff"].offline_since).astimezone().isoformat()
+            if state["backoff"].offline_since else None,
         }
 
     return payload
+
+
+# A1: detection that has not run for this long while the camera is live is "stalled".
+DETECTION_STALLED_AFTER_SECONDS = 15.0
+
+NEXT_STEP_BY_ERROR = {
+    "unauthorized": "Enter the camera's username and password in Settings.",
+    "not_found": "Assign the camera again in Settings.",
+    "invalid_source": "Set up this gate's camera in Settings.",
+    "unreachable": "Check the camera's LAN cable and power.",
+    "timeout": "Check the camera's LAN cable and network.",
+    "no_frames": "Wait a moment; if it stays, restart the camera.",
+}
+
+
+def detection_status(role, state, camera_config, model_info):
+    """
+    A1: {code, label, message, next_step, retry_in}: what one gate's
+    detection is doing now. Codes: connecting, camera_offline, no_zone,
+    model_loading, model_error, error, stalled, running.
+    """
+    now = time.monotonic()
+    backoff = state["backoff"]
+    debug = state.get("debug") or {}
+
+    def result(code, label, message, next_step="", retry_in=None):
+        return {"code": code, "label": label, "message": message, "next_step": next_step,
+                "retry_in": None if retry_in is None else round(retry_in)}
+
+    if not state.get("camera_running"):
+        if not backoff.failures and not state.get("open_problem"):
+            return result("connecting", "Connecting", "Connecting to the camera…")
+        return result(
+            "camera_offline", "Camera offline",
+            short_reason(state.get("last_error")) or "The camera is not connected.",
+            NEXT_STEP_BY_ERROR.get(state.get("error_code"), "Check the camera's LAN cable and power."),
+            backoff.seconds_left(now),
+        )
+    if not calibration_ready(camera_config):
+        return result("no_zone", "Zone not set", "No detection zone and trigger line yet.",
+                      "Draw them in Settings › Calibration.")
+    if model_info.get("model") is None:
+        if "could not be loaded" in str(state.get("last_error")):
+            return result("model_error", "Model error", short_reason(state.get("last_error")),
+                          "Check that yolov8n.pt is in the detector folder.")
+        return result("model_loading", "Starting", "Loading the detection model…")
+    if not model_info.get("vehicle_labels"):
+        return result("model_error", "Model error", "The detection model has no vehicle classes.",
+                      "Use a vehicle detection model.")
+    if state.get("last_detection_error") and not state.get("detection_ready"):
+        return result("error", "Detection error", short_reason(state["last_detection_error"]),
+                      "It retries by itself; restart the detector if it stays.")
+    if debug.get("at") and now - debug["at"] > DETECTION_STALLED_AFTER_SECONDS:
+        return result("stalled", "Paused", f"No detection for {now - debug['at']:.0f} s while the camera is live.",
+                      "Restart the detector if it stays.")
+    if not debug.get("at"):
+        return result("model_loading", "Starting", "First check starts in a moment…")
+    return result("running", "Running", f"Watching for vehicles ({debug.get('detection_fps') or 0:.1f} checks per second).")
+
+
+def log_status_change(role, status):
+    """A1: one log line when a gate's detection status changes (not every retry)."""
+    return f"{role}: {status['label']}: {status['message']}" + (f" Next: {status['next_step']}" if status["next_step"] else "")
 
 
 def detection_counters(state):
@@ -2587,8 +2752,7 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
         release_capture(state)
         state["camera_running"] = False
         state["detection_ready"] = False
-        if time.monotonic() >= state.get("retry_after", 0.0):
-            state["retry_count"] += 1
+        state["retry_count"] = state["backoff"].failures
         state["last_error"] = camera_open_error(camera_config, capture_source, state)
         publish_status_frame(role, "Camera source unavailable", state["last_error"])
         return False
@@ -2757,8 +2921,7 @@ def camera_stream_worker(role, state, model_info, stop_event):
                 release_capture(state)
                 state["camera_running"] = False
                 state["detection_ready"] = False
-                if time.monotonic() >= state.get("retry_after", 0.0):
-                    state["retry_count"] += 1
+                state["retry_count"] = state["backoff"].failures
                 state["last_error"] = camera_open_error(camera_config, capture_source, state)
                 if viewer_active:
                     publish_status_frame(role, "Camera source unavailable", state["last_error"])
@@ -2770,14 +2933,22 @@ def camera_stream_worker(role, state, model_info, stop_event):
                     release_capture(state)
                     state["camera_running"] = False
                     state["detection_ready"] = False
-                    state["retry_count"] += 1
-                    state["last_error"] = "Camera opened, but frame capture failed."
+                    state["backoff"].failed(time.monotonic())
+                    state["retry_count"] = state["backoff"].failures
+                    state["open_problem"] = {"code": "no_frames", "message": "The camera connected but sent no picture. It reconnects by itself."}
+                    state["last_error"] = state["open_problem"]["message"]
                     if viewer_active:
                         publish_status_frame(role, "Frame capture failed", state["last_error"])
                     success = False
                 else:
                     now_monotonic = time.monotonic()
                     frame_time = getattr(capture, "frame_time", 0.0) or now_monotonic
+
+                    if state["backoff"].failures:
+                        print(f"{role}: camera connected again after {state['backoff'].failures} attempt(s).", flush=True)
+                    state["backoff"].reset()
+                    state["open_problem"] = None
+                    state["retry_count"] = 0
 
                     with state["lock"]:
                         state["latest_frame_at"] = frame_time
@@ -2827,7 +2998,8 @@ def camera_stream_worker(role, state, model_info, stop_event):
         except Exception as error:
             state["camera_running"] = False
             state["detection_ready"] = False
-            state["retry_count"] += 1
+            state["backoff"].failed(time.monotonic())
+            state["retry_count"] = state["backoff"].failures
             state["last_error"] = f"{role.capitalize()} stream worker error: {error}"
             publish_status_frame(role, "Stream worker error", state["last_error"])
             success = False
@@ -2836,8 +3008,11 @@ def camera_stream_worker(role, state, model_info, stop_event):
         # the old fixed 0.04s sleep would only add delay after every frame.
         if success and isinstance(state.get("capture"), LatestFrameReader):
             delay = 0
+        elif success:
+            delay = CAPTURE_INTERVAL_SECONDS
         else:
-            delay = CAPTURE_INTERVAL_SECONDS if success else RECONNECT_DELAY_SECONDS
+            # A1: wake up when the next attempt is due (status stays fresh).
+            delay = max(0.2, min(RECONNECT_DELAY_SECONDS, state["backoff"].seconds_left(time.monotonic())))
         stop_event.wait(delay)
 
     release_capture(state)

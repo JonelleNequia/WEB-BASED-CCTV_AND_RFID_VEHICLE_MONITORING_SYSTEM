@@ -134,6 +134,8 @@ final class PipelineReport
 
             $gates[$code] = [
                 'label' => $name,
+                // A1 (detection): what detection is doing at this gate, and why.
+                'detection' => DetectionStatus::forGate($status, $code),
                 'state' => $state,
                 'state_label' => ['ok' => 'OK', 'delayed' => 'Delayed', 'offline' => 'Offline'][$state],
                 'tone' => ['ok' => 'success', 'delayed' => 'warning', 'offline' => 'critical'][$state],
@@ -142,6 +144,11 @@ final class PipelineReport
         }
 
         return $gates;
+    }
+
+    public static function firstSentence(string $text): string
+    {
+        return self::short($text);
     }
 
     /** First sentence, at most 140 characters. */

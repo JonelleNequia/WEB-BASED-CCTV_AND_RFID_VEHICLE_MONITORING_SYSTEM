@@ -141,6 +141,56 @@ class RtspDiagnosis:
         self.cache.pop(role, None)
 
 
+class ReconnectBackoff:
+    """
+    A1 (detection): wait longer after each failed camera connection (2, 4,
+    8, 16, then 30 s), so an offline camera is not hammered every few
+    seconds and the log stays readable. A success or a new camera setting
+    starts over at once.
+    """
+
+    def __init__(self, first=2.0, factor=2.0, maximum=30.0):
+        self.first = first
+        self.factor = factor
+        self.maximum = maximum
+        self.reset()
+
+    def reset(self):
+        self.failures = 0
+        self.next_at = 0.0
+        self.offline_since = None
+
+    def ready(self, now):
+        return now >= self.next_at
+
+    def failed(self, now):
+        """Record a failed attempt; return the wait before the next one."""
+        if self.offline_since is None:
+            self.offline_since = time.time()
+        delay = min(self.maximum, self.first * (self.factor ** self.failures))
+        self.failures += 1
+        self.next_at = now + delay
+        return delay
+
+    def seconds_left(self, now):
+        return max(0.0, self.next_at - now)
+
+
+def short_reason(text):
+    """First sentence of a message (one line for the status)."""
+    text = str(text or "").strip()
+    return re.split(r"(?<=\.)\s", text, maxsplit=1)[0] if text else ""
+
+
+def strip_credentials(url):
+    """A camera address without its login, safe for logs and the status."""
+    text = str(url or "")
+    parsed = urlparse(text)
+    if "@" not in (parsed.netloc or ""):
+        return text
+    return parsed._replace(netloc=parsed.netloc.split("@", 1)[1]).geturl()
+
+
 def take_over_stale_detector(port, status_path, module_root, stale_after_seconds=20, log=print):
     """
     Stop this project's older detector process when it holds the stream port

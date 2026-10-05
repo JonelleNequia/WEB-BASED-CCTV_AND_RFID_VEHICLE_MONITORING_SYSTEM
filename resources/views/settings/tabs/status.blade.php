@@ -27,10 +27,12 @@
                     <x-badge :status="($cameraStatus['camera_running'] ?? false) ? 'online' : 'offline'" :label="($cameraStatus['camera_running'] ?? false) ? 'OK' : 'Offline'" />
                 </div>
 
+                @php($detectionStatus = \App\Support\DetectionStatus::forGate($runtime, $role))
                 <div class="camera-detail-grid">
-                    <div>
-                        <span>Detection Ready</span>
-                        <strong>{{ ($cameraStatus['detection_ready'] ?? false) ? 'Yes' : 'No' }}</strong>
+                    {{-- A1: what detection is doing and why (was "Detection Ready: No"). --}}
+                    <div class="span-full">
+                        <span>Detection</span>
+                        <strong>{{ $detectionStatus['label'] }} · {{ $detectionStatus['message'] }}</strong>
                     </div>
                     <div>
                         <span>Calibration Ready</span>
@@ -45,8 +47,8 @@
                         <strong>{{ $cameraStatus['detections_seen'] ?? 0 }}</strong>
                     </div>
                     <div>
-                        <span>Retry Count</span>
-                        <strong>{{ $cameraStatus['retry_count'] ?? 0 }}</strong>
+                        <span>Reconnect attempts</span>
+                        <strong>{{ $cameraStatus['retry_count'] ?? 0 }}@if (! empty($cameraStatus['offline_since'])) <small class="text-muted">since <x-datetime :value="$cameraStatus['offline_since']" format="seconds" /></small>@endif</strong>
                     </div>
                     <div>
                         <span>Last Capture</span>
@@ -54,8 +56,8 @@
                     </div>
                     @php($detection = $cameraStatus['detection'] ?? [])
                     <div>
-                        <span>Detection runs</span>
-                        <strong>{{ isset($detection['detection_fps']) ? $detection['detection_fps'].' per second on '.($detection['device'] ?? '—') : 'Not running' }}</strong>
+                        <span>Checks per second</span>
+                        <strong>{{ $detectionStatus['code'] === 'running' && isset($detection['detection_fps']) ? $detection['detection_fps'].' on '.($detection['device'] ?? '—') : '—' }}</strong>
                     </div>
                     <div>
                         <span>Last run: raw / vehicles / in zone</span>

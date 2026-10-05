@@ -122,8 +122,9 @@ class UiPhase3ClarityTest extends TestCase
         // It used to say "No bottleneck" next to a 5,675 ms delay.
         $this->assertStringNotContainsString('No bottleneck', $html);
         $this->assertStringNotContainsString('No delay on this PC', $html);
-        $this->assertMatchesRegularExpression('/Delayed<\/span>\s*<strong>Gate 1<\/strong>\s*<span class="text-muted">The live view is 5\.7 s behind\./', $html);
-        $this->assertMatchesRegularExpression('/Offline<\/span>\s*<strong>Gate 2<\/strong>\s*<span class="text-muted">The camera did not answer in time\./', $html);
+        // A1 (detection): each gate shows its live video line, then its detection line.
+        $this->assertMatchesRegularExpression('/<strong class="gate-state-name">Gate 1<\/strong>.*?Delayed<\/span>\s*<span class="text-muted">The live view is 5\.7 s behind\./s', $html);
+        $this->assertMatchesRegularExpression('/<strong class="gate-state-name">Gate 2<\/strong>.*?Offline<\/span>\s*<span class="text-muted">The camera did not answer in time\./s', $html);
         $this->assertStringContainsString('<details class="advanced-section" data-advanced-diagnostics>', $html); // closed
     }
 

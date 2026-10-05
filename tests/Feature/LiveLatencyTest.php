@@ -149,7 +149,7 @@ class LiveLatencyTest extends TestCase
             ]],
         ]));
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'status']))
-            ->assertOk()->assertSee('7.8 per second on mps')->assertSee('4 / 3 / 2');
+            ->assertOk()->assertSee('7.8 on mps')->assertSee('4 / 3 / 2');
     }
 
     public function test_status_page_shows_the_measured_pipeline(): void

@@ -9,6 +9,7 @@ use App\Support\PythonLauncher;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
 use Symfony\Component\Process\Process;
 
 // Phase 1: start (or confirm) the detector without opening a Station page,
@@ -20,6 +21,10 @@ Artisan::command('detector:start', function (DetectorRuntimeService $detectorRun
     $this->info((string) ($status['auto_start_message'] ?? 'Detector check finished.'));
     $this->line('Service running: '.(($status['service_running'] ?? false) ? 'yes' : 'no'));
 })->purpose('Start the Python vehicle detector in the background');
+
+// A1 (detection): restart the detector if it stopped, even when no page is
+// open. Run `php artisan schedule:work` at Windows startup (Task Scheduler).
+Schedule::command('detector:start')->everyMinute()->withoutOverlapping();
 
 // Phase 3 (visitor model): close tag reads whose camera crossing never came
 // (also done on every web request; this is for a scheduler or a manual run).

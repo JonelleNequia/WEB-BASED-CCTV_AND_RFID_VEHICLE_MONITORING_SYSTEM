@@ -3,15 +3,27 @@
      in "Advanced diagnostics" (closed by default, stays open across refreshes). --}}
 <section class="panel" data-pipeline-metrics data-url="{{ route('settings.status.metrics') }}">
     <div class="panel-header panel-header-modern">
-        <h2 class="panel-title">Live video</h2>
+        <h2 class="panel-title">Gates</h2>
     </div>
 
+    {{-- A1 (detection): per gate, the live video and the vehicle detection, each with its reason and next step. --}}
     <ul class="gate-state-list">
         @foreach ($report['gates'] as $gate)
-            <li>
-                <x-badge :tone="$gate['tone']" :label="$gate['state_label']" />
-                <strong>{{ $gate['label'] }}</strong>
-                <span class="text-muted">{{ $gate['reason'] }}</span>
+            <li class="gate-state" data-gate-detection="{{ $gate['detection']['code'] }}">
+                <strong class="gate-state-name">{{ $gate['label'] }}</strong>
+                <span class="gate-state-row">
+                    <span class="gate-state-kind">Live video</span>
+                    <x-badge :tone="$gate['tone']" :label="$gate['state_label']" />
+                    <span class="text-muted">{{ $gate['reason'] }}</span>
+                </span>
+                <span class="gate-state-row">
+                    <span class="gate-state-kind">Detection</span>
+                    <x-badge :tone="$gate['detection']['tone']" :label="$gate['detection']['label']" />
+                    <span class="text-muted">{{ $gate['detection']['message'] }}@if ($gate['detection']['retry_in'] !== null && $gate['detection']['code'] === 'camera_offline') Next try in {{ $gate['detection']['retry_in'] }} s.@endif</span>
+                </span>
+                @if ($gate['detection']['next_step'] !== '')
+                    <span class="gate-state-next">→ {{ $gate['detection']['next_step'] }}</span>
+                @endif
             </li>
         @endforeach
     </ul>

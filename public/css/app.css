@@ -6801,3 +6801,32 @@ img.thumb-plate {
 .movement-split {
     align-items: start;
 }
+
+/* A1 (detection): System Status, per gate: live video + detection, each with a reason. */
+.gate-state-list li.gate-state {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.gate-state-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.gate-state-kind {
+    min-width: 5.5rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.gate-state-next {
+    color: var(--purple-deep);
+    font-size: 0.86rem;
+    font-weight: 600;
+}
