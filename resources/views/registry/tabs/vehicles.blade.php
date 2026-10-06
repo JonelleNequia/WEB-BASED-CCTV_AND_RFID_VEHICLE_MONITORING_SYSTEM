@@ -100,6 +100,7 @@
                             <button type="button" role="menuitem" data-vehicle-action="edit" data-vehicle-url="{{ route('registry.vehicles.show', $vehicle) }}">Edit details</button>
                             <button type="button" role="menuitem" data-vehicle-action="replace" data-vehicle-url="{{ route('registry.vehicles.show', $vehicle) }}">{{ $vehicle->rfidTag ? 'Replace tag' : 'Assign tag' }}</button>
                             <form method="POST" action="{{ route('registry.vehicles.status', $vehicle) }}"
+                                  data-confirm-label="{{ $vehicle->status === 'active' ? 'Deactivate' : 'Activate' }}"
                                   data-confirm="{{ $vehicle->status === 'active'
                                       ? 'Deactivate '.$vehicle->plate_number.'? Its tag will no longer let it in: scans are flagged as anomalies. You can activate it again later.'
                                       : 'Activate '.$vehicle->plate_number.' again? Its tag will be accepted at the gates.' }}">

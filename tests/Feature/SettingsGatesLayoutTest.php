@@ -93,7 +93,9 @@ class SettingsGatesLayoutTest extends TestCase
         Camera::query()->forRole('gate-1')->first()->forceFill(['source_type' => 'rtsp', 'source_value' => 'rtsp://camera.test:554/stream1'])->save();
 
         $card = $this->card('gate-1');
-        $this->assertStringContainsString('Offline · The camera is not reachable from this PC (Host is down).', $card);
+        // B4: plain words (no "Host is down"), red dot, the next step.
+        $this->assertStringContainsString('Offline · The camera does not answer.', $card);
+        $this->assertStringNotContainsString('Host is down', $card);
         $this->assertStringContainsString('→ Check the camera&#039;s LAN cable and power.', $card);
         foreach (['>Rename<', '>Change login<', '>Test<', '>Remove…<'] as $item) {
             $this->assertStringContainsString($item, $card);

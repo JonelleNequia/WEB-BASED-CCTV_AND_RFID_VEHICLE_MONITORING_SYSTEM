@@ -159,11 +159,60 @@
     });
 
     // UI Phase 3: <form data-confirm="Are you sure?"> asks before submitting.
+    // B4: in a large dialog (touchscreen) instead of the browser's box.
+    // Optional: data-confirm-title, data-confirm-label (the confirm button).
+    // A form with a red ("danger") button gets a red confirm button.
+    function confirmDialog() {
+        let dialog = document.getElementById('confirm-dialog');
+        if (dialog) {
+            return dialog;
+        }
+        dialog = document.createElement('div');
+        dialog.id = 'confirm-dialog';
+        dialog.className = 'drawer modal modal-sm confirm-dialog';
+        dialog.setAttribute('data-drawer', '');
+        dialog.hidden = true;
+        dialog.innerHTML = '<div class="drawer-backdrop" data-drawer-close></div>'
+            + '<div class="drawer-panel" role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message" tabindex="-1">'
+            + '<header class="drawer-head"><h2 id="confirm-dialog-title"></h2><button type="button" class="icon-button" data-drawer-close aria-label="Close">&times;</button></header>'
+            + '<div class="drawer-body"><p id="confirm-dialog-message" class="confirm-dialog-message"></p>'
+            + '<div class="button-row button-row-end"><button type="button" class="button button-secondary button-lg" data-drawer-close>Cancel</button>'
+            + '<button type="button" class="button button-primary button-lg" data-confirm-yes></button></div></div></div>';
+        document.body.appendChild(dialog);
+        return dialog;
+    }
+
     document.addEventListener('submit', function (event) {
         const form = event.target.closest('form[data-confirm]');
-        if (form && !window.confirm(form.dataset.confirm)) {
-            event.preventDefault();
+        if (!form) {
+            return;
         }
+        if (form.dataset.confirmed === '1') {
+            delete form.dataset.confirmed;
+            return;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        const submitter = event.submitter || null;
+        const dialog = confirmDialog();
+        const danger = form.hasAttribute('data-confirm-danger') || !!form.querySelector('.menu-item-danger, .button-danger');
+        const yes = dialog.querySelector('[data-confirm-yes]');
+        dialog.querySelector('#confirm-dialog-title').textContent = form.dataset.confirmTitle || 'Please confirm';
+        dialog.querySelector('#confirm-dialog-message').textContent = form.dataset.confirm;
+        yes.textContent = form.dataset.confirmLabel || 'Yes, continue';
+        yes.className = `button button-lg ${danger ? 'button-danger' : 'button-primary'}`;
+        yes.onclick = function () {
+            closeDrawer(dialog);
+            form.dataset.confirmed = '1';
+            if (form.requestSubmit) {
+                form.requestSubmit(submitter && submitter.form === form ? submitter : undefined);
+            } else {
+                form.submit();
+            }
+        };
+        openDrawer(dialog, submitter);
+        window.setTimeout(() => yes.focus(), 50);
     }, true);
 
     document.addEventListener('keydown', function (event) {

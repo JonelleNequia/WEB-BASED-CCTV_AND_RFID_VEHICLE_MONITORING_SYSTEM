@@ -16,6 +16,8 @@
         'advanced' => ['label' => 'Advanced', 'href' => route('settings.index', ['tab' => 'status'])],
     ]" :active="$mainTab" />
 
+    {{-- B4: larger buttons and fields for a touchscreen. --}}
+    <div class="settings-page">
     @if ($mainTab === 'advanced')
         <div class="advanced-layout">
             <nav class="advanced-nav" aria-label="Advanced settings">
@@ -34,4 +36,5 @@
     @else
         @include('settings.tabs.'.$tab)
     @endif
+    </div>
 @endsection

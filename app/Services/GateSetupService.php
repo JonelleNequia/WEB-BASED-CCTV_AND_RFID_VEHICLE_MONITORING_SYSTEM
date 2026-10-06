@@ -51,8 +51,8 @@ class GateSetupService
             return null;
         }
 
-        $status = DetectionStatus::forGate($runtime, $gate->code);
         $live = (bool) data_get($runtime, "cameras.{$gate->code}.camera_running", false) && ($runtime['service_running'] ?? false);
+        [$state, $line, $nextStep] = $live ? ['online', 'Online', ''] : $this->cameraProblem($gate->code, $runtime);
 
         return [
             'name' => (string) ($config['camera_name'] ?? $gate->name.' Camera'),
@@ -64,13 +64,41 @@ class GateSetupService
                 },
             'managed' => (bool) $assigned,
             'online' => $live,
-            'line' => $live ? 'Online' : 'Offline · '.$status['message'],
-            'next_step' => $live ? '' : $status['next_step'],
+            // B4: green / yellow (starting) / red, one plain line and the next step.
+            'state' => $state,
+            'line' => $line,
+            'next_step' => $nextStep,
             'preview_url' => (string) data_get($runtime, "cameras.{$gate->code}.stream_url", ''),
             'has_login' => filled($config['source_username'] ?? null),
             'username' => (string) ($config['source_username'] ?? ''),
             'can_test' => in_array($config['source_type'] ?? '', ['rtsp'], true) || (bool) $assigned,
         ];
+    }
+
+    /**
+     * B4: why a camera has no picture, in plain words (no RTSP codes or
+     * network terms), and what to do: [state, line, next step].
+     *
+     * @return array{0: string, 1: string, 2: string}
+     */
+    protected function cameraProblem(string $gate, array $runtime): array
+    {
+        if (! ($runtime['service_running'] ?? false)) {
+            return ['starting', 'Starting · The detection program is starting.', 'Wait a minute; it starts by itself.'];
+        }
+
+        $status = DetectionStatus::forGate($runtime, $gate);
+        if (in_array($status['code'], ['connecting', 'model_loading'], true)) {
+            return ['starting', 'Connecting to the camera…', ''];
+        }
+
+        return match ((string) data_get($runtime, "cameras.$gate.error_code")) {
+            'unauthorized' => ['offline', 'Offline · The camera rejected the login.', 'Open ⋯ › Change login and enter the camera\'s username and password.'],
+            'not_found' => ['offline', 'Offline · The camera answers, but sends no video there.', 'Remove the camera and add it again.'],
+            'no_frames' => ['offline', 'Offline · The camera sends no picture.', 'Wait a moment; if it stays, switch the camera off and on.'],
+            'invalid_source' => ['offline', 'Offline · The camera is not set up correctly.', 'Remove the camera and add it again.'],
+            default => ['offline', 'Offline · The camera does not answer.', "Check the camera's LAN cable and power."],
+        };
     }
 
     /**
@@ -95,9 +123,15 @@ class GateSetupService
         return [
             'name' => $gate->readerDisplayName(),
             'online' => $online,
+            'state' => match (true) {
+                $online => 'online',
+                $serviceRunning && ($state === 'connecting' || $state === null) => 'starting',
+                ! $serviceRunning => 'starting',
+                default => 'offline',
+            },
             'manual' => $manual && ! $assigned,
             'line' => match (true) {
-                ! $serviceRunning => 'Offline · The device service is not running.',
+                ! $serviceRunning => 'Starting · The device program is starting.',
                 $online => 'Online',
                 $state === 'connecting' || $state === null => 'Connecting…',
                 default => 'Offline · The reader does not answer.',

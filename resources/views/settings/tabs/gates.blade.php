@@ -33,7 +33,7 @@
                         </div>
                         <div class="setup-device-text">
                             <strong>{{ $camera['name'] }}</strong>
-                            <span class="status-line"><span @class(['status-dot', 'is-online' => $camera['online']]) aria-hidden="true"></span>{{ $camera['line'] }}</span>
+                            <span class="status-line"><span @class(['status-dot', 'is-online' => $camera['state'] === 'online', 'is-warning' => $camera['state'] === 'starting']) aria-hidden="true"></span>{{ $camera['line'] }}</span>
                             @if ($camera['next_step'] !== '')
                                 <span class="next-step">→ {{ $camera['next_step'] }}</span>
                             @endif
@@ -47,7 +47,7 @@
                                 @if ($camera['can_test'])
                                     <button type="button" role="menuitem" data-camera-test="{{ route('settings.gate.camera.test', $gate['code']) }}">Test</button>
                                 @endif
-                                <form method="POST" action="{{ route('settings.gate.camera.remove', $gate['code']) }}" data-confirm="Remove the camera from {{ $gate['name'] }}? Vehicles at this gate are not detected until you add a camera again. The detection zone is kept.">
+                                <form method="POST" action="{{ route('settings.gate.camera.remove', $gate['code']) }}" data-confirm-title="Remove the camera?" data-confirm-label="Remove camera" data-confirm="Remove the camera from {{ $gate['name'] }}? Vehicles at this gate are not detected until you add a camera again. The detection zone is kept.">
                                     @csrf
                                     @method('DELETE')
                                     <button type="submit" role="menuitem" class="menu-item-danger">Remove…</button>
@@ -71,7 +71,7 @@
                         </div>
                         <div class="setup-device-text">
                             <strong>{{ $reader['name'] }}</strong>
-                            <span class="status-line"><span @class(['status-dot', 'is-online' => $reader['online']]) aria-hidden="true"></span>{{ $reader['line'] }}</span>
+                            <span class="status-line"><span @class(['status-dot', 'is-online' => $reader['state'] === 'online', 'is-warning' => $reader['state'] === 'starting']) aria-hidden="true"></span>{{ $reader['line'] }}</span>
                             @if ($reader['next_step'] !== '')
                                 <span class="next-step">→ {{ $reader['next_step'] }}</span>
                             @endif
@@ -82,7 +82,7 @@
                             <div class="menu-panel" role="menu">
                                 <button type="button" role="menuitem" data-setup-dialog="reader-name" data-action-url="{{ route('settings.gate.reader.name', $gate['code']) }}" data-value="{{ $reader['name'] }}">Rename</button>
                                 <button type="button" role="menuitem" data-reader-test="{{ $gate['code'] }}" data-label="{{ $gate['name'] }}">Test</button>
-                                <form method="POST" action="{{ route('settings.gate.reader.remove', $gate['code']) }}" data-confirm="Remove the RFID reader from {{ $gate['name'] }}? Tags at this gate are not read until you add a reader again.">
+                                <form method="POST" action="{{ route('settings.gate.reader.remove', $gate['code']) }}" data-confirm-title="Remove the reader?" data-confirm-label="Remove reader" data-confirm="Remove the RFID reader from {{ $gate['name'] }}? Tags at this gate are not read until you add a reader again.">
                                     @csrf
                                     @method('DELETE')
                                     <button type="submit" role="menuitem" class="menu-item-danger">Remove…</button>

@@ -7339,3 +7339,40 @@ img.thumb-plate {
     padding-inline: 1.4rem;
     font-size: 1rem;
 }
+
+/* ==========================================================================
+   B4 (Settings): touchscreen sizes, plain confirm dialog.
+   ========================================================================== */
+
+.settings-page .button {
+    min-height: 44px;
+}
+
+.settings-page input:not([type="checkbox"]):not([type="radio"]),
+.settings-page select {
+    min-height: 44px;
+}
+
+.settings-page .checkbox-row {
+    min-height: 40px;
+    align-items: center;
+}
+
+.settings-page .checkbox-row input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
+.settings-page .tab,
+.settings-page .menu-panel button,
+.settings-page .menu-panel .menu-link,
+.menu-panel button,
+.menu-panel .menu-link {
+    min-height: 44px;
+}
+
+.confirm-dialog-message {
+    margin: 0 0 1rem;
+    font-size: 1.02rem;
+    line-height: 1.5;
+}

@@ -22,18 +22,22 @@
                     <div class="field">
                         <label for="perf_stream_fps">Live view FPS</label>
                         <input id="perf_stream_fps" type="number" name="perf_stream_fps" min="1" max="30" step="1" value="{{ old('perf_stream_fps', $settings['perf_stream_fps']) }}">
+                        <span class="field-help">Pictures per second on the Gate Monitor and kiosks. Lower uses less of the PC.</span>
                     </div>
                     <div class="field">
                         <label for="perf_stream_width">Live view width (px)</label>
                         <input id="perf_stream_width" type="number" name="perf_stream_width" min="320" max="1920" step="16" value="{{ old('perf_stream_width', $settings['perf_stream_width']) }}">
+                        <span class="field-help">Size of the live picture. Smaller loads faster.</span>
                     </div>
                     <div class="field">
                         <label for="perf_jpeg_quality">Live view JPEG quality</label>
                         <input id="perf_jpeg_quality" type="number" name="perf_jpeg_quality" min="30" max="95" value="{{ old('perf_jpeg_quality', $settings['perf_jpeg_quality']) }}">
+                        <span class="field-help">Sharpness of the live picture (30–95).</span>
                     </div>
                     <div class="field">
                         <label for="perf_detection_fps">Detection runs per second</label>
                         <input id="perf_detection_fps" type="number" name="perf_detection_fps" min="1" max="25" step="1" value="{{ old('perf_detection_fps', $settings['perf_detection_fps']) }}">
+                        <span class="field-help">How often each camera is checked for vehicles. 8 is enough for a gate.</span>
                     </div>
                     <div class="field">
                         <label for="perf_yolo_imgsz">Detection input size</label>
@@ -42,6 +46,7 @@
                                 <option value="{{ $size }}" @selected((string) old('perf_yolo_imgsz', $settings['perf_yolo_imgsz']) === (string) $size)>{{ $size }}{{ $size === 480 ? ' (recommended)' : '' }}</option>
                             @endforeach
                         </select>
+                        <span class="field-help">Bigger sees small vehicles better but is slower.</span>
                     </div>
                     <div class="field">
                         <label for="perf_yolo_device">Detection runs on</label>
@@ -50,6 +55,7 @@
                                 <option value="{{ $value }}" @selected(old('perf_yolo_device', $settings['perf_yolo_device']) === $value)>{{ $text }}</option>
                             @endforeach
                         </select>
+                        <span class="field-help">Automatic uses a graphics card when the PC has one.</span>
                     </div>
                     <div class="field span-full">
                         <label class="checkbox-row">
