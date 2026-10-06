@@ -241,18 +241,18 @@
             <section class="subpanel">
                 <div class="panel-title-row">
                     <h4>Vehicle type</h4>
-                    <p class="field-help">Types: Car (sedan, SUV, AUV, pickup, van), Motorcycle (motorcycle, e-bike, tricycle), Truck/Bus (truck, bus, jeepney). Every frame of a vehicle votes; the camera sees vehicles from behind, so a wide, low back counts as a Car.</p>
+                    <p class="field-help">Types: Car (sedan, SUV, AUV, pickup, van), Motorcycle (motorcycle, e-bike, tricycle), Truck/Bus (truck, bus, jeepney). Every frame of a vehicle votes. The camera sees vehicles from behind: Truck/Bus needs a back that is both tall in the zone and about as tall as it is wide; anything wider (SUV, AUV, pickup, van) is a Car.</p>
                 </div>
                 <div class="form-grid">
                     <div class="field">
-                        <label for="perf_type_truck_min_height">Truck/Bus: back at least this tall (% of the zone)</label>
+                        <label for="perf_type_truck_min_height">Truck/Bus: back at least this tall (% of the zone's height)</label>
                         <input id="perf_type_truck_min_height" type="number" name="perf_type_truck_min_height" min="20" max="95" step="1" value="{{ old('perf_type_truck_min_height', $settings['perf_type_truck_min_height']) }}">
-                        <span class="field-help">Lower it if real trucks are saved as Car; raise it if cars are saved as Truck/Bus.</span>
+                        <span class="field-help">Lower it if real trucks are saved as Car.</span>
                     </div>
                     <div class="field">
-                        <label for="perf_type_car_min_aspect">Car: back at least this wide (width ÷ height)</label>
+                        <label for="perf_type_car_min_aspect">Truck/Bus: back narrower than (width ÷ height)</label>
                         <input id="perf_type_car_min_aspect" type="number" name="perf_type_car_min_aspect" min="0.8" max="2.5" step="0.05" value="{{ old('perf_type_car_min_aspect', $settings['perf_type_car_min_aspect']) }}">
-                        <span class="field-help">A truck's back is about as tall as it is wide (below this); a car's is wider.</span>
+                        <span class="field-help">Trucks, buses and jeepneys are about 0.7–0.9; pickups measured 1.2 and up. Raise it if real trucks are saved as Car; lower it if pickups or AUVs are saved as Truck/Bus.</span>
                     </div>
                     <div class="field">
                         <label for="perf_type_model">Second check model</label>

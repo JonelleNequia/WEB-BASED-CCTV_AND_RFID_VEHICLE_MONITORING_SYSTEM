@@ -12,8 +12,12 @@ often calls it "truck". So the type is decided like this:
    how big the vehicle is in that frame (a close, large view is surer).
 3. A second check on the best full-resolution crop of the vehicle, with a
    larger input size, counts as much as all the frames together.
-4. Size and shape: "Truck/Bus" is kept only when the vehicle's back is tall
-   in the gate's zone or narrow like a truck's back; otherwise it is a Car.
+4. Size and shape: "Truck/Bus" is kept only when the vehicle's back is
+   BOTH tall in the gate's zone and narrow like a truck's, bus's or
+   jeepney's back (about as tall as it is wide); otherwise it is a Car.
+   A4: measured on the first real crossings (rear pictures of a pickup):
+   the pickup's box was 1.19-1.63 wide per 1 high and the model said
+   "truck" in 4 of 6; trucks, buses and jeepneys are about 0.7-0.9.
    Both limits are settings (Settings › Cameras, later Advanced).
 """
 
@@ -36,8 +40,8 @@ DEFAULTS = {
     "type_second_pass": 1,          # second check on the best full-resolution crop
     "type_model": "yolov8s.pt",     # model for the second check (once per vehicle; bigger, surer)
     "type_second_pass_imgsz": 960,  # input size of the second check
-    "type_truck_min_height": 0.55,  # a truck's back is at least this share of the zone's height...
-    "type_car_min_aspect": 1.25,    # ...or narrower (width / height) than this; else it is a Car
+    "type_truck_min_height": 0.35,  # a truck's back is at least this share of the zone's height...
+    "type_car_min_aspect": 1.05,    # ...and narrower (width / height) than this; else it is a Car
 }
 
 # The second check weighs as much as all the frame votes together.
@@ -86,14 +90,15 @@ def _normalized(scores):
 
 def looks_like_a_car(xyxy, zone_height, settings):
     """
-    The size/shape rule: a truck's or bus's back is tall in the zone, or
-    tall for its width. A wide, low back is a car (SUV, AUV, pickup, van).
+    The size/shape rule: a truck's, bus's or jeepney's back is tall in the
+    zone AND about as tall as it is wide. Anything wider (SUV, AUV, pickup,
+    van) or small in the zone is a car.
     """
     width = max(1.0, float(xyxy[2]) - float(xyxy[0]))
     height = max(1.0, float(xyxy[3]) - float(xyxy[1]))
-    tall_in_zone = zone_height > 0 and height / zone_height >= float(settings["type_truck_min_height"])
+    tall_in_zone = zone_height <= 0 or height / zone_height >= float(settings["type_truck_min_height"])
     narrow_like_a_truck = width / height < float(settings["type_car_min_aspect"])
-    return not tall_in_zone and not narrow_like_a_truck
+    return not (tall_in_zone and narrow_like_a_truck)
 
 
 def decide(vote, second_pass=None, zone_height=0.0, settings=None, fallback=None):

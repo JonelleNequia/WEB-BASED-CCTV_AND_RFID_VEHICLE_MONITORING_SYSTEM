@@ -75,11 +75,44 @@ class VehicleTypeAccuracyTest extends TestCase
         $this->artisan('detection:accuracy', ['--gate' => 'gate-9'])->assertFailed();
     }
 
+    public function test_counting_report_shows_unknown_directions_duplicates_and_missed_vehicles(): void
+    {
+        // A4: two crossings at Gate 1 (one direction unknown), one counted twice, one dismissed;
+        // two registered tag reads: one seen by the camera, one missed.
+        $first = $this->visitorRecord('Car');
+        $twice = $this->visitorRecord('Car');
+        $twice->forceFill(['status' => VisitorRecord::STATUS_DUPLICATE, 'duplicate_of_id' => $first->id, 'status_note' => 'Same plate as record #'.$first->id.'.'])->save();
+        $twice->crossing->forceFill(['direction' => 'UNKNOWN'])->save();
+        $this->visitorRecord('Truck/Bus')->forceFill(['status' => VisitorRecord::STATUS_DISMISSED, 'status_note' => 'not a vehicle'])->save();
+        $seen = $this->registeredCrossing('Car', 'Car')->rfidScanLog;
+        $seen->forceFill(['fusion_status' => RfidScanLog::FUSION_CAMERA])->save();
+        $missed = RfidScanLog::query()->create([
+            'tag_uid' => 'MISSED-TAG', 'vehicle_id' => $seen->vehicle_id, 'scan_location' => 'gate-1', 'scan_direction' => 'entry',
+            'scan_time' => now(), 'verification_status' => 'verified', 'source_mode' => 'hardware_placeholder', 'fusion_status' => RfidScanLog::FUSION_SCAN_ONLY,
+        ]);
+
+        $rows = app(\App\Services\DetectionAccuracyService::class)->counting(now()->subDay(), now()->addMinute());
+        $this->assertSame(
+            ['crossings' => 4, 'direction_unknown' => 1, 'duplicates' => 1, 'dismissed' => 1, 'false_rate' => 50.0, 'tag_reads_seen' => 1, 'missed' => 1, 'missed_rate' => 50.0],
+            array_intersect_key($rows['gate-1'], array_flip(['crossings', 'direction_unknown', 'duplicates', 'dismissed', 'false_rate', 'tag_reads_seen', 'missed', 'missed_rate']))
+        );
+
+        $this->artisan('detection:accuracy', ['--from' => now()->subDay()->toDateString(), '--mistakes' => true])
+            ->expectsOutputToContain('Counting (one vehicle = one event)')
+            ->expectsOutputToContain('counted twice')
+            ->expectsOutputToContain('not a vehicle / dismissed')
+            ->expectsOutputToContain('missed by the camera')
+            ->assertSuccessful();
+        $this->artisan('detection:accuracy', ['--from' => 'not a date'])->assertFailed();
+        $this->assertNotNull($missed);
+    }
+
     public function test_type_settings_reach_the_detector(): void
     {
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'cameras']))->assertOk()
             ->assertSee('Vehicle type')->assertSee('perf_type_truck_min_height', false);
 
+        $this->assertSame([0.35, 1.05], array_values(array_intersect_key(app(SettingsService::class)->performanceSettings([]), array_flip(['type_truck_min_height', 'type_car_min_aspect']))));
         $performance = app(SettingsService::class)->performanceSettings(['perf_type_truck_min_height' => '60', 'perf_type_car_min_aspect' => '1.4']);
         $this->assertSame([0.6, 1.4, 'yolov8s.pt', 1], [$performance['type_truck_min_height'], $performance['type_car_min_aspect'], $performance['type_model'], $performance['type_second_pass']]);
         // A3 (detection): counting limits, as shares of the zone's height.

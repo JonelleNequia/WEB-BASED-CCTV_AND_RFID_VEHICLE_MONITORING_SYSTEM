@@ -69,9 +69,14 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual((tall["type"], narrow["type"]), (vtype.TRUCK_BUS, vtype.TRUCK_BUS))
 
     def test_the_limits_are_settings(self):
-        vote = vote_with((vtype.TRUCK_BUS, 0.8, self.WIDE_LOW_BACK))
-        self.assertEqual(vtype.decide(vote, None, ZONE_HEIGHT, {"type_truck_min_height": 0.4})["type"], vtype.TRUCK_BUS)
+        vote = vote_with((vtype.TRUCK_BUS, 0.8, self.WIDE_LOW_BACK))   # 1.54 wide per 1 high, 45% of the zone
         self.assertEqual(vtype.decide(vote, None, ZONE_HEIGHT, {"type_car_min_aspect": 1.8})["type"], vtype.TRUCK_BUS)
+        self.assertEqual(vtype.decide(vote, None, ZONE_HEIGHT, {"type_car_min_aspect": 1.8, "type_truck_min_height": 0.5})["type"], vtype.CAR)
+
+    def test_pickup_backs_from_the_first_real_crossings_are_cars(self):
+        # A4: boxes of the 2026-10-05 Gate 1 crossings (rear pictures of a Ford Ranger; zone 772 px high).
+        for box in ((839.2, 285.7, 1721.7, 1027.9), (714.6, 201.2, 1348.1, 727.4), (232.9, 0.8, 1920, 1036)):
+            self.assertEqual(vtype.decide(vote_with((vtype.TRUCK_BUS, 0.8, box)), None, 772.0)["type"], vtype.CAR, box)
 
     def test_the_second_check_counts_as_much_as_all_frames(self):
         vote = vote_with((vtype.MOTORCYCLE, 0.4, (330, 230, 370, 300)))

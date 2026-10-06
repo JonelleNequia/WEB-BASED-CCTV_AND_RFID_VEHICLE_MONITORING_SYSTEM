@@ -78,8 +78,8 @@ PERFORMANCE_DEFAULTS = {
     "type_second_pass": 1,          # second check on the best full-resolution crop
     "type_model": "yolov8s.pt",     # model of the second check (once per vehicle; yolov8n.pt when missing)
     "type_second_pass_imgsz": 960,  # input size of the second check
-    "type_truck_min_height": 0.55,  # Truck/Bus needs a back at least this share of the zone's height...
-    "type_car_min_aspect": 1.25,    # ...or narrower (width / height) than this; otherwise it is a Car
+    "type_truck_min_height": 0.35,  # Truck/Bus needs a back at least this share of the zone's height...
+    "type_car_min_aspect": 1.05,    # ...and narrower (width / height) than this; otherwise it is a Car
     # A3: one vehicle = one crossing (tracking.LineCrossing).
     "cross_margin": 0.05,           # the centre must be this far past the line (share of the zone's height)
     "cross_min_points": 3,          # sightings of the track before it can count

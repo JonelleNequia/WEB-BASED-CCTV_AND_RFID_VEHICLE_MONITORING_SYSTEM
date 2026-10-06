@@ -52,8 +52,8 @@ class SettingsService
             // A2 (detection): vehicle type (Car / Motorcycle / Truck/Bus).
             'perf_type_second_pass' => '1',
             'perf_type_model' => 'yolov8s.pt',
-            'perf_type_truck_min_height' => '55',
-            'perf_type_car_min_aspect' => '1.25',
+            'perf_type_truck_min_height' => '35',
+            'perf_type_car_min_aspect' => '1.05',
             // A3 (detection): one vehicle = one event.
             'perf_cross_margin' => '5',
             'perf_cross_min_points' => '3',
@@ -376,8 +376,8 @@ class SettingsService
             'debug_overlay' => (int) ($settings['detector_debug_overlay'] ?? 0),
             'type_second_pass' => (int) ($settings['perf_type_second_pass'] ?? 1),
             'type_model' => (string) ($settings['perf_type_model'] ?? 'yolov8s.pt'),
-            'type_truck_min_height' => round(((float) ($settings['perf_type_truck_min_height'] ?? 55)) / 100, 3),
-            'type_car_min_aspect' => (float) ($settings['perf_type_car_min_aspect'] ?? 1.25),
+            'type_truck_min_height' => round(((float) ($settings['perf_type_truck_min_height'] ?? 35)) / 100, 3),
+            'type_car_min_aspect' => (float) ($settings['perf_type_car_min_aspect'] ?? 1.05),
             'cross_margin' => round(((float) ($settings['perf_cross_margin'] ?? 5)) / 100, 3),
             'cross_min_points' => (int) ($settings['perf_cross_min_points'] ?? 3),
             'cross_min_move' => round(((float) ($settings['perf_cross_min_move'] ?? 10)) / 100, 3),
