@@ -130,6 +130,22 @@ class ReconnectTests(unittest.TestCase):
         self.assertLess(elapsed, 0.3)
 
 
+class NoCameraTests(unittest.TestCase):
+    def test_a_gate_without_a_camera_opens_nothing_and_says_so(self):
+        state = detector.initial_camera_state()
+        config = {**camera(), "source_type": "none", "source_value": ""}
+        with mock.patch.object(detector, "open_capture") as opener, mock.patch.object(detector.RTSP_DIAGNOSIS, "get") as precheck:
+            self.assertEqual(detector.ensure_capture(config, state)[0], None)
+        opener.assert_not_called()
+        precheck.assert_not_called()
+        self.assertEqual(state["backoff"].failures, 0)
+        self.assertEqual(detector.camera_open_error(config, "", state), "No camera added for this gate.")
+        status = detector.detection_status("gate-2", state, config, {})
+        from config import normalize_camera_config
+        self.assertEqual(normalize_camera_config("gate-2", {"source_type": "none", "source_value": ""})["source_type"], "none")
+        self.assertEqual([status["code"], status["next_step"]], ["no_camera", "Add one in Settings › Gates."])
+
+
 class DetectionStatusTests(unittest.TestCase):
     def status(self, state, config=None, model=None):
         return detector.detection_status("gate-1", state, config or camera("gate-1"), model if model is not None else {"model": object(), "vehicle_labels": {2: "Car"}})

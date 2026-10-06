@@ -1,19 +1,19 @@
 {{--
-    UI Phase 2: one form per Settings tab, each with its own Save button.
-    Plug-and-detect: network cameras are assigned in Gates & Readers ›
-    Devices; the manual source moved to "Advanced". The password is never
-    sent back to the page.
+    B3 (Settings › Advanced › Manual setup): for a technician, only when a
+    device cannot be added from the Gates tab: camera address and login,
+    stream options, the reader type and a manual reader address, and the
+    integration key. The camera password is never sent back to the page.
 --}}
 <section class="panel">
     <form method="POST" action="{{ route('settings.update') }}" class="stack-form" id="settings-form">
         @csrf
         @method('PUT')
-        <input type="hidden" name="section" value="cameras">
+        <input type="hidden" name="section" value="manual">
 
             <section class="subpanel">
                 <div class="panel-title-row">
                     <h4>Camera Sources</h4>
-                    <p class="field-help">Network cameras are found automatically. Assign them in <a href="{{ route('settings.index', ['tab' => 'stations']) }}">Gates &amp; Readers › Devices</a>.</p>
+                    <p class="field-help">Network cameras are added from the <a href="{{ route('settings.index', ['tab' => 'gates']) }}">Gates</a> tab. Change these only for a USB webcam or a camera that cannot be found.</p>
                 </div>
 
                 <div class="camera-grid">
@@ -86,7 +86,7 @@
                                     </div>
                                 </details>
                             @else
-                                <p class="field-help">Stream and snapshot options appear when a camera is assigned in <a href="{{ route('settings.index', ['tab' => 'stations']) }}">Gates &amp; Readers › Devices</a>.</p>
+                                <p class="field-help">Stream and snapshot options appear when a camera is added from the <a href="{{ route('settings.index', ['tab' => 'gates']) }}">Gates</a> tab.</p>
                             @endif
 
                             <div class="form-grid">
@@ -127,7 +127,7 @@
                             <details class="advanced-section" @if ($errors->hasAny(["camera_configs.$role.source_type", "camera_configs.$role.source_value"])) open @endif>
                                 <summary>Advanced: manual source</summary>
                                 @if ($managed)
-                                    <p class="field-help">Managed by the assigned camera: the address follows it automatically when its IP changes. Unassign it in Gates &amp; Readers to type a source by hand.</p>
+                                    <p class="field-help">Managed by the assigned camera: the address follows it automatically when its IP changes. Remove it in the Gates tab to type a source by hand.</p>
                                 @else
                                     <p class="field-help">Only for a USB webcam or a camera that cannot be detected.</p>
                                 @endif
@@ -141,6 +141,7 @@
                                             <option value="webcam" @selected($sourceType === 'webcam')>Webcam</option>
                                             <option value="rtsp" @selected($sourceType === 'rtsp')>RTSP</option>
                                             <option value="url" @selected($sourceType === 'url')>URL</option>
+                                            <option value="none" @selected($sourceType === 'none')>No camera</option>
                                         </select>
                                         @error("camera_configs.$role.source_type")
                                             <span class="field-error">{{ $message }}</span>
@@ -154,7 +155,6 @@
                                             type="text"
                                             name="camera_configs[{{ $role }}][source_value]"
                                             value="{{ old("camera_configs.$role.source_value", $camera['source_value']) }}"
-                                            required
                                             @readonly($managed)
                                         >
                                         <span class="field-help">Webcam: a number such as 0. RTSP: the full rtsp:// address of the camera stream.</span>
@@ -183,121 +183,80 @@
                 </div>
             </section>
 
-            {{-- Live-latency work: tuning shared by both cameras. --}}
+            {{-- Moved from Gates & Readers: reader type and a manual reader address per gate. --}}
             <section class="subpanel">
                 <div class="panel-title-row">
-                    <h4>Live view performance</h4>
-                    <p class="field-help">Lower values mean less delay and CPU. Measurements are in Settings › System Status.</p>
+                    <h4>RFID readers</h4>
+                    <p class="field-help">Readers added from the Gates tab need nothing here. Use a manual address only when the reader cannot be found on the network.</p>
                 </div>
-                <div class="form-grid">
-                    <div class="field">
-                        <label for="perf_stream_fps">Live view FPS</label>
-                        <input id="perf_stream_fps" type="number" name="perf_stream_fps" min="1" max="30" step="1" value="{{ old('perf_stream_fps', $settings['perf_stream_fps']) }}">
-                    </div>
-                    <div class="field">
-                        <label for="perf_stream_width">Live view width (px)</label>
-                        <input id="perf_stream_width" type="number" name="perf_stream_width" min="320" max="1920" step="16" value="{{ old('perf_stream_width', $settings['perf_stream_width']) }}">
-                    </div>
-                    <div class="field">
-                        <label for="perf_jpeg_quality">Live view JPEG quality</label>
-                        <input id="perf_jpeg_quality" type="number" name="perf_jpeg_quality" min="30" max="95" value="{{ old('perf_jpeg_quality', $settings['perf_jpeg_quality']) }}">
-                    </div>
-                    <div class="field">
-                        <label for="perf_detection_fps">Detection runs per second</label>
-                        <input id="perf_detection_fps" type="number" name="perf_detection_fps" min="1" max="25" step="1" value="{{ old('perf_detection_fps', $settings['perf_detection_fps']) }}">
-                    </div>
-                    <div class="field">
-                        <label for="perf_yolo_imgsz">Detection input size</label>
-                        <select id="perf_yolo_imgsz" name="perf_yolo_imgsz">
-                            @foreach ([320, 384, 416, 480, 512, 640] as $size)
-                                <option value="{{ $size }}" @selected((string) old('perf_yolo_imgsz', $settings['perf_yolo_imgsz']) === (string) $size)>{{ $size }}{{ $size === 480 ? ' (recommended)' : '' }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="field">
-                        <label for="perf_yolo_device">Detection runs on</label>
-                        <select id="perf_yolo_device" name="perf_yolo_device">
-                            @foreach (['auto' => 'Automatic (GPU if available)', 'cpu' => 'CPU', 'mps' => 'Apple GPU (Mac)', 'cuda:0' => 'NVIDIA GPU'] as $value => $text)
-                                <option value="{{ $value }}" @selected(old('perf_yolo_device', $settings['perf_yolo_device']) === $value)>{{ $text }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="field span-full">
-                        <label class="checkbox-row">
-                            <input type="hidden" name="perf_roi_crop" value="0">
-                            <input type="checkbox" name="perf_roi_crop" value="1" @checked(old('perf_roi_crop', $settings['perf_roi_crop']) === '1')>
-                            Detect only inside the calibrated zone (faster, sharper for small zones)
-                        </label>
-                        <label class="checkbox-row">
-                            <input type="hidden" name="perf_hires_on_trigger" value="0">
-                            <input type="checkbox" name="perf_hires_on_trigger" value="1" @checked(old('perf_hires_on_trigger', $settings['perf_hires_on_trigger']) === '1')>
-                            Use full-resolution frames for alert snapshots and plate reading
-                        </label>
-                    </div>
+                <div class="camera-grid">
+                    @foreach ($gates as $gate)
+                        @php
+                            $field = fn (string $name) => "gates[{$gate->code}][{$name}]";
+                            $old = fn (string $name, $default) => old("gates.{$gate->code}.{$name}", $default);
+                            $readerType = $old('reader_type', $gate->reader_type);
+                            $manual = (string) $old('reader_manual', $gate->reader_manual ? '1' : '0') === '1';
+                            $transport = $old('reader_transport', $gate->reader_transport ?: 'tcp');
+                        @endphp
+                        <article class="camera-card" data-gate-card="{{ $gate->code }}">
+                            <div class="camera-card-head">
+                                <div>
+                                    <h4>{{ $gate->name }}</h4>
+                                    <p>{{ $gate->readerDisplayName() }}</p>
+                                </div>
+                            </div>
+                            <input type="hidden" name="{{ $field('name') }}" value="{{ $gate->name }}">
+                            <div class="field">
+                                <label for="gate_{{ $gate->code }}_reader_type">Reader type</label>
+                                <select id="gate_{{ $gate->code }}_reader_type" name="{{ $field('reader_type') }}">
+                                    @foreach (\App\Models\Gate::READER_TYPES as $value => $text)
+                                        <option value="{{ $value }}" @selected($readerType === $value)>{{ $text }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                            <label class="checkbox-row">
+                                <input type="hidden" name="{{ $field('reader_manual') }}" value="0">
+                                <input type="checkbox" name="{{ $field('reader_manual') }}" value="1" @checked($manual)>
+                                Use this manual reader address
+                            </label>
+                            <div class="form-grid">
+                                <div class="field">
+                                    <label for="gate_{{ $gate->code }}_reader_ip">Reader IP</label>
+                                    <input id="gate_{{ $gate->code }}_reader_ip" type="text" name="{{ $field('reader_ip') }}" value="{{ $old('reader_ip', $gate->reader_ip) }}" inputmode="decimal" autocomplete="off">
+                                    @error("gates.{$gate->code}.reader_ip")<span class="field-error">{{ $message }}</span>@enderror
+                                </div>
+                                <div class="field">
+                                    <label for="gate_{{ $gate->code }}_reader_port">Port</label>
+                                    <input id="gate_{{ $gate->code }}_reader_port" type="number" name="{{ $field('reader_port') }}" value="{{ $old('reader_port', $gate->reader_port) }}" min="1" max="65535">
+                                    @error("gates.{$gate->code}.reader_port")<span class="field-error">{{ $message }}</span>@enderror
+                                </div>
+                                <div class="field">
+                                    <label for="gate_{{ $gate->code }}_reader_transport">Protocol</label>
+                                    <select id="gate_{{ $gate->code }}_reader_transport" name="{{ $field('reader_transport') }}">
+                                        <option value="tcp" @selected($transport === 'tcp')>TCP</option>
+                                        <option value="udp" @selected($transport === 'udp')>UDP</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </article>
+                    @endforeach
                 </div>
             </section>
 
-            {{-- A2 (detection): how the vehicle type is decided (moves to Advanced in the new Settings). --}}
+            {{-- Phase 6: used by the Python detector and the device service; it lives in .env. --}}
             <section class="subpanel">
                 <div class="panel-title-row">
-                    <h4>Vehicle type</h4>
-                    <p class="field-help">Types: Car (sedan, SUV, AUV, pickup, van), Motorcycle (motorcycle, e-bike, tricycle), Truck/Bus (truck, bus, jeepney). Every frame of a vehicle votes. The camera sees vehicles from behind: Truck/Bus needs a back that is both tall in the zone and about as tall as it is wide; anything wider (SUV, AUV, pickup, van) is a Car.</p>
+                    <h4>Integration key</h4>
                 </div>
-                <div class="form-grid">
-                    <div class="field">
-                        <label for="perf_type_truck_min_height">Truck/Bus: back at least this tall (% of the zone's height)</label>
-                        <input id="perf_type_truck_min_height" type="number" name="perf_type_truck_min_height" min="20" max="95" step="1" value="{{ old('perf_type_truck_min_height', $settings['perf_type_truck_min_height']) }}">
-                        <span class="field-help">Lower it if real trucks are saved as Car.</span>
-                    </div>
-                    <div class="field">
-                        <label for="perf_type_car_min_aspect">Truck/Bus: back narrower than (width ÷ height)</label>
-                        <input id="perf_type_car_min_aspect" type="number" name="perf_type_car_min_aspect" min="0.8" max="2.5" step="0.05" value="{{ old('perf_type_car_min_aspect', $settings['perf_type_car_min_aspect']) }}">
-                        <span class="field-help">Trucks, buses and jeepneys are about 0.7–0.9; pickups measured 1.2 and up. Raise it if real trucks are saved as Car; lower it if pickups or AUVs are saved as Truck/Bus.</span>
-                    </div>
-                    <div class="field">
-                        <label for="perf_type_model">Second check model</label>
-                        <select id="perf_type_model" name="perf_type_model">
-                            <option value="yolov8n.pt" @selected(old('perf_type_model', $settings['perf_type_model']) === 'yolov8n.pt')>Fast (yolov8n)</option>
-                            <option value="yolov8s.pt" @selected(old('perf_type_model', $settings['perf_type_model']) === 'yolov8s.pt')>More accurate (yolov8s, recommended)</option>
-                        </select>
-                    </div>
-                    <div class="field span-full">
-                        <label class="checkbox-row">
-                            <input type="hidden" name="perf_type_second_pass" value="0">
-                            <input type="checkbox" name="perf_type_second_pass" value="1" @checked(old('perf_type_second_pass', $settings['perf_type_second_pass']) === '1')>
-                            Check the type again on the sharpest full-size picture of each vehicle
-                        </label>
-                    </div>
-                </div>
-            </section>
-
-            {{-- A3 (detection): when a vehicle counts (moves to Advanced in the new Settings). --}}
-            <section class="subpanel">
-                <div class="panel-title-row">
-                    <h4>Counting</h4>
-                    <p class="field-help">A vehicle counts once, when it is clearly past the trigger line. Stopping, rocking or backing up on the line and parked vehicles are not counted.</p>
-                </div>
-                <div class="form-grid">
-                    <div class="field">
-                        <label for="perf_cross_margin">Past the line by (% of the zone's height)</label>
-                        <input id="perf_cross_margin" type="number" name="perf_cross_margin" min="0" max="30" step="1" value="{{ old('perf_cross_margin', $settings['perf_cross_margin']) }}">
-                        <span class="field-help">Raise it if a vehicle stopping on the line is counted twice.</span>
-                    </div>
-                    <div class="field">
-                        <label for="perf_cross_min_points">Seen at least (times)</label>
-                        <input id="perf_cross_min_points" type="number" name="perf_cross_min_points" min="1" max="10" step="1" value="{{ old('perf_cross_min_points', $settings['perf_cross_min_points']) }}">
-                        <span class="field-help">Lower it if fast vehicles are missed.</span>
-                    </div>
-                    <div class="field">
-                        <label for="perf_cross_min_move">Moved at least (% of the zone's height)</label>
-                        <input id="perf_cross_min_move" type="number" name="perf_cross_min_move" min="0" max="60" step="1" value="{{ old('perf_cross_min_move', $settings['perf_cross_min_move']) }}">
-                        <span class="field-help">Keeps parked vehicles from being counted.</span>
-                    </div>
+                <div class="field">
+                    <label for="python_api_key">Shared integration key</label>
+                    <input id="python_api_key" type="text" value="{{ $detectorKeySet ? 'Set in .env (DETECTOR_API_KEY)' : 'Not set: add DETECTOR_API_KEY to .env' }}" readonly>
+                    <span class="field-help">Used by the Python detector, the device service and RFID readers. Change it in .env, then restart the server.</span>
                 </div>
             </section>
 
         <div class="button-row button-row-end">
-            <button type="submit" class="button button-primary">Save Cameras</button>
+            <button type="submit" class="button button-primary">Save</button>
         </div>
     </form>
 </section>

@@ -679,6 +679,11 @@ def camera_open_error(camera_config, capture_source, state):
     For RTSP cameras the camera itself is asked why it failed (wrong login,
     wrong path, unreachable), instead of a generic "could not open".
     """
+    if camera_config["source_type"] == "none":
+        # B1 (Settings): the gate has no camera (new gate, or removed).
+        state["error_code"] = "no_camera"
+        return "No camera added for this gate."
+
     if state.get("source_validation_error"):
         state["error_code"] = "invalid_source"
         return state["source_validation_error"]
@@ -1033,6 +1038,13 @@ def ensure_capture(camera_config, state):
         RTSP_DIAGNOSIS.forget(camera_config["camera_role"])
     state["wanted_signature"] = signature
 
+    if camera_config["source_type"] == "none":
+        # B1: no camera for this gate: nothing to open, nothing to retry.
+        release_capture(state)
+        backoff.reset()
+        state["open_problem"] = None
+        return None, capture_source
+
     if validation_error:
         release_capture(state)
         state["source_validation_error"] = validation_error
@@ -1216,6 +1228,8 @@ def detection_status(role, state, camera_config, model_info):
         return {"code": code, "label": label, "message": message, "next_step": next_step,
                 "retry_in": None if retry_in is None else round(retry_in)}
 
+    if camera_config.get("source_type") == "none":
+        return result("no_camera", "No camera", "No camera added for this gate.", "Add one in Settings › Gates.")
     if not state.get("camera_running"):
         if not backoff.failures and not state.get("open_problem"):
             return result("connecting", "Connecting", "Connecting to the camera…")

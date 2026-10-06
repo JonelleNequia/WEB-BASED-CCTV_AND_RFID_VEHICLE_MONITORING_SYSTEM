@@ -6859,3 +6859,318 @@ img.thumb-plate {
 .type-option small {
     color: var(--text-muted);
 }
+
+/* ==========================================================================
+   B1 (Settings): Gates cards, General, Advanced layout. Large touch targets.
+   ========================================================================== */
+
+.gate-setup-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+    gap: 1.25rem;
+    align-items: start;
+}
+
+.gate-setup-card {
+    display: grid;
+    gap: 0.25rem;
+    padding: 1.1rem 1.2rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: #ffffff;
+}
+
+.gate-setup-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding-bottom: 0.4rem;
+}
+
+.gate-setup-head h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: #2f2250;
+}
+
+.gate-setup-kiosk {
+    margin-left: auto;
+    font-size: 0.86rem;
+    font-weight: 600;
+}
+
+.setup-part {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0.85rem 0;
+    border-top: 1px solid #f1f2f4;
+}
+
+.setup-part-title {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.add-device-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 56px;
+    padding: 0.75rem 1rem;
+    border: 2px dashed #c9bde6;
+    border-radius: 12px;
+    background: #faf8fe;
+    color: var(--purple-deep);
+    font: inherit;
+    font-size: 1.05rem;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.add-device-button:hover,
+.add-device-button:focus-visible {
+    border-color: var(--purple);
+    background: var(--purple-soft);
+}
+
+.setup-device {
+    display: grid;
+    grid-template-columns: 112px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.85rem;
+}
+
+.setup-preview {
+    position: relative;
+    width: 112px;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    background: #f4f5f7;
+}
+
+.setup-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.setup-preview-off svg,
+.setup-icon svg {
+    width: 1.8rem;
+    height: 1.8rem;
+    fill: #9ca3af;
+}
+
+.setup-icon {
+    width: 112px;
+    display: grid;
+    place-items: center;
+}
+
+.setup-icon svg {
+    fill: var(--purple);
+}
+
+.zone-preview svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.zone-area {
+    fill: rgba(111, 75, 174, 0.25);
+    stroke: #6f4bae;
+    stroke-width: 0.01;
+}
+
+.zone-line {
+    stroke: #f59e0b;
+    stroke-width: 0.025;
+}
+
+.setup-device-text {
+    display: grid;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.setup-device-text strong {
+    font-size: 1rem;
+    overflow-wrap: anywhere;
+}
+
+.status-line {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    font-size: 0.9rem;
+}
+
+.status-dot {
+    flex-shrink: 0;
+    width: 0.65rem;
+    height: 0.65rem;
+    border-radius: 999px;
+    background: #dc2626;
+    transform: translateY(1px);
+}
+
+.status-dot.is-online {
+    background: #16a34a;
+}
+
+.status-dot.is-warning {
+    background: #f59e0b;
+}
+
+.next-step {
+    color: var(--purple-deep);
+    font-size: 0.86rem;
+    font-weight: 600;
+}
+
+.setup-device .row-menu > summary,
+.setup-device > .button {
+    min-height: 44px;
+    min-width: 44px;
+}
+
+.gate-setup-add {
+    display: grid;
+    gap: 0.6rem;
+    align-content: start;
+    padding: 1.1rem 1.2rem;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-lg);
+}
+
+.gate-setup-add input {
+    min-height: 44px;
+}
+
+.reader-test-result {
+    padding: 0.8rem 1rem;
+    border-radius: 10px;
+    background: #f4f5f7;
+    font-weight: 600;
+}
+
+.reader-test-result.is-good {
+    background: #dcfce7;
+    color: #14532d;
+}
+
+.reader-test-result.is-bad {
+    background: #fee2e2;
+    color: #7f1d1d;
+}
+
+.settings-back {
+    margin: 0 0 0.75rem;
+}
+
+.general-gates {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.general-gate {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 1rem;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #f1f2f4;
+}
+
+.switch-row {
+    min-height: 44px;
+}
+
+.advanced-layout {
+    display: grid;
+    grid-template-columns: 210px minmax(0, 1fr);
+    gap: 1.25rem;
+    align-items: start;
+}
+
+.advanced-nav {
+    position: sticky;
+    top: 1rem;
+    display: grid;
+    gap: 0.2rem;
+}
+
+.advanced-nav-note {
+    margin: 0 0 0.4rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.advanced-nav-link {
+    padding: 0.6rem 0.75rem;
+    border-radius: 8px;
+    color: var(--text);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.advanced-nav-link:hover {
+    background: #f4f2f9;
+}
+
+.advanced-nav-link.is-active {
+    background: var(--purple-soft);
+    color: var(--purple-deep);
+}
+
+.advanced-content {
+    display: grid;
+    gap: 1.25rem;
+    min-width: 0;
+}
+
+.devices-hint {
+    margin-bottom: 0;
+}
+
+@media (max-width: 900px) {
+    .advanced-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .advanced-nav {
+        position: static;
+        display: flex;
+        flex-wrap: wrap;
+    }
+
+    .advanced-nav-note {
+        flex-basis: 100%;
+    }
+}
+
+@media (max-width: 600px) {
+    /* Phone: the text gets the room; the small preview is hidden. */
+    .setup-device {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .setup-preview,
+    .setup-icon {
+        display: none;
+    }
+
+    .general-gate {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

@@ -158,6 +158,16 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('settings.update');
         Route::post('/settings/gates', [SettingsController::class, 'storeGate'])->name('settings.gates.store');
+        // B1 (Settings): defaults and the gate cards' "⋯" actions.
+        Route::post('/settings/restore-defaults', [SettingsController::class, 'restoreDefaults'])->name('settings.restore-defaults');
+        Route::prefix('/settings/gates/{gate}')->where(['gate' => '[a-z0-9-]+'])->name('settings.gate.')->group(function (): void {
+            Route::patch('/camera/name', [\App\Http\Controllers\GateSetupController::class, 'renameCamera'])->name('camera.name');
+            Route::patch('/camera/login', [\App\Http\Controllers\GateSetupController::class, 'cameraLogin'])->name('camera.login');
+            Route::post('/camera/test', [\App\Http\Controllers\GateSetupController::class, 'testCamera'])->name('camera.test');
+            Route::delete('/camera', [\App\Http\Controllers\GateSetupController::class, 'removeCamera'])->name('camera.remove');
+            Route::patch('/reader/name', [\App\Http\Controllers\GateSetupController::class, 'renameReader'])->name('reader.name');
+            Route::delete('/reader', [\App\Http\Controllers\GateSetupController::class, 'removeReader'])->name('reader.remove');
+        });
         // Fresh start: activity data only, after a backup (same as `system:reset`).
         Route::post('/settings/system/reset-activity', [SettingsController::class, 'resetActivity'])->name('settings.system.reset-activity');
         // Plug-and-detect: Settings › Stations & Readers › Devices.

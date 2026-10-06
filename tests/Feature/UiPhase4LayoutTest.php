@@ -150,7 +150,7 @@ class UiPhase4LayoutTest extends TestCase
 
     public function test_gates_and_readers_lists_devices_first_with_a_short_warning(): void
     {
-        $html = $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'stations']))->assertOk()->getContent();
+        $html = $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'devices']))->assertOk()->getContent();
 
         $this->assertStringContainsString('data-devices-banner', $html);
         $this->assertLessThan(strpos($html, 'data-devices-stations'), strpos($html, 'data-devices-list'));

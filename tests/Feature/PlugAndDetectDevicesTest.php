@@ -198,9 +198,9 @@ class PlugAndDetectDevicesTest extends TestCase
         app(DeviceRegistryService::class)->ingestScan($this->scan());
 
         $this->actingAs($this->admin)
-            ->get(route('settings.index', ['tab' => 'stations']))
+            ->get(route('settings.index', ['tab' => 'devices']))
             ->assertOk()
-            ->assertSee('Devices')
+            ->assertSee('All network devices')
             ->assertSee('Scan again')
             ->assertSee('DHCP (automatic IP)', false)
             ->assertSee('data-devices-panel', false);
@@ -253,7 +253,7 @@ class PlugAndDetectDevicesTest extends TestCase
             ->assertJsonPath('diagnostics.warnings.1.code', 'lan_only_router');
 
         $this->actingAs($this->admin)
-            ->get(route('settings.index', ['tab' => 'stations']))
+            ->get(route('settings.index', ['tab' => 'devices']))
             ->assertOk()
             ->assertSee('data-devices-diagnostics', false);
     }
@@ -335,7 +335,7 @@ class PlugAndDetectDevicesTest extends TestCase
             ->assertJsonPath('find.new_devices.0.mac', 'D8:A0:1D:00:00:02')
             ->assertJsonPath('find.other_subnet.pc_ip', '203.0.113.254');
 
-        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'stations']))
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'devices']))
             ->assertOk()->assertSee('Find my reader');
     }
 

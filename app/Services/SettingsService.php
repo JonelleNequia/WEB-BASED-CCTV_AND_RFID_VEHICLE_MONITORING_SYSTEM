@@ -153,6 +153,13 @@ class SettingsService
             }
 
             $type = (string) ($values['reader_type'] ?? $gate->reader_type);
+            $suffix = fn (?string $readerType): string => match ($readerType) {
+                'uhf_ethernet' => 'UHF Reader',
+                'simulated' => 'Reader (Simulated)',
+                default => 'Reader',
+            };
+            // B1: a reader renamed on the Gates tab keeps its name; the default name follows the gate.
+            $defaultName = $gate->reader_name === null || $gate->reader_name === $gate->name.' '.$suffix($gate->reader_type);
             $gate->fill(array_filter([
                 'name' => isset($values['name']) ? trim((string) $values['name']) : null,
                 'reader_type' => $type,
@@ -168,14 +175,12 @@ class SettingsService
                 $gate->reader_port = filled($values['reader_port']) ? (int) $values['reader_port'] : null;
             }
 
-            // The name shown in logs follows the gate name and reader type.
-            $gate->reader_name = filled($values['reader_name'] ?? null)
-                ? (string) $values['reader_name']
-                : $gate->name.' '.match ($type) {
-                    'uhf_ethernet' => 'UHF Reader',
-                    'simulated' => 'Reader (Simulated)',
-                    default => 'Reader',
-                };
+            // The name shown in logs follows the gate name and reader type, unless it was renamed.
+            if (filled($values['reader_name'] ?? null)) {
+                $gate->reader_name = (string) $values['reader_name'];
+            } elseif ($defaultName) {
+                $gate->reader_name = $gate->name.' '.$suffix($type);
+            }
             $gate->save();
         }
 
@@ -301,7 +306,7 @@ class SettingsService
             if (! $managed) {
                 $camera->fill([
                     'source_type' => (string) ($cameraData['source_type'] ?? 'webcam'),
-                    'source_value' => (string) ($cameraData['source_value'] ?? '0'),
+                    'source_value' => ($cameraData['source_type'] ?? '') === Camera::SOURCE_NONE ? '' : (string) ($cameraData['source_value'] ?? '0'),
                     // Optional full-resolution stream for trigger snapshots (manual sources).
                     'snapshot_source_value' => filled($cameraData['snapshot_source_value'] ?? null)
                         ? (string) $cameraData['snapshot_source_value'] : null,

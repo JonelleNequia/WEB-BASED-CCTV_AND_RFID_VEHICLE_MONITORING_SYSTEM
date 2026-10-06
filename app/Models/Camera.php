@@ -15,6 +15,9 @@ class Camera extends Model
     use HasFactory;
     use StoresLocalTime;
 
+    /** B1 (Settings): a gate without a camera (new gate, or the camera was removed). */
+    public const SOURCE_NONE = 'none';
+
     /**
      * The attributes that are mass assignable.
      *

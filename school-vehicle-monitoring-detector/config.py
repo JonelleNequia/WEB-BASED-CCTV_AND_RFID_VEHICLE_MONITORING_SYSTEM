@@ -193,7 +193,8 @@ def normalize_camera_config(role, loaded_config):
         config.update(loaded_config)
 
     source_type = str(config.get("source_type", "webcam")).strip().lower()
-    if source_type not in {"webcam", "rtsp", "url"}:
+    # B1 (Settings): "none" = this gate has no camera yet.
+    if source_type not in {"webcam", "rtsp", "url", "none"}:
         source_type = "webcam"
 
     config["camera_role"] = role

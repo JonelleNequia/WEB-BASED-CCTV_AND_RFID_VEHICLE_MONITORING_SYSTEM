@@ -19,6 +19,7 @@ final class DetectionStatus
         'model_error' => 'critical',
         'error' => 'critical',
         'detector_off' => 'critical',
+        'no_camera' => 'neutral',
     ];
 
     /**

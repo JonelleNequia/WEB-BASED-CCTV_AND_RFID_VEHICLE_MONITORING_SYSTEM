@@ -27,8 +27,9 @@ class CalibrationService
                 [
                     'camera_name' => $gate->name.' Camera',
                     'camera_role' => $gate->code,
-                    'source_type' => 'webcam',
-                    'source_value' => '0',
+                    // B1: a new gate starts without a camera ("+ Add camera"), not this PC's webcam.
+                    'source_type' => Camera::SOURCE_NONE,
+                    'source_value' => '',
                     'status' => 'active',
                     'last_connection_status' => 'unknown',
                     'last_connection_message' => 'Waiting for browser camera access.',
@@ -181,7 +182,7 @@ class CalibrationService
     protected function transformCamera(Camera $camera, bool $withSecrets = false): array
     {
         $sourceType = $camera->source_type ?: 'webcam';
-        $sourceValue = $camera->source_value ?: '0';
+        $sourceValue = $sourceType === Camera::SOURCE_NONE ? '' : ($camera->source_value ?: '0');
 
         // Plug-and-detect: pages and page JSON never get the camera password
         // or credentials embedded in the URL; only the Python export does.

@@ -150,7 +150,7 @@ class Phase6SecurityTest extends TestCase
     public function test_settings_page_does_not_show_the_key(): void
     {
         $this->actingAs($this->admin)
-            ->get(route('settings.index'))
+            ->get(route('settings.index', ['tab' => 'manual']))
             ->assertOk()
             ->assertSee('Set in .env (DETECTOR_API_KEY)')
             ->assertDontSee('test-detector-key');

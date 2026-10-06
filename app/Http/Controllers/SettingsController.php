@@ -18,21 +18,62 @@ class SettingsController extends Controller
 {
     use ResolvesTab;
 
-    /** UI Phase 2: Settings tabs; each form tab has its own Save button. */
+    /**
+     * B1 (Settings): three tabs for a non-technical user. Gates: a card per
+     * gate (camera, RFID reader, detection zone). General: gate names.
+     * Advanced: everything technical, for an admin or technician.
+     */
     public const TABS = [
-        'stations' => 'Gates & Readers',
-        'cameras' => 'Cameras',
-        'calibration' => 'Calibration',
-        'status' => 'System Status',
+        'gates' => 'Gates',
+        'general' => 'General',
+        'advanced' => 'Advanced',
+    ];
+
+    /** B1: Advanced sections (each its own ?tab=, so older links keep working). */
+    public const ADVANCED_SECTIONS = [
+        'status' => 'System status',
+        'devices' => 'All network devices',
+        'detection' => 'Detection',
+        'timing' => 'Timing',
+        'manual' => 'Manual setup',
         'test-scan' => 'Test Scan',
     ];
+
+    /** Older tab names (bookmarks, links in messages). */
+    public const ALIASES = [
+        'stations' => 'gates',
+        'cameras' => 'manual',
+        'advanced' => 'status',
+    ];
+
+    /** B3: settings a section can put back to their defaults. */
+    public const RESTORABLE = [
+        'timing' => ['rfid_cooldown_seconds', 'rfid_lookback_seconds', 'rfid_lookahead_seconds'],
+        'detection' => [
+            'perf_stream_fps', 'perf_stream_width', 'perf_jpeg_quality', 'perf_detection_fps', 'perf_yolo_imgsz',
+            'perf_yolo_device', 'perf_roi_crop', 'perf_hires_on_trigger',
+            'perf_type_second_pass', 'perf_type_model', 'perf_type_truck_min_height', 'perf_type_car_min_aspect',
+            'perf_cross_margin', 'perf_cross_min_points', 'perf_cross_min_move',
+        ],
+    ];
+
+    /** The tab shown in the tab bar for a page (an Advanced section shows "Advanced"). */
+    public static function mainTab(string $tab): string
+    {
+        return array_key_exists($tab, self::ADVANCED_SECTIONS) ? 'advanced' : ($tab === 'calibration' ? 'gates' : $tab);
+    }
 
     /**
      * Show one Settings tab.
      */
     public function index(Request $request, SettingsService $settingsService): View
     {
-        $tab = $this->resolveTab($request, self::TABS);
+        $requested = (string) $request->query('tab', 'gates');
+        $tab = self::ALIASES[$requested] ?? $requested;
+
+        if (! array_key_exists($tab, self::TABS) && ! array_key_exists($tab, self::ADVANCED_SECTIONS) && $tab !== 'calibration') {
+            $tab = 'gates';
+        }
 
         return match ($tab) {
             'calibration' => app()->call([app(CalibrationController::class), 'index']),
@@ -42,30 +83,51 @@ class SettingsController extends Controller
         };
     }
 
+    /**
+     * B3: put one Advanced section back to its default values.
+     */
+    public function restoreDefaults(Request $request, SettingsService $settingsService): RedirectResponse
+    {
+        $section = (string) $request->validate(['section' => ['required', 'in:'.implode(',', array_keys(self::RESTORABLE))]])['section'];
+        $defaults = $settingsService->defaults();
+        $settingsService->save(array_intersect_key($defaults, array_flip(self::RESTORABLE[$section])));
+        app(DeviceRegistryService::class)->exportRuntimeConfig();
+
+        return redirect()->route('settings.index', ['tab' => $section])
+            ->with('status', self::ADVANCED_SECTIONS[$section].': default values restored.');
+    }
+
     protected function formTab(string $tab, SettingsService $settingsService): View
     {
         $settingsService->ensureCameraRuntimeConfigExists();
 
-        // Plug-and-detect: the Devices panel (Gates & Readers) and the
-        // camera assignments shown on the Cameras tab.
-        if ($tab === 'stations') {
+        // Plug-and-detect: the device service lists cameras and readers (Gates, All network devices).
+        if (in_array($tab, ['gates', 'devices'], true)) {
             app(DeviceServiceRuntime::class)->ensureRunning();
         }
 
+        $gates = Gate::query()->orderBy('sort_order')->orderBy('id')->get();
+        $devicesPayload = in_array($tab, ['gates', 'devices', 'manual'], true) ? app(DeviceRegistryService::class)->panelPayload() : null;
+        $cameraLive = in_array($tab, ['gates', 'manual'], true)
+            ? app(DetectorRuntimeService::class)->withViewerStreamUrls(app(DetectorRuntimeService::class)->ensureRunning(), request()->getHost())
+            : null;
+
         return view('settings.index', [
             'tab' => $tab,
+            // B1: one card per gate (camera, RFID reader, detection zone).
+            'gateCards' => $tab === 'gates'
+                ? app(\App\Services\GateSetupService::class)->cards($gates, $devicesPayload ?? [], app(\App\Services\CalibrationService::class)->cameraPayload(), $cameraLive ?? [])
+                : [],
             'settings' => $settingsService->all(),
             'cameraConfigs' => $settingsService->cameraConfigurations(),
             'detectorKeySet' => $settingsService->detectorApiKey() !== '',
-            'devicesPayload' => $tab === 'stations' ? app(DeviceRegistryService::class)->panelPayload() : null,
-            // Phase 1: every gate, active or not (Settings › Gates & Readers).
-            'gates' => Gate::query()->orderBy('sort_order')->orderBy('id')->get(),
+            'devicesPayload' => $devicesPayload,
+            // Phase 1: every gate, active or not.
+            'gates' => $gates,
             'cameraAssignments' => DeviceAssignment::query()->with('device')
                 ->where('role', DeviceAssignment::ROLE_CAMERA)->get()->keyBy('station'),
-            // Live preview on the Cameras tab (also counts as a viewer).
-            'cameraLive' => $tab === 'cameras'
-                ? app(DetectorRuntimeService::class)->withViewerStreamUrls(app(DetectorRuntimeService::class)->ensureRunning(), request()->getHost())
-                : null,
+            // Live previews (Gates, Manual setup) also count as viewers.
+            'cameraLive' => $cameraLive,
         ]);
     }
 
@@ -90,7 +152,10 @@ class SettingsController extends Controller
         // Plug-and-detect: a manual reader address or label change goes to Python.
         app(DeviceRegistryService::class)->exportRuntimeConfig();
 
-        $section = self::TABS[$request->input('section')] ?? 'System settings';
+        $section = [
+            'general' => 'General settings', 'timing' => 'Timing', 'detection' => 'Detection settings',
+            'manual' => 'Manual setup', 'stations' => 'Gates & Readers', 'cameras' => 'Cameras',
+        ][$request->input('section')] ?? 'Settings';
 
         return back()->with('status', $section.' saved.');
     }
@@ -151,7 +216,7 @@ class SettingsController extends Controller
         // The detector starts one camera worker per gate when it starts.
         app(DetectorRuntimeService::class)->ensureRunning(force: true);
 
-        return redirect()->route('settings.index', ['tab' => 'stations'])
-            ->with('status', "{$name} added. Assign its camera and reader in Devices, then calibrate it.");
+        return redirect()->route('settings.index', ['tab' => 'gates'])
+            ->with('status', "{$name} added. Add its camera and RFID reader, then set up its detection zone.");
     }
 }

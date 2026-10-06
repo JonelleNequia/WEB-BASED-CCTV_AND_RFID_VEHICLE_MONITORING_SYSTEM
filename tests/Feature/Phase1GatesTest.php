@@ -108,7 +108,7 @@ class Phase1GatesTest extends TestCase
     public function test_add_rename_and_deactivate_gates(): void
     {
         $this->actingAs($this->admin)->post(route('settings.gates.store'), ['name' => 'Service Gate'])
-            ->assertRedirect(route('settings.index', ['tab' => 'stations']));
+            ->assertRedirect(route('settings.index', ['tab' => 'gates']));
 
         $gate = Gate::query()->where('code', 'gate-3')->firstOrFail();
         $this->assertSame('Service Gate', $gate->name);
@@ -157,8 +157,11 @@ class Phase1GatesTest extends TestCase
 
         $this->actingAs($this->admin)->get(route('logs.index', ['tab' => 'scans']))
             ->assertOk()->assertSee('Main Gate')->assertSee('<th>Gate</th>', false);
-        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'stations']))
-            ->assertOk()->assertSee('Gates & Readers', false)->assertSee('Add a gate')->assertSee('gates[gate-1][name]', false);
+        // B1: gate cards on Gates, gate names on General.
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'gates']))
+            ->assertOk()->assertSee('Main Gate')->assertSee('+ Add gate');
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'general']))
+            ->assertOk()->assertSee('Gate names')->assertSee('gates[gate-1][name]', false);
         $this->actingAs($this->admin)->get(route('gates.kiosk', 'gate-1'))
             ->assertOk()->assertSee('Main Gate')->assertSee('IN and OUT');
     }

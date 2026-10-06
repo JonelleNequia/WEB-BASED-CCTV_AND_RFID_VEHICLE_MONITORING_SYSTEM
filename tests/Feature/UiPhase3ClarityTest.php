@@ -133,7 +133,7 @@ class UiPhase3ClarityTest extends TestCase
         $html = $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'cameras']))->assertOk()->getContent();
 
         $this->assertSame(2, substr_count($html, 'Source: manual address'));
-        $this->assertSame(2, substr_count($html, 'Stream and snapshot options appear when a camera is assigned'));
+        $this->assertSame(2, substr_count($html, 'Stream and snapshot options appear when a camera is added'));
         $this->assertStringNotContainsString('Manual source', $html);
     }
 

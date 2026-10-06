@@ -105,12 +105,12 @@ class Phase4UiTest extends TestCase
     public function test_settings_has_reader_configuration_and_no_guest_pass_section(): void
     {
         $this->actingAs($this->admin)
-            ->get(route('settings.index', ['tab' => 'stations']))
+            ->get(route('settings.index', ['tab' => 'manual']))
             ->assertOk()
-            // Plug-and-detect: readers are picked in Devices; the address is under Advanced.
+            // B3: the reader type and a manual address are in Advanced › Manual setup.
             ->assertSee('Reader type')
             ->assertSee('UHF (network reader)')
-            ->assertSee('Advanced: manual reader address')
+            ->assertSee('Use this manual reader address')
             ->assertDontSee('Entrance Reader Name');
 
         // UI Phase 2: each section is its own Settings tab.

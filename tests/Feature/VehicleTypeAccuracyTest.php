@@ -109,7 +109,7 @@ class VehicleTypeAccuracyTest extends TestCase
 
     public function test_type_settings_reach_the_detector(): void
     {
-        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'cameras']))->assertOk()
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'detection']))->assertOk()
             ->assertSee('Vehicle type')->assertSee('perf_type_truck_min_height', false);
 
         $this->assertSame([0.35, 1.05], array_values(array_intersect_key(app(SettingsService::class)->performanceSettings([]), array_flip(['type_truck_min_height', 'type_car_min_aspect']))));
@@ -118,7 +118,7 @@ class VehicleTypeAccuracyTest extends TestCase
         // A3 (detection): counting limits, as shares of the zone's height.
         $counting = app(SettingsService::class)->performanceSettings(['perf_cross_margin' => '8', 'perf_cross_min_points' => '4', 'perf_cross_min_move' => '12']);
         $this->assertSame([0.08, 4, 0.12], [$counting['cross_margin'], $counting['cross_min_points'], $counting['cross_min_move']]);
-        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'cameras']))->assertOk()
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'detection']))->assertOk()
             ->assertSee('Counting')->assertSee('perf_cross_margin', false);
     }
 

@@ -26,6 +26,10 @@ final class CameraSource
             return 'Webcam '.$value;
         }
 
+        if ($type === 'none') {
+            return 'No camera';
+        }
+
         return strtoupper($type).' · '.self::withoutCredentials((string) $value);
     }
 

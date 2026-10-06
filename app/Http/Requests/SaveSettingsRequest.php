@@ -42,6 +42,16 @@ class SaveSettingsRequest extends FormRequest
 
     /** UI Phase 2: which fields each Settings tab saves. */
     public const SECTIONS = [
+        // B1 (Settings): General (gate names), Advanced › Timing, Detection, Manual setup.
+        'general' => ['gates'],
+        'timing' => ['rfid_cooldown_seconds', 'rfid_lookback_seconds', 'rfid_lookahead_seconds'],
+        'detection' => [
+            'perf_stream_fps', 'perf_stream_width', 'perf_jpeg_quality', 'perf_detection_fps',
+            'perf_yolo_imgsz', 'perf_yolo_device', 'perf_roi_crop', 'perf_hires_on_trigger',
+            'perf_type_second_pass', 'perf_type_model', 'perf_type_truck_min_height', 'perf_type_car_min_aspect',
+            'perf_cross_margin', 'perf_cross_min_points', 'perf_cross_min_move',
+        ],
+        'manual' => ['camera_configs', 'camera_source_placeholder', 'camera_streams', 'gates'],
         // Phase 1: Gates & Readers (name, reader type, manual reader address per gate).
         'stations' => [
             'gates',
@@ -90,8 +100,8 @@ class SaveSettingsRequest extends FormRequest
             // Cameras tab: one camera per gate (keys = gate codes).
             'camera_configs' => ['required', 'array'],
             'camera_configs.*.camera_name' => ['required', 'string', 'max:100'],
-            'camera_configs.*.source_type' => ['required', 'in:webcam,rtsp,url'],
-            'camera_configs.*.source_value' => ['required', 'string', 'max:500'],
+            'camera_configs.*.source_type' => ['required', 'in:webcam,rtsp,url,none'],
+            'camera_configs.*.source_value' => ['nullable', 'required_unless:camera_configs.*.source_type,none', 'string', 'max:500'],
             'camera_configs.*.source_username' => ['nullable', 'string', 'max:255'],
             'camera_configs.*.source_password' => ['nullable', 'string', 'max:255'],
             'camera_configs.*.clear_password' => ['nullable', 'boolean'],

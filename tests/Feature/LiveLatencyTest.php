@@ -120,8 +120,9 @@ class LiveLatencyTest extends TestCase
             (float) $performance['detection_fps'], $performance['yolo_imgsz'], $performance['yolo_device'], $performance['roi_crop'],
         ]);
 
-        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'cameras']))
-            ->assertOk()->assertSee('Live view performance')->assertSee('Optimize camera settings');
+        // B3: performance is in Advanced › Detection, camera settings in Advanced › Manual setup.
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'detection']))->assertOk()->assertSee('Live view performance');
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'cameras']))->assertOk()->assertSee('Optimize camera settings');
     }
 
     public function test_detector_debug_view_switch_is_exported_and_counters_are_shown(): void

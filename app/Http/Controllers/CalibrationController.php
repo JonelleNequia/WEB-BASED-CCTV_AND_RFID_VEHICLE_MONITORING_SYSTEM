@@ -28,6 +28,11 @@ class CalibrationController extends Controller
             request()->getHost()
         );
         $cameras = $calibrationService->cameraPayload();
+        // B1: "Set up" / "Edit" on a gate card opens only that gate.
+        $only = \App\Models\Gate::resolveCode((string) request('gate'));
+        if ($only && isset($cameras[$only])) {
+            $cameras = [$only => $cameras[$only]];
+        }
 
         foreach (array_keys($cameras) as $role) {
             $cameras[$role]['stream_url'] = $detectorRuntimeService->streamUrlForRole($role, $detectorStatus, request()->getHost());

@@ -12,8 +12,8 @@
          data-acknowledge-url="{{ route('settings.devices.acknowledge') }}">
     <div class="panel-header panel-header-modern">
         <div>
-            <h2 class="panel-title">Devices</h2>
-            <p class="text-muted devices-intro">Cameras and UHF readers on this PC's network. No IP to type.</p>
+            <h2 class="panel-title">All network devices</h2>
+            <p class="text-muted devices-intro">Cameras and UHF readers on this PC's network (one row per device).</p>
         </div>
         <div class="button-row">
             <x-live-indicator />
