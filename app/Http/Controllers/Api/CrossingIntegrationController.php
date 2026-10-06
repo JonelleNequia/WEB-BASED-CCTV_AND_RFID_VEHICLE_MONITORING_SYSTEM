@@ -8,7 +8,7 @@ use App\Models\Camera;
 use App\Models\Gate;
 use App\Models\VehicleCrossing;
 use App\Rules\ValidGate;
-use App\Services\RfidCameraFusionService;
+use App\Services\RfidIngestService;
 use App\Services\SettingsService;
 use App\Services\VisitorRecordService;
 use Illuminate\Http\JsonResponse;
@@ -27,7 +27,7 @@ class CrossingIntegrationController extends Controller
     public function store(
         Request $request,
         SettingsService $settingsService,
-        RfidCameraFusionService $fusionService,
+        RfidIngestService $rfidIngestService,
         VisitorRecordService $visitorRecordService
     ): JsonResponse
     {
@@ -84,10 +84,13 @@ class CrossingIntegrationController extends Controller
             'detection_metadata_json' => $validated['detection_metadata'] ?? null,
         ]);
 
-        // Phase 3: the registered tag read of this vehicle takes this direction.
-        $scan = $fusionService->attachCrossing($crossing);
-        // Phase 5: no registered tag read -> an Unregistered Visitor record.
-        $visitor = $scan ? null : $visitorRecordService->createFromCrossing($crossing->fresh());
+        // RFID only with a vehicle: this vehicle's tag from the read buffer
+        // makes its one record (registered IN / OUT with this direction).
+        $tagged = $rfidIngestService->forCrossing($crossing);
+        $scan = $tagged['scan'];
+        // Phase 5: no registered tag -> an Unregistered Visitor record (an
+        // unknown tag is kept on it: "Register this tag").
+        $visitor = $scan ? null : $visitorRecordService->createFromCrossing($crossing->fresh(), $tagged['unknown_tag']);
 
         return response()->json([
             'message' => 'Crossing stored.',
@@ -101,6 +104,7 @@ class CrossingIntegrationController extends Controller
                 'anomaly_reason' => $scan->anomaly_reason,
             ] : null,
             'visitor_record_id' => $visitor?->id,
+            'unknown_tag' => $tagged['unknown_tag'],
         ], 201);
     }
 

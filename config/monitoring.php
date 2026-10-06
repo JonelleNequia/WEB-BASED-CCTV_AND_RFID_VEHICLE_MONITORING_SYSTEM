@@ -80,6 +80,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | RFID Only With a Vehicle
+    |--------------------------------------------------------------------------
+    |
+    | UHF reads wait in the device service's memory buffer and are recorded
+    | only when the camera sees a vehicle cross the line. A tag read again
+    | within absent_seconds is the same pass; the buffer keeps passes for
+    | buffer_seconds after their last read. Settings › Timing has the
+    | stationary time and the camera-offline fallback.
+    |
+    */
+
+    'rfid' => [
+        'buffer_seconds' => (float) env('RFID_BUFFER_SECONDS', 15),
+        'absent_seconds' => (float) env('RFID_ABSENT_SECONDS', 5),
+        // The buffer file is ignored when the device service stopped writing it.
+        'buffer_stale_seconds' => 5,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Plug-and-detect Devices
     |--------------------------------------------------------------------------
     |

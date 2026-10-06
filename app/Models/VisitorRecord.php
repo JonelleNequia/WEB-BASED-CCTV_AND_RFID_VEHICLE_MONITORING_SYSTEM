@@ -58,6 +58,8 @@ class VisitorRecord extends Model
         'plate_image_path',
         'plate_status',
         'plate_number',
+        // RFID only with a vehicle: an unknown tag read for this vehicle.
+        'tag_uid',
         'plate_key',
         'plate_confidence',
         'ocr_plate_number',

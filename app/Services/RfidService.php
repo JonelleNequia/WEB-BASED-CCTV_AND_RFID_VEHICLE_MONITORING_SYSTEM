@@ -24,9 +24,8 @@ class RfidService
     /**
      * Create one simulated RFID scan from the RFID Desk.
      *
-     * Same rules as a gate read (RfidIngestService): the camera's direction
-     * when it saw the crossing, otherwise the vehicle state toggles
-     * (INSIDE -> EXIT, OUTSIDE -> ENTRY).
+     * Preview only: registered, unknown or flagged, and what the camera's
+     * crossing would record. Nothing is saved.
      *
      * @param  array<string, mixed>  $data
      */
@@ -38,7 +37,9 @@ class RfidService
             ]);
         }
 
-        return $this->rfidIngestService->ingest($data, 'simulated', RfidIngestService::DIRECTION_TOGGLE);
+        // RFID only with a vehicle: a test scan only shows what the tag is
+        // (a read without a vehicle is never a record).
+        return $this->rfidIngestService->preview($data);
     }
 
     /**

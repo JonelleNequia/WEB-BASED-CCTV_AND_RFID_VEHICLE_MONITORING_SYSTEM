@@ -16,6 +16,8 @@ PROJECT_ROOT = DETECTOR_ROOT.parent
 
 DEVICE_FILES_DIR = Path(os.environ.get("DEVICE_FILES_PATH") or (PROJECT_ROOT / "storage" / "app" / "devices"))
 STATUS_PATH = DEVICE_FILES_DIR / "device_service_status.json"
+# RFID only with a vehicle: the in-memory read buffer, for Laravel (devices/tag_buffer.py).
+RFID_BUFFER_PATH = DEVICE_FILES_DIR / "rfid_buffer.json"
 SCAN_RESULT_PATH = DEVICE_FILES_DIR / "last_scan.json"
 # Overridable so `sudo ... --find` can read the config without writing root-owned files here.
 RUNTIME_CONFIG_PATH = Path(os.environ.get("DEVICE_RUNTIME_CONFIG_PATH") or (DEVICE_FILES_DIR / "device_runtime_config.json"))

@@ -28,13 +28,14 @@ class RfidSimulationTest extends TestCase
             ->get(route('settings.index', ['tab' => 'test-scan']))
             ->assertOk()
             ->assertSee('Test Scan')
-            ->assertSee('Simulate RFID Scan');
+            ->assertSee('Check Tag')
+            ->assertSee('Preview only. Nothing is recorded.');
     }
 
     /**
-     * Ensure simulating an RFID scan creates a local RFID log.
+     * RFID only with a vehicle: a test scan is a preview (no record).
      */
-    public function test_simulated_rfid_scan_creates_a_scan_log(): void
+    public function test_test_scan_is_a_preview_and_saves_nothing(): void
     {
         $this->seed(DatabaseSeeder::class);
 
@@ -49,19 +50,16 @@ class RfidSimulationTest extends TestCase
                 'scan_time' => now()->toIso8601String(),
                 'notes' => 'Created from feature test.',
             ])
-            ->assertRedirect();
+            ->assertRedirect()
+            ->assertSessionHas('status', fn (string $message): bool => str_starts_with($message, 'Preview only, nothing saved.'));
 
-        $scanLog = RfidScanLog::query()->latest('id')->first();
-
-        $this->assertNotNull($scanLog);
-        $this->assertSame('RFID-ABC-1001', $scanLog->tag_uid);
-        $this->assertSame('gate-1', $scanLog->scan_location);
+        $this->assertSame(0, RfidScanLog::query()->count());
     }
 
     /**
-     * Counterflow scans should still use the vehicle's state, not the lane name.
+     * The preview says what a crossing would record; nothing moves.
      */
-    public function test_json_rfid_scan_toggles_outside_vehicle_to_entry(): void
+    public function test_json_test_scan_shows_the_registered_vehicle_without_moving_it(): void
     {
         $user = User::factory()->create();
         [$vehicle] = $this->createAssignedVehicleWithTag('TOG-1001', 'RFID-TOGGLE-1001', Vehicle::STATE_OUTSIDE);
@@ -72,28 +70,19 @@ class RfidSimulationTest extends TestCase
                 'scan_location' => 'gate-2',
                 'reader_name' => 'Exit RFID Reader',
             ])
-            ->assertCreated()
+            ->assertOk()
+            ->assertJsonPath('outcome', 'preview')
             ->assertJsonPath('vehicle.id', $vehicle->id)
             ->assertJsonPath('vehicle.plate_number', 'TOG-1001')
-            ->assertJsonPath('action_taken', 'ENTRY')
-            ->assertJsonPath('new_state', Vehicle::STATE_INSIDE)
-            ->assertJsonPath('vehicle.current_state', Vehicle::STATE_INSIDE);
+            ->assertJsonPath('action_taken', null)
+            ->assertJsonPath('vehicle.current_state', Vehicle::STATE_OUTSIDE);
 
-        $this->assertDatabaseHas('vehicles', [
-            'id' => $vehicle->id,
-            'current_state' => Vehicle::STATE_INSIDE,
-        ]);
-
-        $this->assertDatabaseHas('vehicle_events', [
-            'vehicle_id' => $vehicle->id,
-            'event_type' => 'ENTRY',
-            'resulting_state' => Vehicle::STATE_INSIDE,
-        ]);
+        $this->assertSame(Vehicle::STATE_OUTSIDE, $vehicle->fresh()->current_state);
+        $this->assertDatabaseCount('vehicle_events', 0);
     }
 
     /**
-     * Phase 3: the Exit reader records EXIT for an inside vehicle (the station
-     * decides the direction; only the RFID Desk toggles).
+     * RFID only (no camera at the gate): the vehicle's state gives EXIT.
      */
     public function test_api_rfid_scan_at_exit_records_exit_for_inside_vehicle(): void
     {
@@ -139,13 +128,11 @@ class RfidSimulationTest extends TestCase
                 'scan_location' => 'gate-1',
                 'reader_name' => 'Entrance RFID Reader',
             ])
-            ->assertCreated()
-            ->assertJsonPath('scan.verification_status', 'unknown_tag');
+            ->assertOk()
+            ->assertJsonPath('scan.verification_status', 'unknown_tag')
+            ->assertJsonPath('message', 'Preview only, nothing saved. Unknown tag UNKNOWN-GUEST-1001: not in the registry. Register this tag.');
 
-        $scanLog = RfidScanLog::query()->latest('id')->firstOrFail();
-        $this->assertNull($scanLog->guest_vehicle_observation_id);
-        $this->assertTrue($scanLog->is_anomaly);
-        $this->assertStringContainsString('Register this tag', (string) $scanLog->anomaly_reason);
+        $this->assertSame(0, RfidScanLog::query()->count());
         $this->assertSame(0, GuestVehicleObservation::query()->count());
     }
 

@@ -24,9 +24,11 @@ use Illuminate\Support\Facades\DB;
  *   vehicle's state decides (OUTSIDE -> IN, INSIDE -> OUT).
  * - The camera was watching but no crossing came: "scan only", no movement.
  *
- * A read waits ("pending") until its crossing arrives or the time runs out;
- * finalizeExpired() runs on every request (FinalizePendingScans) and from
- * `rfid:finalize-pending`.
+ * RFID only with a vehicle: reads are no longer saved while the camera is
+ * watching (RfidTagMatcher keeps them; RfidIngestService::forCrossing() makes
+ * the record), so nothing new waits "pending". finalizeExpired() still runs
+ * on every request (FinalizePendingScans) and from `rfid:finalize-pending`
+ * for reads saved before that.
  */
 class RfidCameraFusionService
 {
@@ -90,6 +92,26 @@ class RfidCameraFusionService
     }
 
     /**
+     * RFID only with a vehicle: how long this gate's camera has not been
+     * watching (null = it is watching). INF when it never was, or the
+     * detector does not say since when.
+     */
+    public function cameraOfflineSeconds(string $gate): ?float
+    {
+        if ($this->cameraProblem($gate) === null) {
+            return null;
+        }
+
+        $since = $this->detectorRuntimeService->readStatus()['cameras'][$gate]['offline_since'] ?? null;
+
+        try {
+            return $since ? max(0.0, (float) Carbon::parse($since)->diffInMilliseconds(now(), false) / 1000) : INF;
+        } catch (\Throwable) {
+            return INF;
+        }
+    }
+
+    /**
      * A registered read just arrived: take the direction from a crossing that
      * is already here, wait for one, or use the vehicle's state when the gate
      * has no working camera. Returns the RfidIngestResult outcome.
@@ -99,7 +121,7 @@ class RfidCameraFusionService
         $problem = $this->cameraProblem($scan->scan_location);
 
         if ($problem !== null) {
-            return $this->applyMovement($scan, null, 'No camera direction ('.$problem.'); vehicle state used.');
+            return $this->applyMovement($scan, null, 'RFID only ('.$problem.'): IN/OUT from the vehicle\'s state.');
         }
 
         if ($crossing = $this->crossingForScan($scan)) {
@@ -234,7 +256,7 @@ class RfidCameraFusionService
      * Record the movement of a registered read: camera direction when there
      * is one, else the vehicle's state. Returns RECORDED or ANOMALY.
      */
-    protected function applyMovement(RfidScanLog $scan, ?VehicleCrossing $crossing, ?string $toggleNote = null): string
+    public function applyMovement(RfidScanLog $scan, ?VehicleCrossing $crossing, ?string $toggleNote = null): string
     {
         return DB::transaction(function () use ($scan, $crossing, $toggleNote): string {
             $vehicle = Vehicle::query()->whereKey($scan->vehicle_id)->lockForUpdate()->firstOrFail();

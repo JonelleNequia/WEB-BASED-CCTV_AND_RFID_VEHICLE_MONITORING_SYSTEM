@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\RfidScanLog;
 use App\Models\RfidTag;
 use App\Models\User;
 use App\Models\Vehicle;
@@ -44,7 +45,11 @@ class UiPhase3ClarityTest extends TestCase
     {
         $vehicle = $this->registeredVehicle('COL 1001', 'COL-TAG');
         app(RfidIngestService::class)->ingest(['tag_uid' => 'COL-TAG', 'scan_location' => 'gate-1']);       // registered IN
-        app(RfidIngestService::class)->ingest(['tag_uid' => 'WHO-ARE-YOU', 'scan_location' => 'gate-1']);   // unknown tag
+RfidScanLog::query()->create([ // saved before "RFID only with a vehicle"
+            'tag_uid' => 'WHO-ARE-YOU', 'scan_location' => 'gate-1', 'scan_time' => now(), 'verification_status' => 'unknown_tag',
+            'source_mode' => 'hardware_placeholder', 'reader_name' => 'Gate UHF Reader', 'is_anomaly' => true, 'outcome' => 'unknown_tag',
+            'anomaly_reason' => 'Unknown tag WHO-ARE-YOU is not in the registry. Register this tag.',
+        ]);
         VisitorRecord::query()->create(['external_event_key' => 'col-v1', 'gate' => 'gate-1', 'direction' => 'IN', 'seen_at' => now(),
             'status' => 'active', 'plate_status' => 'read', 'plate_number' => 'VIS 2002', 'plate_key' => 'VIS2002']);
         VisitorRecord::query()->create(['external_event_key' => 'col-v2', 'gate' => 'gate-1', 'direction' => 'UNKNOWN', 'seen_at' => now(),

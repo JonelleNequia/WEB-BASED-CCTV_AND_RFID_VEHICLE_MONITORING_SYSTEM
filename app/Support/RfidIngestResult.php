@@ -32,6 +32,12 @@ final class RfidIngestResult
     /** Phase 3: a tag that is not in the registry (never a visitor record). */
     public const UNKNOWN_TAG = 'unknown_tag';
 
+    /** RFID only with a vehicle: the read waits in the buffer; nothing saved. */
+    public const BUFFERED = 'buffered';
+
+    /** Settings › Test Scan: what the tag is; nothing saved. */
+    public const PREVIEW = 'preview';
+
     public function __construct(
         public readonly RfidScanLog $scanLog,
         public readonly string $outcome,
@@ -44,6 +50,12 @@ final class RfidIngestResult
         return $this->outcome === self::DUPLICATE;
     }
 
+    /** A buffered read or a preview: no record was made. */
+    public function isSaved(): bool
+    {
+        return $this->scanLog->exists;
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -53,6 +65,7 @@ final class RfidIngestResult
             'outcome' => $this->outcome,
             'message' => $this->message,
             'duplicate_ignored' => $this->isDuplicate(),
+            'saved' => $this->isSaved(),
             'anomaly' => (bool) $this->scanLog->is_anomaly,
             'anomaly_reason' => $this->scanLog->anomaly_reason,
         ];

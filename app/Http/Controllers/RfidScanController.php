@@ -93,7 +93,7 @@ class RfidScanController extends Controller
             return response()->json([
                 ...$this->rfidScanResponsePayload($scanLog),
                 ...$result->toArray(),
-            ], $result->isDuplicate() ? 200 : 201);
+            ], $result->isDuplicate() || ! $result->isSaved() ? 200 : 201);
         }
 
         return back()->with(

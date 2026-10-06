@@ -131,6 +131,10 @@
         if (body.outcome === 'pending') {
             return ['verified', plate, ['Waiting for the camera', body.vehicle?.owner_name].filter(Boolean).join(' · ')];
         }
+        // RFID only with a vehicle: recorded when the camera sees it cross.
+        if (body.outcome === 'buffered') {
+            return [plate ? 'verified' : 'unknown', plate || `Tag ${tag || ''}`.trim(), 'Waiting for the camera to see the vehicle'];
+        }
         if (body.outcome === 'unknown_tag' || ['unassigned_tag', 'guest', 'non_recurring_category'].includes(status)) {
             return ['unknown', plate || `Tag ${tag || ''}`.trim(), body.anomaly_reason || 'Not in the registry. Ask the admin to register this tag.'];
         }

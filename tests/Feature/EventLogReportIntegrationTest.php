@@ -212,10 +212,12 @@ class EventLogReportIntegrationTest extends TestCase
         $tag = RfidTag::query()->create(['uid' => 'RFID-GUEST-EVT-01', 'status' => RfidTag::STATUS_ASSIGNED, 'vehicle_id' => $vehicle->id, 'assigned_at' => now()]);
         $vehicle->forceFill(['rfid_tag_id' => $tag->id, 'rfid_tag_uid' => $tag->uid])->save();
 
+        // Test Scan previews it; a gate read (RFID only, no camera) flags it.
         $this->actingAs($admin)
             ->postJson(route('rfid-scans.store'), ['tag_uid' => $tag->uid, 'scan_location' => 'gate-2'])
-            ->assertCreated()
+            ->assertOk()
             ->assertJsonPath('scan.verification_status', 'guest');
+        $this->assertSame('guest', app(\App\Services\RfidIngestService::class)->ingest(['tag_uid' => $tag->uid, 'scan_location' => 'gate-2'])->scanLog->verification_status);
 
         $this->assertSame(0, GuestVehicleObservation::query()->count());
         $this->actingAs($admin)->get(route('logs.index', ['tab' => 'alerts']))

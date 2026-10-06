@@ -6,6 +6,7 @@ use App\Models\Gate;
 use App\Models\RfidScanLog;
 use App\Models\RfidTag;
 use App\Models\Vehicle;
+use App\Models\VehicleCrossing;
 use App\Support\RfidIngestResult;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -28,6 +29,13 @@ use Illuminate\Validation\ValidationException;
  *
  * Guest passes were removed (Phase 0 of the visitor model): every tag is a
  * vehicle tag; vehicles without a tag are handled by the camera.
+ *
+ * RFID only with a vehicle: a read is not a record. While the gate's camera
+ * is watching, a read only joins the buffer (RfidTagMatcher); the camera's
+ * crossing takes the right tag from it (forCrossing()) and makes ONE record.
+ * With the camera offline longer than `rfid_offline_grace_seconds` and
+ * `rfid_offline_fallback` on, a registered tag is recorded "RFID only"
+ * (direction from the vehicle's state); an unknown tag only counts.
  */
 class RfidIngestService
 {
@@ -45,7 +53,9 @@ class RfidIngestService
         protected LocalStorageService $localStorageService,
         protected VehicleRegistryService $vehicleRegistryService,
         protected EventService $eventService,
-        protected RfidCameraFusionService $fusionService
+        protected RfidCameraFusionService $fusionService,
+        protected RfidTagMatcher $tagMatcher,
+        protected VisitorRecordService $visitorRecordService
     ) {
     }
 
@@ -71,6 +81,16 @@ class RfidIngestService
             ]);
         }
 
+        // Every read joins the buffer (the detector's window may still claim
+        // it); while the camera is watching, that is all it does.
+        $rssi = data_get($data, 'payload_json.rssi');
+        $this->tagMatcher->addRead($scanLocation, $requestedUid, $scanTime, is_numeric($rssi) ? (float) $rssi : null);
+
+        if (! $this->rfidOnly($scanLocation)) {
+            return $this->attachLateRead($scanLocation, $requestedUid, $scanTime)
+                ?? $this->buffered($data, $sourceMode, $scanLocation, $scanTime);
+        }
+
         if ($duplicate = $this->recentScanWithinCooldown($requestedUid, $scanLocation)) {
             return new RfidIngestResult(
                 $duplicate->loadMissing(['vehicle.rfidTag', 'vehicleRfidTag', 'correlatedVehicleEvent', 'guestVehicleObservation']),
@@ -82,8 +102,245 @@ class RfidIngestService
         return DB::transaction(function () use ($data, $sourceMode, $directionMode, $scanLocation, $scanTime): RfidIngestResult {
             $tag = $this->resolveTag($data);
 
-            return $this->handleVehicleTag($tag, $data, $sourceMode, $directionMode, $scanLocation, $scanTime);
+            // RFID only: an unknown tag without a vehicle is not recorded.
+            if ($this->resolveVerificationStatus($tag, $tag?->vehicle) === 'unknown_tag') {
+                $this->tagMatcher->count($scanLocation, 'unknown_offline');
+
+                return new RfidIngestResult(
+                    $this->unsavedScan($data, $sourceMode, $scanLocation, $scanTime, $tag),
+                    RfidIngestResult::UNKNOWN_TAG,
+                    'Unknown tag '.$this->requestedUid($data).' read while the camera is offline. Not recorded.'
+                );
+            }
+
+            $result = $this->handleVehicleTag($tag, $data, $sourceMode, $directionMode, $scanLocation, $scanTime);
+            $this->tagMatcher->count($scanLocation, 'rfid_only');
+
+            return $result;
         });
+    }
+
+    /**
+     * RFID only with a vehicle: is this gate's camera offline long enough
+     * (and the fallback on) to record registered tags without it?
+     */
+    public function rfidOnly(string $gate): bool
+    {
+        if ($this->settingsService->get('rfid_offline_fallback', '1') !== '1') {
+            return false;
+        }
+
+        $offline = $this->fusionService->cameraOfflineSeconds($gate);
+
+        return $offline !== null && $offline >= max(0, $this->settingsService->getInt('rfid_offline_grace_seconds', 10));
+    }
+
+    /**
+     * The camera's crossing: the tag of this vehicle from the buffer, and the
+     * one record for it. A registered tag -> its IN / OUT with the camera's
+     * direction; a lost, disabled or unassigned tag -> a flagged read linked
+     * to the crossing; an unknown tag or none -> null (the caller makes the
+     * Unregistered Visitor record, with 'unknown_tag' as a note).
+     *
+     * @return array{scan: ?RfidScanLog, unknown_tag: ?string}
+     */
+    public function forCrossing(VehicleCrossing $crossing): array
+    {
+        $presence = $this->tagMatcher->pick($crossing->gate, $crossing->crossed_at, $crossing->external_event_key);
+
+        if ($presence === null) {
+            return ['scan' => null, 'unknown_tag' => null];
+        }
+
+        $this->tagMatcher->claim($crossing->gate, $presence, $crossing->external_event_key, $crossing->crossed_at);
+
+        // Already recorded (RFID only while the camera was offline, or this
+        // vehicle's earlier crossing with a new track ID).
+        if ($this->recordedSince($crossing->gate, $presence['epc'], (float) $presence['first_seen'])) {
+            return ['scan' => null, 'unknown_tag' => null];
+        }
+
+        return $this->recordPresence($crossing, $presence);
+    }
+
+    /**
+     * @param  array<string, mixed>  $presence
+     * @return array{scan: ?RfidScanLog, unknown_tag: ?string}
+     */
+    protected function recordPresence(VehicleCrossing $crossing, array $presence): array
+    {
+        return DB::transaction(function () use ($crossing, $presence): array {
+            $data = [
+                'tag_uid' => $presence['epc'],
+                'scan_location' => $crossing->gate,
+                'payload_json' => [
+                    'source' => 'rfid_buffer',
+                    'reads' => $presence['reads'],
+                    'max_rssi' => $presence['max_rssi'],
+                    'first_seen' => $presence['first_seen'],
+                    'peak_at' => $presence['peak_at'],
+                ],
+            ];
+            $scanTime = Carbon::createFromTimestamp((float) $presence['peak_at'], config('app.timezone'));
+            $tag = $this->resolveTag($data);
+            $vehicle = $tag?->vehicle;
+            $status = $this->resolveVerificationStatus($tag, $vehicle);
+
+            if ($status === 'unknown_tag') {
+                return ['scan' => null, 'unknown_tag' => $this->requestedUid($data)];
+            }
+
+            $sourceMode = 'hardware_placeholder';
+            $scan = $this->createScanLog($data, $sourceMode, $crossing->gate, $scanTime, $tag, [
+                'vehicle' => $vehicle,
+                'verification_status' => $status,
+                'resolved_event_type' => null,
+                'resulting_state' => $vehicle?->current_state ?: null,
+                'anomaly_reason' => $status === 'verified' ? null : $this->tagAnomalyReason($tag, $status, $crossing->gate),
+            ]);
+
+            if ($status === 'verified') {
+                $this->fusionService->applyMovement($scan, $crossing);
+            } else {
+                $scan->forceFill([
+                    'vehicle_crossing_id' => $crossing->id,
+                    'outcome' => $status === 'inactive_tag' ? RfidIngestResult::ALERT : RfidIngestResult::ANOMALY,
+                    'fusion_note' => 'Read when the camera saw a vehicle go '.$crossing->direction.'. No IN/OUT recorded for this tag.',
+                ])->save();
+                $crossing->forceFill(['rfid_scan_log_id' => $scan->id])->save();
+                $this->visitorRecordService->dismissForCrossing($crossing, 'Flagged tag '.$scan->tag_uid.' read for it.');
+            }
+
+            return ['scan' => $scan->fresh(['vehicle']), 'unknown_tag' => null];
+        });
+    }
+
+    /**
+     * A tag read a little after a crossing that was already sent (the
+     * crossing found no tag then): it still belongs to that vehicle.
+     */
+    protected function attachLateRead(string $gate, string $uid, Carbon $scanTime): ?RfidIngestResult
+    {
+        $crossings = VehicleCrossing::query()
+            ->atGate($gate)
+            ->whereNull('rfid_scan_log_id')
+            ->whereBetween('crossed_at', [$scanTime->copy()->subSeconds($this->fusionService->lookaheadSeconds()), $scanTime])
+            ->orderByDesc('crossed_at')
+            ->get();
+
+        foreach ($crossings as $crossing) {
+            $presence = $this->tagMatcher->pick($gate, $crossing->crossed_at, $crossing->external_event_key);
+
+            if ($presence === null || strtoupper((string) $presence['epc']) !== strtoupper($uid)) {
+                continue;
+            }
+
+            $this->tagMatcher->claim($gate, $presence, $crossing->external_event_key, $crossing->crossed_at);
+            $recorded = $this->recordPresence($crossing, $presence);
+
+            if ($recorded['unknown_tag'] !== null) {
+                $this->visitorRecordService->noteUnknownTag($crossing, $recorded['unknown_tag']);
+
+                return new RfidIngestResult(
+                    $this->unsavedScan(['tag_uid' => $uid], 'hardware_placeholder', $gate, $scanTime, null),
+                    RfidIngestResult::UNKNOWN_TAG,
+                    'Unknown tag '.$uid.' read for the vehicle the camera just saw. Register this tag.'
+                );
+            }
+
+            $scan = $recorded['scan'];
+
+            return $this->result($scan, (string) $scan->outcome, $scan->vehicle
+                ? "{$scan->resolved_event_type} recorded for {$scan->vehicle->plate_number}."
+                : (string) $scan->anomaly_reason);
+        }
+
+        return null;
+    }
+
+    /**
+     * A read while the camera is watching: it waits in the buffer for a
+     * vehicle; nothing is saved.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function buffered(array $data, string $sourceMode, string $scanLocation, Carbon $scanTime): RfidIngestResult
+    {
+        $tag = $this->resolveTag($data);
+        $scan = $this->unsavedScan($data, $sourceMode, $scanLocation, $scanTime, $tag);
+        $plate = $scan->vehicle?->plate_number;
+
+        return new RfidIngestResult(
+            $scan,
+            RfidIngestResult::BUFFERED,
+            ($plate ? "Tag read for {$plate}." : 'Tag '.$scan->tag_uid.' read.').' Recorded only when the camera sees the vehicle cross.'
+        );
+    }
+
+    /**
+     * Settings › Test Scan: what this tag is, without saving anything.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function preview(array $data): RfidIngestResult
+    {
+        $scanLocation = $this->normalizeLocation((string) ($data['scan_location'] ?? ''));
+        $uid = $this->requestedUid($data);
+
+        if ($uid === '') {
+            throw ValidationException::withMessages(['tag_uid' => 'Scan or select an RFID tag first.']);
+        }
+
+        $tag = $this->resolveTag($data);
+        $scan = $this->unsavedScan($data, 'simulated', $scanLocation, now(), $tag);
+        $vehicle = $scan->vehicle;
+        $status = $scan->verification_status;
+        $next = $vehicle && strtoupper((string) $vehicle->current_state) === Vehicle::STATE_INSIDE ? 'OUT' : 'IN';
+
+        $message = match (true) {
+            $status === 'verified' => "Registered tag: {$vehicle->plate_number}. It is recorded ({$next} by the vehicle's state, or the camera's direction) only when the camera sees the vehicle cross.",
+            $status === 'unknown_tag' => "Unknown tag {$uid}: not in the registry. Register this tag.",
+            default => (string) $this->tagAnomalyReason($tag, $status, $scanLocation),
+        };
+
+        return new RfidIngestResult($scan, RfidIngestResult::PREVIEW, 'Preview only, nothing saved. '.$message);
+    }
+
+    /**
+     * An RfidScanLog that is not saved (buffered reads, Test Scan preview).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function unsavedScan(array $data, string $sourceMode, string $scanLocation, Carbon $scanTime, ?RfidTag $tag): RfidScanLog
+    {
+        $vehicle = $tag?->vehicle;
+        $status = $this->resolveVerificationStatus($tag, $vehicle);
+        $scan = new RfidScanLog([
+            'vehicle_id' => $vehicle?->id,
+            'vehicle_rfid_tag_id' => $tag?->id,
+            'tag_uid' => $tag?->uid ?: $this->requestedUid($data),
+            'scan_location' => $scanLocation,
+            'scan_time' => $scanTime,
+            'verification_status' => $status,
+            'source_mode' => $sourceMode,
+            'anomaly_reason' => $status === 'unknown_tag' ? null : $this->tagAnomalyReason($tag, $status, $scanLocation),
+        ]);
+        $scan->setRelation('vehicle', $vehicle);
+        $scan->setRelation('vehicleRfidTag', $tag);
+        $scan->setRelation('correlatedVehicleEvent', null);
+        $scan->setRelation('guestVehicleObservation', null);
+
+        return $scan;
+    }
+
+    /** A read of this tag at this gate was recorded during this presence. */
+    protected function recordedSince(string $gate, string $uid, float $since): bool
+    {
+        return RfidScanLog::query()
+            ->where('scan_location', $gate)
+            ->whereRaw('upper(tag_uid) = ?', [strtoupper($uid)])
+            ->where('scan_time', '>=', Carbon::createFromTimestamp($since - 2, config('app.timezone')))
+            ->exists();
     }
 
     /** Phase 3: never below 10 s (0 recorded every read of a tag again). */

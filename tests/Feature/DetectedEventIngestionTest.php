@@ -191,7 +191,8 @@ class DetectedEventIngestionTest extends TestCase
             ->assertJsonPath('overlay.vehicle.plate_number', $tag->vehicle->plate_number);
     }
 
-    public function test_detector_can_poll_rfid_match_across_stations_during_detection_window(): void
+    /** RFID only with a vehicle: a read belongs to its own gate's vehicles only. */
+    public function test_detector_rfid_match_does_not_take_a_read_from_another_gate(): void
     {
         $this->seed(DatabaseSeeder::class);
 
@@ -213,9 +214,8 @@ class DetectedEventIngestionTest extends TestCase
             'window_seconds' => 4,
         ]))
             ->assertOk()
-            ->assertJsonPath('matched', true)
-            ->assertJsonPath('overlay.verification', 'registered')
-            ->assertJsonPath('overlay.vehicle.plate_number', $tag->vehicle->plate_number);
+            ->assertJsonPath('matched', false)
+            ->assertJsonPath('overlay.verification', 'no_pass');
     }
 
     public function test_local_detector_can_poll_rfid_match_without_key_and_with_detector_timezone(): void
@@ -513,7 +513,8 @@ class DetectedEventIngestionTest extends TestCase
             ->exists());
     }
 
-    public function test_detector_guest_observation_is_suppressed_when_recent_rfid_scan_is_registered_across_stations(): void
+    /** RFID only with a vehicle: a read at another gate does not confirm this vehicle. */
+    public function test_detector_guest_observation_is_not_suppressed_by_a_read_at_another_gate(): void
     {
         Storage::fake('public');
         $this->seed(DatabaseSeeder::class);
@@ -541,12 +542,10 @@ class DetectedEventIngestionTest extends TestCase
                 'analysis_status' => 'pending',
             ]),
         ])
-            ->assertOk()
-            ->assertJsonPath('suppressed', true)
-            ->assertJsonPath('overlay.verification', 'registered')
-            ->assertJsonPath('overlay.vehicle.plate_number', 'CRS-1001');
+            ->assertCreated()
+            ->assertJsonMissingPath('suppressed');
 
-        $this->assertDatabaseMissing('guest_vehicle_observations', [
+        $this->assertDatabaseHas('guest_vehicle_observations', [
             'external_event_key' => 'guest-window-registered-suppressed-cross-001',
         ]);
     }

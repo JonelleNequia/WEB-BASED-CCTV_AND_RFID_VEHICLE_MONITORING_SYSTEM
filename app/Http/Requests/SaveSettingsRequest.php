@@ -44,7 +44,10 @@ class SaveSettingsRequest extends FormRequest
     public const SECTIONS = [
         // B1 (Settings): General (gate names), Advanced › Timing, Detection, Manual setup.
         'general' => ['gates'],
-        'timing' => ['rfid_cooldown_seconds', 'rfid_lookback_seconds', 'rfid_lookahead_seconds'],
+        'timing' => [
+            'rfid_cooldown_seconds', 'rfid_lookback_seconds', 'rfid_lookahead_seconds',
+            'rfid_stationary_seconds', 'rfid_offline_fallback', 'rfid_offline_grace_seconds',
+        ],
         'detection' => [
             'perf_stream_fps', 'perf_stream_width', 'perf_jpeg_quality', 'perf_detection_fps',
             'perf_yolo_imgsz', 'perf_yolo_device', 'perf_roi_crop', 'perf_hires_on_trigger',
@@ -97,6 +100,10 @@ class SaveSettingsRequest extends FormRequest
             'rfid_cooldown_seconds' => ['sometimes', 'integer', 'min:10', 'max:3600'],
             'rfid_lookback_seconds' => ['sometimes', 'integer', 'min:1', 'max:15'],
             'rfid_lookahead_seconds' => ['sometimes', 'integer', 'min:1', 'max:10'],
+            // RFID only with a vehicle.
+            'rfid_stationary_seconds' => ['sometimes', 'integer', 'min:10', 'max:3600'],
+            'rfid_offline_fallback' => ['sometimes', 'in:0,1'],
+            'rfid_offline_grace_seconds' => ['sometimes', 'integer', 'min:0', 'max:300'],
             // Cameras tab: one camera per gate (keys = gate codes).
             'camera_configs' => ['required', 'array'],
             'camera_configs.*.camera_name' => ['required', 'string', 'max:100'],

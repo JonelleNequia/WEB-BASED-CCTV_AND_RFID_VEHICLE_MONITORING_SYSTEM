@@ -107,16 +107,16 @@
                 </div>
 
                 <div class="mini-note">
-                    {{-- Phase 1 (gates): every gate records IN and OUT. --}}
-                    <strong>Every gate records IN and OUT.</strong>
+                    {{-- RFID only with a vehicle: a test scan is a preview. --}}
+                    <strong>Preview only. Nothing is recorded.</strong>
                     <p>
-                        A registered vehicle that is outside is recorded as IN, one that is inside as OUT (the camera will give the direction later).
-                        The same tag at the same gate is ignored for {{ $settings['rfid_cooldown_seconds'] ?? 60 }} seconds.
+                        Shows whether the tag is registered, unknown or flagged. A tag is recorded only when the camera sees a vehicle cross the line
+                        (or "RFID only" while the camera is offline).
                     </p>
                 </div>
 
                 <div class="button-row">
-                    <button type="submit" class="button button-primary {{ $simulationEnabled ? '' : 'button-disabled' }}" @disabled(! $simulationEnabled)>Simulate RFID Scan</button>
+                    <button type="submit" class="button button-primary {{ $simulationEnabled ? '' : 'button-disabled' }}" @disabled(! $simulationEnabled)>Check Tag</button>
                 </div>
             </form>
 
@@ -360,7 +360,7 @@
             form.addEventListener('submit', async (event) => {
                 event.preventDefault();
                 resultBox.hidden = false;
-                resultBox.textContent = 'Recording RFID scan...';
+                resultBox.textContent = 'Checking tag...';
 
                 try {
                     if (!registeredTagValue?.value && manualTagInput?.value.trim() === '') {
@@ -389,11 +389,9 @@
                         return;
                     }
 
-                    const scan = payload.scan || {};
-                    resultBox.textContent = `${payload.message} ${scan.guest_observation_id ? 'Guest observation #' + scan.guest_observation_id + ' was created.' : ''} Refreshing latest result...`;
-                    window.setTimeout(() => {
-                        window.location.href = '{{ route('settings.index', ['tab' => 'test-scan']) }}';
-                    }, 500);
+                    // Preview only: nothing saved, so the page stays.
+                    resultBox.textContent = payload.message;
+                    focusScannerInput();
                 } catch (error) {
                     resultBox.textContent = 'RFID scan could not reach the server.';
                     focusScannerInput();

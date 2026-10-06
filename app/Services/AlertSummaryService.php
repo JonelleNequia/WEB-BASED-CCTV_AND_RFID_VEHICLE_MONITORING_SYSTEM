@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\RfidScanLog;
+use App\Models\VisitorRecord;
 use App\Support\DisplayTime;
 use App\Support\PhilippineTime;
 use Illuminate\Support\Facades\Cache;
@@ -32,7 +33,8 @@ class AlertSummaryService
             $counts = [
                 // Direction does not fit, lost / disabled tag, inactive vehicle...
                 'anomalies' => $today()->where('verification_status', '!=', 'unknown_tag')->count(),
-                'unknown_tags' => $today()->where('verification_status', 'unknown_tag')->count(),
+                // RFID only with a vehicle: an unknown tag is kept on the visitor's record.
+                'unknown_tags' => $today()->where('verification_status', 'unknown_tag')->count() + $this->unknownTagVisitors()->count(),
             ];
 
             return $counts + ['total' => array_sum($counts)];
@@ -78,7 +80,30 @@ class AlertSummaryService
                 ]);
             });
 
+        $this->unknownTagVisitors()->latest('seen_at')->limit($limit)->get()
+            ->each(function (VisitorRecord $record) use ($items): void {
+                $items->push([
+                    'kind' => 'unknown_tag',
+                    'tone' => 'warning',
+                    'label' => 'Unknown tag',
+                    'title' => $record->tag_uid.' · '.\App\Models\Gate::labelFor($record->gate),
+                    'detail' => 'Read for an Unregistered Visitor ('.($record->plate_number ?: 'plate not read').'). Not in the registry.',
+                    'time' => DisplayTime::time($record->seen_at),
+                    'sort' => $record->seen_at?->getTimestamp() ?? 0,
+                    'action_label' => 'Register this tag',
+                    'action_url' => route('registry.index', ['tab' => 'vehicles', 'register_tag' => $record->tag_uid]),
+                ]);
+            });
+
         return $items->sortByDesc('sort')->take($limit)->values()->all();
+    }
+
+    protected function unknownTagVisitors()
+    {
+        return VisitorRecord::query()
+            ->whereNotNull('tag_uid')
+            ->where('status', VisitorRecord::STATUS_ACTIVE)
+            ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['seen_at']));
     }
 
     public function forget(): void

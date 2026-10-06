@@ -307,7 +307,7 @@ class GuestObservationController extends Controller
                     'source_name' => $sourceName,
                     'payload_json' => $this->safeGuestObservationLogPayload($request),
                     'status' => 'guest_observation_suppressed_registered',
-                    'notes' => "No-pass alert suppressed because RFID scan {$recentVerifiedScan->id} verified {$passType}.",
+                    'notes' => "No-pass alert suppressed because RFID tag {$recentVerifiedScan->tag_uid} verified {$passType}.",
                 ]);
 
                 return response()->json([

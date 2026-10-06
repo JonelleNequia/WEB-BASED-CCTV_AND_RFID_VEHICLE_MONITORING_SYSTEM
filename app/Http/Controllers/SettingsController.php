@@ -48,7 +48,10 @@ class SettingsController extends Controller
 
     /** B3: settings a section can put back to their defaults. */
     public const RESTORABLE = [
-        'timing' => ['rfid_cooldown_seconds', 'rfid_lookback_seconds', 'rfid_lookahead_seconds'],
+        'timing' => [
+            'rfid_cooldown_seconds', 'rfid_lookback_seconds', 'rfid_lookahead_seconds',
+            'rfid_stationary_seconds', 'rfid_offline_fallback', 'rfid_offline_grace_seconds',
+        ],
         'detection' => [
             'perf_stream_fps', 'perf_stream_width', 'perf_jpeg_quality', 'perf_detection_fps', 'perf_yolo_imgsz',
             'perf_yolo_device', 'perf_roi_crop', 'perf_hires_on_trigger',

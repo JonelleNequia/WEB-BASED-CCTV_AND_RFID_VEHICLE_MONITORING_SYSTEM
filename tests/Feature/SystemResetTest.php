@@ -186,7 +186,11 @@ class SystemResetTest extends TestCase
         $vehicle->forceFill(['rfid_tag_id' => $tag->id, 'rfid_tag_uid' => $tag->uid])->save();
 
         app(RfidIngestService::class)->ingest(['tag_uid' => 'RST-TAG', 'scan_location' => 'gate-1']);
-        app(RfidIngestService::class)->ingest(['tag_uid' => 'UNKNOWN-RST', 'scan_location' => 'gate-1']);
+RfidScanLog::query()->create([ // saved before "RFID only with a vehicle"
+            'tag_uid' => 'UNKNOWN-RST', 'scan_location' => 'gate-1', 'scan_time' => now(), 'verification_status' => 'unknown_tag',
+            'source_mode' => 'hardware_placeholder', 'reader_name' => 'Gate UHF Reader', 'is_anomaly' => true, 'outcome' => 'unknown_tag',
+            'anomaly_reason' => 'Unknown tag UNKNOWN-RST is not in the registry. Register this tag.',
+        ]);
         VisitorRecord::query()->create(['external_event_key' => 'rst-1', 'gate' => 'gate-1', 'direction' => 'IN', 'seen_at' => now(), 'status' => 'active', 'plate_status' => 'unreadable']);
 
         Storage::disk('public')->put('visitor_plates/plate.jpg', 'jpg');

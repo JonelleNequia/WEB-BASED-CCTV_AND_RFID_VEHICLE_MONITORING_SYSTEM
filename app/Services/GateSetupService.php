@@ -143,6 +143,8 @@ class GateSetupService
             },
             'last_tag' => filled($link['last_tag'] ?? null) ? '…'.substr((string) $link['last_tag'], -8) : null,
             'last_tag_time' => filled($link['last_tag_at'] ?? null) ? DisplayTime::time($link['last_tag_at']) : null,
+            // RFID only with a vehicle: tags are recorded without the camera now.
+            'rfid_only' => app(RfidIngestService::class)->rfidOnly($gate->code),
         ];
     }
 

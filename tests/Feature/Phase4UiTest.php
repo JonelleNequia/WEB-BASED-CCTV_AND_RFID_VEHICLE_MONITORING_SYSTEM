@@ -60,7 +60,7 @@ class Phase4UiTest extends TestCase
             ->get(route('settings.index', ['tab' => 'test-scan']))
             ->assertOk()
             ->assertDontSee('Same station scan can become ENTRY or EXIT')
-            ->assertSee('Every gate records IN and OUT')
+            ->assertSee('Preview only. Nothing is recorded.')
             ->assertDontSee('Guest Pass')
             ->assertSee('is LOST but was scanned')
             ->assertSee('SPARE-DESK-1');

@@ -34,6 +34,7 @@ class Phase3RfidCameraFusionTest extends TestCase
         parent::setUp();
 
         $this->seed(DatabaseSeeder::class);
+        $this->freezeTime();
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
 
@@ -49,17 +50,18 @@ class Phase3RfidCameraFusionTest extends TestCase
         $this->cameraOnline();
         $vehicle = $this->registeredVehicle('FUS 1001', 'FUS-TAG-1');
 
-        // The reader reads the tag on approach; nothing moves until the camera sees the crossing.
+        // The reader reads the tag on approach; nothing is saved until the
+        // camera sees the crossing (RFID only with a vehicle).
         $read = $this->scan('FUS-TAG-1');
-        $this->assertSame(RfidIngestResult::PENDING, $read->outcome);
+        $this->assertSame(RfidIngestResult::BUFFERED, $read->outcome);
         $this->assertSame(Vehicle::STATE_OUTSIDE, $vehicle->fresh()->current_state);
-        $this->assertSame(0, VehicleEvent::query()->count());
+        $this->assertSame([0, 0], [VehicleEvent::query()->count(), RfidScanLog::query()->count()]);
 
         $this->travel(8)->seconds(); // inside the 10 s lookback
         $this->cameraOnline();
         $this->crossing('IN', 'k-in')->assertCreated()->assertJsonPath('rfid_scan.event_type', 'ENTRY');
 
-        $scan = $read->scanLog->fresh();
+        $scan = RfidScanLog::query()->sole();
         $crossing = VehicleCrossing::query()->where('external_event_key', 'k-in')->sole();
         $this->assertSame(['ENTRY', RfidScanLog::FUSION_CAMERA, $crossing->id, false], [$scan->resolved_event_type, $scan->fusion_status, $scan->vehicle_crossing_id, $scan->is_anomaly]);
         $this->assertSame($scan->id, $crossing->rfid_scan_log_id);
@@ -97,11 +99,11 @@ class Phase3RfidCameraFusionTest extends TestCase
         $this->cameraOnline();
         $this->registeredVehicle('FUS 3003', 'FUS-TAG-3');
 
-        $read = $this->scan('FUS-TAG-3');
+        $this->scan('FUS-TAG-3');
         $this->travel(5)->seconds(); // more than 3 s before the crossing
         $this->cameraOnline();
         $this->crossing('IN', 'k-late')->assertCreated()->assertJsonPath('rfid_scan', null);
-        $this->assertSame(RfidScanLog::FUSION_PENDING, $read->scanLog->fresh()->fusion_status);
+        $this->assertSame(0, RfidScanLog::query()->count());
 
         // The detector gets the window lengths from the export.
         app(\App\Services\SettingsService::class)->exportCameraRuntimeConfig();
@@ -114,10 +116,10 @@ class Phase3RfidCameraFusionTest extends TestCase
         $this->cameraOnline();
         $vehicle = $this->registeredVehicle('ANO 4004', 'ANO-TAG-4', Vehicle::STATE_INSIDE);
 
-        $read = $this->scan('ANO-TAG-4');
+        $this->scan('ANO-TAG-4');
         $this->crossing('IN', 'k-anomaly');
 
-        $scan = $read->scanLog->fresh();
+        $scan = RfidScanLog::query()->sole();
         $this->assertSame(['ENTRY', RfidIngestResult::ANOMALY, true], [$scan->resolved_event_type, $scan->outcome, $scan->is_anomaly]);
         $this->assertStringContainsString('already inside', $scan->anomaly_reason);
         $this->assertSame(Vehicle::STATE_INSIDE, $vehicle->fresh()->current_state);
@@ -129,10 +131,10 @@ class Phase3RfidCameraFusionTest extends TestCase
         $this->cameraOnline();
         $vehicle = $this->registeredVehicle('UNK 5005', 'UNK-TAG-5', Vehicle::STATE_INSIDE);
 
-        $read = $this->scan('UNK-TAG-5');
+        $this->scan('UNK-TAG-5');
         $this->crossing('UNKNOWN', 'k-unknown', 'track too short');
 
-        $scan = $read->scanLog->fresh();
+        $scan = RfidScanLog::query()->sole();
         $this->assertSame(['EXIT', RfidScanLog::FUSION_TOGGLE], [$scan->resolved_event_type, $scan->fusion_status]);
         $this->assertStringContainsString('Camera direction unknown (track too short)', $scan->fusion_note);
         $this->assertSame(Vehicle::STATE_OUTSIDE, $vehicle->fresh()->current_state);
@@ -142,55 +144,37 @@ class Phase3RfidCameraFusionTest extends TestCase
     {
         $vehicle = $this->registeredVehicle('TGL 6006', 'TGL-TAG-6');
 
-        // No detector status at all.
+        // No detector status at all: RFID only.
         $read = $this->scan('TGL-TAG-6');
         $this->assertSame([RfidIngestResult::RECORDED, 'ENTRY', RfidScanLog::FUSION_TOGGLE], [$read->outcome, $read->scanLog->resolved_event_type, $read->scanLog->fusion_status]);
-        $this->assertStringContainsString('detector not running', $read->scanLog->fusion_note);
+        $this->assertStringContainsString('RFID only (detector not running)', $read->scanLog->fusion_note);
 
-        // Detector running, this gate's camera offline.
+        // Detector running, this gate's camera offline (since when unknown).
         $this->travel(2)->minutes();
         $this->cameraOnline(running: false);
         $read = $this->scan('TGL-TAG-6');
-        $this->assertSame(['EXIT', 'No camera direction (camera offline); vehicle state used.'], [$read->scanLog->resolved_event_type, $read->scanLog->fusion_note]);
+        $this->assertSame(['EXIT', "RFID only (camera offline): IN/OUT from the vehicle's state."], [$read->scanLog->resolved_event_type, $read->scanLog->fusion_note]);
         $this->assertSame(Vehicle::STATE_OUTSIDE, $vehicle->fresh()->current_state);
     }
 
-    public function test_read_without_a_crossing_becomes_scan_only_and_moves_nothing(): void
+    public function test_read_without_a_crossing_is_not_recorded_and_moves_nothing(): void
     {
         $this->cameraOnline();
         $vehicle = $this->registeredVehicle('SCN 7007', 'SCN-TAG-7');
-        $read = $this->scan('SCN-TAG-7');
-
-        // Still waiting: the kiosk shows it.
-        $this->actingAs($this->admin)->getJson(route('stations.state', 'gate-1'))
-            ->assertOk()->assertJsonFragment(['event_type' => 'WAITING', 'plate_number' => 'SCN 7007']);
+        $this->scan('SCN-TAG-7');
 
         $this->travel(21)->seconds(); // lookback 10 + lookahead 4 + delivery 6
         $this->cameraOnline();
-        $this->actingAs($this->admin)->getJson(route('stations.state', 'gate-1'))
-            ->assertOk()->assertJsonFragment(['event_type' => 'SCAN ONLY', 'plate_number' => 'SCN 7007']);
+        $this->actingAs($this->admin)->getJson(route('stations.state', 'gate-1'))->assertOk()->assertJsonMissing(['plate_number' => 'SCN 7007']);
 
-        $scan = $read->scanLog->fresh();
-        $this->assertSame([RfidScanLog::FUSION_SCAN_ONLY, null], [$scan->fusion_status, $scan->resolved_event_type]);
+        $this->assertSame(0, RfidScanLog::query()->count());
         $this->assertSame(Vehicle::STATE_OUTSIDE, $vehicle->fresh()->current_state);
         $this->assertSame(0, VehicleEvent::query()->count());
-        $this->actingAs($this->admin)->get(route('logs.index', ['tab' => 'scans', 'verification_status' => 'scan_only']))
-            ->assertOk()->assertSee('Scan only (no crossing seen)')->assertSee('No IN/OUT');
-    }
 
-    public function test_camera_going_offline_while_a_read_waits_uses_the_vehicle_state(): void
-    {
-        $this->cameraOnline();
-        $vehicle = $this->registeredVehicle('OFF 8008', 'OFF-TAG-8');
-        $read = $this->scan('OFF-TAG-8');
-
-        $this->travel(21)->seconds();
+        // The camera going offline later does not record it either.
         $this->cameraOnline(running: false);
         $this->artisan('rfid:finalize-pending')->assertSuccessful();
-
-        $scan = $read->scanLog->fresh();
-        $this->assertSame(['ENTRY', RfidScanLog::FUSION_TOGGLE], [$scan->resolved_event_type, $scan->fusion_status]);
-        $this->assertSame(Vehicle::STATE_INSIDE, $vehicle->fresh()->current_state);
+        $this->assertSame(0, RfidScanLog::query()->count());
     }
 
     public function test_the_detector_match_decides_which_read_a_crossing_belongs_to(): void
@@ -198,45 +182,42 @@ class Phase3RfidCameraFusionTest extends TestCase
         $this->cameraOnline();
         $this->registeredVehicle('TWO 0001', 'TWO-TAG-1');
         $this->registeredVehicle('TWO 0002', 'TWO-TAG-2');
-        $first = $this->scan('TWO-TAG-1');
+        $this->scan('TWO-TAG-1');
         $this->travel(2)->seconds();
-        $second = $this->scan('TWO-TAG-2');
+        $this->cameraOnline();
+        $this->scan('TWO-TAG-2');
 
         // Two cars, two detector windows more than 3 s apart (closer than that
         // counts as the same car with a new track ID). Car B's window claims
         // the newest read (TWO-TAG-2); car A's window then claims TWO-TAG-1.
-        $this->cameraOnline();
         $this->matchFor('k-car-b', 'TWO 0002');
         $this->travel(4)->seconds();
         $this->cameraOnline();
         $this->matchFor('k-car-a', 'TWO 0001');
 
         // Car A's crossing takes its claimed read, although TWO-TAG-2 is closer in time.
-        $this->crossing('IN', 'k-car-a');
-        $this->assertSame(['ENTRY', null], [$first->scanLog->fresh()->resolved_event_type, $second->scanLog->fresh()->resolved_event_type]);
-        $this->crossing('IN', 'k-car-b');
-        $this->assertSame('ENTRY', $second->scanLog->fresh()->resolved_event_type);
+        $this->crossing('IN', 'k-car-a')->assertJsonPath('rfid_scan.plate_number', 'TWO 0001');
+        $this->crossing('IN', 'k-car-b')->assertJsonPath('rfid_scan.plate_number', 'TWO 0002');
+        $this->assertSame(2, RfidScanLog::query()->where('resolved_event_type', 'ENTRY')->count());
     }
 
-    public function test_unknown_tag_is_one_event_per_cooldown_with_register_this_tag_and_no_visitor_record(): void
+    public function test_unknown_tag_without_a_vehicle_is_not_recorded_and_no_visitor_record(): void
     {
         $this->cameraOnline();
         $first = $this->scan('E280689400004031D6456CE8');
-        $this->assertSame(RfidIngestResult::UNKNOWN_TAG, $first->outcome);
+        $this->assertSame(RfidIngestResult::BUFFERED, $first->outcome);
         $this->travel(20)->seconds();
-        $this->assertTrue($this->scan('E280689400004031D6456CE8')->isDuplicate());
+        $this->cameraOnline();
+        $this->scan('E280689400004031D6456CE8');
 
-        $this->assertSame(1, RfidScanLog::query()->count());
+        $this->assertSame(0, RfidScanLog::query()->count());
         $this->assertSame(0, GuestVehicleObservation::query()->count());
         $this->assertSame(0, VehicleEvent::query()->count());
 
+        // Register this tag still opens the prefilled form.
         $registerUrl = route('registry.index', ['tab' => 'vehicles', 'register_tag' => 'E280689400004031D6456CE8']);
-        $this->actingAs($this->admin)->get(route('logs.index', ['tab' => 'alerts']))
-            ->assertOk()->assertSee('Register this tag')->assertSee(e($registerUrl), false);
         $this->actingAs($this->admin)->get($registerUrl)
             ->assertOk()->assertSee('value="E280689400004031D6456CE8"', false)->assertSee('data-prefill="1"', false);
-        $this->actingAs($this->admin)->getJson(route('stations.state', 'gate-1'))
-            ->assertJsonFragment(['event_type' => 'UNKNOWN TAG', 'unknown_tag' => true]);
     }
 
     public function test_cooldown_has_a_10_second_minimum_and_the_old_zero_becomes_60(): void

@@ -109,16 +109,7 @@ class SystemResetService
      */
     public function backup(): string
     {
-        $folder = storage_path('backups/reset-'.now()->format('Ymd-His'));
-        File::ensureDirectoryExists($folder);
-
-        $database = (string) config('database.connections.'.config('database.default').'.database');
-        if (config('database.default') === 'sqlite' && $database !== ':memory:' && File::exists($database)) {
-            // A consistent copy even while the app is writing (VACUUM INTO).
-            DB::statement('VACUUM INTO ?', [$folder.'/database.sqlite']);
-        } elseif (config('database.default') !== 'sqlite') {
-            throw new RuntimeException('Automatic backup supports the SQLite database only; back up the database first.');
-        }
+        $folder = $this->backupDatabase('reset');
 
         $zip = new ZipArchive;
         if ($zip->open($folder.'/snapshots.zip', ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
@@ -137,6 +128,26 @@ class SystemResetService
 
         $zip->addFromString('README.txt', 'Snapshots and frames saved before `system:reset` on '.now()->toDateTimeString().".\n");
         $zip->close();
+
+        return $folder;
+    }
+
+    /**
+     * Copy the database file into storage/backups/{prefix}-YYYYmmdd-HHMMSS/.
+     * Returns that folder.
+     */
+    public function backupDatabase(string $prefix): string
+    {
+        $folder = storage_path('backups/'.$prefix.'-'.now()->format('Ymd-His'));
+        File::ensureDirectoryExists($folder);
+
+        $database = (string) config('database.connections.'.config('database.default').'.database');
+        if (config('database.default') === 'sqlite' && $database !== ':memory:' && File::exists($database)) {
+            // A consistent copy even while the app is writing (VACUUM INTO).
+            DB::statement('VACUUM INTO ?', [$folder.'/database.sqlite']);
+        } elseif (config('database.default') !== 'sqlite') {
+            throw new RuntimeException('Automatic backup supports the SQLite database only; back up the database first.');
+        }
 
         return $folder;
     }

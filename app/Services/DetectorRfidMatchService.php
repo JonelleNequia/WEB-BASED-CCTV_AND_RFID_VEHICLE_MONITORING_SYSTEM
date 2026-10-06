@@ -4,17 +4,19 @@ namespace App\Services;
 
 use App\Models\RfidScanLog;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Cache;
 
 /**
  * Phase 5: decide whether a vehicle the detector saw crossing the trigger
  * line had a registered RFID tag (guest passes were removed in Phase 0).
  *
- * - Lookback: scans from ~10 seconds BEFORE the crossing count, because a UHF
+ * RFID only with a vehicle: the tag comes from the read buffer
+ * (RfidTagMatcher), not from saved reads.
+ * - Lookback: reads from ~10 seconds BEFORE the crossing count, because a UHF
  *   reader reads the tag while the vehicle is still approaching.
- * - One scan confirms one vehicle: when a detector window takes a scan, a
+ * - One tag presence confirms one vehicle: when a detector window takes it, a
  *   different vehicle crossing later cannot reuse it. A second window within
  *   a few seconds of the first (YOLO track-id swap on the same car) may.
+ * - The returned RfidScanLog is not saved: the crossing makes the record.
  */
 class DetectorRfidMatchService
 {
@@ -22,17 +24,18 @@ class DetectorRfidMatchService
 
     public const MAX_LOOKBACK_SECONDS = 15;
 
-    /** Scans from the other station only count this close to the crossing. */
-    public const OTHER_STATION_LOOKBACK_SECONDS = 3;
-
     /** Same car, new YOLO track id: may reuse the claim within this gap. */
-    public const SAME_VEHICLE_REUSE_SECONDS = 3;
+    public const SAME_VEHICLE_REUSE_SECONDS = RfidTagMatcher::SAME_VEHICLE_REUSE_SECONDS;
 
-    protected const CLAIM_TTL_SECONDS = 300;
+    public function __construct(protected RfidTagMatcher $tagMatcher)
+    {
+    }
 
-    /** Registered vehicle tag reads. */
-    public const REGISTERED_STATUSES = ['verified'];
-
+    /**
+     * The registered tag of the vehicle in this detector window, or null.
+     * The window and lookback come from Settings › Timing (the detector
+     * sends the same values).
+     */
     public function find(
         string $cameraRole,
         Carbon $eventTime,
@@ -40,36 +43,30 @@ class DetectorRfidMatchService
         int $lookbackSeconds = self::DEFAULT_LOOKBACK_SECONDS,
         ?string $eventKey = null
     ): ?RfidScanLog {
-        $eventTime = $eventTime->copy()->setTimezone(config('app.timezone', 'UTC'));
-        $lookbackSeconds = max(0, min(self::MAX_LOOKBACK_SECONDS, $lookbackSeconds));
-        $windowEnd = $eventTime->copy()->addSeconds($windowSeconds);
-        $to = now()->lessThan($windowEnd) ? now() : $windowEnd;
+        $presence = $this->tagMatcher->pick($cameraRole, $eventTime, $eventKey, registeredOnly: true);
 
-        $candidates = $this->candidates($eventTime->copy()->subSeconds($lookbackSeconds), $to)
-            ->where('scan_location', $cameraRole)
-            ->get();
-
-        // Legacy single-camera setups: a read at the other station still
-        // counts, but only right around the crossing.
-        $candidates = $candidates->concat(
-            $this->candidates($eventTime->copy()->subSeconds(min($lookbackSeconds, self::OTHER_STATION_LOOKBACK_SECONDS)), $to)
-                ->where('scan_location', '!=', $cameraRole)
-                ->get()
-        );
-
-        foreach ($candidates as $scan) {
-            if ($this->claim($scan, $eventKey, $eventTime)) {
-                // Phase 3: this detector window's crossing gives the read its
-                // direction (the first window that claimed it).
-                if (filled($eventKey) && blank($scan->detector_event_key) && $scan->scan_location === $cameraRole) {
-                    $scan->forceFill(['detector_event_key' => $eventKey])->saveQuietly();
-                }
-
-                return $scan;
-            }
+        if ($presence === null) {
+            return null;
         }
 
-        return null;
+        // Callers without an event key (manual checks) only look.
+        if (filled($eventKey)) {
+            $this->tagMatcher->claim($cameraRole, $presence, $eventKey, $eventTime);
+        }
+
+        $tag = $presence['tag'];
+        $scan = new RfidScanLog([
+            'vehicle_id' => $tag->vehicle_id,
+            'vehicle_rfid_tag_id' => $tag->id,
+            'tag_uid' => $tag->uid,
+            'scan_location' => $cameraRole,
+            'scan_time' => Carbon::createFromTimestamp((float) $presence['peak_at'], config('app.timezone')),
+            'verification_status' => 'verified',
+        ]);
+        $scan->setRelation('vehicle', $tag->vehicle->loadMissing('rfidTag'));
+        $scan->setRelation('vehicleRfidTag', $tag);
+
+        return $scan;
     }
 
     /**
@@ -117,45 +114,5 @@ class DetectorRfidMatchService
             'vehicle' => null,
             ...$extra,
         ];
-    }
-
-    /**
-     * Registered tag reads, newest first.
-     */
-    protected function candidates(Carbon $from, Carbon $to)
-    {
-        return RfidScanLog::query()
-            ->with(['vehicle.rfidTag', 'vehicleRfidTag'])
-            ->whereIn('verification_status', self::REGISTERED_STATUSES)
-            ->where(function ($query) use ($from, $to): void {
-                $query->whereBetween('scan_time', [$from, $to])
-                    ->orWhereBetween('created_at', [$from, $to])
-                    ->orWhereBetween('updated_at', [$from, $to]);
-            })
-            ->latest('scan_time')
-            ->latest('id');
-    }
-
-    protected function claim(RfidScanLog $scan, ?string $eventKey, Carbon $eventTime): bool
-    {
-        // Callers without an event key (manual checks) only look.
-        if (blank($eventKey)) {
-            return true;
-        }
-
-        $cacheKey = 'detector-rfid-claim:'.$scan->id;
-        $claim = ['event_key' => $eventKey, 'event_time' => $eventTime->getTimestamp()];
-
-        if (Cache::add($cacheKey, $claim, self::CLAIM_TTL_SECONDS)) {
-            return true;
-        }
-
-        $existing = Cache::get($cacheKey);
-
-        if (! is_array($existing) || ($existing['event_key'] ?? null) === $eventKey) {
-            return true;
-        }
-
-        return abs(((int) ($existing['event_time'] ?? 0)) - $eventTime->getTimestamp()) <= self::SAME_VEHICLE_REUSE_SECONDS;
     }
 }

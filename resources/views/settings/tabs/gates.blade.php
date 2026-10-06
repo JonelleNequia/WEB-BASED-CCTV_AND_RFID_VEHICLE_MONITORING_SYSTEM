@@ -75,6 +75,9 @@
                             @if ($reader['next_step'] !== '')
                                 <span class="next-step">→ {{ $reader['next_step'] }}</span>
                             @endif
+                            @if ($reader['rfid_only'])
+                                <span class="next-step" data-rfid-only>RFID only (camera offline): registered tags are recorded without the camera, IN/OUT from the vehicle's state.</span>
+                            @endif
                             <small class="text-muted">{{ $reader['last_tag'] ? 'Last tag '.$reader['last_tag'].' at '.$reader['last_tag_time'] : 'No tag read yet' }}{{ $reader['manual'] ? ' · added by hand (Advanced)' : '' }}</small>
                         </div>
                         <details class="menu row-menu">

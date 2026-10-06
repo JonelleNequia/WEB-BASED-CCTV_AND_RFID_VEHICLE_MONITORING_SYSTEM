@@ -68,15 +68,15 @@ class Phase3RfidLogicTest extends TestCase
         $this->assertSame(Vehicle::STATE_INSIDE, $vehicle->fresh()->current_state);
     }
 
-    public function test_rfid_desk_keeps_the_toggle(): void
+    public function test_test_scan_previews_the_toggle_without_moving_the_vehicle(): void
     {
         $vehicle = $this->registeredVehicle('TGL 3003', 'TGL-TAG-3', Vehicle::STATE_INSIDE);
 
         $result = app(RfidService::class)->simulate(['tag_uid' => 'TGL-TAG-3', 'scan_location' => 'gate-1']);
 
-        $this->assertSame('EXIT', $result->scanLog->resolved_event_type);
-        $this->assertFalse($result->scanLog->is_anomaly);
-        $this->assertSame(Vehicle::STATE_OUTSIDE, $vehicle->fresh()->current_state);
+        $this->assertSame([\App\Support\RfidIngestResult::PREVIEW, false], [$result->outcome, $result->isSaved()]);
+        $this->assertStringContainsString('Registered tag: TGL 3003. It is recorded (OUT', $result->message);
+        $this->assertSame(Vehicle::STATE_INSIDE, $vehicle->fresh()->current_state);
     }
 
     public function test_cooldown_ignores_repeat_reads_per_tag_and_station(): void

@@ -570,6 +570,13 @@ class DeviceRegistryService
             'scan_request' => $scanRequest ?? ($current['scan_request'] ?? null),
             'identify_request' => $identifyRequest ?? ($current['identify_request'] ?? null),
             'find_request' => $findRequest ?? ($current['find_request'] ?? null),
+            // RFID only with a vehicle: the read buffer (devices/tag_buffer.py).
+            'rfid' => [
+                // Long enough for a read 10 s before a crossing the detector sends a few seconds late.
+                'buffer_seconds' => max((int) config('monitoring.rfid.buffer_seconds', 15), app(RfidCameraFusionService::class)->pendingTimeoutSeconds()),
+                'absent_seconds' => (int) config('monitoring.rfid.absent_seconds', 5),
+                'stationary_seconds' => max(10, (int) ($settings['rfid_stationary_seconds'] ?? 60)),
+            ],
             // Phase 1: one entry per gate (key = gate code).
             'stations' => Gate::ordered()->mapWithKeys(fn (Gate $gate): array => [
                 $gate->code => [

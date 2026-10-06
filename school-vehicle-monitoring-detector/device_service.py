@@ -59,6 +59,7 @@ from devices.paths import (
     RAW_TAP_REQUEST_PATH,
     SCAN_RESULT_PATH,
     SERVICE_LOG_PATH,
+    RFID_BUFFER_PATH,
     STATUS_PATH,
     load_profiles,
     load_runtime_config,
@@ -67,6 +68,7 @@ from devices.paths import (
 from devices.find import FindReaderWizard
 from devices.identify import ReaderIdentifier
 from devices.reader_link import CaptureLog, ClientModeListener, ReaderLink, TagPoster, utc_now
+from devices.tag_buffer import TagBuffer
 from devices.scanner import Scanner
 
 # Phase 1: one reader link per gate; the gate codes come from Laravel's
@@ -165,6 +167,9 @@ class DeviceService:
         self.capture = CaptureLog(profiles.get("reader_link", {}).get("capture_log_max_bytes", 1048576))
         self.poster = TagPoster(log)
         self.poster.configure(self.runtime.get("app"))
+        self.tag_buffer = TagBuffer()
+        self.configure_buffer()
+        self.buffer_written = (None, 0.0)
         self.links = {}
         self.links_started = False
         self.sync_links()
@@ -212,6 +217,7 @@ class DeviceService:
         self.runtime_mtime = mtime
         self.runtime = load_runtime_config()
         self.poster.configure(self.runtime.get("app"))
+        self.configure_buffer()
         self.sync_links()
         stations = self.runtime.get("stations") or {}
         for station, link in self.links.items():
@@ -222,10 +228,25 @@ class DeviceService:
         """A reader link for every gate in the runtime config (gates can be added later)."""
         for station in station_codes(self.runtime):
             if station not in self.links:
-                link = ReaderLink(station, self.poster, self.profiles, self.capture, self.resolve_ip, log)
+                link = ReaderLink(station, self.poster, self.profiles, self.capture, self.resolve_ip, log, self.tag_buffer)
                 self.links[station] = link
                 if self.links_started:
                     link.start()
+
+    def configure_buffer(self):
+        """Buffer, presence gap and stationary time from Laravel (Settings › Timing)."""
+        rfid = self.runtime.get("rfid") or {}
+        self.tag_buffer.configure(rfid.get("buffer_seconds"), rfid.get("absent_seconds"), rfid.get("stationary_seconds"))
+
+    def write_buffer(self):
+        """rfid_buffer.json when a read came in, and at least every second (freshness)."""
+        self.tag_buffer.expire()
+        version, written_at = self.buffer_written
+        now = time.monotonic()
+        if version == self.tag_buffer.version and now - written_at < 1.0:
+            return
+        write_json_atomic(RFID_BUFFER_PATH, self.tag_buffer.snapshot())
+        self.buffer_written = (self.tag_buffer.version, now)
 
     # -- scanning -------------------------------------------------------
     def request_scan(self, trigger, light=False):
@@ -480,7 +501,12 @@ class DeviceService:
                 except OSError as error:
                     log(f"Could not write status: {error}")
 
-            time.sleep(0.5)
+            try:
+                self.write_buffer()
+            except OSError as error:
+                log(f"Could not write the RFID buffer: {error}")
+
+            time.sleep(0.25)
 
 
 def find_payload(result):

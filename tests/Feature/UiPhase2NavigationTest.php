@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\RfidScanLog;
 use App\Models\RfidTag;
 use App\Models\SystemSetting;
 use App\Models\User;
@@ -137,7 +138,11 @@ class UiPhase2NavigationTest extends TestCase
     public function test_gate_monitor_shows_the_latest_vehicle_per_gate(): void
     {
         RfidTag::query()->create(['uid' => 'GATE-UNKNOWN-1', 'status' => RfidTag::STATUS_AVAILABLE]);
-        app(RfidIngestService::class)->ingest(['tag_uid' => 'GATE-UNKNOWN-1', 'scan_location' => 'gate-2'], 'station_reader');
+RfidScanLog::query()->create([ // saved before "RFID only with a vehicle"
+            'tag_uid' => 'GATE-UNKNOWN-1', 'scan_location' => 'gate-2', 'scan_time' => now(), 'verification_status' => 'unknown_tag',
+            'source_mode' => 'station_reader', 'reader_name' => 'Gate 2 UHF Reader', 'is_anomaly' => true, 'outcome' => 'unknown_tag',
+            'anomaly_reason' => 'Unknown tag GATE-UNKNOWN-1 is not in the registry. Register this tag.',
+        ]);
 
         $state = $this->actingAs($this->admin)->getJson(route('gates.state'))->json('gates');
 

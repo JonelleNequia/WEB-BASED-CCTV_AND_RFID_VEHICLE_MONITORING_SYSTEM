@@ -196,10 +196,12 @@ RAW_TAP = RawTap()
 
 
 class ReaderLink(threading.Thread):
-    def __init__(self, station, poster, profiles, capture, resolve_ip, log):
+    def __init__(self, station, poster, profiles, capture, resolve_ip, log, buffer=None):
         super().__init__(daemon=True, name=f"reader-{station}")
         self.station = station
         self.poster = poster
+        # RFID only with a vehicle: every read goes into the buffer (tag_buffer.py).
+        self.buffer = buffer
         self.profiles = profiles
         self.settings = profiles.get("reader_link", {})
         self.capture = capture
@@ -387,6 +389,10 @@ class ReaderLink(threading.Thread):
             if frame.kind != "tag" or not frame.epc:
                 continue
             now = utc_now()
+            if self.buffer is not None:
+                self.buffer.add(self.station, frame.epc, frame.rssi)
+            # One event per tag (cooldown) still goes to Laravel, which records
+            # it only while this gate's camera is offline (RFID-only fallback).
             sent = self.filter.should_send(frame.epc)
             with self.lock:
                 self.status.update(last_tag=frame.epc, last_tag_at=now, last_rssi=frame.rssi,

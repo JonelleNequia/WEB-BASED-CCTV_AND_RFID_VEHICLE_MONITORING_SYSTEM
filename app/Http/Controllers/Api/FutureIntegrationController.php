@@ -585,12 +585,16 @@ class FutureIntegrationController extends Controller
             $result = $rfidIngestService->ingest($validated, 'hardware_placeholder', RfidIngestService::DIRECTION_STATION);
             $scanLog = $result->scanLog;
 
-            EventReceiveLog::query()->create([
-                'source_name' => $sourceName,
-                'payload_json' => $request->all(),
-                'status' => 'ingested',
-                'notes' => 'RFID scan received for future offline hardware integration.',
-            ]);
+            // RFID only with a vehicle: a read that only joined the buffer is
+            // not logged anywhere.
+            if ($result->isSaved()) {
+                EventReceiveLog::query()->create([
+                    'source_name' => $sourceName,
+                    'payload_json' => $request->all(),
+                    'status' => 'ingested',
+                    'notes' => 'RFID scan received for future offline hardware integration.',
+                ]);
+            }
 
             return response()->json([
                 ...$this->rfidScanResponsePayload($scanLog),

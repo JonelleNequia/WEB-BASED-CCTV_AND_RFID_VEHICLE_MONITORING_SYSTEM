@@ -30,6 +30,28 @@
                 <span class="field-help">How long the camera waits for a tag after the crossing before it records an Unregistered Visitor.</span>
                 @error('rfid_lookahead_seconds')<span class="field-error">{{ $message }}</span>@enderror
             </div>
+            <div class="field">
+                <label for="rfid_stationary_seconds">Parked tag after (seconds)</label>
+                <input id="rfid_stationary_seconds" type="number" name="rfid_stationary_seconds" value="{{ old('rfid_stationary_seconds', $settings['rfid_stationary_seconds'] ?? 60) }}" min="10" max="3600">
+                <span class="field-help">A tag the reader keeps reading this long is a vehicle parked near the gate. It is not given to a passing vehicle until it has been gone for a few seconds.</span>
+                @error('rfid_stationary_seconds')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
+            <div class="field">
+                <label for="rfid_offline_fallback">When the camera is offline</label>
+                <input type="hidden" name="rfid_offline_fallback" value="0">
+                <label class="checkbox-row">
+                    <input id="rfid_offline_fallback" type="checkbox" name="rfid_offline_fallback" value="1" @checked(old('rfid_offline_fallback', $settings['rfid_offline_fallback'] ?? '1') === '1')>
+                    Record registered tags anyway ("RFID only")
+                </label>
+                <span class="field-help">Tags are normally recorded only when the camera sees a vehicle. With this on, a registered tag is still recorded when the camera is offline: IN or OUT from the vehicle's last state, marked "camera offline". Unknown tags are not recorded.</span>
+                @error('rfid_offline_fallback')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
+            <div class="field">
+                <label for="rfid_offline_grace_seconds">Camera offline for at least (seconds)</label>
+                <input id="rfid_offline_grace_seconds" type="number" name="rfid_offline_grace_seconds" value="{{ old('rfid_offline_grace_seconds', $settings['rfid_offline_grace_seconds'] ?? 10) }}" min="0" max="300">
+                <span class="field-help">A short camera hiccup does not switch to "RFID only".</span>
+                @error('rfid_offline_grace_seconds')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
         </div>
         <div class="button-row button-row-end">
             <button type="submit" class="button button-primary">Save</button>

@@ -21,6 +21,12 @@ final class DeviceFiles
         return self::directory().DIRECTORY_SEPARATOR.'device_service_status.json';
     }
 
+    /** RFID only with a vehicle: the device service's in-memory read buffer (devices/tag_buffer.py). */
+    public static function rfidBufferPath(): string
+    {
+        return self::directory().DIRECTORY_SEPARATOR.'rfid_buffer.json';
+    }
+
     public static function scanResultPath(): string
     {
         return self::directory().DIRECTORY_SEPARATOR.'last_scan.json';

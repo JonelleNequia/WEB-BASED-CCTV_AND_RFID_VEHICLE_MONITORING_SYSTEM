@@ -83,6 +83,43 @@
     </div>
     </details>
 
+    {{-- RFID only with a vehicle: what the readers read, and what was given to a vehicle. --}}
+    @php($rfidDiagnostics = app(\App\Services\RfidTagMatcher::class)->diagnostics())
+    <details class="advanced-section" data-rfid-diagnostics>
+        <summary>RFID reads</summary>
+        <p class="field-help">Reads are kept a few seconds and recorded only for a vehicle the camera sees. Counts are since the device program started (reads, passes) or today (attached).</p>
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr><th>Gate</th><th>Raw reads</th><th>Tag passes</th><th>Given to a vehicle</th><th>Not given (recent)</th><th>RFID only</th><th>Unknown, camera offline</th><th>Parked tags</th></tr>
+                </thead>
+                <tbody>
+                    @foreach ($rfidDiagnostics as $row)
+                        <tr>
+                            <td>{{ $row['label'] }}</td>
+                            <td>{{ $row['buffer_running'] ? $row['raw_reads'] : '—' }}</td>
+                            <td>{{ $row['buffer_running'] ? $row['passes'] : '—' }}</td>
+                            <td>{{ $row['attached'] }}</td>
+                            <td>{{ $row['buffer_running'] ? $row['discarded_recent'].' of '.$row['recent_ended'] : '—' }}</td>
+                            <td>{{ $row['rfid_only'] }}</td>
+                            <td>{{ $row['unknown_while_offline'] }}</td>
+                            <td>
+                                @forelse ($row['stationary'] as $parked)
+                                    <div>…{{ substr($parked['epc'], -8) }} · {{ $parked['minutes'] }} min</div>
+                                @empty
+                                    None
+                                @endforelse
+                            </td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
+        @unless (collect($rfidDiagnostics)->contains('buffer_running', true))
+            <p class="next-step">→ The device program is not sending reads. It starts by itself within a minute.</p>
+        @endunless
+    </details>
+
     {{-- Fresh start: removes activity data after a backup (same as `php artisan system:reset`). --}}
     <section class="panel reset-panel">
         <div class="panel-header panel-header-modern">

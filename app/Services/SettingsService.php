@@ -40,6 +40,13 @@ class SettingsService
             // from this long before it to this long after it.
             'rfid_lookback_seconds' => '10',
             'rfid_lookahead_seconds' => '4',
+            // RFID only with a vehicle: a tag read for longer than this is a
+            // parked vehicle (never given to a passing one); with the camera
+            // offline longer than the grace, registered tags are recorded
+            // "RFID only" (direction from the vehicle's state).
+            'rfid_stationary_seconds' => '60',
+            'rfid_offline_fallback' => '1',
+            'rfid_offline_grace_seconds' => '10',
             // Live-latency work: live view and detection tuning (Settings › Cameras).
             'perf_stream_fps' => '15',
             'perf_stream_width' => '960',

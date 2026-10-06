@@ -95,7 +95,7 @@ class UhfReaderIntegrationTest extends TestCase
         $this->assertNull(collect($payload['devices'])->firstWhere('mac', self::MAC)['network_warning']);
     }
 
-    public function test_epc_is_a_tag_id_and_repeated_reads_log_once(): void
+    public function test_epc_is_a_tag_id_and_a_read_without_a_vehicle_logs_nothing(): void
     {
         // Registry › RFID Tags: register the EPC like any tag UID.
         $this->actingAs($this->admin)
@@ -114,10 +114,11 @@ class UhfReaderIntegrationTest extends TestCase
             'payload_json' => ['source' => 'uhf_ethernet', 'protocol' => 'cc', 'rssi' => -70],
         ];
         $headers = ['X-Api-Key' => 'test-detector-key', 'X-Source-Name' => 'philcst-uhf-reader'];
-        $this->postJson(route('api.integration.rfid-scans'), $read, $headers)->assertCreated();
-        $this->postJson(route('api.integration.rfid-scans'), $read, $headers)->assertOk()->assertJsonPath('duplicate_ignored', true);
+        // RFID only with a vehicle: a tag on no vehicle, no camera -> not recorded.
+        $this->postJson(route('api.integration.rfid-scans'), $read, $headers)->assertCreated()->assertJsonPath('saved', false);
+        $this->postJson(route('api.integration.rfid-scans'), $read, $headers)->assertCreated()->assertJsonPath('saved', false);
 
-        $this->assertSame(1, RfidScanLog::query()->where('tag_uid', self::EPC)->count());
+        $this->assertSame(0, RfidScanLog::query()->where('tag_uid', self::EPC)->count());
     }
 
     public function test_sidebar_and_registry_see_the_reader_status_and_last_tag(): void

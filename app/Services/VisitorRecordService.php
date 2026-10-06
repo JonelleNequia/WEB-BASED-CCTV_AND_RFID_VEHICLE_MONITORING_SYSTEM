@@ -41,15 +41,16 @@ class VisitorRecordService
     public const SAME_PLATE_SECONDS = 60;
 
     /**
-     * The record of a crossing with no registered tag read, or null.
+     * The record of a crossing with no registered tag read, or null. An
+     * unknown tag read for the vehicle is kept on it ("Register this tag").
      */
-    public function createFromCrossing(VehicleCrossing $crossing): ?VisitorRecord
+    public function createFromCrossing(VehicleCrossing $crossing, ?string $unknownTag = null): ?VisitorRecord
     {
-        if ($crossing->rfid_scan_log_id || data_get($crossing->detection_metadata_json, 'rfid_status') !== 'no_pass') {
+        if ($crossing->rfid_scan_log_id || ($unknownTag === null && data_get($crossing->detection_metadata_json, 'rfid_status') !== 'no_pass')) {
             return null;
         }
 
-        return DB::transaction(function () use ($crossing): VisitorRecord {
+        return DB::transaction(function () use ($crossing, $unknownTag): VisitorRecord {
             $record = VisitorRecord::query()->firstOrNew(['external_event_key' => $crossing->external_event_key]);
             $this->fillDefaults($record);
             $record->fill([
@@ -60,6 +61,7 @@ class VisitorRecordService
                 'seen_at' => $crossing->crossed_at,
                 'snapshot_path' => $crossing->snapshot_path,
                 'vehicle_type' => $record->vehicle_type ?: $crossing->vehicle_type,
+                'tag_uid' => $unknownTag ?? $record->tag_uid,
             ]);
             $record->save();
 
@@ -303,6 +305,23 @@ class VisitorRecordService
             ->where('status', '!=', VisitorRecord::STATUS_DISMISSED)
             ->get()
             ->each(fn (VisitorRecord $record) => $this->dismiss($record, $reason));
+    }
+
+    /**
+     * RFID only with a vehicle: an unknown tag read a little after this
+     * crossing was recorded.
+     */
+    public function noteUnknownTag(VehicleCrossing $crossing, string $uid): ?VisitorRecord
+    {
+        $record = VisitorRecord::query()->where('vehicle_crossing_id', $crossing->id)->first();
+
+        if (! $record) {
+            return $this->createFromCrossing($crossing, $uid);
+        }
+
+        $record->forceFill(['tag_uid' => $uid])->save();
+
+        return $record;
     }
 
     public function updateNote(PlateProfile $profile, ?string $note, User $user): PlateProfile
