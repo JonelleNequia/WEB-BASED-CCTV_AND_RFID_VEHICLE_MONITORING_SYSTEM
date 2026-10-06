@@ -12,6 +12,8 @@
 
     @include('settings.partials.pipeline-metrics')
 
+    @include('settings.partials.live-view-status')
+
     {{-- UI Phase 3: per-camera details are diagnostics too. --}}
     <details class="advanced-section">
         <summary>Camera details</summary>

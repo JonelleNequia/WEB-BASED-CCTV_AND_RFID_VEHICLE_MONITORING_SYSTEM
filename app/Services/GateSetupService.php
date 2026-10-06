@@ -54,7 +54,15 @@ class GateSetupService
         $live = (bool) data_get($runtime, "cameras.{$gate->code}.camera_running", false) && ($runtime['service_running'] ?? false);
         [$state, $line, $nextStep] = $live ? ['online', 'Online', ''] : $this->cameraProblem($gate->code, $runtime);
 
+        // Live view work: WebRTC plays H.264 only (checked while the camera is online).
+        $codecs = $live ? app(Go2rtcService::class)->codecs($gate->code) : ['main' => null, 'sub' => null];
+        $notH264 = array_filter($codecs, fn (?string $codec): bool => $codec !== null && $codec !== 'H264');
+
         return [
+            'codec_warning' => $notH264 === [] ? null : [
+                'line' => 'The camera sends '.implode(' / ', array_unique(array_map(fn (string $codec): string => str_replace('H26', 'H.26', $codec), $notH264))).' video; the full-quality live view needs H.264.',
+                'next_step' => "Open the camera's own settings page › Video › Encoding, and choose H.264 for both streams.",
+            ],
             'name' => (string) ($config['camera_name'] ?? $gate->name.' Camera'),
             'source' => $assigned
                 ? (string) $assigned['name']

@@ -188,6 +188,9 @@ http://127.0.0.1:8000
 Do these before the system is used at the gate. The demo settings above are
 for development only.
 
+Installing on the gate PC (start with Windows, firewall, live view, camera
+video settings): see [DEPLOYMENT.md](DEPLOYMENT.md).
+
 1. **Turn off debug mode.** In `.env`:
 
    ```env
@@ -236,9 +239,10 @@ for development only.
    (`/camera/{role}/frame`, admin-only `/camera/status`). Serve only the
    `public/` folder from the web server; never the project root.
 
-7. **Know the remaining open port.** The live MJPEG stream on port `8765` has
-   no login. Block it in the PC firewall for other devices if guard stations
-   are not on this PC.
+7. **Know the remaining open port.** The basic MJPEG stream on port `8765`
+   has no login. Block it in the PC firewall for other devices (the
+   full-quality live view goes through the signed-in pages and the WebRTC
+   port 8555; `tools/start/install-windows-autostart.ps1` opens only that).
 
 ## Demo Login
 

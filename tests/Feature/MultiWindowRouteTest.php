@@ -48,7 +48,8 @@ class MultiWindowRouteTest extends TestCase
             ->assertDontSee('RFID Ready')
             ->assertSee('data-rfid-input', false)
             ->assertDontSee('Vehicle Registry')
-            ->assertDontSee('<canvas', false)
+            // Live view work: the only canvas is the detection overlay over the video.
+            ->assertSee('data-live-overlay', false)
             ->assertDontSee('Save ROI')
             ->assertDontSee('browser-camera-common.js')
             ->assertDontSee('data-browser-frame', false);
@@ -63,7 +64,7 @@ class MultiWindowRouteTest extends TestCase
             ->assertDontSee('RFID Ready')
             ->assertSee('data-rfid-input', false)
             ->assertDontSee('RFID Inventory')
-            ->assertDontSee('<canvas', false)
+            ->assertSee('data-live-overlay', false)
             ->assertDontSee('Save ROI')
             ->assertDontSee('browser-camera-common.js')
             ->assertDontSee('data-browser-frame', false);

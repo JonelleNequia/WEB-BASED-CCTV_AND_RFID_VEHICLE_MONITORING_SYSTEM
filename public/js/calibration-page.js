@@ -96,18 +96,21 @@
             this.canvas.addEventListener('dblclick', (event) => event.preventDefault());
             this.canvas.addEventListener('pointercancel', () => this.cancelDraft());
             this.canvas.addEventListener('pointerleave', () => this.cancelDraft());
-            this.video.addEventListener('loadedmetadata', () => {
+            // Live view work: this.video is the live player (live-video.js); it
+            // says when its picture is ready, which mode it uses, or that it failed.
+            this.video.addEventListener('live:mode', () => {
                 this.resizeCanvas();
                 this.render();
             });
-            this.video.addEventListener('load', () => {
+            this.video.addEventListener('live:ready', () => {
                 this.resizeCanvas();
                 this.hideFallback();
-                this.updateConnection('connected', 'Connected', 'Detector MJPEG stream connected.');
+                const mode = this.video.dataset.mode;
+                this.updateConnection('connected', 'Connected', mode === 'mjpeg' ? 'Basic live view (detector stream).' : 'Full-quality live view (camera main stream).');
                 this.syncState();
                 this.render();
             });
-            this.video.addEventListener('error', () => {
+            this.video.addEventListener('live:error', () => {
                 // Say why, from the detector status, instead of a generic message.
                 const problem = this.streamProblem();
                 this.showFallback(problem.title, problem.detail);
@@ -190,10 +193,9 @@
                 return;
             }
 
-            const separator = this.streamUrl.includes('?') ? '&' : '?';
-            this.video.src = `${this.streamUrl}${separator}calibration=${Date.now()}`;
+            this.video.liveVideo?.reconnect();
             this.resizeCanvas();
-            this.updateConnection('not_connected', 'Connecting', 'Opening detector MJPEG stream...');
+            this.updateConnection('not_connected', 'Connecting', 'Opening the live view…');
             this.render();
         }
 
@@ -256,9 +258,10 @@
         contentRect() {
             const width = this.canvas.width;
             const height = this.canvas.height;
-            const naturalWidth = this.video.naturalWidth || this.video.videoWidth || 0;
-            const naturalHeight = this.video.naturalHeight || this.video.videoHeight || 0;
-            const fit = window.getComputedStyle(this.video).objectFit;
+            const media = this.video.liveVideo?.activeElement() || this.video;
+            const naturalWidth = media.naturalWidth || media.videoWidth || 0;
+            const naturalHeight = media.naturalHeight || media.videoHeight || 0;
+            const fit = window.getComputedStyle(media).objectFit;
 
             if (!naturalWidth || !naturalHeight || !width || !height || fit === 'fill') {
                 return { x: 0, y: 0, width: width, height: height };

@@ -163,49 +163,18 @@
         return String(uid || '').replace(/\s+/g, '').trim().toUpperCase();
     }
 
-    // The live view retries by itself (it used to stay hidden after one
-    // failed load, e.g. when the page opened before the detector started).
-    let streamBroken = false;
-    let lastStreamRetry = 0;
+    // Live view work: the player (live-video.js) connects and retries by
+    // itself (WebRTC, then HLS, then MJPEG); this page only shows why there
+    // is no picture.
     const frameMessage = document.querySelector('[data-frame-message]');
+    let wasOnline = null;
 
     function showFrameMessage(text) {
         if (frameMessage) {
             frameMessage.querySelector('[data-feed-offline-text]').textContent = text || '';
             frameMessage.hidden = !text;
         }
-        // The detector's own "unavailable" picture is hidden behind the small placeholder.
         frame?.classList.toggle('is-hidden', !!text);
-    }
-
-    function startLiveStream(streamUrl, forceReload) {
-        const base = streamUrl || frame?.dataset.frameStream || payload.streamUrl;
-
-        if (!frame || !base) {
-            return;
-        }
-
-        frame.onload = function () {
-            streamBroken = false;
-            showFrameMessage(frameProblem(lastRuntime, lastCamera));
-        };
-
-        frame.onerror = function () {
-            streamBroken = true;
-            showFrameMessage(frameProblem(lastRuntime, lastCamera));
-        };
-
-        // An error that happened before this script loaded left a broken image.
-        if (!forceReload && frame.src && frame.complete && !frame.naturalWidth) {
-            streamBroken = true;
-        }
-
-        if (forceReload) {
-            lastStreamRetry = Date.now();
-            frame.src = base + (base.includes('?') ? '&' : '?') + 'retry=' + lastStreamRetry;
-        } else if (frame.src !== base) {
-            frame.src = base;
-        }
     }
 
     let lastRuntime = payload.detectorStatus || {};
@@ -223,7 +192,7 @@
         if (camera && !camera.camera_running) {
             return camera.last_error ? firstSentence(camera.last_error) : 'Camera offline';
         }
-        return streamBroken ? 'Connecting to the camera…' : '';
+        return '';
     }
 
     function stationLogKey(log) {
@@ -353,9 +322,12 @@
         lastRuntime = runtime;
         lastCamera = camera;
         showFrameMessage(frameProblem(runtime, camera));
-        if (streamBroken && detectorOnline && Date.now() - lastStreamRetry > 5000) {
-            startLiveStream(body?.stream_url || null, true);
+        // The camera is back: connect the player again.
+        const online = detectorOnline && cameraOnline;
+        if (online && wasOnline === false) {
+            frame?.liveVideo?.reconnect();
         }
+        wasOnline = online;
     }
 
     async function refreshState() {
@@ -376,10 +348,6 @@
 
             const body = await response.json();
             updateStatus(body);
-            if (body.stream_url && body.stream_url !== frame?.dataset.frameStream) {
-                frame.dataset.frameStream = body.stream_url;
-                startLiveStream(body.stream_url);
-            }
 
             renderLogs(body.logs || []);
         } catch (error) {
@@ -492,7 +460,6 @@
     updateClock();
     updateStatus({ runtime: payload.detectorStatus, camera: payload.cameraStatus });
     renderLogs(payload.logs || []);
-    startLiveStream(payload.streamUrl);
     bindRfidScanner();
     refreshState();
     window.setInterval(updateClock, 1000);

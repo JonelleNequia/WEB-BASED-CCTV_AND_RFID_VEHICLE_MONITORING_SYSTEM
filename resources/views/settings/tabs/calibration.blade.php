@@ -47,13 +47,9 @@
                 </div>
 
                 <div class="camera-stage camera-stage-calibration">
-                    <img
-                        class="camera-video"
-                        data-video
-                        data-stream-url="{{ $camera['stream_url'] }}"
-                        src="{{ $camera['stream_url'] }}"
-                        alt="{{ $camera['role_label'] }} calibration stream"
-                    >
+                    {{-- Live view work: the camera's main stream over WebRTC (go2rtc); the zone is drawn on the canvas above. --}}
+                    <x-live-video :gate="$role" :mjpeg="$camera['stream_url']" :overlay="false" page="calibration"
+                                  class="camera-video" data-video data-stream-url="{{ $camera['stream_url'] }}" :alt="$camera['role_label'].' calibration stream'" />
                     <canvas class="camera-overlay" data-overlay></canvas>
                     <div class="camera-fallback" data-fallback-wrapper>
                         <div class="camera-fallback-copy">

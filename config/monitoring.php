@@ -100,6 +100,64 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Live View (go2rtc)
+    |--------------------------------------------------------------------------
+    |
+    | go2rtc passes each camera's main stream to the browser over WebRTC
+    | without re-encoding. Its API listens on this PC only; pages reach it
+    | through signed-in Laravel routes. The video itself uses the WebRTC port.
+    | The binaries are bundled in tools/go2rtc and checked against these
+    | SHA-256 hashes before they are unpacked (offline install).
+    |
+    */
+
+    'live' => [
+        'enabled' => (bool) env('LIVE_VIEW_WEBRTC', true),
+        'api_port' => (int) env('GO2RTC_API_PORT', 1984),
+        'webrtc_port' => (int) env('GO2RTC_WEBRTC_PORT', 8555),
+        'version' => '1.9.14',
+        'bundles' => [
+            'mac_arm64' => ['file' => 'go2rtc_mac_arm64.zip', 'sha256' => '919b78adc759d6b3883d1e1b2ac915ac0985bb903ff1897b4d228527bd64690c'],
+            'mac_amd64' => ['file' => 'go2rtc_mac_amd64.zip', 'sha256' => '9b0b9a27a4dc3a5b8b93376e7e8fc2787c6af624a512842622be84aec0171c7a'],
+            'win64' => ['file' => 'go2rtc_win64.zip', 'sha256' => 'dd4167d75cb04abe618855b7c71f8658bd009f60c1a71835d134d2c11c939907'],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Detection Tuning (not shown to users)
+    |--------------------------------------------------------------------------
+    |
+    | Proven values from the detection work (A2-A4, 2026-10): exported to the
+    | Python detector as system_settings.performance. Change them here only
+    | with a measurement (php artisan detection:accuracy).
+    |
+    */
+
+    'detection' => [
+        // The MJPEG fallback view (the main live view is WebRTC).
+        'stream_fps' => 15.0,
+        'stream_width' => 960,
+        'jpeg_quality' => 75,
+        // Detection on each camera's sub stream.
+        'detection_fps' => 8.0,
+        'yolo_imgsz' => 480,
+        'yolo_device' => env('DETECTOR_YOLO_DEVICE', 'auto'),
+        'roi_crop' => 1,
+        'hires_on_trigger' => 1,
+        // A2/A4: vehicle type (truck rule measured on rear views of pickups).
+        'type_second_pass' => 1,
+        'type_model' => 'yolov8s.pt',
+        'type_truck_min_height' => 0.35,
+        'type_car_min_aspect' => 1.05,
+        // A3: one vehicle = one event.
+        'cross_margin' => 0.05,
+        'cross_min_points' => 3,
+        'cross_min_move' => 0.10,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Plug-and-detect Devices
     |--------------------------------------------------------------------------
     |

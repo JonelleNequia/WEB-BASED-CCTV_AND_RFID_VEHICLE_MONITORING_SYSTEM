@@ -7,6 +7,7 @@ use App\Models\DeviceAssignment;
 use App\Models\Gate;
 use App\Support\CameraFiles;
 use App\Models\SystemSetting;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 
 class SettingsService
@@ -47,24 +48,6 @@ class SettingsService
             'rfid_stationary_seconds' => '60',
             'rfid_offline_fallback' => '1',
             'rfid_offline_grace_seconds' => '10',
-            // Live-latency work: live view and detection tuning (Settings › Cameras).
-            'perf_stream_fps' => '15',
-            'perf_stream_width' => '960',
-            'perf_jpeg_quality' => '70',
-            'perf_detection_fps' => '8',
-            'perf_yolo_imgsz' => '480',
-            'perf_yolo_device' => 'auto',
-            'perf_roi_crop' => '1',
-            'perf_hires_on_trigger' => '1',
-            // A2 (detection): vehicle type (Car / Motorcycle / Truck/Bus).
-            'perf_type_second_pass' => '1',
-            'perf_type_model' => 'yolov8s.pt',
-            'perf_type_truck_min_height' => '35',
-            'perf_type_car_min_aspect' => '1.05',
-            // A3 (detection): one vehicle = one event.
-            'perf_cross_margin' => '5',
-            'perf_cross_min_points' => '3',
-            'perf_cross_min_move' => '10',
             // Detector debug view (Settings › Calibration): raw detections on the live view.
             'detector_debug_overlay' => '0',
         ];
@@ -265,6 +248,12 @@ class SettingsService
             $this->cameraRuntimeConfigPath(),
             json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
         );
+
+        // Live view work: a new camera address or login reaches go2rtc too
+        // (it rewrites its config and reloads only when something changed).
+        if (Cache::add('go2rtc-config-sync', true, 2)) {
+            app(\App\Services\Go2rtcService::class)->ensureRunning();
+        }
     }
 
     /**
@@ -376,23 +365,11 @@ class SettingsService
      */
     public function performanceSettings(array $settings): array
     {
+        // Live view work: tuning lives in config/monitoring.php (detection),
+        // not on a Settings page; only the debug view is switched in the UI.
         return [
-            'stream_fps' => (float) ($settings['perf_stream_fps'] ?? 15),
-            'stream_width' => (int) ($settings['perf_stream_width'] ?? 960),
-            'jpeg_quality' => (int) ($settings['perf_jpeg_quality'] ?? 70),
-            'detection_fps' => (float) ($settings['perf_detection_fps'] ?? 8),
-            'yolo_imgsz' => (int) ($settings['perf_yolo_imgsz'] ?? 480),
-            'yolo_device' => (string) ($settings['perf_yolo_device'] ?? 'auto'),
-            'roi_crop' => (int) ($settings['perf_roi_crop'] ?? 1),
-            'hires_on_trigger' => (int) ($settings['perf_hires_on_trigger'] ?? 1),
+            ...config('monitoring.detection'),
             'debug_overlay' => (int) ($settings['detector_debug_overlay'] ?? 0),
-            'type_second_pass' => (int) ($settings['perf_type_second_pass'] ?? 1),
-            'type_model' => (string) ($settings['perf_type_model'] ?? 'yolov8s.pt'),
-            'type_truck_min_height' => round(((float) ($settings['perf_type_truck_min_height'] ?? 35)) / 100, 3),
-            'type_car_min_aspect' => (float) ($settings['perf_type_car_min_aspect'] ?? 1.05),
-            'cross_margin' => round(((float) ($settings['perf_cross_margin'] ?? 5)) / 100, 3),
-            'cross_min_points' => (int) ($settings['perf_cross_min_points'] ?? 3),
-            'cross_min_move' => round(((float) ($settings['perf_cross_min_move'] ?? 10)) / 100, 3),
         ];
     }
 

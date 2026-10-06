@@ -26,6 +26,20 @@ Artisan::command('detector:start', function (DetectorRuntimeService $detectorRun
 // open. Run `php artisan schedule:work` at Windows startup (Task Scheduler).
 Schedule::command('detector:start')->everyMinute()->withoutOverlapping();
 
+// Live view work: go2rtc (WebRTC live view) starts and follows camera changes without an open page.
+Artisan::command('go2rtc:start', function (\App\Services\Go2rtcService $go2rtc) {
+    if (! $go2rtc->enabled()) {
+        $this->warn('The WebRTC live view is off or not available on this system; pages use the basic (MJPEG) view.');
+
+        return;
+    }
+    $this->info($go2rtc->ensureRunning(force: true) ? 'Live view service (go2rtc) running.' : 'Live view service (go2rtc) could not be started; see storage/logs/go2rtc.log.');
+})->purpose('Start the go2rtc live view service (WebRTC)');
+Schedule::command('go2rtc:start')->everyMinute()->withoutOverlapping();
+
+// Live view work: the device service (UHF readers) also restarts without an open page.
+Schedule::call(fn () => app(DeviceServiceRuntime::class)->ensureRunning())->everyMinute()->name('devices:ensure-running')->withoutOverlapping();
+
 // Phase 3 (visitor model): close tag reads whose camera crossing never came
 // (also done on every web request; this is for a scheduler or a manual run).
 Artisan::command('rfid:finalize-pending', function (\App\Services\RfidCameraFusionService $fusionService) {

@@ -86,6 +86,9 @@ STREAM_CONDITION = threading.Condition()
 # (Station, Gate Monitor, Calibration, Settings › Cameras) counts as a viewer.
 STREAM_CLIENTS = {}
 STREAM_CLIENTS_LOCK = threading.Lock()
+# Live view (go2rtc) work: each gate's state, for the /overlay/{gate} JSON
+# the browser draws over the WebRTC video.
+OVERLAY_STATES = {}
 RTSP_DIAGNOSIS = RtspDiagnosis()
 # Full-resolution frames from the snapshot (main) stream, only around triggers.
 HIRES = {}
@@ -134,11 +137,27 @@ class MjpegStreamHandler(BaseHTTPRequestHandler):
             return
 
         role = request_path.strip("/").split("/")
-        if len(role) != 2 or role[0] != "stream" or role[1] not in camera_roles(load_runtime_config()):
+        if len(role) != 2 or role[0] not in ("stream", "overlay") or role[1] not in camera_roles(load_runtime_config()):
             self.send_error(404)
             return
 
+        if role[0] == "overlay":
+            self.send_overlay(role[1])
+            return
+
         self.stream_role(role[1])
+
+    def send_overlay(self, role):
+        """Live view work: boxes, zone, line and the latest IN/OUT as JSON (0-1 coordinates)."""
+        state = OVERLAY_STATES.get(role)
+        camera_config = (load_runtime_config().get("cameras") or {}).get(role) or {}
+        body = json.dumps(overlay_payload(state, camera_config) if state else {"tracks": [], "ready": False}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
 
     def stream_role(self, role):
         self.send_response(200)
@@ -1659,6 +1678,49 @@ def draw_calibration_guides(frame, camera_config):
     return
 
 
+OVERLAY_COLORS = {"green": "#16a34a", "blue": "#2563eb", "amber": "#f59e0b", "red": "#dc2626"}
+
+
+def overlay_payload(state, camera_config, now=None):
+    """
+    Live view work: what the browser draws over the video: each vehicle in
+    the zone (box, label, color), the zone and the trigger line, and the
+    latest crossings. Coordinates are 0-1 of the detection frame (same
+    shape as the camera's main stream).
+    """
+    now = time.monotonic() if now is None else now
+    with state["lock"]:
+        frame = state.get("latest_frame")
+        boxes = {track_id: box.copy() for track_id, box in state.get("track_boxes", {}).items()}
+        overlays = {track_id: overlay.copy() for track_id, overlay in state.get("track_overlays", {}).items()}
+        recent = list(state.get("recent_crossings", []))
+        debug = state.get("debug") or {}
+    if frame is None:
+        return {"tracks": [], "ready": False}
+    height, width = frame.shape[:2]
+    tracks = []
+    for track_id, box in boxes.items():
+        overlay = overlays.get(track_id) or detection_overlay()
+        hold = RESOLVED_OVERLAY_HOLD_SECONDS if overlay.get("verification") in RESOLVED_VERIFICATIONS else 0.75
+        if now - float(box.get("last_seen", 0.0)) > hold:
+            continue
+        x1, y1, x2, y2 = box.get("xyxy", (0, 0, 0, 0))
+        tracks.append({
+            "id": int(track_id),
+            "box": [round(x1 / width, 4), round(y1 / height, 4), round(x2 / width, 4), round(y2 / height, 4)],
+            "label": overlay.get("label") or "VEHICLE",
+            "color": OVERLAY_COLORS.get(overlay.get("color"), "#dc2626"),
+        })
+    return {
+        "ready": True,
+        "age_ms": round((now - debug["at"]) * 1000) if debug.get("at") else None,
+        "zone": camera_config.get("calibration_mask"),
+        "line": camera_config.get("calibration_line"),
+        "tracks": tracks,
+        "crossings": [{"direction": item.get("direction"), "seconds_ago": round(now - item.get("at", now), 1)} for item in recent[-3:]],
+    }
+
+
 def render_annotated_frame(role, frame, results, camera_config, state, vehicle_labels):
     """
     Draw live YOLO detections, then upgrade the label when RFID/guest state resolves.
@@ -3032,7 +3094,10 @@ def camera_stream_worker(role, state, model_info, stop_event):
             # Phase 1: the camera is no longer released when no Station page is
             # open. Capture keeps running so vehicle detection never stops;
             # only the MJPEG publishing below is skipped without a viewer.
-            viewer_active = station_viewer_active(role)
+            # Live view work: the browser now plays the camera through go2rtc
+            # (WebRTC); JPEG frames are made only while an MJPEG client
+            # (the fallback) is connected.
+            viewer_active = STREAM_CLIENTS.get(role, 0) > 0
             capture, capture_source = ensure_capture(camera_config, state)
 
             if capture is None or not capture.isOpened():
@@ -3514,6 +3579,7 @@ def run_detector_loop():
                 if role in role_stops:
                     continue
                 camera_states[role] = initial_camera_state()
+                OVERLAY_STATES[role] = camera_states[role]
                 detector_models[role] = {"model": None, "vehicle_labels": {}}
                 role_stop = threading.Event()
                 role_stops[role] = role_stop
@@ -3526,6 +3592,7 @@ def run_detector_loop():
             for role in [role for role in role_stops if role not in roles]:
                 role_stops.pop(role).set()
                 state = camera_states.pop(role, None)
+                OVERLAY_STATES.pop(role, None)
                 detector_models.pop(role, None)
                 STREAM_FRAMES.pop(role, None)
                 if state is not None:

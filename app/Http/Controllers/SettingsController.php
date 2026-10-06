@@ -33,7 +33,6 @@ class SettingsController extends Controller
     public const ADVANCED_SECTIONS = [
         'status' => 'System status',
         'devices' => 'All network devices',
-        'detection' => 'Detection',
         'timing' => 'Timing',
         'manual' => 'Manual setup',
         'test-scan' => 'Test Scan',
@@ -51,12 +50,6 @@ class SettingsController extends Controller
         'timing' => [
             'rfid_cooldown_seconds', 'rfid_lookback_seconds', 'rfid_lookahead_seconds',
             'rfid_stationary_seconds', 'rfid_offline_fallback', 'rfid_offline_grace_seconds',
-        ],
-        'detection' => [
-            'perf_stream_fps', 'perf_stream_width', 'perf_jpeg_quality', 'perf_detection_fps', 'perf_yolo_imgsz',
-            'perf_yolo_device', 'perf_roi_crop', 'perf_hires_on_trigger',
-            'perf_type_second_pass', 'perf_type_model', 'perf_type_truck_min_height', 'perf_type_car_min_aspect',
-            'perf_cross_margin', 'perf_cross_min_points', 'perf_cross_min_move',
         ],
     ];
 
@@ -156,7 +149,7 @@ class SettingsController extends Controller
         app(DeviceRegistryService::class)->exportRuntimeConfig();
 
         $section = [
-            'general' => 'General settings', 'timing' => 'Timing', 'detection' => 'Detection settings',
+            'general' => 'General settings', 'timing' => 'Timing',
             'manual' => 'Manual setup', 'stations' => 'Gates & Readers', 'cameras' => 'Cameras',
         ][$request->input('section')] ?? 'Settings';
 

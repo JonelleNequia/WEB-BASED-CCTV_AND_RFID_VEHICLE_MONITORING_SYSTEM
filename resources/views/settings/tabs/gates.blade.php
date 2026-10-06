@@ -37,6 +37,10 @@
                             @if ($camera['next_step'] !== '')
                                 <span class="next-step">→ {{ $camera['next_step'] }}</span>
                             @endif
+                            @if ($camera['codec_warning'])
+                                <span class="status-line codec-warning"><span class="status-dot is-warning" aria-hidden="true"></span>{{ $camera['codec_warning']['line'] }}</span>
+                                <span class="next-step">→ {{ $camera['codec_warning']['next_step'] }}</span>
+                            @endif
                             <small class="text-muted">{{ $camera['source'] }}</small>
                         </div>
                         <details class="menu row-menu">

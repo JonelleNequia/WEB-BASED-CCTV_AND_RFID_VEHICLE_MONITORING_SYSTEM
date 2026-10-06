@@ -105,8 +105,8 @@ class LiveLatencyTest extends TestCase
                 'gate-2' => ['camera_name' => 'Exit Camera', 'source_type' => 'webcam', 'source_value' => '0', 'source_username' => '', 'source_password' => ''],
             ],
             'camera_streams' => ['gate-1' => ['stream' => 'main', 'snapshots' => '1']],
-            'perf_stream_fps' => 12, 'perf_stream_width' => 800, 'perf_jpeg_quality' => 65, 'perf_detection_fps' => 6,
-            'perf_yolo_imgsz' => 416, 'perf_yolo_device' => 'cpu', 'perf_roi_crop' => '0', 'perf_hires_on_trigger' => '1',
+            // Live view work: tuning is no longer a setting; it is ignored.
+            'perf_stream_fps' => 12, 'perf_stream_width' => 800,
         ])->assertSessionHasNoErrors();
 
         $entrance = $runtime()['cameras']['gate-1'];
@@ -115,13 +115,14 @@ class LiveLatencyTest extends TestCase
         $this->assertSame(0, $entrance['decoder_threads']);
         $this->assertSame('main', DeviceAssignment::query()->where('station', 'gate-1')->value('options')['stream']);
         $performance = $runtime()['system_settings']['performance'];
-        $this->assertSame([12.0, 800, 65, 6.0, 416, 'cpu', 0], [
+        // Live view work: proven defaults from config/monitoring.php (detection).
+        $this->assertSame([15.0, 960, 75, 8.0, 480, 'auto', 1], [
             (float) $performance['stream_fps'], $performance['stream_width'], $performance['jpeg_quality'],
             (float) $performance['detection_fps'], $performance['yolo_imgsz'], $performance['yolo_device'], $performance['roi_crop'],
         ]);
 
-        // B3: performance is in Advanced › Detection, camera settings in Advanced › Manual setup.
-        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'detection']))->assertOk()->assertSee('Live view performance');
+        // Live view work: the Detection page is gone; camera settings stay in Advanced › Manual setup.
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'detection']))->assertOk()->assertDontSee('Live view performance');
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'cameras']))->assertOk()->assertSee('Optimize camera settings');
     }
 

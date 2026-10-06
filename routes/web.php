@@ -51,6 +51,10 @@ Route::middleware('auth')->group(function (): void {
         ->where('role', '[a-z0-9-]+')
         ->whereIn('kind', CameraFiles::KINDS)
         ->name('camera.frame');
+    // Live view work: WebRTC / HLS through go2rtc, signed-in only.
+    Route::post('/live/{gate}/webrtc', [\App\Http\Controllers\LiveViewController::class, 'webrtc'])->where('gate', '[a-z0-9-]+')->name('live.webrtc');
+    Route::post('/live/{gate}/stats', [\App\Http\Controllers\LiveViewController::class, 'stats'])->where('gate', '[a-z0-9-]+')->name('live.stats');
+    Route::get('/live/hls/{file}', [\App\Http\Controllers\LiveViewController::class, 'hls'])->where('file', '[a-z0-9./]+')->name('live.hls');
     Route::get('/camera/status', [CameraFileController::class, 'status'])
         ->middleware('admin')
         ->name('camera.status');

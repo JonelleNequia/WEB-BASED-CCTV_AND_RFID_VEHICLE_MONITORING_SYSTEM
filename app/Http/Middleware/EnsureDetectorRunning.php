@@ -53,6 +53,15 @@ class EnsureDetectorRunning
             // Never break a page because the device service check failed.
         }
 
+        try {
+            // Live view work: go2rtc (WebRTC live view) runs whenever the system is used.
+            if (Cache::add('go2rtc-heartbeat', true, self::CHECK_EVERY_SECONDS)) {
+                app(\App\Services\Go2rtcService::class)->ensureRunning();
+            }
+        } catch (Throwable) {
+            // Never break a page because the live view check failed.
+        }
+
         return $response;
     }
 }

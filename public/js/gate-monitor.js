@@ -111,15 +111,14 @@
                 const live = body.detector_running && gate.camera_running;
                 card.querySelector('[data-gate-camera]')?.replaceChildren(badge(live ? 'success' : 'critical', live ? 'Live' : 'Offline'));
 
-                const feed = card.querySelector('[data-gate-feed]');
-                const broken = feed?.dataset.broken === '1';
-                setOffline(card, live ? (broken ? 'Connecting to the camera…' : '') : offlineText(body.detector_running, gate));
+                setOffline(card, live ? '' : offlineText(body.detector_running, gate));
 
-                // Retry a feed that failed to load, or follow a new stream address.
-                if (feed && gate.stream_url && (feed.dataset.stream !== gate.stream_url || (broken && live))) {
-                    feed.dataset.stream = gate.stream_url;
-                    feed.src = gate.stream_url + (broken ? (gate.stream_url.includes('?') ? '&' : '?') + 'retry=' + Date.now() : '');
+                // Live view work: the camera is back: the player connects again (WebRTC first).
+                const player = card.querySelector('[data-live-video]')?.liveVideo;
+                if (live && card.dataset.wasLive === '0') {
+                    player?.reconnect();
                 }
+                card.dataset.wasLive = live ? '1' : '0';
 
                 renderLatest(card, (gate.logs || [])[0] || null);
                 renderLogs(card, gate.logs);
@@ -129,19 +128,11 @@
         }
     }
 
-    document.querySelectorAll('[data-gate-feed]').forEach(function (img) {
-        const card = img.closest('[data-gate]');
-        img.addEventListener('error', function () {
-            img.dataset.broken = '1';
-            setOffline(card, card.querySelector('[data-feed-offline-text]')?.textContent || 'Connecting to the camera…');
-        });
-        img.addEventListener('load', function () {
-            img.dataset.broken = '0';
-        });
-        // Offline when the page was drawn: show the placeholder straight away.
-        if (img.closest('.gate-feed')?.classList.contains('is-offline')) {
-            setOffline(card, 'Camera offline');
-        }
+    // Offline when the page was drawn: show the placeholder straight away.
+    document.querySelectorAll('.gate-feed.is-offline').forEach(function (feed) {
+        const card = feed.closest('[data-gate]');
+        card.dataset.wasLive = '0';
+        setOffline(card, 'Camera offline');
     });
 
     refresh();

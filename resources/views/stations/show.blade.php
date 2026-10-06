@@ -39,12 +39,8 @@
             </div>
 
             <div class="station-frame-stage">
-                <img
-                    src="{{ $streamUrl }}"
-                    alt="{{ $stationLabel }} live CCTV feed"
-                    data-station-frame
-                    data-frame-stream="{{ $streamUrl }}"
-                >
+                {{-- Live view work: the camera's main stream over WebRTC (go2rtc). --}}
+                <x-live-video :gate="$location" :mjpeg="$streamUrl" page="kiosk" class="station-frame" data-station-frame :alt="$stationLabel.' live CCTV feed'" />
                 {{-- UI Phase 4: small placeholder when there is no picture (one line + a link). --}}
                 @include('partials.feed-offline', ['attributes' => 'data-frame-message'])
             </div>
@@ -108,6 +104,8 @@
     ])
     <script id="station-kiosk-data" type="application/json">{!! json_encode($stationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
     <script src="{{ asset('js/ui.js') }}"></script>
+    <script src="{{ asset('vendor/hls/hls.light.min.js') }}"></script>
+    <script src="{{ asset('js/live-video.js') }}"></script>
     <script src="{{ asset('js/station-kiosk.js') }}"></script>
 </body>
 </html>

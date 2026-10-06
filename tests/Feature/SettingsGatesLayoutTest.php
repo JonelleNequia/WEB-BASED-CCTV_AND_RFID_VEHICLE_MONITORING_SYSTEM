@@ -155,8 +155,9 @@ class SettingsGatesLayoutTest extends TestCase
         $this->assertSame(['60', '10', '4'], [app(SettingsService::class)->get('rfid_cooldown_seconds'), app(SettingsService::class)->get('rfid_lookback_seconds'), app(SettingsService::class)->get('rfid_lookahead_seconds')]);
         $this->actingAs($this->admin)->post(route('settings.restore-defaults'), ['section' => 'manual'])->assertSessionHasErrors('section');
 
+        // Live view work: the Detection page (live view, vehicle type, counting) is gone.
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'detection']))->assertOk()
-            ->assertSee('Vehicle type')->assertSee('Counting')->assertSee('Live view performance');
+            ->assertDontSee('perf_type_truck_min_height', false)->assertDontSee('perf_cross_margin', false)->assertDontSee('Live view performance');
     }
 
     public function test_set_up_opens_the_calibration_of_that_gate_only(): void

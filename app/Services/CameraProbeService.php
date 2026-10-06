@@ -74,7 +74,8 @@ class CameraProbeService
         }
 
         return match (true) {
-            $status === 200 => ['result' => self::OK, 'status' => $status, 'message' => 'Stream found and login accepted.'],
+            // Live view work: the video codec from the SDP (WebRTC needs H264).
+            $status === 200 => ['result' => self::OK, 'status' => $status, 'message' => 'Stream found and login accepted.', 'codec' => self::videoCodec($response['body'] ?? '')],
             $status === 401 || $status === 403 => ['result' => self::UNAUTHORIZED, 'status' => $status, 'message' => 'The camera rejected the username or password.'],
             $status === 404 => ['result' => self::NOT_FOUND, 'status' => $status, 'message' => 'The camera has no stream at this path.'],
             default => ['result' => self::ERROR, 'status' => $status, 'message' => 'Unexpected camera answer (RTSP '.($status ?? 'none').').'],
@@ -114,15 +115,32 @@ class CameraProbeService
             }
         }
 
-        // Skip a body (SDP) so the next request on this socket starts clean.
+        // Read the body (SDP) so the next request on this socket starts clean.
         $length = (int) ($headers['content-length'] ?? 0);
-        if ($length > 0) {
-            fread($socket, min($length, 65536));
+        $body = '';
+        while ($length > 0 && strlen($body) < min($length, 65536) && ! feof($socket)) {
+            $chunk = fread($socket, min($length, 65536) - strlen($body));
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+            $body .= $chunk;
         }
 
         preg_match('#^RTSP/\d\.\d\s+(\d{3})#', $head, $match);
 
-        return ['status' => isset($match[1]) ? (int) $match[1] : null, 'headers' => $headers];
+        return ['status' => isset($match[1]) ? (int) $match[1] : null, 'headers' => $headers, 'body' => $body];
+    }
+
+    /**
+     * Live view work: "H264", "H265"... of the first video track in an SDP.
+     */
+    public static function videoCodec(string $sdp): ?string
+    {
+        if (! preg_match('#m=video[^\r\n]*\R(?:(?!m=)[^\r\n]*\R)*?a=rtpmap:\d+\s+([A-Za-z0-9-]+)/#', $sdp."\n", $match)) {
+            return null;
+        }
+
+        return strtoupper($match[1]) === 'HEVC' ? 'H265' : strtoupper($match[1]);
     }
 
     protected function authorization(string $challenge, string $method, string $uri, string $username, string $password): ?string

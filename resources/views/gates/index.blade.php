@@ -10,6 +10,8 @@
                 <x-badge :tone="$detectorRunning ? 'success' : 'warning'" :label="$detectorRunning ? 'Detector running' : 'Detector starting'" />
             </span>
             <x-live-indicator />
+            {{-- Live view work: boxes are drawn over the video, and can be hidden. --}}
+            <label class="overlay-toggle"><input type="checkbox" data-overlay-toggle checked> Show detection boxes</label>
         </x-slot:meta>
     </x-page-header>
 
@@ -29,7 +31,8 @@
                 </header>
 
                 <div @class(['gate-feed', 'is-offline' => ! $cameraLive])>
-                    <img src="{{ $gate['stream_url'] }}" alt="{{ $gate['short_label'] }} live camera" data-gate-feed data-stream="{{ $gate['stream_url'] }}">
+                    {{-- Live view work: the camera's main stream over WebRTC (go2rtc). --}}
+                    <x-live-video :gate="$location" :mjpeg="$gate['stream_url']" page="gate-monitor" class="gate-feed-video" :alt="$gate['short_label'].' live camera'" />
                     @include('partials.feed-offline', ['attributes' => 'data-gate-feed-offline'])
                 </div>
 
