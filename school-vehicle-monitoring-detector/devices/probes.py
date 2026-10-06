@@ -7,6 +7,7 @@ import asyncio
 import re
 import select
 import socket
+import sys
 import time
 import uuid
 import xml.etree.ElementTree as ElementTree
@@ -287,36 +288,62 @@ def reader_udp_probe(hosts, profiles):
     return results
 
 
+# B2: macOS option that sends a socket's packets out one network card.
+IP_BOUND_IF = 25
+
+
+def _socket_for_interface(interface):
+    """
+    A UDP broadcast socket that leaves through this interface.
+
+    255.255.255.255 normally leaves through the default route only (on a PC
+    with Wi-Fi and a LAN cable that is often the Wi-Fi), so a reader on the
+    LAN never heard the search. Measured 2026-10-05: the reader answered only
+    when the search was sent out of the LAN card. macOS: IP_BOUND_IF; other
+    systems: bind to the card's own address.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.setblocking(False)
+    bound_to_card = False
+    if sys.platform == "darwin" and interface.get("name"):
+        try:
+            sock.setsockopt(socket.IPPROTO_IP, IP_BOUND_IF, socket.if_nametoindex(interface["name"]))
+            bound_to_card = True
+        except OSError:
+            bound_to_card = False
+    sock.bind(("", 0) if bound_to_card else (interface["ip"], 0))
+    return sock
+
+
 def broadcast_discovery(interfaces, profiles, errors=None):
     """
     Search packets used by the serial-to-Ethernet modules inside many generic
     readers. Any reply means "a network module lives at this address".
+    B2: sent out of every network card (not only the default one).
     """
     probes = profiles.get("uhf_reader", {}).get("broadcast_discovery", [])
     wait = float(profiles.get("scan", {}).get("udp_reply_seconds", 2.5))
     own_ips = {item["ip"] for item in interfaces}
-    destinations = {"255.255.255.255"} | {item["broadcast"] for item in interfaces}
     sockets = []
     replies = {}
 
     try:
-        for probe in probes:
-            payload = bytes.fromhex(probe["payload_hex"]) if probe.get("payload_hex") else str(probe.get("payload_text", "")).encode()
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            sock.setblocking(False)
-            try:
-                sock.bind(("", 0))
-            except OSError as error:
-                _note(errors, f"Reader broadcast ({probe['name']}): could not open a socket: {error}")
-                sock.close()
-                continue
-            for destination in destinations:
+        for interface in interfaces or [{"name": None, "ip": "", "broadcast": "255.255.255.255"}]:
+            destinations = {"255.255.255.255", interface.get("broadcast") or "255.255.255.255"}
+            for probe in probes:
+                payload = bytes.fromhex(probe["payload_hex"]) if probe.get("payload_hex") else str(probe.get("payload_text", "")).encode()
                 try:
-                    sock.sendto(payload, (destination, int(probe["port"])))
+                    sock = _socket_for_interface(interface)
                 except OSError as error:
-                    _note(errors, f"Reader broadcast to {destination}: {error}")
-            sockets.append((sock, probe["name"]))
+                    _note(errors, f"Reader broadcast ({probe['name']}) on {interface.get('name') or 'default'}: could not open a socket: {error}")
+                    continue
+                for destination in destinations:
+                    try:
+                        sock.sendto(payload, (destination, int(probe["port"])))
+                    except OSError as error:
+                        _note(errors, f"Reader broadcast to {destination} on {interface.get('name') or 'default'}: {error}")
+                sockets.append((sock, probe["name"]))
 
         deadline = time.monotonic() + wait
         while sockets and time.monotonic() < deadline:

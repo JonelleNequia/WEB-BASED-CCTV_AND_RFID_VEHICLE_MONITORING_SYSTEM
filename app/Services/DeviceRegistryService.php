@@ -851,6 +851,29 @@ class DeviceRegistryService
             ->values();
     }
 
+    /**
+     * B2: a plain name for a non-technical user: maker + model + what it is.
+     */
+    public function friendlyName(NetworkDevice $device): string
+    {
+        if ($device->kind === NetworkDevice::KIND_READER) {
+            return 'UHF RFID Reader';
+        }
+
+        $model = trim((string) $device->model);
+        $brand = trim((string) ($device->brand ?: $device->vendor));
+        // "TP-Link VIGI" + "VIGI-C240" -> "TP-Link VIGI-C240" (no word twice).
+        $brandWords = array_filter(preg_split('/\s+/', $brand) ?: [], fn (string $word): bool => $word !== '' && stripos($model, $word) === false
+            && ! preg_match('/^(co\.?|ltd\.?|inc\.?|corp\.?|corporation|systems|technologies|technology|,)$/i', rtrim($word, ',')));
+        $name = trim(implode(' ', array_slice($brandWords, 0, 2)).' '.($model ?: ''));
+
+        if ($device->kind === NetworkDevice::KIND_CAMERA) {
+            return trim(($name !== '' ? $name : 'Network').(stripos($name, 'camera') === false ? ' Camera' : ''));
+        }
+
+        return $name !== '' ? $name : ($device->name ?: 'Network device');
+    }
+
     protected function devicePayload(NetworkDevice $device, Collection $suggestions, array $interfaces): array
     {
         $details = (array) $device->details;
@@ -870,6 +893,8 @@ class DeviceRegistryService
             'vendor' => $device->vendor,
             'model' => $device->model,
             'name' => $device->name ?: ($device->brand ?: $device->vendor ?: 'Device'),
+            // B2: the name the add-device wizard shows ("TP-Link VIGI-C240 Camera", "UHF RFID Reader").
+            'friendly_name' => $this->friendlyName($device),
             'subnet' => $device->subnet,
             'is_new' => (bool) $device->is_new,
             'randomized_mac' => (bool) ($details['randomized_mac'] ?? false),

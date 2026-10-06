@@ -30,6 +30,8 @@ class GateSetupService
             'name' => $gate->name,
             'active' => (bool) $gate->is_active,
             'kiosk_url' => route('gates.kiosk', $gate->code),
+            // B2: the live view the add-camera wizard shows once the camera is added.
+            'stream_url' => app(DetectorRuntimeService::class)->streamUrlForRole($gate->code, $runtime, request()->getHost()),
             'camera' => $this->camera($gate, $devices, $cameraConfigs[$gate->code] ?? [], $runtime),
             'reader' => $this->reader($gate, $devices),
             'zone' => $this->zone($gate, $cameraConfigs[$gate->code] ?? []),

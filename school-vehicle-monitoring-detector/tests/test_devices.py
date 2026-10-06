@@ -534,11 +534,13 @@ class FindMyReaderTests(unittest.TestCase):
         lan = {"name": "en7", "label": "USB LAN", "kind": "ethernet", "ip": "198.51.100.2", "network": "198.51.100.0/24",
                "gateway": "198.51.100.1", "link_local": False, "mac": "DC:32:62:56:1E:02"}
         wizard = find.FindReaderWizard(load_profiles(), 2, lambda message: None, listen_seconds=2)
-        self._patches = [mock.patch.object(find.netinfo, "interfaces", return_value=[lan]),
-                         mock.patch.object(find.FindReaderWizard, "_sweep", lambda self, interfaces: {})]
-        for patch in self._patches:
+        # Each call stops its own patches (a second call used to leave the
+        # first netinfo.interfaces patch running for every later test).
+        patches = [mock.patch.object(find.netinfo, "interfaces", return_value=[lan]),
+                   mock.patch.object(find.FindReaderWizard, "_sweep", lambda self, interfaces: {})]
+        for patch in patches:
             patch.start()
-        self.addCleanup(lambda: [patch.stop() for patch in self._patches])
+            self.addCleanup(patch.stop)
         return wizard
 
 

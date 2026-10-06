@@ -89,6 +89,20 @@ def _ignored(name, profiles):
     return False
 
 
+def _assumed_netmask(ip):
+    """
+    B2: an extra address added without a netmask (`ifconfig en7 alias
+    192.168.2.1 255.255.255.0` stores 255.255.255.0 as the broadcast and no
+    netmask) was skipped, so its network was never scanned. A private
+    address gets the usual /24 instead.
+    """
+    try:
+        address = ipaddress.IPv4Address(ip)
+    except ValueError:
+        return None
+    return "255.255.255.0" if address.is_private and not address.is_loopback and not address.is_link_local else None
+
+
 def interfaces(profiles):
     """
     Usable IPv4 interfaces: up, not loopback/virtual, with an address.
@@ -104,10 +118,13 @@ def interfaces(profiles):
             if address.family == getattr(psutil, "AF_LINK", None):
                 mac = normalize_mac(address.address)
         for address in addresses:
-            if address.family != socket.AF_INET or not address.address or not address.netmask:
+            if address.family != socket.AF_INET or not address.address:
+                continue
+            netmask = address.netmask or _assumed_netmask(address.address)
+            if not netmask:
                 continue
             try:
-                network = ipaddress.IPv4Network(f"{address.address}/{address.netmask}", strict=False)
+                network = ipaddress.IPv4Network(f"{address.address}/{netmask}", strict=False)
                 ip = ipaddress.IPv4Address(address.address)
             except ValueError:
                 continue
@@ -118,7 +135,7 @@ def interfaces(profiles):
                 "label": interface_label(name),
                 "kind": interface_kind(name, profiles),
                 "ip": str(ip),
-                "netmask": str(address.netmask),
+                "netmask": str(netmask),
                 "network": str(network),
                 "prefix": network.prefixlen,
                 "broadcast": str(network.broadcast_address),

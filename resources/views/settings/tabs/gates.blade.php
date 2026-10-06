@@ -132,6 +132,19 @@
     </form>
 </div>
 
+{{-- B2: the add-device wizard ("+ Add camera" / "+ Add reader"), drawn by public/js/add-device.js. --}}
+<x-modal id="add-device-modal" title="Add device" size="md">
+    <div class="add-device" data-add-device-box aria-live="polite"></div>
+</x-modal>
+<script id="add-device-data" type="application/json">{!! json_encode([
+    'indexUrl' => route('settings.devices.index'),
+    'scanUrl' => route('settings.devices.scan'),
+    'uhfStatusUrl' => route('devices.uhf-status'),
+    'gatesStateUrl' => route('gates.state'),
+    'manualUrl' => route('settings.index', ['tab' => 'manual']),
+    'gates' => collect($gateCards)->mapWithKeys(fn (array $gate): array => [$gate['code'] => ['name' => $gate['name'], 'stream_url' => $gate['stream_url']]]),
+], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
+
 {{-- Dialogs behind the "⋯" menus (filled by public/js/gate-setup.js). --}}
 <x-modal id="setup-camera-name" title="Rename camera" size="sm">
     <form method="POST" action="" class="stack-form" data-setup-form>
@@ -195,4 +208,5 @@
 
 @push('scripts')
     <script src="{{ asset('js/gate-setup.js') }}"></script>
+    <script src="{{ asset('js/add-device.js') }}"></script>
 @endpush
