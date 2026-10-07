@@ -3,6 +3,14 @@
     Detection zone. Plain words, a status dot and one line each; the "⋯"
     menus rename, test or remove. Technical settings are in Advanced.
 --}}
+@php($lanProblem = $gateCards[0]['lan_problem'] ?? null)
+@if ($lanProblem)
+    {{-- No camera or reader can answer: the LAN itself (said once, in plain words). --}}
+    <div class="devices-banner" role="status" data-lan-problem>
+        <strong>{{ $lanProblem['line'] }}</strong>
+        <span>{{ $lanProblem['next_step'] }}</span>
+    </div>
+@endif
 <div class="gate-setup-grid">
     @foreach ($gateCards as $gate)
         <article class="gate-setup-card" data-gate-card="{{ $gate['code'] }}">

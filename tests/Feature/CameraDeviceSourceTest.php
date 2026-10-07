@@ -183,7 +183,7 @@ class CameraDeviceSourceTest extends TestCase
         $this->assign();
         File::ensureDirectoryExists(DeviceFiles::directory());
         File::put(DeviceFiles::statusPath(), json_encode(['service_running' => true, 'updated_at' => now()->toIso8601String(),
-            'network' => ['interfaces' => [['name' => 'eth0', 'ip' => '203.0.113.2', 'network' => '203.0.113.0/24', 'gateway' => '203.0.113.1']]]]));
+            'network' => ['interfaces' => [['name' => 'eth0', 'kind' => 'ethernet', 'ip' => '203.0.113.2', 'network' => '203.0.113.0/24', 'gateway' => '203.0.113.1']]]]));
         File::ensureDirectoryExists(dirname(CameraFiles::statusPath()));
         File::put(CameraFiles::statusPath(), json_encode(['service_running' => true, 'cameras' => ['gate-1' => ['camera_running' => false, 'error_code' => 'unreachable']]]));
 

@@ -26,15 +26,19 @@ class GateSetupService
      */
     public function cards(Collection $gates, array $devices, array $cameraConfigs, array $runtime): array
     {
+        $lan = $this->lanProblem($devices);
+
         return $gates->map(fn (Gate $gate): array => [
             'code' => $gate->code,
+            // The LAN cable reaches nothing (no router, devices off): said once, above the cards.
+            'lan_problem' => $lan,
             'name' => $gate->name,
             'active' => (bool) $gate->is_active,
             'kiosk_url' => route('gates.kiosk', $gate->code),
             // B2: the live view the add-camera wizard shows once the camera is added.
             'stream_url' => app(DetectorRuntimeService::class)->streamUrlForRole($gate->code, $runtime, request()->getHost()),
-            'camera' => $this->camera($gate, $devices, $cameraConfigs[$gate->code] ?? [], $runtime),
-            'reader' => $this->reader($gate, $devices),
+            'camera' => $this->camera($gate, $devices, $cameraConfigs[$gate->code] ?? [], $runtime, $lan),
+            'reader' => $this->reader($gate, $devices, $lan),
             'zone' => $this->zone($gate, $cameraConfigs[$gate->code] ?? []),
         ])->values()->all();
     }
@@ -44,7 +48,41 @@ class GateSetupService
      *
      * @return array<string, mixed>|null
      */
-    protected function camera(Gate $gate, array $devices, array $config, array $runtime): ?array
+    /**
+     * Why no camera or reader can answer at all: no LAN cable, or a cable
+     * where nothing answers (no router giving addresses, the switch or the
+     * devices are off, or the cable is in the router's WAN port).
+     *
+     * @param  array<string, mixed>  $devices  DeviceRegistryService::panelPayload()
+     * @return array{line: string, next_step: string}|null
+     */
+    public function lanProblem(array $devices): ?array
+    {
+        if (! data_get($devices, 'service.running', false)) {
+            return null;
+        }
+
+        $wired = collect((array) data_get($devices, 'network.interfaces', []))->where('kind', 'ethernet');
+        if ($wired->isEmpty()) {
+            return [
+                'line' => 'This PC is not connected to the cameras and readers (no LAN cable).',
+                'next_step' => 'Plug the LAN cable from the router or switch of the cameras and readers into this PC.',
+            ];
+        }
+
+        $warnings = collect((array) data_get($devices, 'diagnostics.warnings', []))->pluck('code');
+        $router = $wired->contains(fn (array $interface): bool => filled($interface['gateway'] ?? null));
+        if (! $router && $warnings->intersect(['link_local', 'lan_empty'])->isNotEmpty()) {
+            return [
+                'line' => 'Nothing answers on the LAN cable: no router gives this PC an address.',
+                'next_step' => 'Check that the router (and the PoE switch or power adapters of the cameras and readers) is on, and that the cable is in one of its LAN ports, not WAN / Internet.',
+            ];
+        }
+
+        return null;
+    }
+
+    protected function camera(Gate $gate, array $devices, array $config, array $runtime, ?array $lan = null): ?array
     {
         $assigned = data_get($devices, "stations.{$gate->code}.camera");
 
@@ -56,7 +94,10 @@ class GateSetupService
         [$state, $line, $nextStep] = $live ? ['online', 'Online', ''] : $this->cameraProblem($gate->code, $runtime);
         $streams = app(CameraStreams::class);
         $device = $streams->forGate($gate->code)['device'];
-        if (! $live && $device && $this->onOtherNetwork($device)) {
+        if (! $live && $lan) {
+            // The LAN itself is the problem; "set the camera to DHCP" would mislead.
+            [$state, $line, $nextStep] = ['offline', 'Offline · '.$lan['line'], $lan['next_step']];
+        } elseif (! $live && $device && $this->onOtherNetwork($device)) {
             // Camera source work: found by MAC, but with a fixed address from another network.
             [$state, $line, $nextStep] = ['offline', 'Offline · The camera still has an address from another network.',
                 "Set the camera to DHCP (automatic address) in its own settings; the system then finds it by itself."];
@@ -171,7 +212,7 @@ class GateSetupService
      *
      * @return array<string, mixed>|null
      */
-    protected function reader(Gate $gate, array $devices): ?array
+    protected function reader(Gate $gate, array $devices, ?array $lan = null): ?array
     {
         $assigned = data_get($devices, "stations.{$gate->code}.reader");
         $manual = (bool) $gate->reader_manual && filled($gate->reader_ip);
@@ -199,11 +240,13 @@ class GateSetupService
             'line' => match (true) {
                 ! $serviceRunning => 'Starting · The device program is starting.',
                 $online => 'Online',
+                $lan !== null => 'Offline · '.$lan['line'],
                 $state === 'connecting' || $state === null => 'Connecting…',
                 default => 'Offline · The reader does not answer.',
             },
             'next_step' => match (true) {
                 ! $serviceRunning => 'It starts by itself within a minute.',
+                ! $online && $lan !== null => $lan['next_step'],
                 $online, $state === 'connecting', $state === null => '',
                 default => "Check the reader's LAN cable and power.",
             },
