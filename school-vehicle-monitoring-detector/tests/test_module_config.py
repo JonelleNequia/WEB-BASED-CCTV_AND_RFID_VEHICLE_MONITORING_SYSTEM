@@ -155,5 +155,17 @@ class Protocol(unittest.TestCase):
         self.assertEqual("203.0.113.251", mc.free_address(interface, {"203.0.113.253"}, lambda ip: ip in busy))
 
 
+
+class OnePerMac(unittest.TestCase):
+    def test_a_moved_reader_keeps_its_new_address_not_the_stale_one(self):
+        from devices.scanner import one_per_mac
+
+        stale = {"mac": MAC, "ip": "198.51.100.116", "subnet": None, "kind": "unknown", "discovered_by": ["arp"], "open_ports": {"tcp": []}}
+        moved = {"mac": MAC, "ip": "203.0.113.3", "subnet": "203.0.113.0/24", "kind": "rfid_reader",
+                 "discovered_by": ["arp", "reader-broadcast"], "open_ports": {"tcp": [49152]}, "module": {"module": "x"}}
+        for rows in ([stale, moved], [moved, stale]):
+            self.assertEqual(["203.0.113.3"], [device["ip"] for device in one_per_mac(rows)])
+
+
 if __name__ == "__main__":
     unittest.main()

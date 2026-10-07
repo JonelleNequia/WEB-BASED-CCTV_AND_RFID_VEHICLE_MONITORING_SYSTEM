@@ -411,7 +411,7 @@ class Scanner:
             device["brand"], device["model"], device["name"] = self._naming(device, onvif_info)
             device["key"] = mac or f"ip:{ip}"
             devices.append(device)
-        return devices
+        return one_per_mac(devices)
 
     def _with_signature(self, reader, mac, open_tcp):
         """
@@ -524,3 +524,31 @@ def scan_lock():
 
 
 _LOCK = threading.Lock()
+
+
+KIND_RANK = {"camera": 3, "rfid_reader": 3, "router": 2, "unknown": 0}
+
+
+def one_per_mac(devices):
+    """
+    One row per MAC. After a device moves (e.g. the reader from a fixed
+    address to DHCP) the OS neighbour cache still lists its old address with
+    the same MAC; that stale row must not replace the new one (the reader
+    link followed the old address and timed out). Keep the row on a network
+    of this PC that answered best.
+    """
+    best = {}
+    rest = []
+    for device in devices:
+        mac = device.get("mac")
+        if not mac:
+            rest.append(device)
+            continue
+        score = (
+            bool(device.get("subnet")),
+            bool(device.get("open_ports", {}).get("tcp")) or bool(device.get("module")) or "onvif" in device.get("discovered_by", []),
+            KIND_RANK.get(device.get("kind"), 1),
+        )
+        if mac not in best or score > best[mac][0]:
+            best[mac] = (score, device)
+    return [device for _score, device in best.values()] + rest
