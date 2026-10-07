@@ -217,9 +217,9 @@ def normalize_camera_config(role, loaded_config):
         config.update(loaded_config)
 
     source_type = str(config.get("source_type", "none")).strip().lower()
-    # B1 (Settings): "none" = this gate has no camera yet. Camera source work:
-    # network cameras only (an RTSP or stream URL); USB webcams are gone.
-    if source_type not in {"rtsp", "url", "none"}:
+    # B1 (Settings): "none" = this gate has no camera yet. Network cameras
+    # (RTSP / stream URL); "webcam" = this PC's webcam, for testing only.
+    if source_type not in {"rtsp", "url", "webcam", "none"}:
         source_type = "none"
 
     config["camera_role"] = role
@@ -238,7 +238,13 @@ def normalize_camera_config(role, loaded_config):
     config["calibration_mask"] = config.get("calibration_mask")
     config["calibration_line"] = config.get("calibration_line")
 
-    config["source_value"] = str(config.get("source_value", "") or "").strip()
+    if source_type == "webcam":
+        try:
+            config["source_value"] = int(config.get("source_value") or 0)
+        except (TypeError, ValueError):
+            config["source_value"] = 0
+    else:
+        config["source_value"] = str(config.get("source_value", "") or "").strip()
 
     return config
 
@@ -318,4 +324,6 @@ def resolve_capture_source(camera_config):
     """
     Convert the configured source into the value expected by OpenCV.
     """
+    if camera_config["source_type"] == "webcam":
+        return int(camera_config["source_value"])
     return str(camera_config["source_value"])

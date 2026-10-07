@@ -7585,3 +7585,21 @@ img.thumb-plate {
     align-items: center;
     margin-bottom: 4px;
 }
+
+/* Testing: "or use this PC's webcam for testing" under "+ Add camera". */
+.setup-webcam-form {
+    margin-top: 6px;
+    text-align: center;
+}
+
+.link-button {
+    min-height: 44px;
+    padding: 0 8px;
+    border: 0;
+    background: none;
+    color: var(--purple-deep, #5b3fa8);
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+}

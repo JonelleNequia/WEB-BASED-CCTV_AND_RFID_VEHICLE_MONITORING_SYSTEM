@@ -29,6 +29,8 @@ class Camera extends Model
         'source_type',
         'source_value',
         'snapshot_source_value',
+        // Testing: this PC's webcam instead of the gate's CCTV (null = CCTV).
+        'test_webcam_index',
         'source_username',
         'source_password',
         'browser_device_id',

@@ -45,5 +45,16 @@ class Scripts(unittest.TestCase):
             self.assertIn(f"{pattern} text eol=crlf", attributes)
 
 
+
+class TestWebcam(unittest.TestCase):
+    def test_a_testing_webcam_is_a_camera_number(self):
+        camera = config.normalize_camera_config("gate-1", {"source_type": "webcam", "source_value": "1"})
+        self.assertEqual(("webcam", 1), (camera["source_type"], camera["source_value"]))
+        self.assertEqual(1, config.resolve_capture_source(camera))
+        self.assertEqual(0, config.normalize_camera_config("gate-1", {"source_type": "webcam", "source_value": ""})["source_value"])
+        # Anything else unknown still means "no camera".
+        self.assertEqual("none", config.normalize_camera_config("gate-1", {"source_type": "usb"})["source_type"])
+
+
 if __name__ == "__main__":
     unittest.main()

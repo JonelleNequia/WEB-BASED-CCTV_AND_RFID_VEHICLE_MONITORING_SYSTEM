@@ -385,6 +385,7 @@ class SettingsService
         // current address (found by MAC); a manual one is the typed URL.
         $streams = app(CameraStreams::class)->forGate((string) $cameraConfiguration['camera_role']);
         $sourceType = match (true) {
+            $streams['source'] === CameraStreams::SOURCE_WEBCAM => 'webcam',
             $streams['source'] === CameraStreams::SOURCE_DEVICE && filled($streams['live']) => 'rtsp',
             $streams['source'] === CameraStreams::SOURCE_MANUAL => (string) $cameraConfiguration['source_type'],
             default => Camera::SOURCE_NONE,
@@ -396,7 +397,11 @@ class SettingsService
             'camera_role' => $cameraConfiguration['camera_role'],
             'camera_name' => $cameraConfiguration['camera_name'],
             'source_type' => $sourceType,
-            'source_value' => $sourceType === Camera::SOURCE_NONE ? '' : (string) $streams['live'],
+            'source_value' => match ($sourceType) {
+                Camera::SOURCE_NONE => '',
+                'webcam' => (int) $streams['live'],
+                default => (string) $streams['live'],
+            },
             'source_username' => (string) ($cameraConfiguration['source_username'] ?? ''),
             'source_password' => (string) ($cameraConfiguration['source_password'] ?? ''),
             'snapshot_source_value' => (string) ($streams['snapshot'] ?? ''),

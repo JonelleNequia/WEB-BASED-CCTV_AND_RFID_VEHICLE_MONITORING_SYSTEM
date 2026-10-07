@@ -85,16 +85,21 @@ class GateSetupService
     protected function camera(Gate $gate, array $devices, array $config, array $runtime, ?array $lan = null): ?array
     {
         $assigned = data_get($devices, "stations.{$gate->code}.camera");
+        $streams = app(CameraStreams::class);
+        // Testing: this PC's webcam stands in for the CCTV.
+        $webcam = $streams->forGate($gate->code)['source'] === CameraStreams::SOURCE_WEBCAM;
 
-        if (! $assigned && ($config['source_type'] ?? 'none') === Camera::SOURCE_NONE) {
+        if (! $assigned && ! $webcam && ($config['source_type'] ?? 'none') === Camera::SOURCE_NONE) {
             return null;
         }
 
         $live = (bool) data_get($runtime, "cameras.{$gate->code}.camera_running", false) && ($runtime['service_running'] ?? false);
         [$state, $line, $nextStep] = $live ? ['online', 'Online', ''] : $this->cameraProblem($gate->code, $runtime);
-        $streams = app(CameraStreams::class);
         $device = $streams->forGate($gate->code)['device'];
-        if (! $live && $lan) {
+        if ($webcam && ! $live) {
+            [$state, $line, $nextStep] = $state === 'starting' ? [$state, $line, $nextStep]
+                : ['offline', 'Offline · The webcam sends no picture.', 'Allow camera access for this app in the computer\'s privacy settings, or close other apps that use the webcam.'];
+        } elseif (! $live && $lan) {
             // The LAN itself is the problem; "set the camera to DHCP" would mislead.
             [$state, $line, $nextStep] = ['offline', 'Offline · '.$lan['line'], $lan['next_step']];
         } elseif (! $live && $device && $this->onOtherNetwork($device)) {
@@ -116,7 +121,12 @@ class GateSetupService
                 'next_step' => "Open the camera's own settings page › Video › Encoding, and choose H.264 for both streams.",
             ],
             'name' => (string) ($config['camera_name'] ?? $gate->name.' Camera'),
-            'source' => $assigned ? (string) $assigned['name'] : 'Added by hand (Advanced)',
+            'source' => match (true) {
+                $webcam => "This PC's webcam (testing)".($assigned ? ' · the CCTV is used again when you stop it' : ''),
+                (bool) $assigned => (string) $assigned['name'],
+                default => 'Added by hand (Advanced)',
+            },
+            'webcam' => $webcam,
             'managed' => (bool) $assigned,
             'device_id' => $assigned['device_id'] ?? null,
             'detected' => $detected ? ['id' => $detected->id, 'name' => app(DeviceRegistryService::class)->friendlyName($detected)] : null,
@@ -158,6 +168,15 @@ class GateSetupService
         }
 
         return true;
+    }
+
+    /**
+     * Testing: this PC's webcam instead of the gate's CCTV, or back to the CCTV.
+     */
+    public function useWebcam(string $gate, ?int $index): void
+    {
+        Camera::query()->forRole($gate)->firstOrFail()->forceFill(['test_webcam_index' => $index])->save();
+        app(DeviceRegistryService::class)->syncAssignments(force: true);
     }
 
     /**

@@ -55,6 +55,19 @@ class GateSetupController extends Controller
         return response()->json($result, $result['ok'] ? 200 : 422);
     }
 
+    /** Testing: this PC's webcam instead of the CCTV (enabled=0 goes back to the CCTV). */
+    public function webcam(Request $request, string $gate, GateSetupService $setup): RedirectResponse
+    {
+        $validated = $request->validate(['enabled' => ['required', 'boolean'], 'index' => ['nullable', 'integer', 'between:0,9']]);
+        $code = $this->code($gate);
+        $on = (bool) $validated['enabled'];
+        $setup->useWebcam($code, $on ? (int) ($validated['index'] ?? 0) : null);
+
+        return back()->with('status', $on
+            ? Gate::labelFor($code)." uses this PC's webcam for testing. The picture appears in a few seconds."
+            : Gate::labelFor($code).' uses its CCTV again.');
+    }
+
     /** Camera source work: a hand-typed camera that the scan found becomes automatic. */
     public function useDetectedCamera(string $gate, GateSetupService $setup): RedirectResponse
     {

@@ -27,6 +27,12 @@
                 <h3 class="setup-part-title">Camera</h3>
                 @if (! $gate['camera'])
                     <a href="{{ route('settings.index', ['tab' => 'devices', 'gate' => $gate['code'], 'role' => 'camera']) }}" class="add-device-button" data-add-device="camera" data-gate="{{ $gate['code'] }}">+ Add camera</a>
+                    {{-- Testing: this PC's webcam until the CCTV is ready. --}}
+                    <form method="POST" action="{{ route('settings.gate.camera.webcam', $gate['code']) }}" class="setup-webcam-form">
+                        @csrf
+                        <input type="hidden" name="enabled" value="1">
+                        <button type="submit" class="link-button" data-use-webcam>or use this PC's webcam for testing</button>
+                    </form>
                 @else
                     @php($camera = $gate['camera'])
                     <div class="setup-device">
@@ -64,7 +70,13 @@
                             <div class="menu-panel" role="menu">
                                 <button type="button" role="menuitem" data-setup-dialog="camera-name" data-action-url="{{ route('settings.gate.camera.name', $gate['code']) }}" data-value="{{ $camera['name'] }}">Rename</button>
                                 <button type="button" role="menuitem" data-setup-dialog="camera-login" data-action-url="{{ route('settings.gate.camera.login', $gate['code']) }}" data-value="{{ $camera['username'] }}">Change login</button>
-                                @if ($camera['can_test'])
+                                {{-- Testing: this PC's webcam instead of the CCTV, and back. --}}
+                                <form method="POST" action="{{ route('settings.gate.camera.webcam', $gate['code']) }}">
+                                    @csrf
+                                    <input type="hidden" name="enabled" value="{{ $camera['webcam'] ? '0' : '1' }}">
+                                    <button type="submit" role="menuitem" data-use-webcam>{{ $camera['webcam'] ? ($camera['managed'] ? 'Use the CCTV again' : 'Stop using the webcam') : "Use this PC's webcam (testing)" }}</button>
+                                </form>
+                                @if ($camera['can_test'] && ! $camera['webcam'])
                                     <button type="button" role="menuitem" data-camera-test="{{ route('settings.gate.camera.test', $gate['code']) }}">Test</button>
                                 @endif
                                 <form method="POST" action="{{ route('settings.gate.camera.remove', $gate['code']) }}" data-confirm-title="Remove the camera?" data-confirm-label="Remove camera" data-confirm="Remove the camera from {{ $gate['name'] }}? Vehicles at this gate are not detected until you add a camera again. The detection zone is kept.">

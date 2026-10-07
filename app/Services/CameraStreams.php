@@ -30,11 +30,21 @@ class CameraStreams
 
     public const SOURCE_NONE = 'none';
 
+    /** Testing only: this PC's webcam stands in for the gate's CCTV. */
+    public const SOURCE_WEBCAM = 'webcam';
+
     /**
      * @return array{source: string, live: ?string, main: ?string, sub: ?string, snapshot: ?string, stream: string, device: ?NetworkDevice}
      */
     public function forGate(string $gate): array
     {
+        // Testing: the webcam wins over the CCTV until it is switched off
+        // (the CCTV assignment is kept).
+        $webcam = Camera::query()->forRole($gate)->value('test_webcam_index');
+        if ($webcam !== null) {
+            return ['source' => self::SOURCE_WEBCAM, 'live' => (string) $webcam, 'main' => null, 'sub' => null, 'snapshot' => null, 'stream' => 'sub', 'device' => null];
+        }
+
         $assignment = DeviceAssignment::query()->with('device')
             ->where('station', $gate)->where('role', DeviceAssignment::ROLE_CAMERA)->first();
         $device = $assignment?->device;

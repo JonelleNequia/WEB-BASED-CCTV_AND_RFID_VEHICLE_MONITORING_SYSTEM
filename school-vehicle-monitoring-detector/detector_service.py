@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import threading
 import time
 from datetime import datetime, timedelta
@@ -626,7 +627,15 @@ def build_capture(source_type, capture_source, decoder_threads=0):
 
         return cv2.VideoCapture(capture_source)
 
-    # Camera source work: network cameras only (no USB webcam): nothing to open.
+    if source_type == "webcam":
+        # Testing only: this PC's webcam (AVFoundation on macOS, DirectShow on Windows).
+        system_name = sys.platform
+        if system_name == "darwin" and hasattr(cv2, "CAP_AVFOUNDATION"):
+            return cv2.VideoCapture(int(capture_source), cv2.CAP_AVFOUNDATION)
+        if system_name.startswith("win") and hasattr(cv2, "CAP_DSHOW"):
+            return cv2.VideoCapture(int(capture_source), cv2.CAP_DSHOW)
+        return cv2.VideoCapture(int(capture_source))
+
     return cv2.VideoCapture()
 
 
@@ -662,6 +671,8 @@ def validate_camera_source(camera_config, capture_source):
     Return a user-friendly setup error before OpenCV tries an impossible source.
     """
     source_type = camera_config["source_type"]
+    if source_type == "webcam":
+        return ""
     source_text = str(capture_source or "").strip()
     parsed = urlparse(source_text)
 
@@ -713,6 +724,10 @@ def camera_open_error(camera_config, capture_source, state):
             state["error_code"] = diagnosis["code"]
             return diagnosis["message"]
 
+    if camera_config["source_type"] == "webcam":
+        state["error_code"] = "no_frames"
+        return "The webcam sends no picture. Allow camera access for this app, or close other apps that use it."
+
     state["error_code"] = "open_failed"
     return f"Could not open camera source: {strip_credentials(capture_source)}"
 
@@ -721,6 +736,8 @@ def build_connection_source(camera_config, capture_source):
     """
     Add credentials to RTSP or URL sources when they are stored separately.
     """
+    if camera_config["source_type"] == "webcam":
+        return capture_source
     source_value = str(capture_source).strip()
     username = camera_config["source_username"]
     password = camera_config["source_password"]

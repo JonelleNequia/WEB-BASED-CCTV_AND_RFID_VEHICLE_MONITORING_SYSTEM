@@ -207,6 +207,28 @@ class CameraDeviceSourceTest extends TestCase
         $this->assertSame('rtsp://198.51.100.20:554/stream2', app(CameraStreams::class)->forGate('gate-1')['live']);
     }
 
+    public function test_a_gate_can_use_this_pcs_webcam_for_testing_and_go_back_to_its_cctv(): void
+    {
+        $this->assign();
+
+        $this->actingAs($this->admin)->post(route('settings.gate.camera.webcam', 'gate-1'), ['enabled' => 1])
+            ->assertSessionHas('status', "Gate 1 uses this PC's webcam for testing. The picture appears in a few seconds.");
+        $detector = $this->detectorCamera();
+        $this->assertSame(['webcam', 0], [$detector['source_type'], $detector['source_value']]);
+        $this->assertSame([], app(Go2rtcService::class)->streams(), 'The webcam uses the basic live view.');
+        $card = $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'gates']))->assertOk()->getContent();
+        $this->assertStringContainsString(e("This PC's webcam (testing) · the CCTV is used again when you stop it"), $card);
+        $this->assertStringContainsString('Use the CCTV again', $card);
+        $this->assertTrue(DeviceAssignment::query()->where('station', 'gate-1')->where('role', 'camera')->exists(), 'The CCTV stays assigned.');
+
+        $this->actingAs($this->admin)->post(route('settings.gate.camera.webcam', 'gate-1'), ['enabled' => 0])
+            ->assertSessionHas('status', 'Gate 1 uses its CCTV again.');
+        $this->assertSame('rtsp://198.51.100.20:8554/h264/ch1/sub', $this->detectorCamera()['source_value']);
+
+        // A gate without any camera offers the webcam under "+ Add camera".
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'gates']))->assertSee("or use this PC's webcam for testing", false);
+    }
+
     protected function assign(): void
     {
         app(DeviceRegistryService::class)->ingestScan($this->scan());

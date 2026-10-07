@@ -169,6 +169,7 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
             Route::patch('/camera/login', [\App\Http\Controllers\GateSetupController::class, 'cameraLogin'])->name('camera.login');
             Route::post('/camera/test', [\App\Http\Controllers\GateSetupController::class, 'testCamera'])->name('camera.test');
             Route::post('/camera/automatic', [\App\Http\Controllers\GateSetupController::class, 'useDetectedCamera'])->name('camera.automatic');
+            Route::post('/camera/webcam', [\App\Http\Controllers\GateSetupController::class, 'webcam'])->name('camera.webcam');
             Route::delete('/camera', [\App\Http\Controllers\GateSetupController::class, 'removeCamera'])->name('camera.remove');
             Route::patch('/reader/name', [\App\Http\Controllers\GateSetupController::class, 'renameReader'])->name('reader.name');
             Route::delete('/reader', [\App\Http\Controllers\GateSetupController::class, 'removeReader'])->name('reader.remove');
