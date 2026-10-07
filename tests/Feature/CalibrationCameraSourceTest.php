@@ -106,7 +106,7 @@ class CalibrationCameraSourceTest extends TestCase
 
         // The drawing canvas has its own attribute: the live player's root
         // also has data-overlay, and picking it stopped the whole page.
-        $this->assertStringContainsString('<canvas class="camera-overlay" data-calibration-canvas>', $html);
+        $this->assertStringContainsString('<canvas class="camera-overlay" data-calibration-canvas', $html);
         $this->assertStringNotContainsString("querySelector('[data-overlay]')", $script);
     }
 

@@ -1,6 +1,7 @@
 
 
-    <p class="field-help">On a gate's camera, click point by point to draw the detection zone, then draw the trigger line, then save. The detector logs a vehicle when it crosses the line inside the zone.</p>
+    <p class="field-help"><strong>Zone (ROI):</strong> click point by point, then click point 1 or press Done. Drag a point to move it, the "+" on an edge to add one, the inside to move the whole zone; right-click a point (or select it and press Delete) to remove it.
+        <strong>Trigger line:</strong> drag across the road. Drag its ends or its middle to adjust it; click the IN arrow to flip it. Then Save.</p>
     <p class="field-help">Each gate records IN and OUT. The <strong>IN</strong> arrow on the line shows the direction of a vehicle coming into campus; use <strong>Flip IN direction</strong> if it points the wrong way, then save. Check it below: drive through once and look at "Recent crossings".</p>
 
     {{-- Detector debug view: raw detections, zone/line as used, track IDs, counters. --}}
@@ -31,13 +32,17 @@
 
                 @if ($camera['has_camera'])
                     <div class="calibration-controls-panel">
-                        <div class="button-row camera-toolbar">
-                            <button type="button" class="button button-secondary button-sm" data-tool="mask">Draw Polygon ROI</button>
-                            <button type="button" class="button button-secondary button-sm" data-tool="line">Draw Trigger Line</button>
+                        <div class="button-row camera-toolbar" role="toolbar" aria-label="{{ $camera['role_label'] }} calibration tools">
+                            <span class="calibration-tool-group" role="group" aria-label="Draw">
+                                <button type="button" class="button button-secondary button-sm" data-tool="mask" aria-pressed="false">Zone (ROI)</button>
+                                <button type="button" class="button button-secondary button-sm" data-tool="line" aria-pressed="false">Trigger line</button>
+                            </span>
+                            <button type="button" class="button button-secondary button-sm" data-done disabled>Done</button>
                             <button type="button" class="button button-secondary button-sm" data-flip-direction>Flip IN direction</button>
                             <button type="button" class="button button-secondary button-sm" data-clear>Clear</button>
                             <button type="button" class="button button-primary button-sm" data-save>Save Calibration</button>
                         </div>
+                        <ul class="calibration-problems" data-problems hidden></ul>
                     </div>
                 @endif
 
@@ -49,7 +54,10 @@
                         {{-- The detector's last saved picture: shown while the camera is offline, so the zone can still be drawn. --}}
                         <img class="camera-video camera-last-picture" data-last-picture alt="{{ $camera['role_label'] }} last picture"
                              @if ($camera['snapshot_url']) src="{{ $camera['snapshot_url'] }}" @endif hidden>
-                        <canvas class="camera-overlay" data-calibration-canvas></canvas>
+                        <canvas class="camera-overlay" data-calibration-canvas tabindex="0" aria-label="{{ $camera['role_label'] }} zone and trigger line"></canvas>
+                        <div class="calibration-point-menu" data-point-menu role="menu" hidden>
+                            <button type="button" role="menuitem" data-remove-point>Remove point</button>
+                        </div>
                         <span class="calibration-picture-badge" data-picture-badge hidden></span>
                         <div class="camera-fallback" data-fallback-wrapper>
                             <div class="camera-fallback-copy">
@@ -127,5 +135,7 @@
     <script id="camera-calibration-data" type="application/json">{!! json_encode($calibrationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 
 @push('scripts')
-    <script src="{{ asset('js/calibration-page.js') }}"></script>
+    {{-- ?v=: a changed script is never taken from the browser's cache. --}}
+    <script src="{{ asset('js/calibration-editor.js') }}?v={{ filemtime(public_path('js/calibration-editor.js')) }}"></script>
+    <script src="{{ asset('js/calibration-page.js') }}?v={{ filemtime(public_path('js/calibration-page.js')) }}"></script>
 @endpush

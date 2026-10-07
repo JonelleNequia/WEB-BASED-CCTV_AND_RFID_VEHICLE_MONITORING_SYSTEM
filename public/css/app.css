@@ -7637,3 +7637,98 @@ img.thumb-plate {
     color: rgba(248, 250, 252, 0.85);
     font-size: 0.85rem;
 }
+
+/* Calibration editor: tools, warnings, point menu. */
+.calibration-tool-group {
+    display: inline-flex;
+    gap: 0;
+}
+
+.calibration-tool-group .button {
+    border-radius: 0;
+}
+
+.calibration-tool-group .button:first-child {
+    border-radius: 999px 0 0 999px;
+}
+
+.calibration-tool-group .button:last-child {
+    border-radius: 0 999px 999px 0;
+}
+
+.camera-toolbar .button.is-active {
+    background: var(--purple-deep, #5b3fa8);
+    border-color: var(--purple-deep, #5b3fa8);
+    color: #fff;
+}
+
+.calibration-problems {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.calibration-problems[hidden] {
+    display: none;
+}
+
+.calibration-problem {
+    padding: 0.45rem 0.7rem;
+    border-radius: 10px;
+    font-size: 0.86rem;
+    font-weight: 600;
+}
+
+.calibration-problem.is-error {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.calibration-problem.is-warning {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.camera-stage-calibration .camera-overlay:focus-visible {
+    outline: 3px solid #fde047;
+    outline-offset: -3px;
+}
+
+.calibration-point-menu {
+    position: absolute;
+    z-index: 4;
+    min-width: 140px;
+    padding: 0.25rem;
+    border-radius: 10px;
+    background: #ffffff;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.3);
+}
+
+.calibration-point-menu[hidden] {
+    display: none;
+}
+
+.calibration-point-menu button {
+    width: 100%;
+    min-height: 40px;
+    padding: 0 0.75rem;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: #991b1b;
+    font: inherit;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+.calibration-point-menu button:hover:not(:disabled) {
+    background: #fee2e2;
+}
+
+.calibration-point-menu button:disabled {
+    color: #9ca3af;
+    cursor: not-allowed;
+}

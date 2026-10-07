@@ -4,13 +4,18 @@
  * this page never asks for the browser's camera. The status comes from the
  * detector (as on System status). While the camera is offline the detector's
  * last picture is shown, so the zone and line can still be drawn.
+ *
+ * Editing (drag points, line ends, whole shapes, "+" on edges, remove a
+ * point, flip IN) is in calibration-editor.js; this file connects it to the
+ * page: the picture, the pointer, the buttons and saving.
  */
 (function () {
     const payloadNode = document.getElementById('camera-calibration-data');
+    const Calib = window.CalibrationEditor;
     const HEARTBEAT_INTERVAL_MS = 4000;
     const LIVE_RECONNECT_INTERVAL_MS = 5000;
 
-    if (!payloadNode) {
+    if (!payloadNode || !Calib) {
         return;
     }
 
@@ -40,40 +45,6 @@
         return result;
     }
 
-    function clampRatio(value) {
-        return Number.isNaN(value) ? 0 : Math.min(Math.max(value, 0), 1);
-    }
-
-    /* Saved points are normalized (0-1) to the camera picture, as the detector uses them. */
-    function normalisePolygon(points, width, height) {
-        if (!Array.isArray(points) || points.length < 3 || width <= 0 || height <= 0) {
-            return null;
-        }
-
-        return points.map((point) => ({ x: clampRatio(point.x / width), y: clampRatio(point.y / height) }));
-    }
-
-    function denormalisePolygon(points, width, height) {
-        return Array.isArray(points) ? points.map((point) => ({ x: point.x * width, y: point.y * height })) : null;
-    }
-
-    function normaliseLine(line, width, height) {
-        if (!line || width <= 0 || height <= 0) {
-            return null;
-        }
-
-        return {
-            x1: clampRatio(line.x1 / width),
-            y1: clampRatio(line.y1 / height),
-            x2: clampRatio(line.x2 / width),
-            y2: clampRatio(line.y2 / height),
-        };
-    }
-
-    function denormaliseLine(line, width, height) {
-        return line ? { x1: line.x1 * width, y1: line.y1 * height, x2: line.x2 * width, y2: line.y2 * height } : null;
-    }
-
     class CalibrationCard {
         constructor(element, camera, routes) {
             this.element = element;
@@ -85,17 +56,20 @@
             this.pictureBadge = element.querySelector('[data-picture-badge]');
             // Not [data-overlay]: the live player's own root has data-overlay="0".
             this.canvas = element.querySelector('[data-calibration-canvas]');
+            this.pointMenu = element.querySelector('[data-point-menu]');
             this.fallbackContainer = element.querySelector('[data-fallback-wrapper]');
             this.fallback = element.querySelector('[data-fallback]');
             this.fallbackDetail = element.querySelector('[data-fallback-detail]');
             this.statusBadge = element.querySelector('[data-status-badge]');
             this.statusValue = element.querySelector('[data-status-value]');
             this.messageValue = element.querySelector('[data-message-value]');
+            this.problemsList = element.querySelector('[data-problems]');
             this.maskValue = element.querySelector('[data-mask-value]');
             this.lineValue = element.querySelector('[data-line-value]');
             this.directionValue = element.querySelector('[data-direction-value]');
             this.crossingList = element.querySelector('[data-crossings]');
             this.saveButton = element.querySelector('[data-save]');
+            this.doneButton = element.querySelector('[data-done]');
             this.ctx = this.canvas?.getContext('2d');
             this.connection = camera.connection || { state: 'offline', label: 'Offline', reason: '', tone: 'critical' };
             this.snapshotUrl = camera.snapshot_url || null;
@@ -103,22 +77,20 @@
             this.liveReady = false;
             this.shown = null;
             this.lastReconnectAt = 0;
-            this.currentTool = 'mask';
-            this.pointerStart = null;
-            this.pointerId = null;
-            this.draftShape = null;
+            this.touch = false;
+            this.cssWidth = 0;
+            this.cssHeight = 0;
             // The saved zone and line, drawn as soon as there is a picture.
-            this.maskShape = camera.calibration_mask || null;
-            this.maskDraftPoints = [];
-            this.lineShape = camera.calibration_line || null;
+            this.editor = new Calib.Editor({ mask: camera.calibration_mask, line: camera.calibration_line });
 
             if (!this.canvas) {
                 return; // No camera at this gate: only the "Add camera" message.
             }
 
             this.bindEvents();
-            this.updateCalibrationSummary();
-            this.setActiveTool('mask');
+            // Saved shapes are only dragged; the Line tool is chosen when the line is missing.
+            this.setActiveTool(this.editor.closed && !this.editor.line ? 'line' : 'mask');
+            this.updateSummary();
             this.applyConnection(this.connection);
         }
 
@@ -126,37 +98,53 @@
             this.element.querySelectorAll('[data-tool]').forEach((button) => {
                 button.addEventListener('click', () => this.setActiveTool(button.dataset.tool));
             });
-
-            this.element.querySelector('[data-clear]').addEventListener('click', () => {
-                this.maskShape = null;
-                this.maskDraftPoints = [];
-                this.lineShape = null;
-                this.draftShape = null;
-                this.updateCalibrationSummary();
-                this.render();
+            this.doneButton.addEventListener('click', () => {
+                this.edited(this.editor.closeMask(), 'Zone closed. Drag its points to adjust it.');
+                if (!this.editor.line) {
+                    this.setActiveTool('line');
+                }
             });
-
-            // Phase 2: which side of the line is IN (the arrow on the canvas).
+            this.element.querySelector('[data-clear]').addEventListener('click', () => {
+                this.edited(this.editor.clear(), 'Cleared. Draw the zone again, then the line.');
+                this.setActiveTool('mask');
+            });
+            // Phase 2: which side of the line is IN (also: click the arrow).
             this.element.querySelector('[data-flip-direction]').addEventListener('click', () => {
-                if (!this.lineShape) {
-                    this.messageValue.textContent = 'Draw the trigger line first.';
+                if (!this.editor.line) {
+                    this.message('Draw the trigger line first.');
                     return;
                 }
-
-                this.lineShape = { ...this.lineShape, in_side: this.inSide() * -1 };
-                this.messageValue.textContent = 'IN direction flipped. Save to apply it.';
-                this.updateCalibrationSummary();
-                this.render();
+                this.edited(this.editor.flip(), 'IN direction flipped. Save to apply it.');
             });
-
             this.saveButton.addEventListener('click', () => this.saveCalibration());
 
             this.canvas.addEventListener('pointerdown', (event) => this.handlePointerDown(event));
             this.canvas.addEventListener('pointermove', (event) => this.handlePointerMove(event));
             this.canvas.addEventListener('pointerup', (event) => this.handlePointerUp(event));
-            this.canvas.addEventListener('dblclick', (event) => event.preventDefault());
-            this.canvas.addEventListener('pointercancel', () => this.cancelDraft());
-            this.canvas.addEventListener('pointerleave', () => this.cancelDraft());
+            this.canvas.addEventListener('pointercancel', () => this.edited(this.editor.pointerCancel()));
+            this.canvas.addEventListener('pointerleave', () => {
+                if (!this.editor.drag) {
+                    this.editor.hover = null;
+                    this.editor.cursor = null;
+                    this.render();
+                }
+            });
+            this.canvas.addEventListener('dblclick', (event) => {
+                event.preventDefault();
+                this.edited(this.editor.doubleClick(this.point(event), this.view(), { touch: this.touch }), 'Point added.');
+            });
+            this.canvas.addEventListener('contextmenu', (event) => this.openPointMenu(event));
+            this.canvas.addEventListener('keydown', (event) => this.handleKey(event));
+            this.pointMenu?.querySelector('[data-remove-point]').addEventListener('click', () => {
+                const index = Number(this.pointMenu.dataset.index);
+                this.closePointMenu();
+                this.edited(this.editor.removeVertex(index), 'Point removed.');
+            });
+            document.addEventListener('pointerdown', (event) => {
+                if (this.pointMenu && !this.pointMenu.hidden && !this.pointMenu.contains(event.target)) {
+                    this.closePointMenu();
+                }
+            });
 
             // The live player says when its picture is ready, which mode it uses, or that it failed.
             this.video.addEventListener('live:mode', () => this.refresh());
@@ -168,8 +156,13 @@
                 this.liveReady = false;
                 this.showPicture();
             });
+            this.video.querySelector('video')?.addEventListener('loadedmetadata', () => this.refresh());
             this.lastPicture?.addEventListener('load', () => this.refresh());
 
+            // The card changes size with the window and the layout.
+            if (window.ResizeObserver) {
+                new ResizeObserver(() => this.refresh()).observe(this.stage);
+            }
             window.addEventListener('resize', () => this.refresh());
         }
 
@@ -242,20 +235,32 @@
         }
 
         setActiveTool(tool) {
-            this.currentTool = tool;
+            this.editor.tool = tool;
             this.element.querySelectorAll('[data-tool]').forEach((button) => {
-                button.classList.toggle('is-active', button.dataset.tool === tool);
+                const active = button.dataset.tool === tool;
+                button.classList.toggle('is-active', active);
+                button.setAttribute('aria-pressed', active ? 'true' : 'false');
             });
+            this.updateSummary();
+            this.render();
         }
 
+        /* Sharp on high-density screens: the canvas has device pixels, drawing uses CSS pixels. */
         resizeCanvas() {
             const width = this.stage.clientWidth;
             const height = this.stage.clientHeight;
+            const ratio = window.devicePixelRatio || 1;
 
-            if (width && height && (this.canvas.width !== width || this.canvas.height !== height)) {
-                this.canvas.width = width;
-                this.canvas.height = height;
+            if (!width || !height) {
+                return;
             }
+            this.cssWidth = width;
+            this.cssHeight = height;
+            if (this.canvas.width !== Math.round(width * ratio) || this.canvas.height !== Math.round(height * ratio)) {
+                this.canvas.width = Math.round(width * ratio);
+                this.canvas.height = Math.round(height * ratio);
+            }
+            this.ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
         }
 
         /* The element showing the picture right now: the live video, or the last picture. */
@@ -268,15 +273,15 @@
         }
 
         /*
-         * Where the camera image really is inside the canvas. The picture is
-         * shown with object-fit (contain letterboxes, cover crops), so a
-         * picture whose shape differs from the 16:9 box is not the whole
-         * canvas. Saved points are normalized (0-1) to the IMAGE, the same
-         * frame the detector scales them to.
+         * Where the camera picture really is inside the canvas (CSS pixels).
+         * The picture is letterboxed (object-fit: contain), so a picture
+         * whose shape differs from the 16:9 box is not the whole canvas.
+         * Shapes are normalized to the PICTURE, the same frame the detector
+         * scales them to, so they stay put at every screen size.
          */
-        contentRect() {
-            const width = this.canvas.width;
-            const height = this.canvas.height;
+        view() {
+            const width = this.cssWidth;
+            const height = this.cssHeight;
             const media = this.pictureElement();
             const naturalWidth = media.naturalWidth || media.videoWidth || 0;
             const naturalHeight = media.naturalHeight || media.videoHeight || 0;
@@ -295,38 +300,7 @@
             return { x: (width - shownWidth) / 2, y: (height - shownHeight) / 2, width: shownWidth, height: shownHeight };
         }
 
-        toImagePolygon(points) {
-            const rect = this.contentRect();
-            const shifted = (points || []).map((point) => ({ x: point.x - rect.x, y: point.y - rect.y }));
-
-            return normalisePolygon(shifted, rect.width, rect.height);
-        }
-
-        toCanvasPolygon(shape) {
-            const rect = this.contentRect();
-            const points = denormalisePolygon(shape, rect.width, rect.height);
-
-            return points ? points.map((point) => ({ x: point.x + rect.x, y: point.y + rect.y })) : null;
-        }
-
-        toImageLine(line) {
-            const rect = this.contentRect();
-
-            return line ? normaliseLine({
-                x1: line.x1 - rect.x, y1: line.y1 - rect.y, x2: line.x2 - rect.x, y2: line.y2 - rect.y,
-            }, rect.width, rect.height) : null;
-        }
-
-        toCanvasLine(line) {
-            const rect = this.contentRect();
-            const scaled = denormaliseLine(line, rect.width, rect.height);
-
-            return scaled ? {
-                x1: scaled.x1 + rect.x, y1: scaled.y1 + rect.y, x2: scaled.x2 + rect.x, y2: scaled.y2 + rect.y,
-            } : null;
-        }
-
-        getCanvasPoint(event) {
+        point(event) {
             const bounds = this.canvas.getBoundingClientRect();
 
             return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
@@ -334,88 +308,135 @@
 
         handlePointerDown(event) {
             // Draw on the live video or on the last picture, never on nothing.
-            if (!this.shown) {
+            if (!this.shown || event.button === 2) {
                 return;
             }
 
             event.preventDefault();
+            this.canvas.focus({ preventScroll: true });
+            this.closePointMenu();
+            this.touch = event.pointerType === 'touch' || event.pointerType === 'pen';
 
-            if (this.currentTool === 'mask') {
-                this.addPolygonPoint(this.getCanvasPoint(event));
-                return;
+            const result = this.editor.pointerDown(this.point(event), this.view(), { touch: this.touch });
+            if (this.editor.drag) {
+                this.canvas.setPointerCapture?.(event.pointerId);
+                this.canvas.style.cursor = 'grabbing';
             }
 
-            this.pointerId = event.pointerId;
-            this.canvas.setPointerCapture?.(event.pointerId);
-            this.pointerStart = this.getCanvasPoint(event);
+            const messages = {
+                close: 'Zone closed. Drag its points to adjust it; use the Line tool for the trigger line.',
+                flip: 'IN direction flipped. Save to apply it.',
+                'add-point': this.editor.mask.length >= 3 ? 'Click point 1 or press Done to close the zone.' : 'Click the next point of the zone.',
+            };
+            if (result.action === 'close' && !this.editor.line) {
+                this.setActiveTool('line');
+            }
+            this.edited(true, messages[result.action]);
         }
 
         handlePointerMove(event) {
-            if (!this.pointerStart || (this.pointerId !== null && event.pointerId !== this.pointerId)) {
+            if (!this.shown) {
                 return;
             }
-
-            event.preventDefault();
-            const currentPoint = this.getCanvasPoint(event);
-
-            if (this.currentTool === 'line') {
-                this.draftShape = {
-                    type: 'line',
-                    value: { x1: this.pointerStart.x, y1: this.pointerStart.y, x2: currentPoint.x, y2: currentPoint.y },
-                };
+            const point = this.point(event);
+            this.editor.pointerMove(point, this.view(), { touch: event.pointerType === 'touch' });
+            if (!this.editor.drag) {
+                this.canvas.style.cursor = Calib.cursorFor(this.editor.hover, this.editor.tool, this.editor.closed);
             }
-
             this.render();
         }
 
         handlePointerUp(event) {
-            if (!this.pointerStart || !this.draftShape || (this.pointerId !== null && event.pointerId !== this.pointerId)) {
+            if (this.canvas.hasPointerCapture?.(event.pointerId)) {
+                this.canvas.releasePointerCapture(event.pointerId);
+            }
+            this.edited(this.editor.pointerUp(this.view()));
+            this.canvas.style.cursor = Calib.cursorFor(this.editor.hover, this.editor.tool, this.editor.closed);
+        }
+
+        handleKey(event) {
+            if (event.key === 'Delete' || event.key === 'Backspace') {
+                event.preventDefault();
+                if (this.editor.selected?.type === 'vertex' && !this.editor.canRemoveVertex()) {
+                    this.message('A zone needs at least 3 points.');
+                    return;
+                }
+                this.edited(this.editor.removeSelected(), 'Removed.');
+            } else if (event.key === 'Enter') {
+                this.edited(this.editor.closeMask(), 'Zone closed.');
+            } else if (event.key === 'Escape') {
+                this.editor.selected = null;
+                this.closePointMenu();
+                this.render();
+            }
+        }
+
+        /* Right-click a point: "Remove point". */
+        openPointMenu(event) {
+            if (!this.pointMenu || !this.shown) {
+                return;
+            }
+            const point = this.point(event);
+            const hit = this.editor.hitTest(point, this.view(), this.touch);
+            if (hit?.type !== 'vertex') {
                 return;
             }
 
             event.preventDefault();
+            this.editor.selected = { type: 'vertex', index: hit.index };
+            const button = this.pointMenu.querySelector('[data-remove-point]');
+            button.disabled = !this.editor.canRemoveVertex();
+            button.title = button.disabled ? 'A zone needs at least 3 points.' : '';
+            this.pointMenu.dataset.index = String(hit.index);
+            this.pointMenu.style.left = `${Math.min(point.x, this.cssWidth - 150)}px`;
+            this.pointMenu.style.top = `${Math.min(point.y, this.cssHeight - 50)}px`;
+            this.pointMenu.hidden = false;
+            this.render();
+        }
 
-            if (this.draftShape.type === 'line') {
-                const inSide = this.inSide();
-                this.lineShape = this.toImageLine(this.draftShape.value);
-                if (this.lineShape) {
-                    this.lineShape.in_side = inSide;
-                }
+        closePointMenu() {
+            if (this.pointMenu) {
+                this.pointMenu.hidden = true;
             }
+        }
 
-            this.pointerStart = null;
-            this.draftShape = null;
-            this.updateCalibrationSummary();
+        /* After every change: summary, warnings, buttons, picture. */
+        edited(changed, text) {
+            if (text) {
+                this.message(text);
+            }
+            this.updateSummary();
             this.render();
+
+            return changed;
         }
 
-        addPolygonPoint(point) {
-            const points = this.toCanvasPolygon(this.maskShape) || this.maskDraftPoints;
-
-            points.push(point);
-            this.maskDraftPoints = points;
-            this.maskShape = points.length >= 3 ? this.toImagePolygon(points) : null;
-            this.updateCalibrationSummary();
-            this.render();
+        message(text) {
+            this.messageValue.textContent = text;
         }
 
-        cancelDraft() {
-            this.pointerStart = null;
-            this.pointerId = null;
-            this.draftShape = null;
-            this.render();
-        }
+        updateSummary() {
+            const editor = this.editor;
+            const count = editor.mask.length;
 
-        updateCalibrationSummary() {
-            const pointCount = Array.isArray(this.maskShape) ? this.maskShape.length : this.maskDraftPoints.length;
+            this.maskValue.textContent = editor.closed
+                ? `${count}-point zone`
+                : (count ? `Drawing: ${count} point${count === 1 ? '' : 's'}` : 'No zone yet');
+            this.lineValue.textContent = editor.line ? 'Line drawn' : 'No line yet';
+            this.directionValue.textContent = editor.line ? 'IN = the side the arrow points to (click it to flip)' : 'Draw a line first';
+            this.doneButton.disabled = editor.closed || count < 3;
 
-            this.maskValue.textContent = pointCount >= 3 ? `${pointCount}-point zone` : 'No zone yet';
-            this.lineValue.textContent = this.lineShape ? 'Line drawn' : 'No line yet';
-            this.directionValue.textContent = this.lineShape ? 'IN = the side the arrow points to' : 'Draw a line first';
-        }
-
-        inSide() {
-            return Number(this.lineShape?.in_side) < 0 ? -1 : 1;
+            const { errors, warnings } = editor.problems();
+            this.problemsList.innerHTML = '';
+            [...errors.map((text) => ['error', text]), ...warnings.map((text) => ['warning', text])].forEach(([kind, text]) => {
+                const item = document.createElement('li');
+                item.className = `calibration-problem is-${kind}`;
+                item.textContent = text;
+                this.problemsList.appendChild(item);
+            });
+            this.problemsList.hidden = errors.length + warnings.length === 0;
+            this.saveButton.disabled = errors.length > 0;
+            this.saveButton.title = errors[0] || '';
         }
 
         renderCrossings(crossings) {
@@ -452,8 +473,9 @@
         }
 
         async saveCalibration() {
-            if (this.maskDraftPoints.length > 0 && !this.maskShape) {
-                this.messageValue.textContent = 'Add at least 3 zone points before saving.';
+            const { errors } = this.editor.problems();
+            if (errors.length) {
+                this.message(errors[0]);
                 return;
             }
 
@@ -463,17 +485,16 @@
             try {
                 const response = await putJson(this.routes.save, {
                     camera_id: this.camera.id,
-                    calibration_mask: this.maskShape,
-                    calibration_line: this.lineShape,
+                    ...this.editor.serialize(),
                 });
 
                 this.applyServerCamera(response.camera);
-                this.messageValue.textContent = response.message || `${this.camera.camera_name} calibration saved.`;
+                this.message(response.message || `${this.camera.camera_name} calibration saved.`);
             } catch (error) {
-                this.messageValue.textContent = error.message || 'Calibration save failed.';
+                this.message(error.message || 'Calibration save failed.');
             } finally {
-                this.saveButton.disabled = false;
                 this.saveButton.textContent = 'Save Calibration';
+                this.updateSummary();
             }
         }
 
@@ -483,93 +504,9 @@
             }
 
             this.camera = { ...this.camera, ...camera };
-            this.maskShape = camera.calibration_mask || null;
-            this.maskDraftPoints = [];
-            this.lineShape = camera.calibration_line || null;
-            this.updateCalibrationSummary();
+            this.editor.load({ mask: camera.calibration_mask, line: camera.calibration_line });
+            this.updateSummary();
             this.render();
-        }
-
-        drawPolygon(points) {
-            if (!Array.isArray(points) || points.length === 0) {
-                return;
-            }
-
-            this.ctx.fillStyle = 'rgba(192, 132, 42, 0.2)';
-            this.ctx.strokeStyle = '#f59e0b';
-            this.ctx.lineWidth = 3;
-            this.ctx.beginPath();
-            this.ctx.moveTo(points[0].x, points[0].y);
-            points.slice(1).forEach((point) => this.ctx.lineTo(point.x, point.y));
-
-            if (points.length >= 3) {
-                this.ctx.closePath();
-                this.ctx.fill();
-            }
-
-            this.ctx.stroke();
-
-            points.forEach((point, index) => {
-                this.ctx.beginPath();
-                this.ctx.fillStyle = '#f59e0b';
-                this.ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
-                this.ctx.fill();
-                this.ctx.fillStyle = '#ffffff';
-                this.ctx.font = '700 11px system-ui, sans-serif';
-                this.ctx.fillText(String(index + 1), point.x + 8, point.y - 8);
-            });
-        }
-
-        drawLine(line) {
-            this.ctx.strokeStyle = '#22c55e';
-            this.ctx.lineWidth = 4;
-            this.ctx.beginPath();
-            this.ctx.moveTo(line.x1, line.y1);
-            this.ctx.lineTo(line.x2, line.y2);
-            this.ctx.stroke();
-        }
-
-        /*
-         * Phase 2: arrow from the middle of the line toward the IN side.
-         * Side +1 is to the right of the line's direction in image
-         * coordinates (below a line drawn left to right), as in the detector.
-         */
-        drawDirectionArrow(line, inSide) {
-            const dx = line.x2 - line.x1;
-            const dy = line.y2 - line.y1;
-            const length = Math.hypot(dx, dy);
-
-            if (length < 4) {
-                return;
-            }
-
-            const size = Math.max(28, Math.min(70, length * 0.25));
-            const nx = (-dy / length) * inSide;
-            const ny = (dx / length) * inSide;
-            const midX = (line.x1 + line.x2) / 2;
-            const midY = (line.y1 + line.y2) / 2;
-            const tipX = midX + nx * size;
-            const tipY = midY + ny * size;
-            const head = 10;
-
-            this.ctx.strokeStyle = '#38bdf8';
-            this.ctx.fillStyle = '#38bdf8';
-            this.ctx.lineWidth = 4;
-            this.ctx.beginPath();
-            this.ctx.moveTo(midX, midY);
-            this.ctx.lineTo(tipX, tipY);
-            this.ctx.stroke();
-            this.ctx.beginPath();
-            this.ctx.moveTo(tipX + nx * head, tipY + ny * head);
-            this.ctx.lineTo(tipX - ny * head, tipY + nx * head);
-            this.ctx.lineTo(tipX + ny * head, tipY - nx * head);
-            this.ctx.closePath();
-            this.ctx.fill();
-            this.ctx.font = '700 14px system-ui, sans-serif';
-            this.ctx.lineWidth = 3;
-            this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
-            this.ctx.strokeText('IN', tipX + nx * (head + 8) - 8, tipY + ny * (head + 8) + 5);
-            this.ctx.fillText('IN', tipX + nx * (head + 8) - 8, tipY + ny * (head + 8) + 5);
         }
 
         render() {
@@ -577,25 +514,14 @@
                 return;
             }
 
-            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-
-            const savedMask = this.toCanvasPolygon(this.maskShape);
-            const savedLine = this.toCanvasLine(this.lineShape);
-
-            if (savedMask) {
-                this.drawPolygon(savedMask);
-            } else if (this.maskDraftPoints.length > 0) {
-                this.drawPolygon(this.maskDraftPoints);
+            this.ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
+            if (!this.shown) {
+                return;
             }
-
-            if (savedLine) {
-                this.drawLine(savedLine);
-                this.drawDirectionArrow(savedLine, this.inSide());
-            }
-
-            if (this.draftShape?.type === 'line') {
-                this.drawLine(this.draftShape.value);
-            }
+            Calib.draw(this.ctx, this.editor, this.view(), {
+                touch: this.touch,
+                drawingMask: this.editor.tool === 'mask' && !this.editor.closed,
+            });
         }
     }
 
@@ -603,6 +529,8 @@
         const role = element.dataset.role;
         cards[role] = new CalibrationCard(element, payload.cameras[role], payload.routes);
     });
+    // For checks from the browser console and the end-to-end test.
+    window.calibrationCards = cards;
 
     /* Status, last picture and recent crossings from the detector, every few seconds. */
     async function sendCalibrationHeartbeat() {
