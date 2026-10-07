@@ -121,7 +121,7 @@ class GateConfigTests(unittest.TestCase):
 
         payload = {
             "gates": [{"code": "gate-2", "name": "Back Gate"}, {"code": "gate-1", "name": "Main Gate"}, {"code": "gate-3", "name": "Service"}],
-            "cameras": {role: {"camera_role": role, "source_type": "webcam", "source_value": 0} for role in ("gate-1", "gate-3", "gate-2")},
+            "cameras": {role: {"camera_role": role, "source_type": "none", "source_value": ""} for role in ("gate-1", "gate-3", "gate-2")},
         }
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "camera_runtime_config.json"

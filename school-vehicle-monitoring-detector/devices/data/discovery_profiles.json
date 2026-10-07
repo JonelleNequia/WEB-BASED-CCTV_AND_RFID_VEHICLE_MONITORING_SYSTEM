@@ -87,10 +87,7 @@
                 "rtsp_paths": {
                     "main": "/stream1",
                     "sub": "/stream2"
-                },
-                "factory_default_ips": [
-                    "192.168.0.60"
-                ]
+                }
             },
             {
                 "name": "Hikvision",
@@ -101,10 +98,7 @@
                 "rtsp_paths": {
                     "main": "/Streaming/Channels/101",
                     "sub": "/Streaming/Channels/102"
-                },
-                "factory_default_ips": [
-                    "192.168.1.64"
-                ]
+                }
             },
             {
                 "name": "Dahua",
@@ -115,10 +109,7 @@
                 "rtsp_paths": {
                     "main": "/cam/realmonitor?channel=1&subtype=0",
                     "sub": "/cam/realmonitor?channel=1&subtype=1"
-                },
-                "factory_default_ips": [
-                    "192.168.1.108"
-                ]
+                }
             },
             {
                 "name": "Camera",
@@ -126,8 +117,7 @@
                 "rtsp_paths": {
                     "main": "/stream1",
                     "sub": "/stream2"
-                },
-                "factory_default_ips": []
+                }
             }
         ]
     },
@@ -242,16 +232,6 @@
             "Shenzhen",
             "Guangzhou",
             "Qinheng"
-        ],
-        "factory_default_ips": [
-            "192.168.1.190",
-            "192.168.1.192",
-            "192.168.1.200",
-            "192.168.1.116",
-            "192.168.0.178",
-            "192.168.0.7",
-            "192.168.0.250",
-            "10.10.100.254"
         ],
         "identify_port_ranges": [
             [

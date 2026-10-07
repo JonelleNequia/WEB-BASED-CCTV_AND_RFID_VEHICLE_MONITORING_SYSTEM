@@ -97,8 +97,10 @@ class SaveSettingsRequest extends FormRequest
             // Cameras tab: one camera per gate (keys = gate codes).
             'camera_configs' => ['required', 'array'],
             'camera_configs.*.camera_name' => ['required', 'string', 'max:100'],
-            'camera_configs.*.source_type' => ['required', 'in:webcam,rtsp,url,none'],
-            'camera_configs.*.source_value' => ['nullable', 'required_unless:camera_configs.*.source_type,none', 'string', 'max:500'],
+            // Camera source work: an assigned camera sends no source (it is found
+            // by its MAC); a manual one is an RTSP or stream URL (no webcam).
+            'camera_configs.*.source_type' => ['sometimes', 'in:rtsp,url,none'],
+            'camera_configs.*.source_value' => ['nullable', 'required_if:camera_configs.*.source_type,rtsp,url', 'string', 'max:500'],
             'camera_configs.*.source_username' => ['nullable', 'string', 'max:255'],
             'camera_configs.*.source_password' => ['nullable', 'string', 'max:255'],
             'camera_configs.*.clear_password' => ['nullable', 'boolean'],
@@ -231,19 +233,11 @@ class SaveSettingsRequest extends FormRequest
                 $sourceValue = trim((string) $this->input("camera_configs.$role.source_value", ''));
                 $field = "camera_configs.$role.source_value";
 
-                if ($sourceType === 'webcam') {
-                    if (! ctype_digit($sourceValue) || (int) $sourceValue < 0) {
-                        $validator->errors()->add($field, "$label webcam source must be a camera number like 0 or 1.");
-                    }
-
-                    continue;
-                }
-
                 if ($sourceType === 'rtsp') {
                     $parsed = parse_url($sourceValue);
 
                     if (strtolower((string) ($parsed['scheme'] ?? '')) !== 'rtsp' || empty($parsed['host'])) {
-                        $validator->errors()->add($field, "$label RTSP source must be a full rtsp:// address with the camera host and stream path. Do not use 0 for RTSP.");
+                        $validator->errors()->add($field, "$label RTSP source must be a full rtsp:// address with the camera host and stream path.");
                     }
 
                     continue;

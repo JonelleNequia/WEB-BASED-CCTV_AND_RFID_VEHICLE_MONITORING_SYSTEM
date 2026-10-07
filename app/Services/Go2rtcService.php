@@ -3,10 +3,8 @@
 namespace App\Services;
 
 use App\Models\Camera;
-use App\Models\DeviceAssignment;
 use App\Models\Gate;
 use App\Support\BackgroundProcess;
-use App\Support\CameraSource;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
@@ -111,23 +109,18 @@ class Go2rtcService
     public function streams(): array
     {
         $streams = [];
+        $cameraStreams = app(CameraStreams::class);
 
         foreach (Gate::codes() as $gate) {
+            // Camera source work: the main stream, built from the camera's
+            // current address (or the hand-typed full-resolution source).
+            $source = $cameraStreams->forGate($gate);
             $camera = Camera::query()->forRole($gate)->first();
-            if (! $camera || $camera->source_type !== 'rtsp' || blank($camera->source_value)) {
-                continue;  // no camera, a webcam or a URL source: the MJPEG view is used
+            if (! $camera || blank($source['main']) || ! str_starts_with(strtolower((string) $source['main']), 'rtsp')) {
+                continue;  // no camera, or a non-RTSP URL source: the MJPEG view is used
             }
 
-            $assignment = DeviceAssignment::query()->with('device')->where('station', $gate)->where('role', DeviceAssignment::ROLE_CAMERA)->first();
-            $mainPath = data_get($assignment?->options, 'paths.main') ?? data_get($assignment?->options, 'snapshot_path');
-            $main = match (true) {
-                $assignment?->device && filled($assignment->device->ip) && filled($mainPath)
-                    => CameraSource::rtspUrl((string) $assignment->device->ip, data_get($assignment->options, 'rtsp_port'), (string) $mainPath),
-                filled($camera->snapshot_source_value) => (string) $camera->snapshot_source_value,
-                default => (string) $camera->source_value,
-            };
-
-            $streams[$gate] = $this->withLogin($main, (string) $camera->source_username, (string) $camera->source_password);
+            $streams[$gate] = $this->withLogin((string) $source['main'], (string) $camera->source_username, (string) $camera->source_password);
         }
 
         return $streams;
@@ -252,7 +245,9 @@ class Go2rtcService
             $probe = app(CameraProbeService::class);
             $codec = fn (string $url): ?string => $probe->describe(preg_replace('#//[^@/]*@#', '//', $url) ?? $url, (string) $camera->source_username, (string) $camera->source_password)['codec'] ?? null;
 
-            return ['main' => $codec($main), 'sub' => $camera->source_value !== $main ? $codec((string) $camera->source_value) : null];
+            $sub = app(CameraStreams::class)->forGate($gate)['sub'];
+
+            return ['main' => $codec($main), 'sub' => filled($sub) && $sub !== preg_replace('#//[^@/]*@#', '//', $main) ? $codec((string) $sub) : null];
         });
     }
 

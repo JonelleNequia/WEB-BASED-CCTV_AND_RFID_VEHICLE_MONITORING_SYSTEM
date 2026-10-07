@@ -42,6 +42,14 @@
                                 <span class="next-step">→ {{ $camera['codec_warning']['next_step'] }}</span>
                             @endif
                             <small class="text-muted">{{ $camera['source'] }}</small>
+                            @if ($camera['detected'])
+                                {{-- Camera source work: added by hand, but the scan found it. --}}
+                                <form method="POST" action="{{ route('settings.gate.camera.automatic', $gate['code']) }}" class="setup-detected" data-camera-detected>
+                                    @csrf
+                                    <span class="next-step">→ This camera was found on the network ({{ $camera['detected']['name'] }}). Use it automatically so it keeps working when its address changes.</span>
+                                    <button type="submit" class="button button-primary button-sm">Use automatically</button>
+                                </form>
+                            @endif
                         </div>
                         <details class="menu row-menu">
                             <summary class="button button-secondary" aria-label="Camera actions for {{ $gate['name'] }}">⋯</summary>

@@ -554,6 +554,8 @@ class DetectedEventIngestionTest extends TestCase
     {
         Storage::fake('public');
         $this->seed(DatabaseSeeder::class);
+        // One camera watching both gates (the same hand-typed source).
+        \App\Models\Camera::query()->update(['source_type' => 'rtsp', 'source_value' => 'rtsp://198.51.100.20:554/stream1']);
 
         $headers = [
             'X-Api-Key' => 'test-detector-key',
@@ -721,6 +723,8 @@ class DetectedEventIngestionTest extends TestCase
     {
         Storage::fake('public');
         $this->seed(DatabaseSeeder::class);
+        // One camera watching both gates (the same hand-typed source).
+        \App\Models\Camera::query()->update(['source_type' => 'rtsp', 'source_value' => 'rtsp://198.51.100.20:554/stream1']);
 
         $headers = [
             'X-Api-Key' => 'test-detector-key',

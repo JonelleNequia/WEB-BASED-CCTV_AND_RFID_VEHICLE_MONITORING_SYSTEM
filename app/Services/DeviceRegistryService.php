@@ -11,6 +11,7 @@ use App\Support\DeviceFiles;
 use App\Support\DisplayTime;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
@@ -213,7 +214,7 @@ class DeviceRegistryService
         $lastProblem = null;
 
         foreach ($logins ?: [['', '']] as [$username, $password]) {
-            $attempt = $this->resolveCameraStream($device, $stream, $username, $password);
+            $attempt = $this->resolveCameraPaths($device, $stream, $username, $password);
 
             if ($attempt['result'] === CameraProbeService::OK || $attempt['result'] === CameraProbeService::UNREACHABLE) {
                 $resolved = $attempt + ['username' => $username, 'password' => $password];
@@ -237,21 +238,25 @@ class DeviceRegistryService
             return ['ok' => false, 'message' => $lastProblem['message'] ?? 'The camera stream could not be found.'];
         }
 
+        // Camera source work: the device (MAC) is the source; the stream
+        // URLs are built from its current address (CameraStreams).
         DeviceAssignment::query()->updateOrCreate(
             ['station' => $station, 'role' => DeviceAssignment::ROLE_CAMERA],
             ['network_device_id' => $device->id, 'options' => [
                 'stream' => $stream,
                 'rtsp_port' => $resolved['port'],
-                'path' => $resolved['path'],
+                'paths' => $resolved['paths'],
+                'paths_from' => $resolved['from'],
+                'path' => $resolved['paths'][$stream] ?? null,
                 'snapshots' => (bool) ($input['snapshots'] ?? true),
-                'snapshot_path' => $this->vendorPaths($device->cameraDetails())['main'] ?? null,
-                'paths' => $this->vendorPaths($device->cameraDetails()),
+                'snapshot_path' => $resolved['paths']['main'] ?? null,
             ]]
         );
 
         $camera->fill([
-            'source_type' => 'rtsp',
-            'source_value' => CameraSource::rtspUrl((string) $device->ip, $resolved['port'], $resolved['path']),
+            'source_type' => CameraStreams::SOURCE_DEVICE,
+            'source_value' => '',
+            'snapshot_source_value' => null,
         ]);
 
         if ($resolved['username'] !== '') {
@@ -291,57 +296,64 @@ class DeviceRegistryService
     }
 
     /**
-     * Find the stream path/port: ONVIF first, then the vendor paths (checked by RTSP DESCRIBE).
+     * Camera source work: the main and sub stream paths, read from the camera
+     * over ONVIF (GetProfiles + GetStreamUri: the widest profile is the main
+     * stream, the next one the sub stream), else the brand's known paths.
+     * The live stream is checked with RTSP DESCRIBE (also checks the login).
      *
-     * @return array{result: string, message: string, port: int|null, path: string}
+     * @return array{result: string, message: string, port: int|null, paths: array{main?: string, sub?: string}, from: string}
      */
-    protected function resolveCameraStream(NetworkDevice $device, string $stream, string $username, string $password): array
+    protected function resolveCameraPaths(NetworkDevice $device, string $stream, string $username, string $password): array
     {
         $details = $device->cameraDetails();
         $ip = (string) $device->ip;
         $port = isset($details['rtsp_port']) ? (int) $details['rtsp_port'] : $this->profileRtspPort();
-        $paths = $this->vendorPaths($details);
-        $fallbackPath = $paths[$stream] ?? reset($paths) ?: '/';
+        $brand = $this->vendorPaths($details);
+        $brandPaths = array_filter(['main' => $brand['main'] ?? null, 'sub' => $brand['sub'] ?? ($brand['main'] ?? null)]);
 
         if (! $device->isReachable() || $device->status === NetworkDevice::STATUS_OFFLINE) {
-            return ['result' => CameraProbeService::UNREACHABLE, 'message' => 'Camera not reachable.', 'port' => $port, 'path' => $fallbackPath];
+            return ['result' => CameraProbeService::UNREACHABLE, 'message' => 'Camera not reachable.', 'port' => $port, 'paths' => $brandPaths, 'from' => 'brand'];
         }
 
         if (filled($details['onvif_xaddr'] ?? null)) {
-            $xaddr = $this->withHost((string) $details['onvif_xaddr'], $ip);
-            $onvif = $this->cameraProbe->onvifStreams($xaddr, $username, $password);
+            $onvif = $this->cameraProbe->onvifStreams($this->withHost((string) $details['onvif_xaddr'], $ip), $username, $password);
 
             if ($onvif['result'] === CameraProbeService::UNAUTHORIZED) {
-                return ['result' => CameraProbeService::UNAUTHORIZED, 'message' => $onvif['message'], 'port' => $port, 'path' => $fallbackPath];
+                return ['result' => CameraProbeService::UNAUTHORIZED, 'message' => $onvif['message'], 'port' => $port, 'paths' => $brandPaths, 'from' => 'brand'];
             }
 
-            if ($onvif['result'] === CameraProbeService::OK) {
-                $chosen = $onvif['streams'][$stream === 'sub' ? min(1, count($onvif['streams']) - 1) : 0];
-                $parts = parse_url($chosen['uri']) ?: [];
-                $path = ($parts['path'] ?? '/').(isset($parts['query']) ? '?'.$parts['query'] : '');
-                $port = isset($parts['port']) ? (int) $parts['port'] : $port;
-                $check = $this->cameraProbe->describe(CameraSource::rtspUrl($ip, $port, $path), $username, $password);
+            if ($onvif['result'] === CameraProbeService::OK && $onvif['streams'] !== []) {
+                $part = function (array $streamInfo) use (&$port): string {
+                    $parts = parse_url((string) $streamInfo['uri']) ?: [];
+                    $port = isset($parts['port']) ? (int) $parts['port'] : $port;
+
+                    return ($parts['path'] ?? '/').(isset($parts['query']) ? '?'.$parts['query'] : '');
+                };
+                // Sorted widest first (CameraProbeService::onvifStreams): the
+                // widest is the main stream, the next one the sub stream (a
+                // third, smaller profile, e.g. the VIGI's stream6, is not used).
+                $paths = ['main' => $part($onvif['streams'][0]), 'sub' => $part($onvif['streams'][min(1, count($onvif['streams']) - 1)])];
+                $check = $this->cameraProbe->describe(CameraSource::rtspUrl($ip, $port, $paths[$stream]), $username, $password);
 
                 return ['result' => $check['result'] === CameraProbeService::NOT_FOUND ? CameraProbeService::OK : $check['result'],
-                    'message' => $check['message'], 'port' => $port, 'path' => $path];
+                    'message' => $check['message'], 'port' => $port, 'paths' => $paths, 'from' => 'onvif'];
             }
         }
 
-        // No ONVIF: try the vendor's paths for the chosen stream first.
-        $candidates = array_values(array_unique(array_filter([$paths[$stream] ?? null, ...array_values($paths)])));
+        // No ONVIF answer: the brand's paths (e.g. TP-Link VIGI stream1 / stream2).
         $last = ['result' => CameraProbeService::NOT_FOUND, 'message' => 'The camera has no stream at the known paths.'];
-
-        foreach ($candidates ?: ['/'] as $path) {
+        foreach (array_values(array_unique(array_filter([$brandPaths[$stream] ?? null, ...array_values($brandPaths)]))) ?: ['/'] as $path) {
             $check = $this->cameraProbe->describe(CameraSource::rtspUrl($ip, $port, $path), $username, $password);
 
             if (in_array($check['result'], [CameraProbeService::OK, CameraProbeService::UNAUTHORIZED, CameraProbeService::UNREACHABLE], true)) {
-                return ['result' => $check['result'], 'message' => $check['message'], 'port' => $port, 'path' => $path];
+                return ['result' => $check['result'], 'message' => $check['message'], 'port' => $port,
+                    'paths' => $brandPaths ?: ['main' => $path, 'sub' => $path], 'from' => 'brand'];
             }
 
             $last = $check;
         }
 
-        return ['result' => $last['result'], 'message' => $last['message'], 'port' => $port, 'path' => $fallbackPath];
+        return ['result' => $last['result'], 'message' => $last['message'], 'port' => $port, 'paths' => $brandPaths, 'from' => 'brand'];
     }
 
     /**
@@ -454,7 +466,17 @@ class DeviceRegistryService
     public function unassign(string $station, string $role): void
     {
         $station = Gate::normalizeCode($station);
+        $last = $role === DeviceAssignment::ROLE_CAMERA ? app(CameraStreams::class)->forGate($station) : null;
         DeviceAssignment::query()->where('station', $station)->where('role', $role)->delete();
+
+        // An unassigned camera keeps its last address as a manual source
+        // (Settings › Advanced › Manual setup) until it is added again.
+        $camera = $last ? Camera::query()->forRole($station)->first() : null;
+        if ($camera && $camera->source_type === CameraStreams::SOURCE_DEVICE) {
+            $camera->forceFill(filled($last['live'])
+                ? ['source_type' => 'rtsp', 'source_value' => $last['live'], 'snapshot_source_value' => $last['snapshot']]
+                : ['source_type' => Camera::SOURCE_NONE, 'source_value' => '', 'snapshot_source_value' => null])->save();
+        }
 
         $gate = Gate::query()->where('code', $station)->first();
         if ($role === DeviceAssignment::ROLE_READER && $gate && ! $gate->reader_manual) {
@@ -462,46 +484,24 @@ class DeviceRegistryService
             $gate->forceFill(['reader_type' => 'uhf_ethernet', 'reader_name' => $gate->name.' UHF Reader'])->save();
         }
 
-        // An unassigned camera keeps its last address as a manual source
-        // (Settings › Cameras › Advanced) until another one is assigned.
         $this->syncAssignments(force: true);
     }
 
     /**
-     * Follow assigned devices to their current IP and refresh both runtime files.
+     * Follow assigned devices to their current IP (found by MAC in every
+     * scan) and refresh both runtime files when a stream address changed.
+     * Camera source work: no URL is stored; CameraStreams builds them.
      */
     public function syncAssignments(bool $force = false): void
     {
-        $cameraChanged = false;
-
-        DeviceAssignment::query()
-            ->with('device')
-            ->where('role', DeviceAssignment::ROLE_CAMERA)
-            ->get()
-            ->each(function (DeviceAssignment $assignment) use (&$cameraChanged): void {
-                $device = $assignment->device;
-                $camera = Camera::query()->forRole($assignment->station)->first();
-
-                if (! $device || ! $camera || blank($device->ip) || ! $device->isReachable()) {
-                    return;
-                }
-
-                $options = (array) $assignment->options;
-                $url = CameraSource::rtspUrl((string) $device->ip, $options['rtsp_port'] ?? null, $options['path'] ?? '/');
-                // Full-resolution main stream for trigger snapshots, only when the
-                // live stream is not already the main stream.
-                $snapshot = ($options['snapshots'] ?? false) && filled($options['snapshot_path'] ?? null)
-                    && ($options['snapshot_path'] ?? null) !== ($options['path'] ?? null)
-                    ? CameraSource::rtspUrl((string) $device->ip, $options['rtsp_port'] ?? null, $options['snapshot_path'])
-                    : null;
-
-                if ($camera->source_type !== 'rtsp' || $camera->source_value !== $url || $camera->snapshot_source_value !== $snapshot) {
-                    $camera->forceFill(['source_type' => 'rtsp', 'source_value' => $url, 'snapshot_source_value' => $snapshot])->save();
-                    $cameraChanged = true;
-                }
-            });
+        $streams = app(CameraStreams::class);
+        $fingerprint = sha1((string) json_encode(collect(Gate::codes())
+            ->mapWithKeys(fn (string $gate): array => [$gate => Arr::only($streams->forGate($gate), ['source', 'live', 'main', 'snapshot'])])
+            ->all()));
+        $cameraChanged = Cache::get('camera-streams-fingerprint') !== $fingerprint;
 
         if ($cameraChanged || $force) {
+            Cache::forever('camera-streams-fingerprint', $fingerprint);
             // The detector sees the new source and reconnects on its own. If it
             // is not running (or paused after failed starts), start it now.
             $this->settingsService->exportCameraRuntimeConfig();

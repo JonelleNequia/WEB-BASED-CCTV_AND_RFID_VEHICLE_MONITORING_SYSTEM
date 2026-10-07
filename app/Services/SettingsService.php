@@ -302,10 +302,13 @@ class SettingsService
                 ->where('role', DeviceAssignment::ROLE_CAMERA)
                 ->exists();
 
-            if (! $managed) {
+            if (! $managed && array_key_exists('source_type', $cameraData)) {
+                // Camera source work: a manual source is only an rtsp:// or
+                // stream URL for a camera that cannot be found automatically.
+                $type = in_array($cameraData['source_type'], ['rtsp', 'url'], true) ? (string) $cameraData['source_type'] : Camera::SOURCE_NONE;
                 $camera->fill([
-                    'source_type' => (string) ($cameraData['source_type'] ?? 'webcam'),
-                    'source_value' => ($cameraData['source_type'] ?? '') === Camera::SOURCE_NONE ? '' : (string) ($cameraData['source_value'] ?? '0'),
+                    'source_type' => $type,
+                    'source_value' => $type === Camera::SOURCE_NONE ? '' : (string) ($cameraData['source_value'] ?? ''),
                     // Optional full-resolution stream for trigger snapshots (manual sources).
                     'snapshot_source_value' => filled($cameraData['snapshot_source_value'] ?? null)
                         ? (string) $cameraData['snapshot_source_value'] : null,
@@ -378,14 +381,14 @@ class SettingsService
 
     protected function runtimeCameraPayload(array $cameraConfiguration): array
     {
-        $sourceType = (string) ($cameraConfiguration['source_type'] ?? 'webcam');
-        $sourceValue = $cameraConfiguration['source_value'] ?? '0';
-        // One decoder thread (lowest delay) unless the live source is a camera's
-        // full-resolution main stream, which needs FFmpeg's threading to keep up.
-        $liveStream = data_get(DeviceAssignment::query()
-            ->where('station', $cameraConfiguration['camera_role'])
-            ->where('role', DeviceAssignment::ROLE_CAMERA)
-            ->first()?->options, 'stream');
+        // Camera source work: an assigned camera's URLs are built from its
+        // current address (found by MAC); a manual one is the typed URL.
+        $streams = app(CameraStreams::class)->forGate((string) $cameraConfiguration['camera_role']);
+        $sourceType = match (true) {
+            $streams['source'] === CameraStreams::SOURCE_DEVICE && filled($streams['live']) => 'rtsp',
+            $streams['source'] === CameraStreams::SOURCE_MANUAL => (string) $cameraConfiguration['source_type'],
+            default => Camera::SOURCE_NONE,
+        };
 
         return [
             'camera_id' => $cameraConfiguration['id'],
@@ -393,15 +396,13 @@ class SettingsService
             'camera_role' => $cameraConfiguration['camera_role'],
             'camera_name' => $cameraConfiguration['camera_name'],
             'source_type' => $sourceType,
-            'source_value' => $sourceType === 'webcam' && is_numeric((string) $sourceValue)
-                ? (int) $sourceValue
-                : (string) $sourceValue,
+            'source_value' => $sourceType === Camera::SOURCE_NONE ? '' : (string) $streams['live'],
             'source_username' => (string) ($cameraConfiguration['source_username'] ?? ''),
             'source_password' => (string) ($cameraConfiguration['source_password'] ?? ''),
-            'snapshot_source_value' => (string) ($cameraConfiguration['snapshot_source_value'] ?? ''),
-            'decoder_threads' => $liveStream === 'main' ? 0 : 1,
-            'browser_device_id' => $cameraConfiguration['browser_device_id'],
-            'browser_label' => $cameraConfiguration['browser_label'],
+            'snapshot_source_value' => (string) ($streams['snapshot'] ?? ''),
+            // One decoder thread (lowest delay) unless the live source is a camera's
+            // full-resolution main stream, which needs FFmpeg's threading to keep up.
+            'decoder_threads' => $streams['source'] === CameraStreams::SOURCE_DEVICE && $streams['stream'] === 'main' ? 0 : 1,
             'calibration_mask' => $cameraConfiguration['calibration_mask'],
             'calibration_line' => $cameraConfiguration['calibration_line'],
             // Phase 3: how long the detector waits for a tag read after a

@@ -102,7 +102,7 @@ class LiveLatencyTest extends TestCase
             'section' => 'cameras',
             'camera_configs' => [
                 'gate-1' => ['camera_name' => 'Entrance Camera', 'source_type' => 'rtsp', 'source_value' => $entrance['source_value'], 'source_username' => 'admin', 'source_password' => ''],
-                'gate-2' => ['camera_name' => 'Exit Camera', 'source_type' => 'webcam', 'source_value' => '0', 'source_username' => '', 'source_password' => ''],
+                'gate-2' => ['camera_name' => 'Exit Camera', 'source_type' => 'none', 'source_value' => '', 'source_username' => '', 'source_password' => ''],
             ],
             'camera_streams' => ['gate-1' => ['stream' => 'main', 'snapshots' => '1']],
             // Live view work: tuning is no longer a setting; it is ignored.

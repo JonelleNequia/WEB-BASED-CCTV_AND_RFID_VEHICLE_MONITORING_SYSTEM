@@ -1,6 +1,5 @@
 import json
 import os
-import platform
 import threading
 import time
 from datetime import datetime, timedelta
@@ -626,15 +625,8 @@ def build_capture(source_type, capture_source, decoder_threads=0):
 
         return cv2.VideoCapture(capture_source)
 
-    system_name = platform.system().lower()
-
-    if system_name == "darwin" and hasattr(cv2, "CAP_AVFOUNDATION"):
-        return cv2.VideoCapture(capture_source, cv2.CAP_AVFOUNDATION)
-
-    if system_name == "windows" and hasattr(cv2, "CAP_DSHOW"):
-        return cv2.VideoCapture(capture_source, cv2.CAP_DSHOW)
-
-    return cv2.VideoCapture(capture_source)
+    # Camera source work: network cameras only (no USB webcam): nothing to open.
+    return cv2.VideoCapture()
 
 
 def configure_network_capture_options(source_type):
@@ -669,10 +661,6 @@ def validate_camera_source(camera_config, capture_source):
     Return a user-friendly setup error before OpenCV tries an impossible source.
     """
     source_type = camera_config["source_type"]
-
-    if source_type == "webcam":
-        return ""
-
     source_text = str(capture_source or "").strip()
     parsed = urlparse(source_text)
 
@@ -732,9 +720,6 @@ def build_connection_source(camera_config, capture_source):
     """
     Add credentials to RTSP or URL sources when they are stored separately.
     """
-    if camera_config["source_type"] == "webcam":
-        return capture_source
-
     source_value = str(capture_source).strip()
     username = camera_config["source_username"]
     password = camera_config["source_password"]
@@ -912,7 +897,7 @@ def open_capture(camera_config, decoder_threads=None):
 
 
 # A1: the longest a camera connection may take before the worker gives up on
-# it (the FFmpeg RTSP timeout is 5 s; webcams and HTTP streams have none).
+# it (the FFmpeg RTSP timeout is 5 s; HTTP streams have none).
 CAMERA_OPEN_TIMEOUT_SECONDS = 12.0
 
 

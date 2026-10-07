@@ -171,10 +171,10 @@ class Scanner:
         )
         # Silent devices with a fixed IP on another subnet never answer a
         # search. When a temporary address is explicitly allowed, also try the
-        # given targets and the factory-default addresses from the profiles.
+        # addresses given with --target (no address is built in).
         if allow_temp_ip:
             unreachable |= {
-                ip for ip in list(targets) + self._factory_default_ips()
+                ip for ip in targets
                 if not interface_for(ip, interfaces) and ip not in own_ips
             }
         unreachable = sorted(unreachable)
@@ -296,11 +296,6 @@ class Scanner:
         for mac, device in asyncio.run(run_all()):
             carried[mac] = device
         return carried
-
-    def _factory_default_ips(self):
-        camera = [ip for vendor in self.profiles.get("camera", {}).get("vendors", []) for ip in vendor.get("factory_default_ips", [])]
-        reader = self.profiles.get("uhf_reader", {}).get("factory_default_ips", [])
-        return list(dict.fromkeys(camera + reader))
 
     def _other_subnets(self, unreachable, snap, allow_temp_ip, known):
         """

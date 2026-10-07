@@ -44,15 +44,15 @@ class SettingsCameraConfigTest extends TestCase
                 'camera_configs' => [
                     'gate-1' => [
                         'camera_name' => 'Entrance Camera',
-                        'source_type' => 'webcam',
-                        'source_value' => '0',
+                        'source_type' => 'none',
+                        'source_value' => '',
                         'source_username' => '',
                         'source_password' => '',
                     ],
                     'gate-2' => [
                         'camera_name' => 'Exit Camera',
                         'source_type' => 'rtsp',
-                        'source_value' => 'rtsp://192.168.1.50:554/stream1',
+                        'source_value' => 'rtsp://198.51.100.50:554/stream1',
                         'source_username' => 'admin',
                         'source_password' => 'secret',
                     ],
@@ -74,16 +74,17 @@ class SettingsCameraConfigTest extends TestCase
             $this->assertSame('test-detector-key', $config['system_settings']['python_api_key']);
             $this->assertDatabaseMissing('system_settings', ['setting_key' => 'python_api_key']);
             $this->assertSame('Entrance Camera', $config['cameras']['gate-1']['camera_name']);
-            $this->assertSame('webcam', $config['cameras']['gate-1']['source_type']);
-            $this->assertSame(0, $config['cameras']['gate-1']['source_value']);
+            // Camera source work: no USB webcam any more; a gate without a camera exports "none".
+            $this->assertSame('none', $config['cameras']['gate-1']['source_type']);
+            $this->assertSame('', $config['cameras']['gate-1']['source_value']);
             $this->assertSame('Exit Camera', $config['cameras']['gate-2']['camera_name']);
             $this->assertSame('rtsp', $config['cameras']['gate-2']['source_type']);
-            $this->assertSame('rtsp://192.168.1.50:554/stream1', $config['cameras']['gate-2']['source_value']);
+            $this->assertSame('rtsp://198.51.100.50:554/stream1', $config['cameras']['gate-2']['source_value']);
             $this->assertSame('admin', $config['cameras']['gate-2']['source_username']);
             $this->assertSame('secret', $config['cameras']['gate-2']['source_password']);
 
             $this->assertSame('Entrance Camera', Camera::query()->forRole('gate-1')->value('camera_name'));
-            $this->assertSame('rtsp://192.168.1.50:554/stream1', Camera::query()->forRole('gate-2')->value('source_value'));
+            $this->assertSame('rtsp://198.51.100.50:554/stream1', Camera::query()->forRole('gate-2')->value('source_value'));
         } finally {
             if ($originalContents === null) {
                 File::delete($configPath);
@@ -96,7 +97,7 @@ class SettingsCameraConfigTest extends TestCase
     /**
      * RTSP cameras must use the actual network stream URL, not the old webcam index.
      */
-    public function test_rtsp_camera_source_rejects_webcam_index_value(): void
+    public function test_rtsp_camera_source_rejects_a_webcam_index_and_webcams_are_gone(): void
     {
         $this->seed(DatabaseSeeder::class);
 
@@ -133,6 +134,6 @@ class SettingsCameraConfigTest extends TestCase
             ],
         ])
             ->assertRedirect(route('settings.index'))
-            ->assertSessionHasErrors('camera_configs.gate-1.source_value');
+            ->assertSessionHasErrors(['camera_configs.gate-1.source_value', 'camera_configs.gate-2.source_type']);
     }
 }

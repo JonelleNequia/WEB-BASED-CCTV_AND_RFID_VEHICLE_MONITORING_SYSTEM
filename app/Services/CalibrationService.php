@@ -181,8 +181,10 @@ class CalibrationService
      */
     protected function transformCamera(Camera $camera, bool $withSecrets = false): array
     {
-        $sourceType = $camera->source_type ?: 'webcam';
-        $sourceValue = $sourceType === Camera::SOURCE_NONE ? '' : ($camera->source_value ?: '0');
+        $sourceType = $camera->source_type ?: Camera::SOURCE_NONE;
+        $sourceValue = in_array($sourceType, ['rtsp', 'url'], true) ? (string) $camera->source_value : '';
+        // Camera source work: an assigned camera is shown by name and address, never by URL.
+        $device = app(CameraStreams::class)->forGate($camera->camera_role)['device'];
 
         // Plug-and-detect: pages and page JSON never get the camera password
         // or credentials embedded in the URL; only the Python export does.
@@ -201,7 +203,10 @@ class CalibrationService
             'role_label' => $camera->gate?->name ?? Gate::labelFor($camera->camera_role),
             'source_type' => $sourceType,
             ...$secrets,
-            'source_display' => CameraSource::display($sourceType, $sourceValue),
+            'source_display' => $device
+                ? 'Automatic · '.app(DeviceRegistryService::class)->friendlyName($device).($device->ip ? ' ('.$device->ip.')' : '')
+                : CameraSource::display($sourceType, $sourceValue),
+            'automatic' => $device !== null,
             'source_username' => $camera->source_username ?? '',
             'has_password' => filled($camera->source_password),
             'browser_device_id' => $camera->browser_device_id,

@@ -77,7 +77,7 @@ class LiveViewWebrtcTest extends TestCase
 
         // Live view = the MAIN stream with the login; detection keeps the sub stream.
         $this->assertSame(['gate-1' => 'rtsp://admin:p%40ss%3Aword@198.51.100.20:554/stream1'], $go2rtc->streams());
-        $this->assertSame('rtsp://198.51.100.20:554/stream2', Camera::query()->forRole('gate-1')->value('source_value'));
+        $this->assertSame('rtsp://198.51.100.20:554/stream2', app(\App\Services\CameraStreams::class)->forGate('gate-1')['live']);
 
         $this->assertTrue($go2rtc->writeConfig());
         $config = File::get($go2rtc->configPath());

@@ -1043,15 +1043,12 @@ class GuestObservationController extends Controller
             return false;
         }
 
-        $leftType = Str::lower(trim((string) $leftCamera->source_type));
-        $rightType = Str::lower(trim((string) $rightCamera->source_type));
-        $leftSource = trim((string) $leftCamera->source_value);
-        $rightSource = trim((string) $rightCamera->source_value);
+        // Camera source work: the same video (built from the device, or typed).
+        $streams = app(\App\Services\CameraStreams::class);
+        $leftSource = trim((string) $streams->forGate((string) $leftCamera->camera_role)['live']);
+        $rightSource = trim((string) $streams->forGate((string) $rightCamera->camera_role)['live']);
 
-        return $leftType !== ''
-            && $leftType === $rightType
-            && $leftSource !== ''
-            && $leftSource === $rightSource;
+        return $leftSource !== '' && $leftSource === $rightSource;
     }
 
     protected function plateFingerprint(?string $plateNumber): string

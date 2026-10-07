@@ -55,6 +55,14 @@ class GateSetupController extends Controller
         return response()->json($result, $result['ok'] ? 200 : 422);
     }
 
+    /** Camera source work: a hand-typed camera that the scan found becomes automatic. */
+    public function useDetectedCamera(string $gate, GateSetupService $setup): RedirectResponse
+    {
+        $result = $setup->useDetectedCamera($this->code($gate));
+
+        return $result['ok'] ? back()->with('status', $result['message']) : back()->withErrors(['camera' => $result['message']]);
+    }
+
     public function removeCamera(string $gate, GateSetupService $setup): RedirectResponse
     {
         $code = $this->code($gate);

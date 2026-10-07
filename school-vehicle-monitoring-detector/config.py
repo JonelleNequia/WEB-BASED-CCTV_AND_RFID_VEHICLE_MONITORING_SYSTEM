@@ -136,12 +136,11 @@ def default_camera_config(role):
         "camera_role": role,
         "camera_name": f"PHILCST {role.capitalize()} Camera",
         "camera_id": None,
-        "source_type": "webcam",
-        "source_value": 0,
+        # Camera source work: no camera until Laravel exports one (no USB webcam).
+        "source_type": "none",
+        "source_value": "",
         "source_username": "",
         "source_password": "",
-        "browser_device_id": None,
-        "browser_label": None,
         "calibration_mask": None,
         "calibration_line": None,
     }
@@ -192,10 +191,11 @@ def normalize_camera_config(role, loaded_config):
     if isinstance(loaded_config, dict):
         config.update(loaded_config)
 
-    source_type = str(config.get("source_type", "webcam")).strip().lower()
-    # B1 (Settings): "none" = this gate has no camera yet.
-    if source_type not in {"webcam", "rtsp", "url", "none"}:
-        source_type = "webcam"
+    source_type = str(config.get("source_type", "none")).strip().lower()
+    # B1 (Settings): "none" = this gate has no camera yet. Camera source work:
+    # network cameras only (an RTSP or stream URL); USB webcams are gone.
+    if source_type not in {"rtsp", "url", "none"}:
+        source_type = "none"
 
     config["camera_role"] = role
     config["camera_id"] = config.get("camera_id") or config.get("id")
@@ -210,18 +210,10 @@ def normalize_camera_config(role, loaded_config):
         config["decoder_threads"] = int(config.get("decoder_threads", 1))
     except (TypeError, ValueError):
         config["decoder_threads"] = 1
-    config["browser_device_id"] = config.get("browser_device_id")
-    config["browser_label"] = config.get("browser_label")
     config["calibration_mask"] = config.get("calibration_mask")
     config["calibration_line"] = config.get("calibration_line")
 
-    if source_type == "webcam":
-        try:
-            config["source_value"] = int(config.get("source_value", config["source_value"]))
-        except (TypeError, ValueError):
-            config["source_value"] = default_camera_config(role)["source_value"]
-    else:
-        config["source_value"] = str(config.get("source_value", "")).strip()
+    config["source_value"] = str(config.get("source_value", "") or "").strip()
 
     return config
 
@@ -301,8 +293,4 @@ def resolve_capture_source(camera_config):
     """
     Convert the configured source into the value expected by OpenCV.
     """
-    if camera_config["source_type"] == "webcam":
-        return int(camera_config["source_value"])
-
-
     return str(camera_config["source_value"])

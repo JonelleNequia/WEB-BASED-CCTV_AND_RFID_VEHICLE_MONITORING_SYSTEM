@@ -22,11 +22,7 @@ final class CameraSource
     {
         $type = strtolower((string) $type);
 
-        if ($type === 'webcam') {
-            return 'Webcam '.$value;
-        }
-
-        if ($type === 'none') {
+        if ($type === 'none' || $type === '') {
             return 'No camera';
         }
 

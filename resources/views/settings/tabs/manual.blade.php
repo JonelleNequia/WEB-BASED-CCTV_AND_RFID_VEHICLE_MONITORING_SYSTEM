@@ -13,7 +13,7 @@
             <section class="subpanel">
                 <div class="panel-title-row">
                     <h4>Camera Sources</h4>
-                    <p class="field-help">Network cameras are added from the <a href="{{ route('settings.index', ['tab' => 'gates']) }}">Gates</a> tab. Change these only for a USB webcam or a camera that cannot be found.</p>
+                    <p class="field-help">Network cameras are added from the <a href="{{ route('settings.index', ['tab' => 'gates']) }}">Gates</a> tab and found automatically by their MAC address, on any network. A source typed here is only for a camera that cannot be found automatically.</p>
                 </div>
 
                 <div class="camera-grid">
@@ -124,24 +124,27 @@
                                 @endif
                             </p>
 
-                            <details class="advanced-section" @if ($errors->hasAny(["camera_configs.$role.source_type", "camera_configs.$role.source_value"])) open @endif>
+                            @if ($managed)
+                                {{-- Camera source work: the device is the source; its address follows the camera. --}}
+                                @php
+                                    $options = (array) $assignment->options;
+                                @endphp
+                                <p class="field-help" data-camera-automatic>
+                                    Automatic: found by its MAC address {{ $assignment->device->mac }}{{ $assignment->device->ip ? ' (now at '.$assignment->device->ip.')' : '' }}.
+                                    Stream paths {{ ($options['paths_from'] ?? null) === 'onvif' ? 'read from the camera (ONVIF)' : 'of its brand' }}:
+                                    main {{ $options['paths']['main'] ?? '—' }}, sub {{ $options['paths']['sub'] ?? '—' }}.
+                                </p>
+                            @else
+                            <details class="advanced-section" @if ($errors->hasAny(["camera_configs.$role.source_type", "camera_configs.$role.source_value"]) || in_array($sourceType, ['rtsp', 'url'], true)) open @endif>
                                 <summary>Advanced: manual source</summary>
-                                @if ($managed)
-                                    <p class="field-help">Managed by the assigned camera: the address follows it automatically when its IP changes. Remove it in the Gates tab to type a source by hand.</p>
-                                @else
-                                    <p class="field-help">Only for a USB webcam or a camera that cannot be detected.</p>
-                                @endif
+                                <p class="field-help field-warning">Only for a camera that cannot be added from the Gates tab. A typed address does not follow the camera when its address or the network changes.</p>
                                 <div class="form-grid">
                                     <div class="field">
-                                        <label for="{{ $role }}_source_type">Source Type</label>
-                                        @if ($managed)
-                                            <input type="hidden" name="camera_configs[{{ $role }}][source_type]" value="{{ $camera['source_type'] }}">
-                                        @endif
-                                        <select id="{{ $role }}_source_type" @unless ($managed) name="camera_configs[{{ $role }}][source_type]" @endunless required @disabled($managed)>
-                                            <option value="webcam" @selected($sourceType === 'webcam')>Webcam</option>
-                                            <option value="rtsp" @selected($sourceType === 'rtsp')>RTSP</option>
-                                            <option value="url" @selected($sourceType === 'url')>URL</option>
-                                            <option value="none" @selected($sourceType === 'none')>No camera</option>
+                                        <label for="{{ $role }}_source_type">Source</label>
+                                        <select id="{{ $role }}_source_type" name="camera_configs[{{ $role }}][source_type]" required>
+                                            <option value="none" @selected(! in_array($sourceType, ['rtsp', 'url'], true))>No camera</option>
+                                            <option value="rtsp" @selected($sourceType === 'rtsp')>RTSP address</option>
+                                            <option value="url" @selected($sourceType === 'url')>Other stream URL</option>
                                         </select>
                                         @error("camera_configs.$role.source_type")
                                             <span class="field-error">{{ $message }}</span>
@@ -149,35 +152,30 @@
                                     </div>
 
                                     <div class="field">
-                                        <label for="{{ $role }}_source_value">Source Value</label>
+                                        <label for="{{ $role }}_source_value">Address</label>
                                         <input
                                             id="{{ $role }}_source_value"
                                             type="text"
                                             name="camera_configs[{{ $role }}][source_value]"
                                             value="{{ old("camera_configs.$role.source_value", $camera['source_value']) }}"
-                                            @readonly($managed)
+                                            placeholder="rtsp://camera-address:554/stream-path"
+                                            autocomplete="off"
                                         >
-                                        <span class="field-help">Webcam: a number such as 0. RTSP: the full rtsp:// address of the camera stream.</span>
+                                        <span class="field-help">The full rtsp:// address of the camera stream, without the login (the login is below).</span>
                                         @error("camera_configs.$role.source_value")
                                             <span class="field-error">{{ $message }}</span>
                                         @enderror
                                     </div>
 
-                                    @unless ($managed)
-                                        <div class="field span-full">
-                                            <label for="{{ $role }}_snapshot_source">Snapshot source (optional)</label>
-                                            <input id="{{ $role }}_snapshot_source" type="text" name="camera_configs[{{ $role }}][snapshot_source_value]"
-                                                   value="{{ old("camera_configs.$role.snapshot_source_value", $camera['snapshot_source_value'] ?? '') }}" autocomplete="off">
-                                            <span class="field-help">Full-resolution rtsp:// stream opened only when a vehicle is detected. Leave blank to use the live frame.</span>
-                                        </div>
-                                    @endunless
-
                                     <div class="field span-full">
-                                        <label for="{{ $role }}_browser_device">Saved Browser Device</label>
-                                        <input id="{{ $role }}_browser_device" type="text" value="{{ $camera['browser_label'] ?: 'No saved browser device yet.' }}" readonly>
+                                        <label for="{{ $role }}_snapshot_source">Snapshot source (optional)</label>
+                                        <input id="{{ $role }}_snapshot_source" type="text" name="camera_configs[{{ $role }}][snapshot_source_value]"
+                                               value="{{ old("camera_configs.$role.snapshot_source_value", $camera['snapshot_source_value'] ?? '') }}" autocomplete="off">
+                                        <span class="field-help">Full-resolution rtsp:// stream opened only when a vehicle is detected. Leave blank to use the live frame.</span>
                                     </div>
                                 </div>
                             </details>
+                            @endif
                         </article>
                     @endforeach
                 </div>

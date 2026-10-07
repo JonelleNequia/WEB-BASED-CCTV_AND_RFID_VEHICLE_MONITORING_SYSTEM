@@ -187,8 +187,8 @@ class Phase4UiTest extends TestCase
             'entrance_reader_type' => 'nfc',
             'exit_reader_type' => 'nfc',
             'camera_configs' => [
-                'gate-1' => ['camera_name' => 'Entrance Camera', 'source_type' => 'webcam', 'source_value' => '0'],
-                'gate-2' => ['camera_name' => 'Exit Camera', 'source_type' => 'webcam', 'source_value' => '0'],
+                'gate-1' => ['camera_name' => 'Entrance Camera', 'source_type' => 'none', 'source_value' => ''],
+                'gate-2' => ['camera_name' => 'Exit Camera', 'source_type' => 'none', 'source_value' => ''],
             ],
         ], $overrides);
     }

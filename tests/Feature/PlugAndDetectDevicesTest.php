@@ -107,8 +107,9 @@ class PlugAndDetectDevicesTest extends TestCase
             ->assertJsonPath('ok', true);
 
         $entrance = Camera::query()->forRole('gate-1')->firstOrFail();
-        $this->assertSame('rtsp', $entrance->source_type);
-        $this->assertSame('rtsp://198.51.100.20:554/stream1', $entrance->source_value);
+        // Camera source work: the device is the source; no URL is stored.
+        $this->assertSame(['device', ''], [$entrance->source_type, (string) $entrance->source_value]);
+        $this->assertSame('rtsp://198.51.100.20:554/stream1', app(\App\Services\CameraStreams::class)->forGate('gate-1')['live']);
         $this->assertSame('secret', $entrance->source_password);
         $raw = (string) DB::table('cameras')->where('id', $entrance->id)->value('source_password');
         $this->assertNotSame('secret', $raw);
@@ -118,7 +119,7 @@ class PlugAndDetectDevicesTest extends TestCase
         $this->actingAs($this->admin)
             ->postJson(route('settings.devices.assign', $camera), ['station' => 'gate-2', 'role' => 'camera', 'stream' => 'sub'])
             ->assertOk();
-        $this->assertSame('rtsp://198.51.100.20:554/stream2', Camera::query()->forRole('gate-2')->value('source_value'));
+        $this->assertSame('rtsp://198.51.100.20:554/stream2', app(\App\Services\CameraStreams::class)->forGate('gate-2')['live']);
 
         // Python still receives the password it needs to connect.
         $runtime = json_decode(File::get(app(\App\Services\SettingsService::class)->cameraRuntimeConfigPath()), true);
@@ -140,8 +141,8 @@ class PlugAndDetectDevicesTest extends TestCase
 
         $this->assertSame(2, $summary['moved']);
         // Live view on the sub stream (default); the main stream only for trigger snapshots.
-        $this->assertSame('rtsp://192.0.2.20:554/stream2', Camera::query()->forRole('gate-1')->value('source_value'));
-        $this->assertSame('rtsp://192.0.2.20:554/stream1', Camera::query()->forRole('gate-1')->value('snapshot_source_value'));
+        $this->assertSame('rtsp://192.0.2.20:554/stream2', app(\App\Services\CameraStreams::class)->forGate('gate-1')['live']);
+        $this->assertSame('rtsp://192.0.2.20:554/stream1', app(\App\Services\CameraStreams::class)->forGate('gate-1')['snapshot']);
         $this->assertSame(1, DeviceAssignment::query()->where('station', 'gate-1')->where('role', 'camera')->count());
         $this->assertSame($camera->id, DeviceAssignment::query()->where('station', 'gate-1')->where('role', 'camera')->value('network_device_id'));
 
@@ -288,7 +289,7 @@ class PlugAndDetectDevicesTest extends TestCase
                 ->assertJsonPath('stations.gate-2.camera.error_code', 'unauthorized')
                 ->assertJsonPath('stations.gate-2.camera.camera_error', fn ($error) => str_contains($error, 'RTSP 401'));
 
-            $this->assertSame('rtsp://198.51.100.20:554/stream2', Camera::query()->forRole('gate-2')->value('source_value'));
+            $this->assertSame('rtsp://198.51.100.20:554/stream2', app(\App\Services\CameraStreams::class)->forGate('gate-2')['live']);
 
             // Sidebar: live count with the reason.
             $this->actingAs($this->admin)
@@ -360,7 +361,7 @@ class PlugAndDetectDevicesTest extends TestCase
                 'section' => 'cameras',
                 'camera_configs' => [
                     'gate-1' => ['camera_name' => 'Entrance Camera', 'source_type' => 'rtsp', 'source_value' => 'rtsp://198.51.100.20:554/stream1', 'source_username' => 'admin', 'source_password' => ''],
-                    'gate-2' => ['camera_name' => 'Exit Camera', 'source_type' => 'webcam', 'source_value' => '0', 'source_username' => '', 'source_password' => ''],
+                    'gate-2' => ['camera_name' => 'Exit Camera', 'source_type' => 'none', 'source_value' => '', 'source_username' => '', 'source_password' => ''],
                 ],
             ])->assertSessionHasNoErrors();
         $this->assertSame('Sup3rSecret', Camera::query()->forRole('gate-1')->firstOrFail()->source_password);

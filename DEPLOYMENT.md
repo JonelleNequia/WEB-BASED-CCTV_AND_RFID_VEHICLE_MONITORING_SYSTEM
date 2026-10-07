@@ -86,8 +86,19 @@ Logs: `storage\logs` (`laravel.log`, `go2rtc.log`, `scheduler.log`,
 ## 4. Cameras (live view)
 
 - Add each camera in **Settings › Gates** (the wizard finds it on the
-  network). The live view uses the camera's **main** stream; detection uses
-  the **sub** stream in the background.
+  network) and enter its login once. Nothing else is typed: the system reads
+  the camera's main and sub stream from the camera itself (ONVIF), or uses
+  the brand's known paths. The live view uses the **main** stream; detection
+  uses the **sub** stream in the background.
+- **Any router or network.** A camera (and a reader) is known by its MAC
+  address, not its IP. At every start and whenever the network changes, the
+  system finds its current address again and builds the stream from it; the
+  login, the gate and the calibration stay. Set cameras to **DHCP** (automatic
+  address): a camera with a fixed address from another network is shown as
+  *The camera still has an address from another network* with this advice.
+- A camera added by hand (Settings › Advanced › Manual setup, an rtsp://
+  address) is only for a camera that cannot be found. When the scan finds it,
+  its card offers **Use automatically**. USB webcams are not supported.
 - WebRTC plays **H.264** only. In the camera's own settings page (TP-Link
   VIGI: *Settings › Video › Encoding*), set:
 
@@ -111,9 +122,9 @@ Logs: `storage\logs` (`laravel.log`, `go2rtc.log`, `scheduler.log`,
 ## 5. RFID reader network (once)
 
 The reader must have an address in the PC's network (the router's network).
-A reader still on its own subnet (e.g. a fixed 192.168.2.x while the router
-is 192.168.1.x) is shown on its gate card: *The reader is set up for another
-network than this PC.*
+A reader that still has a fixed address from another network (another
+router, or its factory address) is shown on its gate card: *The reader is
+set up for another network than this PC.*
 
 **A. From the system (recommended).** Settings › Gates › reader card ›
 **Move reader to this network**:

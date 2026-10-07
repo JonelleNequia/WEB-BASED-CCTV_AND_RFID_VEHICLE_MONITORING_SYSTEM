@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Camera;
 use App\Models\DeviceAssignment;
 use App\Models\Gate;
+use App\Models\NetworkDevice;
 use App\Support\DetectionStatus;
 use App\Support\DisplayTime;
 use Illuminate\Support\Collection;
@@ -53,6 +54,16 @@ class GateSetupService
 
         $live = (bool) data_get($runtime, "cameras.{$gate->code}.camera_running", false) && ($runtime['service_running'] ?? false);
         [$state, $line, $nextStep] = $live ? ['online', 'Online', ''] : $this->cameraProblem($gate->code, $runtime);
+        $streams = app(CameraStreams::class);
+        $device = $streams->forGate($gate->code)['device'];
+        if (! $live && $device && $this->onOtherNetwork($device)) {
+            // Camera source work: found by MAC, but with a fixed address from another network.
+            [$state, $line, $nextStep] = ['offline', 'Offline · The camera still has an address from another network.',
+                "Set the camera to DHCP (automatic address) in its own settings; the system then finds it by itself."];
+        }
+        // "Manual at first": a hand-typed camera that the scan found can be switched to automatic.
+        $camera = Camera::query()->forRole($gate->code)->first();
+        $detected = ! $assigned && $camera ? $streams->detectedForManual($camera) : null;
 
         // Live view work: WebRTC plays H.264 only (checked while the camera is online).
         $codecs = $live ? app(Go2rtcService::class)->codecs($gate->code) : ['main' => null, 'sub' => null];
@@ -64,13 +75,9 @@ class GateSetupService
                 'next_step' => "Open the camera's own settings page › Video › Encoding, and choose H.264 for both streams.",
             ],
             'name' => (string) ($config['camera_name'] ?? $gate->name.' Camera'),
-            'source' => $assigned
-                ? (string) $assigned['name']
-                : match ($config['source_type'] ?? '') {
-                    'webcam' => 'Webcam on this PC',
-                    default => 'Added by hand (Advanced)',
-                },
+            'source' => $assigned ? (string) $assigned['name'] : 'Added by hand (Advanced)',
             'managed' => (bool) $assigned,
+            'detected' => $detected ? ['id' => $detected->id, 'name' => app(DeviceRegistryService::class)->friendlyName($detected)] : null,
             'online' => $live,
             // B4: green / yellow (starting) / red, one plain line and the next step.
             'state' => $state,
@@ -81,6 +88,55 @@ class GateSetupService
             'username' => (string) ($config['source_username'] ?? ''),
             'can_test' => in_array($config['source_type'] ?? '', ['rtsp'], true) || (bool) $assigned,
         ];
+    }
+
+    /**
+     * The camera's last address is not in any of this PC's networks (a fixed
+     * address from the previous router), or it is reached only through an
+     * extra address on this PC.
+     */
+    protected function onOtherNetwork(NetworkDevice $device): bool
+    {
+        if (filled(data_get($device->details, 'network_warning.network'))) {
+            return true;
+        }
+
+        $networks = collect((array) data_get(app(DeviceServiceRuntime::class)->readStatus(), 'network.interfaces', []))
+            ->pluck('network')->filter()->all();
+        if ($networks === [] || blank($device->ip) || ($ip = ip2long((string) $device->ip)) === false) {
+            return false;
+        }
+
+        foreach ($networks as $network) {
+            [$base, $prefix] = array_pad(explode('/', (string) $network), 2, '32');
+            $mask = (int) $prefix === 0 ? 0 : (~0 << (32 - (int) $prefix)) & 0xFFFFFFFF;
+            if ((ip2long($base) & $mask) === ($ip & $mask)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * "Use automatically": the hand-typed camera becomes the detected device
+     * (known by its MAC) with its saved login; the URL is not used any more.
+     *
+     * @return array{ok: bool, message: string}
+     */
+    public function useDetectedCamera(string $gate): array
+    {
+        $camera = Camera::query()->forRole($gate)->firstOrFail();
+        $device = app(CameraStreams::class)->detectedForManual($camera);
+        if (! $device) {
+            return ['ok' => false, 'message' => 'This camera was not found on the network.'];
+        }
+
+        $result = app(DeviceRegistryService::class)->assign($device, $gate, DeviceAssignment::ROLE_CAMERA, [
+            'username' => $camera->source_username, 'password' => $camera->source_password,
+        ]);
+
+        return ['ok' => $result['ok'], 'message' => $result['ok'] ? 'The camera is now found automatically.' : $result['message']];
     }
 
     /**
@@ -185,11 +241,12 @@ class GateSetupService
     {
         $camera = Camera::query()->forRole($gate)->first();
 
-        if (! $camera || $camera->source_type === Camera::SOURCE_NONE) {
+        $source = app(CameraStreams::class)->forGate($gate);
+        if (! $camera || $source['source'] === CameraStreams::SOURCE_NONE) {
             return ['ok' => false, 'message' => 'This gate has no camera yet.'];
         }
 
-        if ($camera->source_type !== 'rtsp') {
+        if (! str_starts_with(strtolower((string) $source['live']), 'rtsp')) {
             $running = (bool) data_get(app(DetectorRuntimeService::class)->readStatus(), "cameras.$gate.camera_running", false);
 
             return $running
@@ -198,7 +255,7 @@ class GateSetupService
         }
 
         $result = app(CameraProbeService::class)->describe(
-            (string) $camera->source_value,
+            (string) $source['live'],
             (string) $camera->source_username,
             (string) $camera->source_password
         );

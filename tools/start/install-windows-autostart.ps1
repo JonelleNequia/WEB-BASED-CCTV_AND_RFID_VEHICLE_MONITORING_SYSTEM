@@ -11,6 +11,11 @@ What it does:
   2. Windows Firewall rules so guard PCs on the LAN can open the system:
      the web port (default 8000) and the live view (WebRTC, default 8555,
      TCP and UDP). The basic MJPEG port (8765) stays closed to other PCs.
+  3. A rule for the system's Python (device service and detector) so the
+     answers of cameras and readers reach it: ONVIF camera search (UDP
+     multicast 3702), the reader module search (UDP broadcast) and readers
+     in client mode. Private and domain networks only; no address is set,
+     so it works on any router or school LAN.
 
 Remove it again with:  -Uninstall
 #>
@@ -64,7 +69,14 @@ Get-NetFirewallRule -DisplayName 'PHILCST *' -ErrorAction SilentlyContinue | Rem
 New-NetFirewallRule -DisplayName 'PHILCST web' -Direction Inbound -Protocol TCP -LocalPort $WebPort -Action Allow -Profile Private,Domain | Out-Null
 New-NetFirewallRule -DisplayName 'PHILCST live view (TCP)' -Direction Inbound -Protocol TCP -LocalPort $WebRtcPort -Action Allow -Profile Private,Domain | Out-Null
 New-NetFirewallRule -DisplayName 'PHILCST live view (UDP)' -Direction Inbound -Protocol UDP -LocalPort $WebRtcPort -Action Allow -Profile Private,Domain | Out-Null
-Write-Host "Firewall: web port $WebPort and live view port $WebRtcPort (TCP/UDP) open on private networks."
+$python = Join-Path $Root 'school-vehicle-monitoring-detector\.venv\Scripts\python.exe'
+if (Test-Path $python) {
+    New-NetFirewallRule -DisplayName 'PHILCST device search (UDP)' -Direction Inbound -Program $python -Protocol UDP -Action Allow -Profile Private,Domain | Out-Null
+    New-NetFirewallRule -DisplayName 'PHILCST device search (TCP)' -Direction Inbound -Program $python -Protocol TCP -Action Allow -Profile Private,Domain | Out-Null
+} else {
+    Write-Host "Python environment not found at $python; create it first (DEPLOYMENT.md), then run this again." -ForegroundColor Yellow
+}
+Write-Host "Firewall: web port $WebPort, live view port $WebRtcPort (TCP/UDP) and device search open on private networks."
 
 Start-ScheduledTask -TaskName $TaskName
 Write-Host 'Started. Open http://localhost:'$WebPort' in a minute.'
