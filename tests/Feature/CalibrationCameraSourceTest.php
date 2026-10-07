@@ -103,6 +103,11 @@ class CalibrationCameraSourceTest extends TestCase
         $this->assertStringNotContainsString('enumerateDevices', $script);
         $this->assertStringNotContainsString('/stream/entrance', $script);
         $this->assertStringNotContainsString('127.0.0.1', $script);
+
+        // The drawing canvas has its own attribute: the live player's root
+        // also has data-overlay, and picking it stopped the whole page.
+        $this->assertStringContainsString('<canvas class="camera-overlay" data-calibration-canvas>', $html);
+        $this->assertStringNotContainsString("querySelector('[data-overlay]')", $script);
     }
 
     public function test_the_saved_zone_line_and_in_side_are_on_the_page(): void

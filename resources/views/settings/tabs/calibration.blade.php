@@ -49,7 +49,7 @@
                         {{-- The detector's last saved picture: shown while the camera is offline, so the zone can still be drawn. --}}
                         <img class="camera-video camera-last-picture" data-last-picture alt="{{ $camera['role_label'] }} last picture"
                              @if ($camera['snapshot_url']) src="{{ $camera['snapshot_url'] }}" @endif hidden>
-                        <canvas class="camera-overlay" data-overlay></canvas>
+                        <canvas class="camera-overlay" data-calibration-canvas></canvas>
                         <span class="calibration-picture-badge" data-picture-badge hidden></span>
                         <div class="camera-fallback" data-fallback-wrapper>
                             <div class="camera-fallback-copy">

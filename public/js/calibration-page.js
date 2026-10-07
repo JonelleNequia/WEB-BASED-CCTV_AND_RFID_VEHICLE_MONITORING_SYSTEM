@@ -83,7 +83,8 @@
             this.video = element.querySelector('[data-video]');
             this.lastPicture = element.querySelector('[data-last-picture]');
             this.pictureBadge = element.querySelector('[data-picture-badge]');
-            this.canvas = element.querySelector('[data-overlay]');
+            // Not [data-overlay]: the live player's own root has data-overlay="0".
+            this.canvas = element.querySelector('[data-calibration-canvas]');
             this.fallbackContainer = element.querySelector('[data-fallback-wrapper]');
             this.fallback = element.querySelector('[data-fallback]');
             this.fallbackDetail = element.querySelector('[data-fallback-detail]');
