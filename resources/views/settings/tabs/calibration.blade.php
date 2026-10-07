@@ -1,8 +1,13 @@
 
 
-    <p class="field-help"><strong>Zone (ROI):</strong> click point by point, then click point 1 or press Done. Drag a point to move it, the "+" on an edge to add one, the inside to move the whole zone; right-click a point (or select it and press Delete) to remove it.
-        <strong>Trigger line:</strong> drag across the road. Drag its ends or its middle to adjust it; click the IN arrow to flip it. Then Save.</p>
-    <p class="field-help">Each gate records IN and OUT. The <strong>IN</strong> arrow on the line shows the direction of a vehicle coming into campus; use <strong>Flip IN direction</strong> if it points the wrong way, then save. Check it below: drive through once and look at "Recent crossings".</p>
+    {{-- Calibration editor: one line per step. --}}
+    <ol class="calibration-steps">
+        <li><strong>Zone:</strong> with <em>Zone (ROI)</em>, click around the road where vehicles pass; click point 1 or press Done to close it.</li>
+        <li><strong>Adjust:</strong> drag a point to move it, the "+" on an edge to add one, the inside to move the whole zone; right-click a point (or select it and press Delete) to remove it.</li>
+        <li><strong>Line:</strong> with <em>Trigger line</em>, drag across the road inside the zone; drag its ends or its middle to adjust it.</li>
+        <li><strong>Direction:</strong> the <strong>IN</strong> arrow must point into campus; click it (or Flip IN direction) to turn it around.</li>
+        <li><strong>Save</strong>, then drive through once and check "Recent crossings" below the video. Undo: Ctrl/⌘+Z · Redo: Ctrl/⌘+Shift+Z.</li>
+    </ol>
 
     {{-- Detector debug view: raw detections, zone/line as used, track IDs, counters. --}}
     <form method="POST" action="{{ route('calibration.debug') }}" class="calibration-debug-toggle">
@@ -39,9 +44,23 @@
                             </span>
                             <button type="button" class="button button-secondary button-sm" data-done disabled>Done</button>
                             <button type="button" class="button button-secondary button-sm" data-flip-direction>Flip IN direction</button>
+                            <span class="calibration-tool-group" role="group" aria-label="History">
+                                <button type="button" class="button button-secondary button-sm" data-undo disabled title="Undo (Ctrl/⌘+Z)">Undo</button>
+                                <button type="button" class="button button-secondary button-sm" data-redo disabled title="Redo (Ctrl/⌘+Shift+Z)">Redo</button>
+                            </span>
+                            <button type="button" class="button button-secondary button-sm" data-reset title="Load the calibration the detector uses now">Reset to saved</button>
                             <button type="button" class="button button-secondary button-sm" data-clear>Clear</button>
                             <button type="button" class="button button-primary button-sm" data-save>Save Calibration</button>
                         </div>
+                        <div class="calibration-unsaved" data-unsaved hidden>
+                            <span>Unsaved changes: the detector still uses the saved zone and line.</span>
+                            <button type="button" class="link-button" data-discard>Discard changes</button>
+                        </div>
+                        <label class="calibration-detection-toggle">
+                            {{-- Off by default; remembered on this browser. Boxes and tracks only, not the saved zone/line. --}}
+                            <input type="checkbox" data-overlay-toggle data-overlay-key="calibration.overlay" data-overlay-default="off">
+                            Show detection (vehicle boxes and crossings on the live video)
+                        </label>
                         <ul class="calibration-problems" data-problems hidden></ul>
                     </div>
                 @endif
@@ -49,7 +68,7 @@
                 <div class="camera-stage camera-stage-calibration">
                     @if ($camera['has_camera'])
                         {{-- Calibration work: the gate's own camera, the same live stream as its kiosk and Gate Monitor (no browser camera). --}}
-                        <x-live-video :gate="$role" :mjpeg="$camera['stream_url']" :overlay="false" page="calibration"
+                        <x-live-video :gate="$role" :mjpeg="$camera['stream_url']" :overlay="true" overlay-key="calibration.overlay" overlay-default="off" :shapes="false" page="calibration"
                                       class="camera-video" data-video :alt="$camera['role_label'].' live camera'" />
                         {{-- The detector's last saved picture: shown while the camera is offline, so the zone can still be drawn. --}}
                         <img class="camera-video camera-last-picture" data-last-picture alt="{{ $camera['role_label'] }} last picture"
@@ -84,6 +103,20 @@
                     @endif
                 </div>
 
+                {{-- Phase 2: the last crossings at this gate with the direction the detector worked out. --}}
+                <div class="calibration-crossings">
+                    <strong>Recent crossings</strong> <span class="field-help">updates by itself</span>
+                    <ul class="calibration-crossing-list" data-crossings>
+                        @forelse ($recentCrossings[$role] ?? [] as $crossing)
+                            <li data-crossing-id="{{ $crossing['id'] }}">
+                                <span class="badge {{ in_array($crossing['direction'], ['IN', 'OUT'], true) ? 'badge-open' : 'badge-manual-review' }}">{{ $crossing['direction_label'] }}</span>
+                                {{ $crossing['time'] }} · {{ $crossing['type_label'] }} · track #{{ $crossing['track_id'] ?? '—' }}{{ $crossing['confidence'] !== null ? ' · '.number_format($crossing['confidence'], 2) : '' }}{{ $crossing['reason'] ? ' · '.$crossing['reason'] : '' }}
+                            </li>
+                        @empty
+                            <li class="field-help">No crossing recorded yet.</li>
+                        @endforelse
+                    </ul>
+                </div>
                 <div class="camera-detail-grid calibration-detail-grid">
                     <div>
                         <span>Status</span>
@@ -107,20 +140,6 @@
                     </div>
                 </div>
 
-                {{-- Phase 2: the last crossings at this gate with the direction the detector worked out. --}}
-                <div class="calibration-crossings">
-                    <strong>Recent crossings</strong>
-                    <ul class="calibration-crossing-list" data-crossings>
-                        @forelse ($recentCrossings[$role] ?? [] as $crossing)
-                            <li>
-                                <span class="badge {{ in_array($crossing['direction'], ['IN', 'OUT'], true) ? 'badge-open' : 'badge-manual-review' }}">{{ $crossing['direction_label'] }}</span>
-                                {{ $crossing['time'] }} · track #{{ $crossing['track_id'] ?? '—' }}{{ $crossing['confidence'] !== null ? ' · '.number_format($crossing['confidence'], 2) : '' }}{{ $crossing['reason'] ? ' · '.$crossing['reason'] : '' }}
-                            </li>
-                        @empty
-                            <li class="field-help">No crossing recorded yet.</li>
-                        @endforelse
-                    </ul>
-                </div>
             </article>
         @endforeach
     </div>

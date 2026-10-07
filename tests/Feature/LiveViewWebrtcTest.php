@@ -157,9 +157,13 @@ class LiveViewWebrtcTest extends TestCase
         $this->assertStringContainsString('data-hls-url="'.e(route('live.hls', ['file' => 'stream.m3u8', 'src' => 'gate-1'])).'"', $html);
 
         $this->actingAs($this->admin)->get(route('gates.kiosk', 'gate-1'))->assertOk()->assertSee('data-live-video', false);
-        // Calibration shows the video without the boxes (its own drawing tools).
+        // Calibration: boxes only when "Show detection" is ticked (off by
+        // default, its own choice), never the saved zone/line (it draws its own).
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'calibration', 'gate' => 'gate-1']))->assertOk()
-            ->assertSee('data-overlay="0"', false);
+            ->assertSee('data-overlay="1"', false)
+            ->assertSee('data-overlay-key="calibration.overlay"', false)
+            ->assertSee('data-overlay-default="off"', false)
+            ->assertSee('data-overlay-shapes="0"', false);
     }
 
     public function test_go2rtc_and_the_device_service_are_kept_running_by_the_scheduler(): void

@@ -3,7 +3,9 @@
     go2rtc (main stream, not re-encoded), then HLS, then the detector's MJPEG.
     Detection boxes are drawn on the canvas, not in the video.
 --}}
-@props(['gate', 'mjpeg', 'overlay' => true, 'page' => null, 'alt' => 'Live camera'])
+@props(['gate', 'mjpeg', 'overlay' => true, 'page' => null, 'alt' => 'Live camera',
+         // Calibration: its own on/off choice (off by default) and boxes only.
+         'overlayKey' => null, 'overlayDefault' => null, 'shapes' => true])
 
 @php
     $go2rtc = app(\App\Services\Go2rtcService::class);
@@ -18,6 +20,9 @@
      data-mjpeg-url="{{ $mjpeg }}"
      data-overlay-url="{{ str_replace('/stream/', '/overlay/', (string) $mjpeg) }}"
      data-overlay="{{ $overlay ? '1' : '0' }}"
+     @if ($overlayKey) data-overlay-key="{{ $overlayKey }}" @endif
+     @if ($overlayDefault) data-overlay-default="{{ $overlayDefault }}" @endif
+     @unless ($shapes) data-overlay-shapes="0" @endunless
      data-stats-url="{{ route('live.stats', $gate) }}"
      @if ($page) data-page="{{ $page }}" @endif>
     <video muted autoplay playsinline disablepictureinpicture aria-label="{{ $alt }}"></video>

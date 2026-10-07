@@ -24,12 +24,21 @@
     const HLS_TIMEOUT_MS = 12000;
     const players = [];
 
-    function overlayWanted() {
-        try {
-            return localStorage.getItem(OVERLAY_KEY) !== 'off';
-        } catch (error) {
-            return true;
-        }
+    /*
+     * Shown unless switched off on this browser. A page can keep its own
+     * choice (data-overlay-key) with another default (data-overlay-default),
+     * e.g. Calibration: off until "Show detection" is ticked.
+     */
+    function overlayWanted(key, fallback) {
+        const stored = (() => {
+            try {
+                return localStorage.getItem(key || OVERLAY_KEY);
+            } catch (error) {
+                return null;
+            }
+        })();
+
+        return (stored || fallback || 'on') !== 'off';
     }
 
     class LivePlayer {
@@ -328,7 +337,8 @@
         /* ---------- detection overlay ---------- */
 
         syncOverlay() {
-            const on = this.root.dataset.overlay === '1' && overlayWanted() && this.canvas && this.root.dataset.overlayUrl;
+            const on = this.root.dataset.overlay === '1' && overlayWanted(this.root.dataset.overlayKey, this.root.dataset.overlayDefault)
+                && this.canvas && this.root.dataset.overlayUrl;
             window.clearInterval(this.overlayTimer);
             if (!on) {
                 this.overlayData = null;
@@ -378,7 +388,9 @@
             const r = this.contentRect(width, height);
             const px = (x, y) => [r.x + x * r.w, r.y + y * r.h];
 
-            if (Array.isArray(data.zone) && data.zone.length > 2) {
+            // Calibration draws its own zone and line (being edited): boxes only there.
+            const shapes = this.root.dataset.overlayShapes !== '0';
+            if (shapes && Array.isArray(data.zone) && data.zone.length > 2) {
                 ctx.beginPath();
                 data.zone.forEach((point, index) => {
                     const [x, y] = px(point.x, point.y);
@@ -389,7 +401,7 @@
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
             }
-            if (data.line) {
+            if (shapes && data.line) {
                 const [x1, y1] = px(data.line.x1, data.line.y1);
                 const [x2, y2] = px(data.line.x2, data.line.y2);
                 ctx.beginPath();
@@ -440,7 +452,7 @@
             return;
         }
         try {
-            localStorage.setItem(OVERLAY_KEY, toggle.checked ? 'on' : 'off');
+            localStorage.setItem(toggle.dataset.overlayKey || OVERLAY_KEY, toggle.checked ? 'on' : 'off');
         } catch (error) {
             // Not remembered in private mode.
         }
@@ -449,7 +461,7 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('[data-overlay-toggle]').forEach((toggle) => {
-            toggle.checked = overlayWanted();
+            toggle.checked = overlayWanted(toggle.dataset.overlayKey, toggle.dataset.overlayDefault);
         });
         mountAll();
     });

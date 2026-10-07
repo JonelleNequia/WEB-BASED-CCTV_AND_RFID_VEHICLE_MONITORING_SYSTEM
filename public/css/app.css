@@ -7610,6 +7610,12 @@ img.thumb-plate {
     background: #05040a;
 }
 
+/* The global img rule sets display: block, which beat [hidden]: the last
+   picture then covered the live video (and the detection boxes). */
+.camera-last-picture[hidden] {
+    display: none;
+}
+
 .calibration-picture-badge {
     position: absolute;
     top: 0.75rem;
@@ -7731,4 +7737,64 @@ img.thumb-plate {
 .calibration-point-menu button:disabled {
     color: #9ca3af;
     cursor: not-allowed;
+}
+
+/* Calibration editor Phase B: steps, unsaved changes, detection toggle, new crossings. */
+.calibration-steps {
+    display: grid;
+    gap: 0.3rem;
+    margin: 0 0 1rem;
+    padding-left: 1.4rem;
+    color: var(--text-muted, #4b5563);
+    font-size: 0.92rem;
+    line-height: 1.5;
+}
+
+.calibration-unsaved {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.75rem;
+    padding: 0.4rem 0.75rem;
+    border-radius: 10px;
+    background: #fef3c7;
+    color: #92400e;
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+
+.calibration-unsaved[hidden] {
+    display: none;
+}
+
+.calibration-unsaved .link-button {
+    min-height: 32px;
+    color: #92400e;
+}
+
+.camera-card-calibration.is-dirty [data-save] {
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.45);
+}
+
+.calibration-detection-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.calibration-detection-toggle input {
+    width: 18px;
+    height: 18px;
+}
+
+.calibration-crossing-list li {
+    border-radius: 8px;
+    transition: background-color 1s ease;
+}
+
+.calibration-crossing-list li.is-new {
+    background: #dcfce7;
 }

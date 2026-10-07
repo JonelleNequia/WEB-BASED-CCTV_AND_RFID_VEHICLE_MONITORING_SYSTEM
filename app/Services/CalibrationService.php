@@ -108,6 +108,7 @@ class CalibrationService
                     'track_id' => $crossing->track_id,
                     'confidence' => $crossing->confidence !== null ? round($crossing->confidence, 2) : null,
                     'vehicle_type' => $crossing->vehicle_type,
+                    'type_label' => filled($crossing->vehicle_type) ? ucfirst(str_replace('_', ' ', (string) $crossing->vehicle_type)) : 'Vehicle',
                     'snapshot_url' => $crossing->snapshot_url,
                 ])
                 ->all();

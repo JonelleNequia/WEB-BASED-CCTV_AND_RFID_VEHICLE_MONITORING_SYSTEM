@@ -167,6 +167,23 @@
             this.drag = null;
         }
 
+        /* Shapes from outside (the saved version): like any edit, it can be undone. */
+        replace(saved) {
+            const next = new Editor(saved);
+
+            return this.change(() => {
+                this.mask = next.mask;
+                this.closed = next.closed;
+                this.line = next.line;
+                this.selected = null;
+            });
+        }
+
+        /* Same shapes as these saved ones (what Save would send). */
+        matches(saved) {
+            return JSON.stringify(this.serialize()) === JSON.stringify(new Editor(saved).serialize());
+        }
+
         snapshot() {
             return { mask: copy(this.mask), closed: this.closed, line: copy(this.line) };
         }

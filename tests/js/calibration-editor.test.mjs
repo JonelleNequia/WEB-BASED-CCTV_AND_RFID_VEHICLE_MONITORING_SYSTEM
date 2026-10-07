@@ -184,3 +184,28 @@ test('clear can be undone', () => {
     editor.undo();
     assert.deepEqual(plain(editor.serialize()), { calibration_mask: SQUARE, calibration_line: LINE });
 });
+
+test('"Discard changes" / "Reset to saved" put the saved shapes back, and can be undone', () => {
+    const saved = { mask: SQUARE, line: LINE };
+    const editor = new Editor(saved);
+    assert.equal(editor.matches(saved), true);
+    drag(editor, px(SQUARE[0], WIDE), px({ x: 0.1, y: 0.1 }, WIDE), WIDE);
+    assert.equal(editor.matches(saved), false);
+
+    assert.equal(editor.replace(saved), true);
+    assert.equal(editor.matches(saved), true);
+    assert.equal(editor.replace(saved), false); // nothing to change
+    editor.undo();
+    near(editor.mask[0].x, 0.1);
+    editor.redo();
+    assert.equal(editor.matches(saved), true);
+});
+
+test('a new edit after undo drops the redo steps', () => {
+    const editor = new Editor({ mask: SQUARE, line: LINE });
+    editor.flip();
+    editor.undo();
+    assert.equal(editor.canRedo(), true);
+    editor.clear();
+    assert.equal(editor.canRedo(), false);
+});

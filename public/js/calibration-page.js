@@ -14,6 +14,7 @@
     const Calib = window.CalibrationEditor;
     const HEARTBEAT_INTERVAL_MS = 4000;
     const LIVE_RECONNECT_INTERVAL_MS = 5000;
+    const NEW_CROSSING_MS = 10000;
 
     if (!payloadNode || !Calib) {
         return;
@@ -21,6 +22,7 @@
 
     const payload = JSON.parse(payloadNode.textContent);
     const cards = {};
+    let activeCard = null;
 
     function csrfToken() {
         return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
@@ -70,6 +72,9 @@
             this.crossingList = element.querySelector('[data-crossings]');
             this.saveButton = element.querySelector('[data-save]');
             this.doneButton = element.querySelector('[data-done]');
+            this.undoButton = element.querySelector('[data-undo]');
+            this.redoButton = element.querySelector('[data-redo]');
+            this.unsavedBar = element.querySelector('[data-unsaved]');
             this.ctx = this.canvas?.getContext('2d');
             this.connection = camera.connection || { state: 'offline', label: 'Offline', reason: '', tone: 'critical' };
             this.snapshotUrl = camera.snapshot_url || null;
@@ -81,7 +86,12 @@
             this.cssWidth = 0;
             this.cssHeight = 0;
             // The saved zone and line, drawn as soon as there is a picture.
-            this.editor = new Calib.Editor({ mask: camera.calibration_mask, line: camera.calibration_line });
+            this.saved = { mask: camera.calibration_mask, line: camera.calibration_line };
+            this.editor = new Calib.Editor(this.saved);
+            this.saving = false;
+            this.lastSaveAt = 0;
+            // When each crossing was first seen here (those on the page at load: long ago).
+            this.crossingSeenAt = new Map([...element.querySelectorAll('[data-crossing-id]')].map((item) => [item.dataset.crossingId, 0]));
 
             if (!this.canvas) {
                 return; // No camera at this gate: only the "Add camera" message.
@@ -117,6 +127,15 @@
                 this.edited(this.editor.flip(), 'IN direction flipped. Save to apply it.');
             });
             this.saveButton.addEventListener('click', () => this.saveCalibration());
+            this.undoButton.addEventListener('click', () => this.undo());
+            this.redoButton.addEventListener('click', () => this.redo());
+            this.element.querySelector('[data-discard]').addEventListener('click', () => {
+                this.edited(this.editor.replace(this.saved), 'Changes discarded: back to the saved zone and line (Undo brings them back).');
+            });
+            this.element.querySelector('[data-reset]').addEventListener('click', () => this.resetToSaved());
+            // Keyboard shortcuts go to the card used last.
+            this.element.addEventListener('pointerdown', () => (activeCard = this));
+            this.element.addEventListener('focusin', () => (activeCard = this));
 
             this.canvas.addEventListener('pointerdown', (event) => this.handlePointerDown(event));
             this.canvas.addEventListener('pointermove', (event) => this.handlePointerMove(event));
@@ -411,6 +430,35 @@
             return changed;
         }
 
+        undo() {
+            this.edited(this.editor.undo(), 'Undone.');
+        }
+
+        redo() {
+            this.edited(this.editor.redo(), 'Redone.');
+        }
+
+        isDirty() {
+            return !!this.canvas && !this.editor.matches(this.saved);
+        }
+
+        /* The calibration saved on the server now (maybe from another tab). */
+        async resetToSaved() {
+            try {
+                const response = await fetch(this.routes.heartbeat, { headers: { 'Accept': 'application/json' } });
+                const body = await response.json();
+                const saved = body.gates?.[this.camera.camera_role]?.calibration;
+                if (!response.ok || !saved) {
+                    throw new Error();
+                }
+                this.saved = saved;
+                const changed = this.editor.replace(saved);
+                this.edited(changed, changed ? 'Loaded the saved zone and line (Undo brings your changes back).' : 'This is already the saved zone and line.');
+            } catch (error) {
+                this.message('Could not load the saved calibration. Try again.');
+            }
+        }
+
         message(text) {
             this.messageValue.textContent = text;
         }
@@ -425,6 +473,11 @@
             this.lineValue.textContent = editor.line ? 'Line drawn' : 'No line yet';
             this.directionValue.textContent = editor.line ? 'IN = the side the arrow points to (click it to flip)' : 'Draw a line first';
             this.doneButton.disabled = editor.closed || count < 3;
+            this.undoButton.disabled = !editor.canUndo();
+            this.redoButton.disabled = !editor.canRedo();
+            const dirty = this.isDirty();
+            this.unsavedBar.hidden = !dirty;
+            this.element.classList.toggle('is-dirty', dirty);
 
             const { errors, warnings } = editor.problems();
             this.problemsList.innerHTML = '';
@@ -460,7 +513,7 @@
                 badge.className = `badge ${['IN', 'OUT'].includes(crossing.direction) ? 'badge-open' : 'badge-manual-review'}`;
                 badge.textContent = crossing.direction_label;
                 item.appendChild(badge);
-                const details = [crossing.time, `track #${crossing.track_id ?? '—'}`];
+                const details = [crossing.time, crossing.type_label || 'Vehicle', `track #${crossing.track_id ?? '—'}`];
                 if (crossing.confidence !== null && crossing.confidence !== undefined) {
                     details.push(Number(crossing.confidence).toFixed(2));
                 }
@@ -468,6 +521,13 @@
                     details.push(crossing.reason);
                 }
                 item.appendChild(document.createTextNode(` ${details.join(' · ')}`));
+                item.dataset.crossingId = String(crossing.id);
+                // A crossing that just happened stands out for a few seconds.
+                const id = String(crossing.id);
+                if (!this.crossingSeenAt.has(id)) {
+                    this.crossingSeenAt.set(id, Date.now());
+                }
+                item.classList.toggle('is-new', Date.now() - this.crossingSeenAt.get(id) < NEW_CROSSING_MS);
                 this.crossingList.appendChild(item);
             });
         }
@@ -479,34 +539,67 @@
                 return;
             }
 
+            this.saving = true;
             this.saveButton.disabled = true;
             this.saveButton.textContent = 'Saving...';
+            const data = this.editor.serialize();
 
             try {
-                const response = await putJson(this.routes.save, {
-                    camera_id: this.camera.id,
-                    ...this.editor.serialize(),
-                });
-
-                this.applyServerCamera(response.camera);
+                const response = await putJson(this.routes.save, { camera_id: this.camera.id, ...data });
+                const camera = response.camera || {};
+                this.camera = { ...this.camera, ...camera };
+                this.saved = { mask: camera.calibration_mask ?? data.calibration_mask, line: camera.calibration_line ?? data.calibration_line };
+                this.lastSaveAt = Date.now();
+                // Same shapes as on screen (kept, with their undo history).
+                this.editor.replace(this.saved);
                 this.message(response.message || `${this.camera.camera_name} calibration saved.`);
+                this.confirmApplied(this.saved);
             } catch (error) {
                 this.message(error.message || 'Calibration save failed.');
+                window.ui?.toast(error.message || 'Calibration save failed.', 'error');
             } finally {
+                this.saving = false;
                 this.saveButton.textContent = 'Save Calibration';
                 this.updateSummary();
+                this.render();
             }
         }
 
-        applyServerCamera(camera) {
-            if (!camera) {
+        /*
+         * The detector re-reads the calibration every frame (no restart). Its
+         * overlay endpoint answers with the zone and line it reads, so the
+         * toast says so once they match what was saved.
+         */
+        async confirmApplied(saved) {
+            const url = this.video.dataset.overlayUrl;
+            const same = (a, b) => JSON.stringify(new Calib.Editor(a).serialize()) === JSON.stringify(new Calib.Editor(b).serialize());
+
+            for (let attempt = 0; url && attempt < 6; attempt++) {
+                try {
+                    const response = await fetch(url, { cache: 'no-store' });
+                    const overlay = await response.json();
+                    if (overlay.ready && same({ mask: overlay.zone, line: overlay.line }, saved)) {
+                        window.ui?.toast(`${this.camera.role_label}: saved. The detector is using the new zone and line now.`, 'success');
+                        return;
+                    }
+                } catch (error) {
+                    break; // the detector is not reachable from this browser
+                }
+                await new Promise((resolve) => window.setTimeout(resolve, 500));
+            }
+            window.ui?.toast(`${this.camera.role_label}: saved. The detector picks it up within a few seconds (no restart needed).`, 'success');
+        }
+
+        /* Saved in another tab while nothing is being edited here: show it. */
+        applySavedFromServer(saved, sentAt) {
+            if (!saved || this.saving || sentAt < this.lastSaveAt || this.editor.drag || this.isDirty()) {
                 return;
             }
-
-            this.camera = { ...this.camera, ...camera };
-            this.editor.load({ mask: camera.calibration_mask, line: camera.calibration_line });
-            this.updateSummary();
-            this.render();
+            if (!this.editor.matches(saved)) {
+                this.saved = saved;
+                this.editor.load(saved);
+                this.edited(true, 'The calibration was changed and saved somewhere else; showing it now.');
+            }
         }
 
         render() {
@@ -532,8 +625,37 @@
     // For checks from the browser console and the end-to-end test.
     window.calibrationCards = cards;
 
+    /* Ctrl/⌘+Z undo, Ctrl/⌘+Shift+Z (or Ctrl+Y) redo, on the card used last. */
+    document.addEventListener('keydown', (event) => {
+        const typing = event.target.closest?.('input, textarea, select, [contenteditable="true"]');
+        if (typing || !(event.ctrlKey || event.metaKey)) {
+            return;
+        }
+        const key = event.key.toLowerCase();
+        const editable = Object.values(cards).filter((card) => card.canvas);
+        const card = activeCard?.canvas ? activeCard : (editable.length === 1 ? editable[0] : null);
+        if (!card || (key !== 'z' && key !== 'y')) {
+            return;
+        }
+        event.preventDefault();
+        if (key === 'y' || event.shiftKey) {
+            card.redo();
+        } else {
+            card.undo();
+        }
+    });
+
+    /* Leaving with unsaved changes: the browser asks first. */
+    window.addEventListener('beforeunload', (event) => {
+        if (Object.values(cards).some((card) => card.isDirty())) {
+            event.preventDefault();
+            event.returnValue = '';
+        }
+    });
+
     /* Status, last picture and recent crossings from the detector, every few seconds. */
     async function sendCalibrationHeartbeat() {
+        const sentAt = Date.now();
         try {
             const response = await fetch(payload.routes.heartbeat, {
                 headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -556,12 +678,17 @@
                 }
                 // A camera was added or removed in another tab: show the new setup.
                 if (gate.has_camera !== (card.element.dataset.hasCamera === '1')) {
-                    window.location.reload();
-                    return;
+                    if (!Object.values(cards).some((other) => other.isDirty())) {
+                        window.location.reload();
+                        return;
+                    }
+                    card.message('The camera of this gate changed. Save or discard your changes, then reload the page.');
+                    continue;
                 }
                 if (card.canvas) {
                     card.applySnapshot(gate.snapshot_url, gate.snapshot_at);
                     card.applyConnection(gate.connection);
+                    card.applySavedFromServer(gate.calibration, sentAt);
                 }
             }
         } catch (error) {

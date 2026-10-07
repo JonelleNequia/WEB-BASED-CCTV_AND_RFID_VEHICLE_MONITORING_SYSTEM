@@ -119,7 +119,7 @@ class CalibrationController extends Controller
      * shows while the camera is offline so the zone can still be drawn.
      *
      * @param  array<string, mixed>  $detectorStatus
-     * @return array{has_camera: bool, connection: array<string, string>, snapshot_url: ?string, snapshot_at: ?string}
+     * @return array{has_camera: bool, calibration: array<string, mixed>, connection: array<string, string>, snapshot_url: ?string, snapshot_at: ?string}
      */
     protected function liveState(string $role, array $detectorStatus): array
     {
@@ -127,8 +127,12 @@ class CalibrationController extends Controller
         $frame = CameraFiles::framePath($role, 'latest');
         $mtime = $hasCamera && is_file($frame) && filesize($frame) > 0 ? filemtime($frame) : false;
 
+        $camera = \App\Models\Camera::query()->forRole($role)->first(['calibration_mask_json', 'calibration_line_json']);
+
         return [
             'has_camera' => $hasCamera,
+            // Calibration editor: "Reset to saved" and changes saved in another tab.
+            'calibration' => ['mask' => $camera?->calibration_mask_json, 'line' => $camera?->calibration_line_json],
             'connection' => PipelineReport::connection($detectorStatus, $role, $hasCamera),
             'snapshot_url' => $mtime ? route('camera.frame', [$role, 'latest'], false).'?t='.$mtime : null,
             'snapshot_at' => $mtime ? DisplayTime::datetimeSeconds(Carbon::createFromTimestamp($mtime)) : null,
