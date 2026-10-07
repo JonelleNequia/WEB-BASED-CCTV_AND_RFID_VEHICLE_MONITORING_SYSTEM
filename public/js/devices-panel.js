@@ -434,7 +434,8 @@
         const tableNode = el('table', 'devices-table');
         const head = el('thead');
         const headRow = el('tr');
-        ['Type', 'Device', 'IP address', 'MAC address', 'Maker', 'Open ports', 'Status', 'Gate', ''].forEach((label) => headRow.append(el('th', null, label)));
+        // Maker and open ports are in the device panel ("Manage"): the table fits without scrolling sideways.
+        ['Device', 'Address', 'Status', 'Gate', ''].forEach((label) => headRow.append(el('th', null, label)));
         head.append(headRow);
 
         const body = el('tbody');
@@ -443,22 +444,25 @@
             tr.tabIndex = 0;
             tr.dataset.deviceId = device.id;
 
-            const type = el('td');
+            // The type badge sits above the name (no separate column: the table fits the page).
+            const name = el('td', 'devices-name');
+            const type = el('div', 'devices-type');
             type.append(badge(KIND_TONE[device.kind] || 'neutral', device.kind_label));
             if (device.confidence === 'possible') {
-                type.append(el('div', 'table-subtext', 'not confirmed'));
+                type.append(el('span', 'table-subtext', 'not confirmed'));
             }
-
-            const name = el('td');
-            name.append(el('strong', null, deviceTitle(device)));
-            if (device.brand && device.brand !== device.name) {
-                name.append(el('div', 'table-subtext', device.brand));
+            name.append(type, el('strong', null, device.friendly_name || deviceTitle(device)));
+            const maker = device.vendor || device.brand;
+            if (maker && maker !== device.friendly_name) {
+                name.append(el('div', 'table-subtext', maker));
             }
             if (device.is_new) {
                 name.append(badge('info', 'New'));
             }
 
+            // IP with the MAC under it (one column, so the table fits the page).
             const ip = el('td', 'nowrap', device.ip || '—');
+            ip.append(el('div', 'table-subtext mono', device.mac || 'MAC unknown'));
             if (device.ip_changed) {
                 ip.append(el('div', 'table-subtext', `new IP since ${device.ip_changed}`));
             }
@@ -478,20 +482,22 @@
             }
 
             const actions = el('td', 'row-actions');
-            actions.append(button('Manage', 'button button-secondary button-sm', () => openDevice(device.id)), rowMenu(device));
+            const group = el('div', 'devices-row-actions');
+            group.append(button('Manage', 'button button-secondary button-sm', () => openDevice(device.id)), rowMenu(device));
+            actions.append(group);
 
-            tr.append(
-                type, name, ip, el('td', 'nowrap mono', device.mac || '—'),
-                el('td', null, device.vendor || '—'),
-                el('td', 'mono', (device.open_ports || []).join(', ') || '—'),
-                status, station, actions
-            );
+            tr.append(name, ip, status, station, actions);
+            // The "⋯" menu (and its items) never opens the device panel.
+            const fromControl = (event) => event.target.closest('button, details, summary, a, input');
             tr.addEventListener('click', function (event) {
-                if (!event.target.closest('button')) {
+                if (!fromControl(event)) {
                     openDevice(device.id);
                 }
             });
             tr.addEventListener('keydown', function (event) {
+                if (fromControl(event)) {
+                    return;
+                }
                 if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
                     openDevice(device.id);
@@ -536,6 +542,15 @@
             items.append(hide);
         }
         menu.append(summary, items);
+        // Open upwards when the table (which scrolls) has no room below the row.
+        menu.addEventListener('toggle', function () {
+            if (!menu.open) {
+                return;
+            }
+            const box = menu.closest('.table-responsive')?.getBoundingClientRect();
+            const below = box ? box.bottom - menu.getBoundingClientRect().bottom : Infinity;
+            menu.classList.toggle('opens-up', below < items.offsetHeight + 12);
+        });
         return menu;
     }
 

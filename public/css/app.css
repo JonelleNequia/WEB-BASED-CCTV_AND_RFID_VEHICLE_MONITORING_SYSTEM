@@ -7551,3 +7551,37 @@ img.thumb-plate {
     align-items: center;
     justify-content: space-between;
 }
+
+/* Delete device work: "Manage" and "⋯" side by side; the device name keeps a readable width. */
+.devices-row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.devices-row-actions .row-menu > summary {
+    min-height: 28px;
+    padding: 0.2rem 0.55rem;
+}
+
+.devices-table .devices-name {
+    min-width: 180px;
+}
+
+.devices-table .menu-panel {
+    text-align: left;
+    white-space: nowrap;
+}
+
+.row-menu.opens-up .menu-panel {
+    top: auto;
+    bottom: calc(100% + 0.35rem);
+}
+
+.devices-table .devices-type {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 4px;
+}
