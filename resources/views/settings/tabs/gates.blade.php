@@ -79,6 +79,24 @@
                             @if ($reader['next_step'] !== '')
                                 <span class="next-step">→ {{ $reader['next_step'] }}</span>
                             @endif
+                            @php($network = $reader['network'])
+                            @php($workaround = $network['workaround'] ?? [])
+                            @if ($network && ($network['outside'] || ($workaround['state'] ?? null) === 'active'))
+                                <div class="reader-network" data-reader-network="{{ $gate['code'] }}">
+                                    <span class="status-line"><span class="status-dot is-warning" aria-hidden="true"></span>The reader is set up for another network than this PC.</span>
+                                    @if (($workaround['state'] ?? null) === 'active')
+                                        <span class="text-muted" data-workaround-active>It works for now through a temporary workaround (development only).</span>
+                                    @endif
+                                    <span class="next-step">→ Move it into this PC's network once; then nothing else is needed.</span>
+                                    <span class="button-row">
+                                        <button type="button" class="button button-primary button-sm" data-reader-move data-label="{{ $gate['name'] }}"
+                                                data-status-url="{{ route('settings.gate.reader.network', $gate['code']) }}"
+                                                data-read-url="{{ route('settings.gate.reader.network.read', $gate['code']) }}"
+                                                data-apply-url="{{ route('settings.gate.reader.network.apply', $gate['code']) }}">Move reader to this network</button>
+                                        <a class="button button-secondary button-sm" href="{{ route('settings.index', ['tab' => 'reader-network']) }}">Other ways</a>
+                                    </span>
+                                </div>
+                            @endif
                             @if ($reader['rfid_only'])
                                 <span class="next-step" data-rfid-only>RFID only (camera offline): registered tags are recorded without the camera, IN/OUT from the vehicle's state.</span>
                             @endif
@@ -213,7 +231,14 @@
     </div>
 </x-modal>
 
+{{-- Phase 2: "Move reader to this network" (public/js/reader-network.js). --}}
+<x-modal id="reader-move" title="Move the reader to this network" size="md">
+    <p class="field-help">Reader of <strong data-reader-move-gate></strong></p>
+    <div data-reader-move-body aria-live="polite"></div>
+</x-modal>
+
 @push('scripts')
     <script src="{{ asset('js/gate-setup.js') }}"></script>
+    <script src="{{ asset('js/reader-network.js') }}"></script>
     <script src="{{ asset('js/add-device.js') }}"></script>
 @endpush

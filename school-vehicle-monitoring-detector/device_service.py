@@ -40,6 +40,7 @@ if __name__ == "__main__":
     close_inherited_descriptors()
 
 import argparse  # noqa: E402
+import ipaddress
 import atexit
 import json
 import logging
@@ -67,8 +68,10 @@ from devices.paths import (
 )
 from devices.find import FindReaderWizard
 from devices.identify import ReaderIdentifier
+from devices.module_config import ModuleError, ModuleSetup, free_address
 from devices.reader_link import CaptureLog, ClientModeListener, ReaderLink, TagPoster, utc_now
 from devices.tag_buffer import TagBuffer
+from devices.workaround import ReaderWorkaround
 from devices.scanner import Scanner
 
 # Phase 1: one reader link per gate; the gate codes come from Laravel's
@@ -170,6 +173,14 @@ class DeviceService:
         self.tag_buffer = TagBuffer()
         self.configure_buffer()
         self.buffer_written = (None, 0.0)
+        # Phase 2 (reader without a terminal): move the reader into this
+        # PC's network, or reach it meanwhile through a temporary address.
+        self.module_profile = profiles.get("uhf_reader", {}).get("module_setup", {})
+        self.handled_reader_network = (self.runtime.get("reader_network_request") or {}).get("id")
+        self.reader_network = None
+        self.workaround = ReaderWorkaround(log)
+        self.workaround_thread = None
+        self.last_workaround_check = -1e9
         self.links = {}
         self.links_started = False
         self.sync_links()
@@ -374,6 +385,108 @@ class DeviceService:
     def scanning(self):
         return bool(self.scan_thread and self.scan_thread.is_alive())
 
+    # -- reader network (Phase 2) -----------------------------------------
+    def module_search(self, mac):
+        """(interface, module) of the reader's module, by MAC, through any network card."""
+        for interface in self.network.get("interfaces", []):
+            if interface.get("link_local") and interface.get("kind") != "ethernet":
+                continue
+            found = ModuleSetup(self.module_profile, interface, log=log).search(mac, wait=1.5).get(mac.upper())
+            if found:
+                return interface, found
+        return None, None
+
+    def check_workaround(self, now):
+        if self.workaround_thread and self.workaround_thread.is_alive():
+            return
+        every = float(self.module_profile.get("workaround_check_seconds", 30))
+        if now - self.last_workaround_check < every:
+            return
+        self.last_workaround_check = now
+        stations = self.runtime.get("stations") or {}
+        targets = {}
+        for station, item in stations.items():
+            target = (item or {}).get("reader") or {}
+            if target.get("mac") and target.get("source") != "manual":
+                targets[station] = {**target, "ip": self.resolve_ip(target) or target.get("ip")}
+        enabled = bool((self.runtime.get("reader_workaround") or {}).get("enabled", True))
+        known = [device.get("ip") for device in (self.last_result or {}).get("devices", []) if device.get("ip")]
+
+        def work():
+            try:
+                self.workaround.check(enabled, targets, self.network.get("interfaces", []), known, self.module_search, time.monotonic())
+            except Exception as error:  # never stop the service
+                log(f"Reader workaround check failed: {error}")
+
+        self.workaround_thread = threading.Thread(target=work, daemon=True)
+        self.workaround_thread.start()
+
+    def request_reader_network(self, request):
+        if self.reader_network and self.reader_network.get("state") == "running":
+            return
+        self.reader_network = {"request_id": request.get("id"), "action": request.get("action"), "station": request.get("station"),
+                               "state": "running", "message": "Looking for the reader...", "updated_at": utc_now()}
+        threading.Thread(target=self._reader_network, args=(request,), daemon=True).start()
+
+    def _set_reader_network(self, **values):
+        self.reader_network = {**(self.reader_network or {}), **values, "updated_at": utc_now()}
+
+    def _reader_network(self, request):
+        mac = str(request.get("mac") or "").upper()
+        login = (request.get("username") or None, request.get("password") or None)
+        try:
+            interface, module = self.module_search(mac)
+            if not module:
+                raise ModuleError("not_found", "The reader's module did not answer. Check that its LAN cable is in the same switch or router as this PC.")
+            lan = next((item for item in self.network.get("interfaces", [])
+                        if item["name"] == interface["name"] and item.get("gateway") and not item.get("link_local")), None)
+            setup = ModuleSetup(self.module_profile, interface, log=log)
+            if request.get("action") == "read":
+                current = setup.read(mac, *login)
+                current.pop("basic_hex", None)
+                proposal = None
+                if lan:
+                    taken = [device.get("ip") for device in (self.last_result or {}).get("devices", []) if device.get("ip")]
+                    proposal = {
+                        "ip": free_address(lan, taken, answers_ping),
+                        "netmask": lan["netmask"], "gateway": lan["gateway"], "network": lan["network"],
+                    }
+                self._set_reader_network(state="read", message="Current settings read.", current=current, search=module,
+                                         interface=interface.get("label") or interface["name"], proposal=proposal,
+                                         lan_network=lan["network"] if lan else None)
+                return
+
+            if not lan:
+                raise ModuleError("no_lan", "This network card has no router network (no DHCP). Connect the PC to the router first.")
+            mode = "dhcp" if request.get("mode") == "dhcp" else "static"
+            target = {"network": lan["network"], "netmask": lan["netmask"], "gateway": lan["gateway"], "ip": request.get("ip")}
+            if mode == "static":
+                address = ipaddress.IPv4Address(str(request.get("ip")))
+                if address not in ipaddress.IPv4Network(lan["network"]) or str(address) in (lan["ip"], lan["gateway"]):
+                    raise ModuleError("bad_ip", f"{address} is not a free address in {lan['network']}.")
+                if answers_ping(str(address)):
+                    raise ModuleError("bad_ip", f"{address} is already used by another device.")
+            result = setup.move(mac, module["ip"], request.get("port"), mode, target, *login,
+                                progress=lambda message: self._set_reader_network(message=message))
+            log(f"Reader {mac} moved from {module['ip']} to {result['after_ip']} ({mode})")
+            self.remember_reader_ip(mac, result["after_ip"])
+            self.request_scan("reader_moved")
+            self._set_reader_network(state="done", message=f"The reader now uses {result['after_ip']}.", after_ip=result["after_ip"],
+                                     before_ip=module["ip"], mode=mode)
+        except ModuleError as error:
+            log(f"Reader network ({request.get('action')}): {error}")
+            self._set_reader_network(state="failed", code=error.code, message=str(error))
+        except Exception as error:  # never stop the service
+            log(f"Reader network ({request.get('action')}) failed: {error}")
+            self._set_reader_network(state="failed", code="error", message=f"Unexpected error: {error}")
+
+    def remember_reader_ip(self, mac, ip):
+        """The reader link reconnects at once (resolve_ip), before the next scan."""
+        with self.lock:
+            for device in (self.last_result or {}).get("devices", []):
+                if (device.get("mac") or "").upper() == mac:
+                    device.update({"ip": ip, "reachable": True, "online": True, "network_warning": None})
+
     # -- status ---------------------------------------------------------
     def write_status(self):
         network = self.network
@@ -425,6 +538,8 @@ class DeviceService:
             "diagnostics": result.get("diagnostics"),
             "identify": self.identify_status(),
             "find": self.finder.snapshot() if self.finder else None,
+            "reader_network": self.reader_network,
+            "reader_workaround": dict(self.workaround.status),
         })
 
     # -- main loop ------------------------------------------------------
@@ -473,6 +588,14 @@ class DeviceService:
                 self.handled_find = find["id"]
                 self.request_find(find)
 
+            reader_network = self.runtime.get("reader_network_request") or {}
+            if reader_network.get("id") and reader_network["id"] != self.handled_reader_network:
+                self.handled_reader_network = reader_network["id"]
+                self.request_reader_network(reader_network)
+
+            if self.network["interfaces"]:
+                self.check_workaround(now)
+
             identify = self.runtime.get("identify_request") or {}
             if identify.get("id") and identify["id"] != self.handled_identify:
                 self.handled_identify = identify["id"]
@@ -507,6 +630,20 @@ class DeviceService:
                 log(f"Could not write the RFID buffer: {error}")
 
             time.sleep(0.25)
+
+
+def answers_ping(ip):
+    """Phase 2: something already uses this address (one ping, or in the ARP cache)."""
+    if ip in netinfo.arp_table():
+        return True
+    if netinfo.SYSTEM == "windows":
+        command = ["ping", "-n", "1", "-w", "800", ip]
+    elif netinfo.SYSTEM == "darwin":
+        command = ["ping", "-c", "1", "-t", "1", ip]
+    else:
+        command = ["ping", "-c", "1", "-W", "1", ip]
+    output = netinfo.run(command, timeout=3).lower()
+    return "ttl=" in output
 
 
 def find_payload(result):

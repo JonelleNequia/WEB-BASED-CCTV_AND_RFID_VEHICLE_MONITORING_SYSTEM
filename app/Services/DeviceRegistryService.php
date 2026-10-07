@@ -554,7 +554,7 @@ class DeviceRegistryService
     /**
      * @param  array<string, string>|null  $scanRequest
      */
-    public function exportRuntimeConfig(?array $scanRequest = null, ?array $identifyRequest = null, ?array $findRequest = null): void
+    public function exportRuntimeConfig(?array $scanRequest = null, ?array $identifyRequest = null, ?array $findRequest = null, ?array $readerNetworkRequest = null): void
     {
         $path = DeviceFiles::runtimeConfigPath();
         $current = is_file($path) ? (array) json_decode((string) File::get($path), true) : [];
@@ -570,6 +570,12 @@ class DeviceRegistryService
             'scan_request' => $scanRequest ?? ($current['scan_request'] ?? null),
             'identify_request' => $identifyRequest ?? ($current['identify_request'] ?? null),
             'find_request' => $findRequest ?? ($current['find_request'] ?? null),
+            // Phase 2: read / move the reader's network settings (the module
+            // login, when one was typed, is kept for that request only).
+            'reader_network_request' => $readerNetworkRequest
+                ?? (isset($current['reader_network_request']) ? Arr::except((array) $current['reader_network_request'], ['username', 'password']) : null),
+            // Phase 2: temporary extra address for a reader on another subnet.
+            'reader_workaround' => ['enabled' => ($settings['reader_workaround'] ?? '1') === '1'],
             // RFID only with a vehicle: the read buffer (devices/tag_buffer.py).
             'rfid' => [
                 // Long enough for a read 10 s before a crossing the detector sends a few seconds late.

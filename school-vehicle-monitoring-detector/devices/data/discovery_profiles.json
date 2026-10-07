@@ -284,7 +284,16 @@
                 "work_mode": "active",
                 "frame_prefix_hex": "CCFFFF"
             }
-        ]
+        ],
+        "module_setup": {
+            "_about": "Network settings of the reader's Ethernet module over its setup protocol (USR-TCP232-T2 manual, 4.6): UDP broadcast, reaches the module on another subnet. Measured 2026-10-06 on the gate reader: search, read (130-byte settings block) answered with the factory login.",
+            "port": 1500,
+            "username": "admin",
+            "password": "admin",
+            "reply_seconds": 2.5,
+            "restart_wait_seconds": 45,
+            "workaround_check_seconds": 30
+        }
     },
     "reader_link": {
         "connect_timeout_seconds": 3,

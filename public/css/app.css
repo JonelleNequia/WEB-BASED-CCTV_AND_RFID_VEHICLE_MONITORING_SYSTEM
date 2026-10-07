@@ -7454,3 +7454,68 @@ img.thumb-plate {
 .station-frame-stage .station-frame.is-hidden {
     display: none;
 }
+
+/* Phase 2 (reader without a terminal): move the reader into this network. */
+.reader-network {
+    display: grid;
+    gap: 6px;
+    margin: 6px 0;
+}
+
+.reader-network .button-row {
+    margin-top: 2px;
+}
+
+.reader-move-table {
+    width: 100%;
+    margin: 8px 0 14px;
+    border-collapse: collapse;
+}
+
+.reader-move-table th,
+.reader-move-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border, #e5e7eb);
+    text-align: left;
+    vertical-align: top;
+}
+
+.reader-move-table th {
+    width: 34%;
+    font-weight: 600;
+}
+
+.reader-move-wait {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+}
+
+.reader-move-result {
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-weight: 600;
+}
+
+.reader-move-result.is-good {
+    background: #dcfce7;
+    color: #14532d;
+}
+
+.reader-move-result.is-bad {
+    background: #fee2e2;
+    color: #7f1d1d;
+}
+
+.guide-steps {
+    display: grid;
+    gap: 10px;
+    padding-left: 22px;
+}
+
+.reader-workaround-form {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border, #e5e7eb);
+}

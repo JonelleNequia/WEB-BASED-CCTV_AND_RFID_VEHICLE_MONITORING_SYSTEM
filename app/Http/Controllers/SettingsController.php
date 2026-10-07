@@ -35,6 +35,8 @@ class SettingsController extends Controller
         'devices' => 'All network devices',
         'timing' => 'Timing',
         'manual' => 'Manual setup',
+        // Phase 2: move the RFID reader into this PC's network (guide, workaround).
+        'reader-network' => 'RFID reader network',
         'test-scan' => 'Test Scan',
     ];
 
@@ -98,12 +100,12 @@ class SettingsController extends Controller
         $settingsService->ensureCameraRuntimeConfigExists();
 
         // Plug-and-detect: the device service lists cameras and readers (Gates, All network devices).
-        if (in_array($tab, ['gates', 'devices'], true)) {
+        if (in_array($tab, ['gates', 'devices', 'reader-network'], true)) {
             app(DeviceServiceRuntime::class)->ensureRunning();
         }
 
         $gates = Gate::query()->orderBy('sort_order')->orderBy('id')->get();
-        $devicesPayload = in_array($tab, ['gates', 'devices', 'manual'], true) ? app(DeviceRegistryService::class)->panelPayload() : null;
+        $devicesPayload = in_array($tab, ['gates', 'devices', 'manual', 'reader-network'], true) ? app(DeviceRegistryService::class)->panelPayload() : null;
         $cameraLive = in_array($tab, ['gates', 'manual'], true)
             ? app(DetectorRuntimeService::class)->withViewerStreamUrls(app(DetectorRuntimeService::class)->ensureRunning(), request()->getHost())
             : null;
@@ -111,7 +113,7 @@ class SettingsController extends Controller
         return view('settings.index', [
             'tab' => $tab,
             // B1: one card per gate (camera, RFID reader, detection zone).
-            'gateCards' => $tab === 'gates'
+            'gateCards' => in_array($tab, ['gates', 'reader-network'], true)
                 ? app(\App\Services\GateSetupService::class)->cards($gates, $devicesPayload ?? [], app(\App\Services\CalibrationService::class)->cameraPayload(), $cameraLive ?? [])
                 : [],
             'settings' => $settingsService->all(),

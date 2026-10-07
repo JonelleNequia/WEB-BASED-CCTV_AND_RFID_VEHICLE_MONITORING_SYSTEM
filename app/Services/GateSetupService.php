@@ -153,6 +153,9 @@ class GateSetupService
             'last_tag_time' => filled($link['last_tag_at'] ?? null) ? DisplayTime::time($link['last_tag_at']) : null,
             // RFID only with a vehicle: tags are recorded without the camera now.
             'rfid_only' => app(RfidIngestService::class)->rfidOnly($gate->code),
+            // Phase 2: the reader is outside this PC's network (move it), or
+            // reached through the temporary workaround.
+            'network' => app(ReaderNetworkService::class)->state($gate),
         ];
     }
 
