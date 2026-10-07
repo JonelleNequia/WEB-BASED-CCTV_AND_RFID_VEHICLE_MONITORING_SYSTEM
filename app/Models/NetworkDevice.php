@@ -37,7 +37,7 @@ class NetworkDevice extends Model
 
     protected $fillable = [
         'device_key', 'mac', 'ip', 'kind', 'confidence', 'status', 'vendor', 'brand', 'model', 'name',
-        'interface', 'subnet', 'details', 'is_new', 'first_seen_at', 'last_seen_at', 'ip_changed_at',
+        'interface', 'subnet', 'details', 'is_new', 'hidden_at', 'first_seen_at', 'last_seen_at', 'ip_changed_at',
     ];
 
     protected function casts(): array
@@ -48,6 +48,7 @@ class NetworkDevice extends Model
             'first_seen_at' => 'datetime',
             'last_seen_at' => 'datetime',
             'ip_changed_at' => 'datetime',
+            'hidden_at' => 'datetime',
         ];
     }
 

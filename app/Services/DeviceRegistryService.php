@@ -703,7 +703,12 @@ class DeviceRegistryService
             ->values()
             ->all();
 
-        $devices = $this->withoutDuplicateRows(NetworkDevice::query()->with('assignments')->get())
+        // Delete device work: a hidden device is listed only under "Show hidden devices".
+        $all = NetworkDevice::query()->with('assignments')->get();
+        $hidden = $all->filter(fn (NetworkDevice $device): bool => $device->hidden_at !== null && filled($device->mac));
+        $hiddenKeys = $hidden->map(fn (NetworkDevice $device): string => 'ip:'.$device->ip)->all();
+        $devices = $this->withoutDuplicateRows($all->reject(fn (NetworkDevice $device): bool => $device->hidden_at !== null
+            || ($device->mac === null && in_array($device->device_key, $hiddenKeys, true))))
             ->sortBy(fn (NetworkDevice $device): string => $this->sortKey($device))
             ->values()
             ->map(fn (NetworkDevice $device): array => $this->devicePayload($device, $suggestions, $interfaces));
@@ -746,6 +751,16 @@ class DeviceRegistryService
                 ],
             ])->all(),
             'devices' => $devices->all(),
+            'hidden_devices' => $hidden->map(fn (NetworkDevice $device): array => [
+                'id' => $device->id, 'name' => $this->friendlyName($device), 'ip' => $device->ip, 'mac' => $device->mac,
+                'hidden' => DisplayTime::datetime($device->hidden_at), 'unhide_url' => route('settings.devices.unhide', $device),
+            ])->values()->all(),
+            // Delete device work: who deleted which device, when.
+            'removals' => DB::table('device_removals')->latest('id')->limit(10)->get()->map(fn ($row): array => [
+                'device' => $row->device_name, 'mac' => $row->mac,
+                'gates' => collect(json_decode((string) $row->gates, true) ?: [])->map(fn (string $code): string => Gate::labelFor($code))->implode(', '),
+                'by' => $row->user_name ?: 'Someone', 'when' => DisplayTime::datetime($row->created_at), 'records_kept' => (int) $row->records_kept,
+            ])->all(),
             'counts' => [
                 'cameras' => $devices->where('kind', NetworkDevice::KIND_CAMERA)->count(),
                 'readers' => $devices->where('kind', NetworkDevice::KIND_READER)->count(),
@@ -930,6 +945,9 @@ class DeviceRegistryService
                 ? $this->unreachableGuidance($device, $suggestions->get($device->ip), $interfaces)
                 : null,
             'assign_url' => route('settings.devices.assign', $device),
+            'delete_summary_url' => route('settings.devices.delete-summary', $device),
+            'delete_url' => route('settings.devices.destroy', $device),
+            'hide_url' => route('settings.devices.hide', $device),
         ];
     }
 

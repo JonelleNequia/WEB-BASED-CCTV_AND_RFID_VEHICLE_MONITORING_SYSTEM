@@ -63,6 +63,8 @@ class VisitorRecordService
                 'vehicle_type' => $record->vehicle_type ?: $crossing->vehicle_type,
                 'tag_uid' => $unknownTag ?? $record->tag_uid,
             ]);
+            // Delete device work: the camera that saw it.
+            $record->forceFill(['camera_device_id' => $crossing->camera_device_id, 'camera_device_label' => $crossing->camera_device_label]);
             $record->save();
 
             if ($record->status === VisitorRecord::STATUS_ACTIVE && ! $record->duplicate_of_id) {

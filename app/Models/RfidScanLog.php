@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsSourceDevice;
 use App\Models\Concerns\StoresLocalTime;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -11,6 +12,8 @@ class RfidScanLog extends Model
 {
     use HasFactory;
     use StoresLocalTime;
+    // Delete device work: remembers the camera / reader that made the record.
+    use RecordsSourceDevice;
 
     /**
      * The attributes that are mass assignable.
@@ -235,5 +238,15 @@ class RfidScanLog extends Model
         }
 
         return ucfirst(strtolower($this->resulting_state));
+    }
+
+    public function sourceDeviceGate(): ?string
+    {
+        return $this->scan_location;
+    }
+
+    public function sourceDeviceRole(): string
+    {
+        return DeviceAssignment::ROLE_READER;
     }
 }

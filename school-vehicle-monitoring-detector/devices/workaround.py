@@ -77,8 +77,12 @@ class ReaderWorkaround:
     def check(self, enabled, targets, interfaces, known_ips, search, now):
         for station, target in (targets or {}).items():
             self.status[station] = self._check_one(station, enabled, target or {}, interfaces, known_ips, search, now)
-        for station in [item for item in self.status if item not in (targets or {})]:
+        # Delete device work: a reader that was deleted (or removed from its
+        # gate) leaves no extra address behind.
+        for station in [item for item in set(self.status) | set(self.added) if item not in (targets or {})]:
             self.status.pop(station, None)
+            if station in self.added:
+                self._remove(station)
         return self.status
 
     def _check_one(self, station, enabled, target, interfaces, known_ips, search, now):
@@ -137,4 +141,4 @@ class ReaderWorkaround:
     def _remove(self, station):
         added = self.added.pop(station)
         code, output = self.run(commands(added["interface"], added["address"])["remove"])
-        self.log(f"Reader workaround for {station}: {'removed' if code == 0 else 'could not remove'} {added['address']['ip']} (reader moved)")
+        self.log(f"Reader workaround for {station}: {'removed' if code == 0 else 'could not remove'} {added['address']['ip']} (not needed any more)")

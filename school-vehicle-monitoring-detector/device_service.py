@@ -233,7 +233,12 @@ class DeviceService:
         stations = self.runtime.get("stations") or {}
         for station, link in self.links.items():
             # A removed gate keeps an idle link (no target).
-            link.set_target((stations.get(station) or {}).get("reader"))
+            target = (stations.get(station) or {}).get("reader")
+            if link.target and not target:
+                # Delete device work: the reader was deleted; its reads go too.
+                self.tag_buffer.clear_station(station)
+                log(f"{station}: reader removed; its reads were cleared")
+            link.set_target(target)
 
     def sync_links(self):
         """A reader link for every gate in the runtime config (gates can be added later)."""

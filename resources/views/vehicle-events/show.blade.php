@@ -27,7 +27,7 @@
                 <div><span>Plate</span><strong>{{ $vehicleEvent->plate_text ?: $vehicleEvent->vehicle?->plate_number ?: 'GUEST' }}</strong></div>
                 <div><span>Vehicle</span><strong>{{ $vehicleEvent->vehicle_color ?: 'Pending color' }} {{ $vehicleEvent->display_vehicle_type }}</strong></div>
                 <div><span>Category</span><strong>{{ \App\Support\VehicleCategory::label($vehicleEvent->vehicle_category) }}</strong></div>
-                <div><span>Station / Camera</span><strong>{{ $vehicleEvent->camera?->camera_name ?? 'No camera linked' }}</strong></div>
+                <div><span>Station / Camera</span><strong>{{ $vehicleEvent->camera_label }}</strong></div>
                 <div><span>RFID Match</span><strong>{{ $vehicleEvent->rfidScanLog ? '#'.$vehicleEvent->rfidScanLog->id.' • '.$vehicleEvent->rfidScanLog->verificationLabel : 'No RFID scan linked' }}</strong></div>
                 <div><span>Current State</span><strong>{{ $vehicleEvent->resulting_state_label }}</strong></div>
                 <div><span>Time</span><strong><x-datetime :value="$vehicleEvent->event_time" /></strong></div>
@@ -208,7 +208,7 @@
                 <div><span>Entry Log</span><strong>#{{ $vehicleEvent->matchedEntry->id }}</strong></div>
                 <div><span>Plate</span><strong>{{ $vehicleEvent->matchedEntry->plate_text }}</strong></div>
                 <div><span>Vehicle</span><strong>{{ $vehicleEvent->matchedEntry->vehicle_color }} {{ $vehicleEvent->matchedEntry->display_vehicle_type }}</strong></div>
-                <div><span>Camera</span><strong>{{ $vehicleEvent->matchedEntry->camera?->camera_name ?? 'N/A' }}</strong></div>
+                <div><span>Camera</span><strong>{{ $vehicleEvent->matchedEntry->camera_label }}</strong></div>
                 <div><span>Time</span><strong><x-datetime :value="$vehicleEvent->matchedEntry->event_time" /></strong></div>
             </div>
         @else
@@ -227,7 +227,7 @@
                 <div class="detail-list">
                     <div><span>Workflow Status</span><strong>{{ ucfirst(str_replace('_', ' ', $vehicleEvent->event_status)) }}</strong></div>
                     <div><span>Detected Vehicle Type</span><strong>{{ $vehicleEvent->detected_vehicle_type ?: 'N/A' }}</strong></div>
-                    <div><span>Camera Source</span><strong>{{ $vehicleEvent->camera ? \App\Support\CameraSource::display($vehicleEvent->camera->source_type, $vehicleEvent->camera->source_value) : 'N/A' }}</strong></div>
+                    <div><span>Camera Source</span><strong>{{ $vehicleEvent->camera_device_label ?: ($vehicleEvent->camera ? \App\Support\CameraSource::display($vehicleEvent->camera->source_type, $vehicleEvent->camera->source_value) : 'N/A') }}</strong></div>
                     <div><span>Station / ROI</span><strong>{{ $vehicleEvent->roi_name ?: 'N/A' }}</strong></div>
                     <div><span>External Event Key</span><strong>{{ $vehicleEvent->external_event_key ?: 'Manual or RFID record' }}</strong></div>
                     <div><span>Details Completed</span><strong><x-datetime :value="$vehicleEvent->details_completed_at" fallback="Not completed yet" /></strong></div>

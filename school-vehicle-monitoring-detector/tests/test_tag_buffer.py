@@ -60,6 +60,19 @@ class TagBufferTests(unittest.TestCase):
         self.assertEqual(buffer.snapshot()["gates"]["gate-1"][0]["reads"], 3)
         self.assertEqual(len(posted), 1)  # one cooldown event (recorded only when the camera is offline)
 
+    def test_a_deleted_reader_leaves_no_reads_of_its_gate(self):
+        buffer = TagBuffer()
+        buffer.add("gate-1", "E2001", -60, T0)
+        buffer.add("gate-2", "E2002", -60, T0)
+        buffer.add("gate-1", "E2001", -60, T0 + 10)  # a new presence; the first one ended
+
+        buffer.clear_station("gate-1")
+
+        snapshot = buffer.snapshot(T0 + 11)
+        self.assertEqual(["gate-2"], list(snapshot["gates"]))
+        self.assertEqual({"gate-2": 1}, snapshot["raw_reads"])
+        self.assertEqual([], [item for item in snapshot["ended"] if item["station"] == "gate-1"])
+
 
 if __name__ == "__main__":
     unittest.main()

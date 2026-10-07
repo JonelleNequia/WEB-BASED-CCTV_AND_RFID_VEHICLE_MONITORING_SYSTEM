@@ -56,12 +56,25 @@
         <div data-devices-other></div>
     </details>
 
+    {{-- Delete device work: hidden devices and the deletion log. --}}
+    <details class="advanced-section devices-hidden" data-devices-hidden-box>
+        <summary>Show hidden devices (<span data-devices-hidden-count>0</span>)</summary>
+        <div data-devices-hidden></div>
+    </details>
+
+    <details class="advanced-section devices-removals">
+        <summary>Deleted devices (<span data-devices-removals-count>0</span>)</summary>
+        <div data-devices-removals></div>
+    </details>
+
     <p class="field-help devices-tip">
         Tip: set cameras and readers to <strong>DHCP (automatic IP)</strong>; this page follows them when their address changes.
     </p>
 
     <script id="devices-panel-data" type="application/json">{!! json_encode($devicesPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 </section>
+
+@include('settings.partials.device-delete')
 
 <x-drawer id="device-drawer" title="Device" size="md">
     <div data-device-drawer-body></div>

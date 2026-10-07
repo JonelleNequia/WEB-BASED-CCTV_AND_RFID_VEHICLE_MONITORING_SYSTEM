@@ -15,9 +15,10 @@ final class CameraFiles
 
     public static function directory(): string
     {
-        $path = rtrim((string) config('monitoring.camera_files_path', storage_path('app/camera')), '/');
+        $path = rtrim((string) config('monitoring.camera_files_path', storage_path('app/camera')), '/\\');
 
-        return str_starts_with($path, '/') ? $path : base_path($path);
+        // Absolute on macOS/Linux ("/...") or Windows ("C:\..."), else relative to the project.
+        return preg_match('#^([A-Za-z]:[\\\\/]|/|\\\\)#', $path) ? $path : base_path($path);
     }
 
     /**

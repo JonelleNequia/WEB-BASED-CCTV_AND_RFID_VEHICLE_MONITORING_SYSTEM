@@ -64,6 +64,13 @@ class Workaround(unittest.TestCase):
         self.assertEqual({"state": "not_needed"}, moved)
         self.assertEqual(["sudo", "-n", "/sbin/ifconfig", "en7", "-alias", "198.51.100.254"], self.commands[-1])
 
+    def test_a_deleted_reader_leaves_no_extra_address(self):
+        with mock.patch.object(workaround, "SYSTEM", "darwin"):
+            self.check([LAN])
+            self.subject.check(True, {}, [LAN], [], lambda mac: (LAN, MODULE), 1060.0)
+        self.assertEqual(["sudo", "-n", "/sbin/ifconfig", "en7", "-alias", "198.51.100.254"], self.commands[-1])
+        self.assertEqual({}, self.subject.status)
+
     def test_switched_off_does_nothing(self):
         self.assertEqual({"state": "off"}, self.check([LAN], enabled=False))
         self.assertEqual([], self.commands)

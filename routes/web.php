@@ -195,6 +195,15 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         Route::post('/settings/devices/{networkDevice}/assign', [DeviceController::class, 'assign'])
             ->whereNumber('networkDevice')
             ->name('settings.devices.assign');
+        // Delete device work: delete (records kept), hide, show again.
+        Route::get('/settings/devices/{networkDevice}/delete', [\App\Http\Controllers\DeviceDeletionController::class, 'summary'])
+            ->whereNumber('networkDevice')->name('settings.devices.delete-summary');
+        Route::delete('/settings/devices/{networkDevice}', [\App\Http\Controllers\DeviceDeletionController::class, 'destroy'])
+            ->whereNumber('networkDevice')->name('settings.devices.destroy');
+        Route::post('/settings/devices/{networkDevice}/hide', [\App\Http\Controllers\DeviceDeletionController::class, 'hide'])
+            ->whereNumber('networkDevice')->name('settings.devices.hide');
+        Route::post('/settings/devices/{networkDevice}/unhide', [\App\Http\Controllers\DeviceDeletionController::class, 'unhide'])
+            ->whereNumber('networkDevice')->name('settings.devices.unhide');
         Route::get('/camera-calibration/heartbeat', [CalibrationController::class, 'heartbeat'])->name('calibration.heartbeat');
         Route::put('/calibration', [CalibrationController::class, 'update'])->name('calibration.update');
         Route::post('/calibration/debug', [CalibrationController::class, 'debugOverlay'])->name('calibration.debug');

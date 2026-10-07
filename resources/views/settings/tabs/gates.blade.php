@@ -64,6 +64,12 @@
                                     @method('DELETE')
                                     <button type="submit" role="menuitem" class="menu-item-danger">Remove…</button>
                                 </form>
+                                @if ($camera['device_id'])
+                                    {{-- Delete device work: the device and its settings go; records stay. --}}
+                                    <button type="button" role="menuitem" class="menu-item-danger" data-device-delete
+                                            data-summary-url="{{ route('settings.devices.delete-summary', $camera['device_id']) }}"
+                                            data-delete-url="{{ route('settings.devices.destroy', $camera['device_id']) }}">Delete device…</button>
+                                @endif
                             </div>
                         </details>
                     </div>
@@ -120,6 +126,11 @@
                                     @method('DELETE')
                                     <button type="submit" role="menuitem" class="menu-item-danger">Remove…</button>
                                 </form>
+                                @if ($reader['device_id'])
+                                    <button type="button" role="menuitem" class="menu-item-danger" data-device-delete
+                                            data-summary-url="{{ route('settings.devices.delete-summary', $reader['device_id']) }}"
+                                            data-delete-url="{{ route('settings.devices.destroy', $reader['device_id']) }}">Delete device…</button>
+                                @endif
                             </div>
                         </details>
                     </div>
@@ -244,6 +255,8 @@
     <p class="field-help">Reader of <strong data-reader-move-gate></strong></p>
     <div data-reader-move-body aria-live="polite"></div>
 </x-modal>
+
+@include('settings.partials.device-delete')
 
 @push('scripts')
     <script src="{{ asset('js/gate-setup.js') }}"></script>

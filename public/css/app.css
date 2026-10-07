@@ -7519,3 +7519,35 @@ img.thumb-plate {
     padding-top: 14px;
     border-top: 1px solid var(--border, #e5e7eb);
 }
+
+/* Delete device work: the confirmation and the hidden / deleted lists. */
+.device-delete-list {
+    display: grid;
+    gap: 4px;
+    margin: 4px 0 12px;
+    padding-left: 20px;
+}
+
+.device-delete-kept {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: #dcfce7;
+    color: #14532d;
+    font-weight: 600;
+}
+
+.devices-hidden-list {
+    display: grid;
+    gap: 8px;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.devices-hidden-list li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    align-items: center;
+    justify-content: space-between;
+}

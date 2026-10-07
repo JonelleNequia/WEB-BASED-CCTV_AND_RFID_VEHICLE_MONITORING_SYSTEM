@@ -478,7 +478,7 @@
             }
 
             const actions = el('td', 'row-actions');
-            actions.append(button('Manage', 'button button-secondary button-sm', () => openDevice(device.id)));
+            actions.append(button('Manage', 'button button-secondary button-sm', () => openDevice(device.id)), rowMenu(device));
 
             tr.append(
                 type, name, ip, el('td', 'nowrap mono', device.mac || '—'),
@@ -503,6 +503,82 @@
         tableNode.append(head, body);
         wrap.append(tableNode);
         return wrap;
+    }
+
+    // Delete device work: "⋯" with "Delete device…" and "Hide this device".
+    function rowMenu(device) {
+        const menu = el('details', 'menu row-menu');
+        const summary = el('summary', 'button button-secondary button-sm', '⋯');
+        summary.setAttribute('aria-label', `More actions for ${deviceTitle(device)}`);
+        const items = el('div', 'menu-panel');
+        items.setAttribute('role', 'menu');
+        const remove = button('Delete device…', 'menu-item-danger', () => {
+            menu.removeAttribute('open');
+            window.deviceDelete?.open(device.delete_summary_url, device.delete_url);
+        });
+        remove.setAttribute('role', 'menuitem');
+        items.append(remove);
+        if (!(device.assigned || []).length) {
+            const hide = button('Hide this device', 'menu-item', async () => {
+                menu.removeAttribute('open');
+                try {
+                    const result = await post(device.hide_url, {});
+                    if (!result.ok) {
+                        throw new Error(result.json.message || 'Not hidden.');
+                    }
+                    window.ui.toast(result.json.message, 'success');
+                    apply(result.json.devices);
+                } catch (error) {
+                    window.ui.toast(error.message, 'error');
+                }
+            });
+            hide.setAttribute('role', 'menuitem');
+            items.append(hide);
+        }
+        menu.append(summary, items);
+        return menu;
+    }
+
+    function renderHidden() {
+        const hidden = data.hidden_devices || [];
+        panel.querySelector('[data-devices-hidden-count]').textContent = hidden.length;
+        const box = panel.querySelector('[data-devices-hidden]');
+        if (!hidden.length) {
+            box.replaceChildren(el('p', 'text-muted', 'No hidden device.'));
+            return;
+        }
+        const list = el('ul', 'devices-hidden-list');
+        hidden.forEach(function (device) {
+            const item = el('li');
+            item.append(
+                el('span', null, `${device.name} · ${device.ip || '—'} · ${device.mac || '—'} · hidden ${device.hidden}`),
+                button('Show again', 'button button-secondary button-sm', async () => {
+                    try {
+                        const result = await post(device.unhide_url, {});
+                        window.ui.toast(result.json.message, 'success');
+                        apply(result.json.devices);
+                    } catch (error) {
+                        window.ui.toast(error.message, 'error');
+                    }
+                })
+            );
+            list.append(item);
+        });
+        box.replaceChildren(list);
+    }
+
+    function renderRemovals() {
+        const removals = data.removals || [];
+        panel.querySelector('[data-devices-removals-count]').textContent = removals.length;
+        const box = panel.querySelector('[data-devices-removals]');
+        if (!removals.length) {
+            box.replaceChildren(el('p', 'text-muted', 'No device deleted yet.'));
+            return;
+        }
+        const list = el('ul', 'devices-hidden-list');
+        removals.forEach((row) => list.append(el('li', null,
+            `${row.when} · ${row.device}${row.gates ? ` (${row.gates})` : ''} · deleted by ${row.by} · ${row.records_kept} record${row.records_kept === 1 ? '' : 's'} kept`)));
+        box.replaceChildren(list);
     }
 
     /* ---------- device drawer ---------- */
@@ -779,6 +855,8 @@
         }
         renderIfChanged('devices', data.devices, renderLists);
         renderIfChanged('diagnostics', data.diagnostics, renderDiagnostics);
+        renderIfChanged('hidden', data.hidden_devices, renderHidden);
+        renderIfChanged('removals', data.removals, renderRemovals);
         renderIdentify();
         renderFind();
         announceNewDevices();

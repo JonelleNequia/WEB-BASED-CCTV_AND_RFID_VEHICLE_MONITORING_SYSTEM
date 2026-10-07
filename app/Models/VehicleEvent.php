@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsSourceDevice;
 use App\Models\Concerns\StoresLocalTime;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -14,6 +15,8 @@ class VehicleEvent extends Model
 {
     use HasFactory;
     use StoresLocalTime;
+    // Delete device work: remembers the camera / reader that made the record.
+    use RecordsSourceDevice;
 
     public const STATUS_PENDING_DETAILS = 'pending_details';
 
@@ -383,5 +386,21 @@ class VehicleEvent extends Model
             'open' => 'open',
             default => 'secondary',
         };
+    }
+
+    public function sourceDeviceGate(): ?string
+    {
+        return $this->camera_id ? Camera::query()->whereKey($this->camera_id)->value('camera_role') : null;
+    }
+
+    public function sourceDeviceRole(): string
+    {
+        return DeviceAssignment::ROLE_CAMERA;
+    }
+
+    /** Delete device work: the camera that made it ("… (removed)" once deleted), else the gate's camera. */
+    public function getCameraLabelAttribute(): string
+    {
+        return $this->camera_device_label ?: ($this->camera?->camera_name ?? 'No camera linked');
     }
 }

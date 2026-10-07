@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsSourceDevice;
 use App\Models\Concerns\StoresLocalTime;
 use App\Support\VehicleCategory;
 use Illuminate\Database\Eloquent\Builder;
@@ -17,6 +18,8 @@ use Illuminate\Support\Facades\Storage;
 class VisitorRecord extends Model
 {
     use StoresLocalTime;
+    // Delete device work: remembers the camera / reader that made the record.
+    use RecordsSourceDevice;
 
     public const STATUS_ACTIVE = 'active';
 
@@ -135,5 +138,15 @@ class VisitorRecord extends Model
     protected function publicUrl(?string $path): ?string
     {
         return $path && Storage::disk('public')->exists($path) ? Storage::disk('public')->url($path) : null;
+    }
+
+    public function sourceDeviceGate(): ?string
+    {
+        return $this->gate;
+    }
+
+    public function sourceDeviceRole(): string
+    {
+        return DeviceAssignment::ROLE_CAMERA;
     }
 }

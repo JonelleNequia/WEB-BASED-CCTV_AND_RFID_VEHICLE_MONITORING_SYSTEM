@@ -77,6 +77,7 @@ class GateSetupService
             'name' => (string) ($config['camera_name'] ?? $gate->name.' Camera'),
             'source' => $assigned ? (string) $assigned['name'] : 'Added by hand (Advanced)',
             'managed' => (bool) $assigned,
+            'device_id' => $assigned['device_id'] ?? null,
             'detected' => $detected ? ['id' => $detected->id, 'name' => app(DeviceRegistryService::class)->friendlyName($detected)] : null,
             'online' => $live,
             // B4: green / yellow (starting) / red, one plain line and the next step.
@@ -186,6 +187,7 @@ class GateSetupService
 
         return [
             'name' => $gate->readerDisplayName(),
+            'device_id' => $assigned['device_id'] ?? null,
             'online' => $online,
             'state' => match (true) {
                 $online => 'online',

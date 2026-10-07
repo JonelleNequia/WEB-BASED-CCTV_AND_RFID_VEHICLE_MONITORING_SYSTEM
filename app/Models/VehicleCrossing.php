@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsSourceDevice;
 use App\Models\Concerns\StoresLocalTime;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -18,6 +19,8 @@ class VehicleCrossing extends Model
 {
     // Phase 3: same timezone as rfid_scan_logs.scan_time (compared for fusion).
     use StoresLocalTime;
+    // Delete device work: remembers the camera / reader that made the record.
+    use RecordsSourceDevice;
 
     public const DIRECTION_IN = 'IN';
 
@@ -86,5 +89,15 @@ class VehicleCrossing extends Model
         }
 
         return null;
+    }
+
+    public function sourceDeviceGate(): ?string
+    {
+        return $this->gate;
+    }
+
+    public function sourceDeviceRole(): string
+    {
+        return DeviceAssignment::ROLE_CAMERA;
     }
 }

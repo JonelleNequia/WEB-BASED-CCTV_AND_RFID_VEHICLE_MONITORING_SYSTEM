@@ -80,6 +80,16 @@ class TagBuffer:
                     del self.presences[key]
                     self.version += 1
 
+    def clear_station(self, station):
+        """Delete device work: forget a gate's reads (its reader was deleted)."""
+        with self.lock:
+            for key in [key for key in self.presences if key[0] == station]:
+                del self.presences[key]
+            self.raw_reads.pop(station, None)
+            self.presences_started.pop(station, None)
+            self.ended = type(self.ended)((item for item in self.ended if item["station"] != station), maxlen=self.ended.maxlen)
+            self.version += 1
+
     def is_stationary(self, presence, now=None):
         now = time.time() if now is None else now
         # Still being read, and read for longer than a passing vehicle can be.
