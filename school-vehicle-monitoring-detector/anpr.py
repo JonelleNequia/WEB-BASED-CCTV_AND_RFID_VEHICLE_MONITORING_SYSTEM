@@ -36,7 +36,11 @@ def easyocr_reader():
         return None
 
     try:
-        return easyocr.Reader(["en"], gpu=False, verbose=False, download_enabled=False)
+        from config import EASYOCR_MODEL_DIR
+
+        # Windows install kit: the bundled models folder (offline), else EasyOCR's own.
+        options = {"model_storage_directory": EASYOCR_MODEL_DIR} if EASYOCR_MODEL_DIR else {}
+        return easyocr.Reader(["en"], gpu=False, verbose=False, download_enabled=False, **options)
     except TypeError:
         return None
     except Exception:

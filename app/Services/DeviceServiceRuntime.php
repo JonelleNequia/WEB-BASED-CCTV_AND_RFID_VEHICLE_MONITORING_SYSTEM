@@ -64,7 +64,8 @@ class DeviceServiceRuntime
      */
     public function ensureRunning(): bool
     {
-        if (app()->runningUnitTests() || $this->isRunning()) {
+        // Windows install kit: the device service is a Windows service.
+        if (app()->runningUnitTests() || $this->isRunning() || config('monitoring.services.managed')) {
             return false;
         }
 

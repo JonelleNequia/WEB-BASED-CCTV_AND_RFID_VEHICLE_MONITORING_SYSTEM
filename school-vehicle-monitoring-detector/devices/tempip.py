@@ -45,10 +45,10 @@ def commands(interface, address):
             "remove": f"sudo ifconfig {name} -alias {ip}",
         },
         "windows": {
-            # Windows refuses a second address while DHCP is on, so switch to
-            # static for the check and back to DHCP afterwards.
-            "add": f'netsh interface ipv4 set address name="{label}" static {ip} {mask}',
-            "remove": f'netsh interface ipv4 set address name="{label}" source=dhcp',
+            # Windows install kit: an extra address next to the DHCP one (the
+            # old "netsh ... set address static" replaced the DHCP address).
+            "add": f"powershell -Command \"New-NetIPAddress -InterfaceAlias '{label}' -IPAddress {ip} -PrefixLength {address['prefix']} -SkipAsSource $true -PolicyStore ActiveStore\"",
+            "remove": f"powershell -Command \"Remove-NetIPAddress -IPAddress {ip} -Confirm:$false\"",
         },
         "linux": {
             "add": f"sudo ip addr add {ip}/{address['prefix']} dev {name}",
@@ -93,9 +93,12 @@ class TemporaryAddress:
         if SYSTEM == "darwin":
             return ["ifconfig", name, "alias", ip, mask] if action == "add" else ["ifconfig", name, "-alias", ip]
         if SYSTEM == "windows":
-            if action == "add":
-                return ["netsh", "interface", "ipv4", "set", "address", f"name={label}", "static", ip, mask]
-            return ["netsh", "interface", "ipv4", "set", "address", f"name={label}", "source=dhcp"]
+            # The same session-only extra address as devices/workaround.py.
+            label = label.replace("'", "''")
+            script = (f"New-NetIPAddress -InterfaceAlias '{label}' -IPAddress {ip} -PrefixLength {self.address['prefix']} "
+                      "-SkipAsSource $true -PolicyStore ActiveStore | Out-Null") if action == "add" \
+                else f"Remove-NetIPAddress -IPAddress {ip} -Confirm:$false"
+            return ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
         if SYSTEM == "linux":
             verb = "add" if action == "add" else "del"
             return ["ip", "addr", verb, f"{ip}/{self.address['prefix']}", "dev", name]

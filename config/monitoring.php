@@ -91,6 +91,22 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Who Runs the Background Programs
+    |--------------------------------------------------------------------------
+    |
+    | "app" (development, macOS): pages and the scheduler start the detector,
+    | the device service and go2rtc when they are not running.
+    | "managed" (Windows install kit): Windows services (NSSM) run them; the
+    | web app never starts a process, it only shows their status.
+    |
+    */
+
+    'services' => [
+        'managed' => env('MONITORING_SERVICES', 'app') === 'managed',
+    ],
+
     'rfid' => [
         'buffer_seconds' => (float) env('RFID_BUFFER_SECONDS', 15),
         'absent_seconds' => (float) env('RFID_ABSENT_SECONDS', 5),

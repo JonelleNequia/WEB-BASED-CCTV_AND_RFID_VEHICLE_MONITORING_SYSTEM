@@ -208,6 +208,11 @@ class Go2rtcService
                     BackgroundProcess::stop($this->pidPath());
                 }
             }
+            // Windows install kit: go2rtc is a Windows service; only its
+            // config is written here (and reloaded above when it changed).
+            if (config('monitoring.services.managed')) {
+                return false;
+            }
             if (! $force && ! Cache::add('go2rtc-launch', true, self::LAUNCH_COOLDOWN_SECONDS)) {
                 return false;
             }

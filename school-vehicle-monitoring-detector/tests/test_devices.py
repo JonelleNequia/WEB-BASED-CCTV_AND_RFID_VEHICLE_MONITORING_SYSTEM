@@ -162,7 +162,16 @@ class NetworkParsingTests(unittest.TestCase):
         self.assertEqual(plan["ip"], "203.0.113.253")
         commands = tempip.commands({"name": "en5", "label": "USB LAN"}, plan)
         self.assertIn("alias 203.0.113.253", commands["darwin"]["add"])
-        self.assertIn('name="USB LAN"', commands["windows"]["add"])
+        # Windows install kit: an extra address next to DHCP (never "set address static").
+        self.assertIn("New-NetIPAddress -InterfaceAlias 'USB LAN' -IPAddress 203.0.113.253 -PrefixLength 24", commands["windows"]["add"])
+        self.assertNotIn("static", commands["windows"]["add"])
+
+    def test_windows_temporary_address_runs_without_replacing_dhcp(self):
+        plan = tempip.plan("203.0.113.60", set())
+        with mock.patch.object(tempip, "SYSTEM", "windows"):
+            add = tempip.TemporaryAddress({"name": "Ethernet 2", "label": "Ethernet 2"}, plan, lambda message: None)._command("add")
+        self.assertEqual(["powershell", "-NoProfile", "-NonInteractive", "-Command"], add[:4])
+        self.assertIn("New-NetIPAddress -InterfaceAlias 'Ethernet 2' -IPAddress 203.0.113.254 -PrefixLength 24 -SkipAsSource $true -PolicyStore ActiveStore", add[4])
 
     def test_onvif_probe_match(self):
         xml = (

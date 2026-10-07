@@ -60,7 +60,7 @@ code {
     border-radius: 8px;
     background: rgba(111, 75, 174, 0.08);
     color: var(--purple-deep);
-    font-family: "SFMono-Regular", "Menlo", monospace;
+    font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
     font-size: 0.9em;
 }
 
@@ -1992,7 +1992,7 @@ th {
     padding: 1rem 1.1rem;
     overflow-x: auto;
     background: #fbfbfe;
-    font-family: "SFMono-Regular", "Menlo", monospace;
+    font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
     font-size: 0.88rem;
     line-height: 1.6;
     white-space: pre-wrap;
@@ -2252,7 +2252,7 @@ th {
 }
 
 .station-clock {
-    font-family: "SFMono-Regular", "Menlo", monospace;
+    font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
     color: #eee7ff;
     font-size: clamp(0.86rem, 1.1vw, 1.05rem);
     font-weight: 800;
@@ -3130,7 +3130,7 @@ th {
     border-radius: 8px;
     background: rgba(111, 75, 174, 0.09);
     color: #5d3f98;
-    font-family: "SFMono-Regular", "Menlo", monospace;
+    font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
 }
 
 @media (max-width: 1340px) {

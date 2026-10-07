@@ -24,3 +24,18 @@ Homestead.yaml
 Thumbs.db
 # Phase 6: old public camera output (now storage/app/camera)
 /public/camera
+
+# Windows install kit: data, caches and big binaries stay out of git.
+/storage/backups/*
+!/storage/backups/.gitignore
+__pycache__/
+*.pyc
+*.pt
+*.pth
+/tools/go2rtc/*.zip
+/school-vehicle-monitoring-detector/models/*
+!/school-vehicle-monitoring-detector/models/README.md
+/build/windows/dist/
+/build/windows/cache/
+*.sqlite-wal
+*.sqlite-shm

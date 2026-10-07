@@ -1,0 +1,19 @@
+# Windows install kit: exact versions for the bundled Python 3.12 (x64).
+# The same versions run on the development Mac (tested together). On Windows
+# the PyPI torch wheels are CPU-only, which is what the detector uses.
+# Built into the kit by build/windows/build-release.ps1; never installed at run time.
+opencv-python-headless==4.13.0.92
+numpy==2.4.3
+requests==2.33.1
+psutil==7.2.2
+ultralytics==8.4.41
+torch==2.11.0
+torchvision==0.26.0
+easyocr==1.7.2
+pytesseract==0.3.13
+pillow==12.2.0
+scipy==1.17.1
+scikit-image==0.26.0
+shapely==2.1.2
+PyYAML==6.0.3
+polars==1.40.1

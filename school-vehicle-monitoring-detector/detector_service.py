@@ -28,6 +28,7 @@ from config import (
     MJPEG_STREAM_HOST,
     MJPEG_STREAM_PORT,
     MODEL_PATH,
+    model_file,
     PERFORMANCE_DEFAULTS,
     RECONNECT_DELAY_SECONDS,
     RFID_DETECTION_WINDOW_SECONDS,
@@ -1249,7 +1250,7 @@ def detection_status(role, state, camera_config, model_info):
     if model_info.get("model") is None:
         if "could not be loaded" in str(state.get("last_error")):
             return result("model_error", "Model error", short_reason(state.get("last_error")),
-                          "Check that yolov8n.pt is in the detector folder.")
+                          "Check that yolov8n.pt is in the detector's models folder.")
         return result("model_loading", "Starting", "Loading the detection model…")
     if not model_info.get("vehicle_labels"):
         return result("model_error", "Model error", "The detection model has no vehicle classes.",
@@ -2187,9 +2188,9 @@ _SECOND_PASS = {"path": None, "model": None, "labels": {}, "lock": threading.Loc
 
 def second_pass_model(model_path):
     """A2: the model of the second check (loaded once; yolov8n.pt when the chosen file is missing)."""
-    path = Path(__file__).resolve().parent / str(model_path or MODEL_PATH)
+    path = model_file(Path(str(model_path or MODEL_PATH)).name)
     if not path.exists():
-        path = Path(__file__).resolve().parent / MODEL_PATH
+        path = Path(MODEL_PATH)
     if _SECOND_PASS["path"] != str(path):
         from ultralytics import YOLO
 

@@ -44,6 +44,16 @@ class DetectorRuntimeService
             ];
         }
 
+        // Windows install kit: a Windows service runs the detector (and
+        // restarts it); a web request never starts a process.
+        if (config('monitoring.services.managed')) {
+            return [
+                ...$status,
+                'auto_start_attempted' => false,
+                'auto_start_message' => 'Starting up… The detector service starts by itself.',
+            ];
+        }
+
         if (app()->runningUnitTests()) {
             return [
                 ...$status,

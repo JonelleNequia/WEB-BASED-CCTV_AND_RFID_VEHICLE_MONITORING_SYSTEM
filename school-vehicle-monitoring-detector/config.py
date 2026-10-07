@@ -89,8 +89,33 @@ PERFORMANCE_DEFAULTS = {
 # about this much against the low-delay live stream (measured on the VIGI C240).
 HIRES_DECODE_DELAY_SECONDS = 0.35
 
+# Windows install kit: the models come from a local folder (offline; the
+# installer puts them in models/). The old place (this folder) still works
+# for development. Never a download at run time.
+MODELS_DIR = Path(os.environ.get("DETECTOR_MODELS_DIR") or (MODULE_ROOT / "models"))
+
+
+def model_file(name):
+    """Absolute path of a model file: models/ first, then this folder."""
+    for folder in (MODELS_DIR, MODULE_ROOT):
+        if (folder / name).exists():
+            return folder / name
+    return MODELS_DIR / name
+
+
+# EasyOCR's detector and recognizer files (craft_mlt_25k.pth, english_g2.pth):
+# models/easyocr when present, else EasyOCR's own folder in the user's home.
+EASYOCR_MODEL_DIR = os.environ.get("EASYOCR_MODEL_DIR") or (
+    str(MODELS_DIR / "easyocr") if (MODELS_DIR / "easyocr").is_dir() else None
+)
+
+# Ultralytics keeps its settings in a writable folder of this project (a
+# Windows service has no normal user folder) and never goes online.
+os.environ.setdefault("YOLO_CONFIG_DIR", str(PROJECT_ROOT / "storage" / "app" / "ultralytics"))
+os.environ.setdefault("YOLO_OFFLINE", "1")
+
 # Detection settings.
-MODEL_PATH = "yolov8n.pt"
+MODEL_PATH = str(model_file("yolov8n.pt"))
 
 # Tuned for 7-8 detections per second (see the file); overridable for tests.
 TRACKER_CONFIG = os.environ.get("DETECTOR_TRACKER_CONFIG") or str(Path(__file__).resolve().parent / "trackers" / "bytetrack_gate.yaml")
