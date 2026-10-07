@@ -1,0 +1,52 @@
+; PHILCST Vehicle Monitoring - PHP for the Windows install kit.
+; Written by the installer from build/windows/templates/php.ini.template:
+; {{INSTALL_DIR}} becomes the install folder (e.g. C:\PHILCST-VMS).
+
+[PHP]
+engine = On
+expose_php = Off
+memory_limit = 512M
+max_execution_time = 60
+max_input_time = 60
+post_max_size = 25M
+upload_max_filesize = 20M
+max_file_uploads = 20
+default_charset = "UTF-8"
+short_open_tag = Off
+
+; Production: errors go to the log, never to the page.
+display_errors = Off
+display_startup_errors = Off
+log_errors = On
+error_log = "{{INSTALL_DIR}}\logs\php-errors.log"
+error_reporting = E_ALL & ~E_DEPRECATED
+
+; Extensions the app needs (Laravel, SQLite, camera/ONVIF HTTP, images, backups).
+extension_dir = "{{INSTALL_DIR}}\runtime\php\ext"
+extension = curl
+extension = fileinfo
+extension = gd
+extension = intl
+extension = mbstring
+extension = openssl
+extension = pdo_sqlite
+extension = sqlite3
+extension = zip
+zend_extension = opcache
+
+[Date]
+date.timezone = Asia/Manila
+
+[Session]
+session.save_path = "{{INSTALL_DIR}}\app\storage\framework\sessions"
+
+[opcache]
+opcache.enable = 1
+opcache.enable_cli = 0
+opcache.memory_consumption = 128
+opcache.interned_strings_buffer = 16
+opcache.max_accelerated_files = 20000
+; Files change only on an update; checked every 2 s so an update needs no restart.
+opcache.validate_timestamps = 1
+opcache.revalidate_freq = 2
+

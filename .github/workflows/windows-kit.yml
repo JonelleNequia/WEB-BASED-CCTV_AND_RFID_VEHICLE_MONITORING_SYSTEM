@@ -1,0 +1,50 @@
+# Windows install kit: builds the self-contained bundle on a real Windows
+# runner, checks that its PHP, Python packages, Caddy, go2rtc and NSSM run,
+# and keeps the ZIP as a build artifact (7 days). Releases go to GitHub
+# Releases, never into the repo.
+name: Windows kit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'build/windows/**'
+      - 'school-vehicle-monitoring-detector/requirements-windows.txt'
+      - '.github/workflows/windows-kit.yml'
+
+jobs:
+  bundle:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: fileinfo, intl, zip, sqlite3, pdo_sqlite
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache downloads
+        uses: actions/cache@v4
+        with:
+          path: build/windows/cache
+          key: kit-${{ hashFiles('build/windows/runtimes.json', 'school-vehicle-monitoring-detector/requirements-windows.txt', 'composer.lock') }}
+
+      - name: Build the kit
+        shell: pwsh
+        run: ./build/windows/build-release.ps1 -Python python
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PHILCST-VMS-win64
+          path: |
+            build/windows/dist/*.zip
+            build/windows/dist/*.sha256
+          retention-days: 7
+          compression-level: 0

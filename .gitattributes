@@ -14,5 +14,16 @@
 *.php diff=php
 
 /.github export-ignore
+# Windows install kit: what the release ZIP leaves out (git archive).
+/tests export-ignore
+/build export-ignore
+/phpunit.xml export-ignore
+/school-vehicle-monitoring-detector/tests export-ignore
+/storage/backups export-ignore
+/public/camera export-ignore
+__pycache__ export-ignore
+*.pyc export-ignore
+*.pt export-ignore
+/tools/go2rtc/*.zip export-ignore
 CHANGELOG.md export-ignore
 .styleci.yml export-ignore

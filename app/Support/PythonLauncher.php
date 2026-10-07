@@ -71,10 +71,13 @@ final class PythonLauncher
 
     public static function pythonExecutable(): string
     {
-        $candidates = [
+        $candidates = array_filter([
+            // Windows install kit: the bundled Python next to the app (or DETECTOR_PYTHON).
+            env('DETECTOR_PYTHON'),
+            dirname(base_path()).'/runtime/python/python.exe',
             self::directory().'/.venv/bin/python',
             self::directory().'/.venv/Scripts/python.exe',
-        ];
+        ]);
 
         foreach ($candidates as $candidate) {
             if (File::exists($candidate)) {

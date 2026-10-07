@@ -164,6 +164,12 @@ SESSION_DRIVER=file
 FILESYSTEM_DISK=public
 ```
 
+Detector models and go2rtc are not in git; fetch them once (checked by SHA-256):
+
+```bash
+php artisan runtime:fetch
+```
+
 Migrate + seed:
 
 ```bash

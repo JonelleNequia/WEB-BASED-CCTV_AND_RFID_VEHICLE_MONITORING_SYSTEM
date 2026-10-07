@@ -1,19 +1,51 @@
-# Windows install kit: exact versions for the bundled Python 3.12 (x64).
-# The same versions run on the development Mac (tested together). On Windows
-# the PyPI torch wheels are CPU-only, which is what the detector uses.
-# Built into the kit by build/windows/build-release.ps1; never installed at run time.
-opencv-python-headless==4.13.0.92
+# Windows install kit: every package at the exact version tested on the
+# development Mac, for the bundled Python 3.12 (x64). On Windows the PyPI
+# torch wheels are CPU-only, which is what the detector uses. Installed into
+# the kit by build/windows/build-release.ps1 (never at run time).
+# Regenerate: resolve requirements.txt for win_amd64 / cp312, keep these pins.
+certifi==2026.4.22
+charset-normalizer==3.4.7
+contourpy==1.3.3
+cycler==0.12.1
+easyocr==1.7.2
+filelock==3.29.0
+fonttools==4.62.1
+fsspec==2026.3.0
+idna==3.13
+imageio==2.37.3
+jinja2==3.1.6
+kiwisolver==1.5.0
+lazy-loader==0.5
+markupsafe==3.0.3
+matplotlib==3.10.9
+mpmath==1.3.0
+networkx==3.6.1
+ninja==1.13.0
 numpy==2.4.3
-requests==2.33.1
+opencv-python==4.13.0.92
+opencv-python-headless==4.13.0.92
+packaging==26.2
+pillow==12.2.0
+polars==1.40.1
+polars-runtime-32==1.40.1
 psutil==7.2.2
-ultralytics==8.4.41
+pyclipper==1.4.0
+pyparsing==3.3.2
+pytesseract==0.3.13
+python-bidi==0.6.7
+python-dateutil==2.9.0.post0
+pyyaml==6.0.3
+requests==2.33.1
+scikit-image==0.26.0
+scipy==1.17.1
+setuptools==81.0.0
+shapely==2.1.2
+six==1.17.0
+sympy==1.14.0
+tifffile==2026.5.2
 torch==2.11.0
 torchvision==0.26.0
-easyocr==1.7.2
-pytesseract==0.3.13
-pillow==12.2.0
-scipy==1.17.1
-scikit-image==0.26.0
-shapely==2.1.2
-PyYAML==6.0.3
-polars==1.40.1
+typing-extensions==4.15.0
+ultralytics==8.4.41
+ultralytics-thop==2.0.19
+urllib3==2.6.3

@@ -1,0 +1,41 @@
+# PHILCST Vehicle Monitoring - web server of the Windows install kit.
+# Written by the installer from build/windows/templates/Caddyfile.template:
+# {{INSTALL_DIR}} = install folder, {{WEB_PORT}} = 80 (or 8080 when 80 is taken).
+#
+# Why Caddy + php-cgi: PHP has no php-fpm on Windows; php-cgi handles one
+# request at a time, so four php-cgi services (ports 9001-9004) run side by
+# side and Caddy shares the requests between them. Caddy is one signed exe,
+# keeps long streams (live view) open without tying up PHP, and needs no
+# other runtime. HTTP only on the school LAN (no certificates to renew).
+{
+	admin off
+	auto_https off
+	servers {
+		timeouts {
+			read_header 30s
+			idle 5m
+		}
+	}
+}
+
+:{{WEB_PORT}} {
+	root * "{{INSTALL_DIR}}/app/public"
+	encode gzip
+
+	php_fastcgi 127.0.0.1:9001 127.0.0.1:9002 127.0.0.1:9003 127.0.0.1:9004 {
+		lb_policy least_conn
+		lb_try_duration 10s
+		fail_duration 5s
+		read_timeout 120s
+		write_timeout 120s
+	}
+
+	file_server
+
+	log {
+		output file "{{INSTALL_DIR}}/logs/caddy-access.log" {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}
