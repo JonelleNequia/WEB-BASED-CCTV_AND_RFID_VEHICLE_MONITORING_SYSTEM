@@ -73,7 +73,7 @@ final class PythonLauncher
     {
         $candidates = array_filter([
             // Windows install kit: the bundled Python next to the app (or DETECTOR_PYTHON).
-            env('DETECTOR_PYTHON'),
+            config('monitoring.python'),
             dirname(base_path()).'/runtime/python/python.exe',
             self::directory().'/.venv/bin/python',
             self::directory().'/.venv/Scripts/python.exe',
@@ -94,6 +94,11 @@ final class PythonLauncher
      */
     public static function rotateLog(string $path): void
     {
+        // Windows install kit: the service manager (NSSM) rotates the logs it writes.
+        if (config('monitoring.services.managed')) {
+            return;
+        }
+
         $limit = (int) config('monitoring.runtime_log_max_bytes', 5 * 1024 * 1024);
 
         try {

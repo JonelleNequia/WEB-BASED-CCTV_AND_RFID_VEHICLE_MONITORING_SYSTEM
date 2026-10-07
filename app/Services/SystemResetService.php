@@ -288,7 +288,7 @@ class SystemResetService
      *
      * @return array<string, string>
      */
-    protected function folders(): array
+    public function folders(): array
     {
         $media = Storage::disk($this->localStorageService->mediaDisk());
         $archive = Storage::disk($this->localStorageService->archiveDisk());

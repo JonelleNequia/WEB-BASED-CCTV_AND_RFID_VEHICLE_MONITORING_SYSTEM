@@ -20,17 +20,33 @@
 
 :{{WEB_PORT}} {
 	root * "{{INSTALL_DIR}}/app/public"
-	encode gzip
 
-	php_fastcgi 127.0.0.1:9001 127.0.0.1:9002 127.0.0.1:9003 127.0.0.1:9004 {
-		lb_policy least_conn
-		lb_try_duration 10s
-		fail_duration 5s
-		read_timeout 120s
-		write_timeout 120s
+	# The basic live view (MJPEG) and detection boxes come from the detector
+	# on this PC (port 8765, closed to the LAN). Signed-in users only: Caddy
+	# asks the app (/live/proxy-auth, with the browser's session cookie)
+	# before passing the request on.
+	handle /detector/* {
+		forward_auth 127.0.0.1:{{WEB_PORT}} {
+			uri /live/proxy-auth
+		}
+		uri strip_prefix /detector
+		reverse_proxy 127.0.0.1:8765 {
+			flush_interval -1
+		}
 	}
 
-	file_server
+	# Everything else: the Laravel app (PHP) and its public files.
+	handle {
+		encode gzip
+		php_fastcgi 127.0.0.1:9001 127.0.0.1:9002 127.0.0.1:9003 127.0.0.1:9004 {
+			lb_policy least_conn
+			lb_try_duration 10s
+			fail_duration 5s
+			read_timeout 120s
+			write_timeout 120s
+		}
+		file_server
+	}
 
 	log {
 		output file "{{INSTALL_DIR}}/logs/caddy-access.log" {

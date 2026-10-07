@@ -15,7 +15,7 @@ everything the PC needs, offline:
       runtime/go2rtc/       live view (WebRTC)
       runtime/nssm/         Windows services
       runtime/vc_redist.x64.exe
-      config/               php.ini / Caddyfile templates (the installer fills them in)
+      config/               php.ini / Caddyfile / .env templates (install.ps1 fills them in)
       BUILD-INFO.json       versions and hashes
 
 Every download is checked against build/windows/runtimes.json (SHA-256, or
@@ -29,7 +29,10 @@ param(
     [string]$CacheDir = (Join-Path $PSScriptRoot 'cache'),
     [string]$Python = '',
     [switch]$SkipSelfCheck,
-    [switch]$SkipZip
+    [switch]$SkipZip,
+    # Phase 3: also build PHILCST-VMS-Setup-<version>.exe with Inno Setup (Windows only).
+    [switch]$Installer,
+    [string]$Iscc = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -217,6 +220,23 @@ if (-not $SkipZip) {
     $size = [math]::Round((Get-Item $zip).Length / 1MB)
     Write-Host "    $zip ($size MB)"
     Write-Host "    SHA-256 $hash"
+}
+
+# --- 8. The installer (Inno Setup): the same folder as a one-file Setup.exe
+if ($Installer) {
+    Step 'Installer (Inno Setup)'
+    if (-not $OnWindows) { throw 'The installer is built on Windows (ISCC.exe); the CI workflow does it.' }
+    if (-not $Iscc) {
+        $Iscc = @($env:ISCC, (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'), (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')) |
+            Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    }
+    if (-not $Iscc) { throw 'Inno Setup 6 (ISCC.exe) was not found: install it (choco install innosetup) or pass -Iscc.' }
+    & $Iscc /Qp "/DAppVersion=$Version" "/DSourceDir=$Stage" "/O$OutDir" (Join-Path $PSScriptRoot 'installer/PHILCST-VMS.iss')
+    if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed.' }
+    $setup = Join-Path $OutDir "PHILCST-VMS-Setup-$Version.exe"
+    $hash = Get-Sha256 $setup
+    Set-Content -LiteralPath "$setup.sha256" -Value "$hash  $([IO.Path]::GetFileName($setup))" -Encoding ascii
+    Write-Host "    $setup ($([math]::Round((Get-Item $setup).Length / 1MB)) MB)"
 }
 
 Step 'Done'

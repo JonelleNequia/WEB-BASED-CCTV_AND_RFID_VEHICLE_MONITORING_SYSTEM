@@ -191,6 +191,10 @@ class DetectorRuntimeService
      */
     public function streamUrlForRole(string $role, array $status = [], ?string $viewerHost = null): string
     {
+        if ($proxied = $this->proxiedStreamUrl($role)) {
+            return $proxied;
+        }
+
         $defaultUrl = $this->defaultStreamUrl($role);
         $streamUrl = (string) data_get($status, "cameras.$role.stream_url", $defaultUrl);
         $viewerHost = trim((string) $viewerHost);
@@ -233,9 +237,25 @@ class DetectorRuntimeService
 
     public function defaultStreamUrl(string $role): string
     {
+        if ($proxied = $this->proxiedStreamUrl($role)) {
+            return $proxied;
+        }
+
         $host = (string) config('monitoring.stream.host', 'localhost');
 
         return 'http://'.$host.':'.$this->streamPort().'/stream/'.$role;
+    }
+
+    /**
+     * Windows install kit: "/detector/stream/{gate}" on the page's own
+     * address (the web server checks the sign-in and passes it on), so it
+     * works from any PC on the LAN without opening the detector's port.
+     */
+    protected function proxiedStreamUrl(string $role): ?string
+    {
+        return config('monitoring.stream.proxy')
+            ? rtrim((string) config('monitoring.stream.proxy_prefix'), '/').'/stream/'.$role
+            : null;
     }
 
     public function streamPort(): int

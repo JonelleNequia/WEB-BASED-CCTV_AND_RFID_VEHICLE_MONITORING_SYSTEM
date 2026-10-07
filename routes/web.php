@@ -54,6 +54,9 @@ Route::middleware('auth')->group(function (): void {
     // Live view work: WebRTC / HLS through go2rtc, signed-in only.
     Route::post('/live/{gate}/webrtc', [\App\Http\Controllers\LiveViewController::class, 'webrtc'])->where('gate', '[a-z0-9-]+')->name('live.webrtc');
     Route::post('/live/{gate}/stats', [\App\Http\Controllers\LiveViewController::class, 'stats'])->where('gate', '[a-z0-9-]+')->name('live.stats');
+    // Windows install kit: the web server asks this before passing
+    // /detector/... (the basic live view) on; signed-in users only.
+    Route::get('/live/proxy-auth', fn () => response()->noContent()->header('Cache-Control', 'no-store'))->name('live.proxy-auth');
     Route::get('/live/hls/{file}', [\App\Http\Controllers\LiveViewController::class, 'hls'])->where('file', '[a-z0-9./]+')->name('live.hls');
     Route::get('/camera/status', [CameraFileController::class, 'status'])
         ->middleware('admin')

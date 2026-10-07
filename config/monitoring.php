@@ -76,7 +76,22 @@ return [
     'stream' => [
         'host' => env('DETECTOR_STREAM_HOST', '127.0.0.1'),
         'port' => (int) env('DETECTOR_STREAM_PORT', 8765),
+        // Windows install kit: the web server (Caddy) passes /detector/... to
+        // the detector on this PC for signed-in users only, so pages use that
+        // same-origin path and the detector's port stays closed to the LAN.
+        'proxy' => (bool) env('DETECTOR_STREAM_PROXY', false),
+        'proxy_prefix' => '/detector',
     ],
+
+    /*
+    | Python for the detector and the device service (the kit's bundled one,
+    | else the project's .venv), and the address Python posts events to.
+    | Read here, not with env() in the code, so "php artisan config:cache"
+    | (used by the install kit) keeps them.
+    */
+
+    'python' => env('DETECTOR_PYTHON'),
+    'integration_url' => env('PYTHON_INTEGRATION_URL', ''),
 
     /*
     |--------------------------------------------------------------------------

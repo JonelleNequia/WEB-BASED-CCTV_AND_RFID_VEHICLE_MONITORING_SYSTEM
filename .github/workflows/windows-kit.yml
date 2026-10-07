@@ -1,6 +1,7 @@
 # Windows install kit: builds the self-contained bundle on a real Windows
 # runner, checks that its PHP, Python packages, Caddy, go2rtc and NSSM run,
-# and keeps the ZIP as a build artifact (7 days). Releases go to GitHub
+# builds PHILCST-VMS-Setup.exe (Inno Setup) and keeps both as build
+# artifacts (7 days). Releases go to GitHub
 # Releases, never into the repo.
 name: Windows kit
 
@@ -10,6 +11,7 @@ on:
     branches: [main]
     paths:
       - 'build/windows/**'
+      - 'deploy/windows/**'
       - 'school-vehicle-monitoring-detector/requirements-windows.txt'
       - '.github/workflows/windows-kit.yml'
 
@@ -36,15 +38,20 @@ jobs:
           path: build/windows/cache
           key: kit-${{ hashFiles('build/windows/runtimes.json', 'school-vehicle-monitoring-detector/requirements-windows.txt', 'composer.lock') }}
 
-      - name: Build the kit
+      - name: Inno Setup
         shell: pwsh
-        run: ./build/windows/build-release.ps1 -Python python
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the kit and the installer
+        shell: pwsh
+        run: ./build/windows/build-release.ps1 -Python python -Installer
 
       - uses: actions/upload-artifact@v4
         with:
           name: PHILCST-VMS-win64
           path: |
             build/windows/dist/*.zip
+            build/windows/dist/*.exe
             build/windows/dist/*.sha256
           retention-days: 7
           compression-level: 0

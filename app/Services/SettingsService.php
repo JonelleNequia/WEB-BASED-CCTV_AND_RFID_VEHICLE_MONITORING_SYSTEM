@@ -334,7 +334,7 @@ class SettingsService
      */
     protected function integrationBaseUrl(array $settings): string
     {
-        $explicitUrl = trim((string) env('PYTHON_INTEGRATION_URL', ''));
+        $explicitUrl = trim((string) config('monitoring.integration_url', ''));
 
         if ($explicitUrl !== '') {
             return rtrim($explicitUrl, '/');
