@@ -14,7 +14,7 @@ class CalibrationSaveTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * Ensure one camera's browser calibration can be saved through the calibration endpoint.
+     * One camera's zone and line are saved; calibration work: no browser camera details.
      */
     public function test_calibration_endpoint_saves_mask_and_line_for_a_camera(): void
     {
@@ -26,10 +26,6 @@ class CalibrationSaveTest extends TestCase
         $this->actingAs($user)
             ->putJson(route('calibration.update'), [
                 'camera_id' => $camera->id,
-                'browser_device_id' => 'device-entrance-001',
-                'browser_label' => 'Built-in Webcam',
-                'last_connection_status' => 'connected',
-                'last_connection_message' => 'Browser preview connected.',
                 'calibration_mask' => [
                     ['x' => 0.15, 'y' => 0.20],
                     ['x' => 0.65, 'y' => 0.20],
@@ -48,9 +44,8 @@ class CalibrationSaveTest extends TestCase
 
         $camera->refresh();
 
-        $this->assertSame('device-entrance-001', $camera->browser_device_id);
-        $this->assertSame('Built-in Webcam', $camera->browser_label);
-        $this->assertSame('connected', $camera->last_connection_status);
+        $this->assertFalse(\Illuminate\Support\Facades\Schema::hasColumn('cameras', 'browser_device_id'));
+        $this->assertFalse(\Illuminate\Support\Facades\Schema::hasColumn('cameras', 'browser_label'));
         $this->assertSame([
             ['x' => 0.15, 'y' => 0.20],
             ['x' => 0.65, 'y' => 0.20],
@@ -64,7 +59,6 @@ class CalibrationSaveTest extends TestCase
             'y2' => 0.80,
             'in_side' => 1, // Phase 2: IN side, not flipped
         ], $camera->calibration_line_json);
-        $this->assertNotNull($camera->last_connected_at);
     }
 
     public function test_calibration_heartbeat_keeps_detector_camera_runtime_active(): void

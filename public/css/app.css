@@ -7603,3 +7603,37 @@ img.thumb-plate {
     text-decoration: underline;
     cursor: pointer;
 }
+
+/* Calibration work: the gate's last picture while its camera is offline. */
+.camera-last-picture {
+    object-fit: contain;
+    background: #05040a;
+}
+
+.calibration-picture-badge {
+    position: absolute;
+    top: 0.75rem;
+    left: 0.75rem;
+    max-width: calc(100% - 1.5rem);
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    background: rgba(185, 28, 28, 0.92);
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 700;
+    pointer-events: none;
+}
+
+.calibration-picture-badge.is-waiting {
+    background: rgba(180, 83, 9, 0.92);
+}
+
+.calibration-picture-badge[hidden] {
+    display: none;
+}
+
+.camera-fallback .calibration-webcam-link {
+    min-height: 32px;
+    color: rgba(248, 250, 252, 0.85);
+    font-size: 0.85rem;
+}

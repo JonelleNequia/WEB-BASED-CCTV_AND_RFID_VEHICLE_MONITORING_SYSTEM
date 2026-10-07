@@ -32,7 +32,6 @@ class CalibrationService
                     'source_value' => '',
                     'status' => 'active',
                     'last_connection_status' => 'unknown',
-                    'last_connection_message' => 'Waiting for browser camera access.',
                 ]
             );
         }
@@ -62,7 +61,9 @@ class CalibrationService
     }
 
     /**
-     * Save browser-selected device details and calibration shapes for one camera.
+     * Save one camera's zone, trigger line and IN side (normalized 0-1 to the
+     * camera picture). Calibration work: drawn on the gate's own camera
+     * stream, so no browser camera details are kept.
      *
      * @param  array<string, mixed>  $data
      */
@@ -70,21 +71,11 @@ class CalibrationService
     {
         return DB::transaction(function () use ($data): Camera {
             $camera = Camera::query()->findOrFail($data['camera_id']);
-            $connectionStatus = (string) ($data['last_connection_status'] ?? 'connected');
 
             $camera->fill([
-                'browser_device_id' => $data['browser_device_id'] ?? null,
-                'browser_label' => $data['browser_label'] ?? null,
                 'calibration_mask_json' => $data['calibration_mask'] ?? null,
                 'calibration_line_json' => $this->lineWithInSide($data['calibration_line'] ?? null),
-                'last_connection_status' => $connectionStatus,
-                'last_connection_message' => $data['last_connection_message'] ?? null,
             ]);
-
-            if ($connectionStatus === 'connected') {
-                $camera->last_connected_at = now();
-            }
-
             $camera->save();
 
             return $camera->fresh();
@@ -147,34 +138,6 @@ class CalibrationService
     }
 
     /**
-     * Save the latest browser connection state even when calibration is unchanged.
-     *
-     * @param  array<string, mixed>  $data
-     */
-    public function syncBrowserState(array $data): Camera
-    {
-        return DB::transaction(function () use ($data): Camera {
-            $camera = Camera::query()->findOrFail($data['camera_id']);
-            $connectionStatus = (string) ($data['last_connection_status'] ?? 'unknown');
-
-            $camera->fill([
-                'browser_device_id' => $data['browser_device_id'] ?? $camera->browser_device_id,
-                'browser_label' => $data['browser_label'] ?? $camera->browser_label,
-                'last_connection_status' => $connectionStatus,
-                'last_connection_message' => $data['last_connection_message'] ?? null,
-            ]);
-
-            if ($connectionStatus === 'connected') {
-                $camera->last_connected_at = now();
-            }
-
-            $camera->save();
-
-            return $camera->fresh();
-        });
-    }
-
-    /**
      * Convert a camera record into a simple array for Blade and JavaScript.
      *
      * @return array<string, mixed>
@@ -209,14 +172,8 @@ class CalibrationService
             'automatic' => $device !== null,
             'source_username' => $camera->source_username ?? '',
             'has_password' => filled($camera->source_password),
-            'browser_device_id' => $camera->browser_device_id,
-            'browser_label' => $camera->browser_label,
             'calibration_mask' => $camera->calibration_mask_json,
             'calibration_line' => $camera->calibration_line_json,
-            'last_connection_status' => $camera->last_connection_status ?: 'unknown',
-            'last_connection_message' => $camera->last_connection_message ?: 'Waiting for browser camera access.',
-            'last_connected_at' => $camera->last_connected_at?->toIso8601String(),
-            'last_connected_at_display' => DisplayTime::datetime($camera->last_connected_at, 'Not connected yet'),
             'status' => $camera->status,
         ];
     }

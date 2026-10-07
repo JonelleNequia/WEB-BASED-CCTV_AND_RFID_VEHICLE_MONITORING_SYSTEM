@@ -33,8 +33,6 @@ class Camera extends Model
         'test_webcam_index',
         'source_username',
         'source_password',
-        'browser_device_id',
-        'browser_label',
         'calibration_mask_json',
         'calibration_line_json',
         'last_connection_status',

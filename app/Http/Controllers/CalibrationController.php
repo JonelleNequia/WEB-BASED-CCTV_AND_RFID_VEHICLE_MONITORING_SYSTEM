@@ -4,8 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\SaveCalibrationRequest;
 use App\Services\CalibrationService;
+use App\Services\CameraStreams;
 use App\Services\DetectorRuntimeService;
 use App\Services\SettingsService;
+use App\Support\CameraFiles;
+use App\Support\DisplayTime;
+use App\Support\PipelineReport;
+use Illuminate\Support\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -35,8 +40,9 @@ class CalibrationController extends Controller
         }
 
         foreach (array_keys($cameras) as $role) {
+            // Calibration work: the same live stream as the kiosk and Gate Monitor.
             $cameras[$role]['stream_url'] = $detectorRuntimeService->streamUrlForRole($role, $detectorStatus, request()->getHost());
-            $cameras[$role]['detector_status'] = $detectorStatus['cameras'][$role] ?? [];
+            $cameras[$role] = [...$cameras[$role], ...$this->liveState($role, $detectorStatus)];
         }
 
         // UI Phase 2: Settings › Calibration tab.
@@ -72,15 +78,22 @@ class CalibrationController extends Controller
             request()->getHost()
         );
 
+        $gates = [];
+        foreach (\App\Models\Gate::codes() as $role) {
+            $gates[$role] = $this->liveState($role, $detectorStatus);
+        }
+
         return response()->json([
             'runtime' => $detectorStatus,
+            // Calibration work: Connected / Reconnecting / Offline and the last picture, per gate.
+            'gates' => $gates,
             'crossings' => $calibrationService->recentCrossings(),
             'generated_at' => now()->toIso8601String(),
         ]);
     }
 
     /**
-     * Save one camera's live calibration overlay and selected browser source.
+     * Save one camera's zone, trigger line and IN side.
      */
     public function update(
         SaveCalibrationRequest $request,
@@ -101,27 +114,24 @@ class CalibrationController extends Controller
     }
 
     /**
-     * Save the last known browser connection state from monitoring pages.
+     * Calibration work: the gate's connection (same detector status as
+     * System status) and the detector's last saved picture, which calibration
+     * shows while the camera is offline so the zone can still be drawn.
+     *
+     * @param  array<string, mixed>  $detectorStatus
+     * @return array{has_camera: bool, connection: array<string, string>, snapshot_url: ?string, snapshot_at: ?string}
      */
-    public function syncState(
-        Request $request,
-        CalibrationService $calibrationService,
-        SettingsService $settingsService
-    ): JsonResponse {
-        $validated = $request->validate([
-            'camera_id' => ['required', 'integer', 'exists:cameras,id'],
-            'browser_device_id' => ['nullable', 'string', 'max:255'],
-            'browser_label' => ['nullable', 'string', 'max:255'],
-            'last_connection_status' => ['required', 'in:connected,not_connected,denied,unavailable,error,unknown'],
-            'last_connection_message' => ['nullable', 'string', 'max:1000'],
-        ]);
+    protected function liveState(string $role, array $detectorStatus): array
+    {
+        $hasCamera = app(CameraStreams::class)->forGate($role)['source'] !== CameraStreams::SOURCE_NONE;
+        $frame = CameraFiles::framePath($role, 'latest');
+        $mtime = $hasCamera && is_file($frame) && filesize($frame) > 0 ? filemtime($frame) : false;
 
-        $camera = $calibrationService->syncBrowserState($validated);
-        $settingsService->exportCameraRuntimeConfig();
-
-        return response()->json([
-            'message' => $camera->camera_name.' browser state updated.',
-            'camera' => $calibrationService->cameraPayload()[$camera->camera_role],
-        ]);
+        return [
+            'has_camera' => $hasCamera,
+            'connection' => PipelineReport::connection($detectorStatus, $role, $hasCamera),
+            'snapshot_url' => $mtime ? route('camera.frame', [$role, 'latest'], false).'?t='.$mtime : null,
+            'snapshot_at' => $mtime ? DisplayTime::datetimeSeconds(Carbon::createFromTimestamp($mtime)) : null,
+        ];
     }
 }

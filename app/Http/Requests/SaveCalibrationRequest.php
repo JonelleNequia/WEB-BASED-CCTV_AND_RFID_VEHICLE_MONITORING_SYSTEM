@@ -23,10 +23,6 @@ class SaveCalibrationRequest extends FormRequest
     {
         return [
             'camera_id' => ['required', 'integer', 'exists:cameras,id'],
-            'browser_device_id' => ['nullable', 'string', 'max:255'],
-            'browser_label' => ['nullable', 'string', 'max:255'],
-            'last_connection_status' => ['nullable', 'in:connected,not_connected,denied,unavailable,error'],
-            'last_connection_message' => ['nullable', 'string', 'max:1000'],
             'calibration_mask' => ['nullable', 'array', 'min:3'],
             'calibration_mask.*.x' => ['required_with:calibration_mask', 'numeric', 'between:0,1'],
             'calibration_mask.*.y' => ['required_with:calibration_mask', 'numeric', 'between:0,1'],

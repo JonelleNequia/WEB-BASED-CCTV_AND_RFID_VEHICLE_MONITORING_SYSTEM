@@ -1,6 +1,6 @@
 
 
-    <p class="field-help">Pick a camera, click point by point to draw the detection zone, then draw the trigger line, then save. The detector logs a vehicle when it crosses the line inside the zone.</p>
+    <p class="field-help">On a gate's camera, click point by point to draw the detection zone, then draw the trigger line, then save. The detector logs a vehicle when it crosses the line inside the zone.</p>
     <p class="field-help">Each gate records IN and OUT. The <strong>IN</strong> arrow on the line shows the direction of a vehicle coming into campus; use <strong>Flip IN direction</strong> if it points the wrong way, then save. Check it below: drive through once and look at "Recent crossings".</p>
 
     {{-- Detector debug view: raw detections, zone/line as used, track IDs, counters. --}}
@@ -18,64 +18,72 @@
 
     <div class="camera-grid">
         @foreach ($cameras as $role => $camera)
-            <article class="camera-card camera-card-calibration" data-calibration-camera data-role="{{ $role }}">
+            @php($connection = $camera['connection'])
+            <article class="camera-card camera-card-calibration" data-calibration-camera data-role="{{ $role }}" data-has-camera="{{ $camera['has_camera'] ? '1' : '0' }}">
                 <div class="camera-card-head">
                     <div>
                         <h4>{{ $camera['role_label'] }}</h4>
                         <p>{{ $camera['camera_name'] }}</p>
                     </div>
-                    <span class="badge badge-secondary" data-status-badge>{{ ucfirst(str_replace('_', ' ', $camera['last_connection_status'])) }}</span>
+                    {{-- Calibration work: same detector status as System status. --}}
+                    <x-badge :tone="$connection['tone']" :label="$connection['label']" data-status-badge />
                 </div>
 
-                <div class="calibration-controls-panel">
-                    <div class="form-grid">
-                        <div class="field">
-                            <label for="{{ $role }}_stream_select">Calibration Stream</label>
-                            <select id="{{ $role }}_stream_select" data-device-select>
-                                <option value="{{ $camera['stream_url'] }}">{{ $camera['role_label'] }} MJPEG Stream</option>
-                            </select>
+                @if ($camera['has_camera'])
+                    <div class="calibration-controls-panel">
+                        <div class="button-row camera-toolbar">
+                            <button type="button" class="button button-secondary button-sm" data-tool="mask">Draw Polygon ROI</button>
+                            <button type="button" class="button button-secondary button-sm" data-tool="line">Draw Trigger Line</button>
+                            <button type="button" class="button button-secondary button-sm" data-flip-direction>Flip IN direction</button>
+                            <button type="button" class="button button-secondary button-sm" data-clear>Clear</button>
+                            <button type="button" class="button button-primary button-sm" data-save>Save Calibration</button>
                         </div>
                     </div>
-
-                    <div class="button-row camera-toolbar">
-                        <button type="button" class="button button-secondary button-sm" data-tool="mask">Draw Polygon ROI</button>
-                        <button type="button" class="button button-secondary button-sm" data-tool="line">Draw Trigger Line</button>
-                        <button type="button" class="button button-secondary button-sm" data-flip-direction>Flip IN direction</button>
-                        <button type="button" class="button button-secondary button-sm" data-clear>Clear</button>
-                        <button type="button" class="button button-primary button-sm" data-save>Save Calibration</button>
-                    </div>
-                </div>
+                @endif
 
                 <div class="camera-stage camera-stage-calibration">
-                    {{-- Live view work: the camera's main stream over WebRTC (go2rtc); the zone is drawn on the canvas above. --}}
-                    <x-live-video :gate="$role" :mjpeg="$camera['stream_url']" :overlay="false" page="calibration"
-                                  class="camera-video" data-video data-stream-url="{{ $camera['stream_url'] }}" :alt="$camera['role_label'].' calibration stream'" />
-                    <canvas class="camera-overlay" data-overlay></canvas>
-                    <div class="camera-fallback" data-fallback-wrapper>
-                        <div class="camera-fallback-copy">
-                            <span class="camera-fallback-kicker">Camera</span>
-                            <strong data-fallback>Not connected</strong>
-                            <p data-fallback-detail>Allow camera access to begin calibration.</p>
+                    @if ($camera['has_camera'])
+                        {{-- Calibration work: the gate's own camera, the same live stream as its kiosk and Gate Monitor (no browser camera). --}}
+                        <x-live-video :gate="$role" :mjpeg="$camera['stream_url']" :overlay="false" page="calibration"
+                                      class="camera-video" data-video :alt="$camera['role_label'].' live camera'" />
+                        {{-- The detector's last saved picture: shown while the camera is offline, so the zone can still be drawn. --}}
+                        <img class="camera-video camera-last-picture" data-last-picture alt="{{ $camera['role_label'] }} last picture"
+                             @if ($camera['snapshot_url']) src="{{ $camera['snapshot_url'] }}" @endif hidden>
+                        <canvas class="camera-overlay" data-overlay></canvas>
+                        <span class="calibration-picture-badge" data-picture-badge hidden></span>
+                        <div class="camera-fallback" data-fallback-wrapper>
+                            <div class="camera-fallback-copy">
+                                <span class="camera-fallback-kicker">Camera</span>
+                                <strong data-fallback>{{ $connection['label'] }}</strong>
+                                <p data-fallback-detail>{{ $connection['state'] === 'connected' ? 'Opening the live view…' : $connection['reason'] }}</p>
+                            </div>
                         </div>
-                    </div>
+                    @else
+                        <div class="camera-fallback" data-no-camera>
+                            <div class="camera-fallback-copy">
+                                <span class="camera-fallback-kicker">Camera</span>
+                                <strong>This gate has no camera yet.</strong>
+                                <p>Add the gate's camera first, then draw its zone and line here.</p>
+                                <a href="{{ route('settings.index', ['tab' => 'devices', 'gate' => $role, 'role' => 'camera']) }}" class="button button-primary button-sm" data-add-camera>+ Add camera</a>
+                                {{-- Testing: this PC's webcam until the CCTV is ready. --}}
+                                <form method="POST" action="{{ route('settings.gate.camera.webcam', $role) }}">
+                                    @csrf
+                                    <input type="hidden" name="enabled" value="1">
+                                    <button type="submit" class="link-button calibration-webcam-link">or use this PC's webcam for testing</button>
+                                </form>
+                            </div>
+                        </div>
+                    @endif
                 </div>
 
                 <div class="camera-detail-grid calibration-detail-grid">
                     <div>
-                        <span>Source</span>
-                        <strong data-source-value>{{ $camera['source_display'] }}</strong>
-                    </div>
-                    <div>
-                        <span>Stream URL</span>
-                        <strong data-browser-value>{{ $camera['stream_url'] }}</strong>
-                    </div>
-                    <div>
                         <span>Status</span>
-                        <strong data-status-value>{{ ucfirst(str_replace('_', ' ', $camera['last_connection_status'])) }}</strong>
+                        <strong data-status-value>{{ $connection['label'] }} · {{ $connection['reason'] }}</strong>
                     </div>
                     <div>
                         <span>Polygon ROI</span>
-                        <strong data-mask-value>{{ $camera['calibration_mask'] ? 'Mask saved' : 'No mask yet' }}</strong>
+                        <strong data-mask-value>{{ $camera['calibration_mask'] ? count($camera['calibration_mask']).'-point zone saved' : 'No zone yet' }}</strong>
                     </div>
                     <div>
                         <span>Trigger Line</span>
@@ -83,11 +91,11 @@
                     </div>
                     <div>
                         <span>IN direction</span>
-                        <strong data-direction-value>{{ $camera['calibration_line'] ? 'Arrow on the line' : 'Draw a line first' }}</strong>
+                        <strong data-direction-value>{{ $camera['calibration_line'] ? 'IN = the side the arrow points to' : 'Draw a line first' }}</strong>
                     </div>
                     <div>
                         <span>Message</span>
-                        <strong data-message-value>{{ $camera['last_connection_message'] }}</strong>
+                        <strong data-message-value>{{ $camera['has_camera'] ? 'Draw the zone, then the line, then save.' : 'Add a camera to calibrate this gate.' }}</strong>
                     </div>
                 </div>
 
@@ -113,13 +121,11 @@
         'cameras' => $cameras,
         'routes' => [
             'save' => route('calibration.update'),
-            'state' => route('camera-browser.state'),
             'heartbeat' => route('calibration.heartbeat'),
         ],
     ])
     <script id="camera-calibration-data" type="application/json">{!! json_encode($calibrationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 
 @push('scripts')
-    <script src="{{ asset('js/browser-camera-common.js') }}"></script>
     <script src="{{ asset('js/calibration-page.js') }}"></script>
 @endpush

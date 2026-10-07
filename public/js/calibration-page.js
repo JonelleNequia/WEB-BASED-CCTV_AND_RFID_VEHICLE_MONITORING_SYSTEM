@@ -1,67 +1,129 @@
+/*
+ * Settings › Calibration. Calibration work: each gate is drawn on its own
+ * camera, the same live stream as its kiosk and Gate Monitor (live-video.js);
+ * this page never asks for the browser's camera. The status comes from the
+ * detector (as on System status). While the camera is offline the detector's
+ * last picture is shown, so the zone and line can still be drawn.
+ */
 (function () {
-    const cameraApi = window.PHILCSTBrowserCamera;
     const payloadNode = document.getElementById('camera-calibration-data');
     const HEARTBEAT_INTERVAL_MS = 4000;
-    const STREAM_RECONNECT_INTERVAL_MS = 5000;
+    const LIVE_RECONNECT_INTERVAL_MS = 5000;
 
-    if (!cameraApi || !payloadNode) {
+    if (!payloadNode) {
         return;
     }
 
     const payload = JSON.parse(payloadNode.textContent);
-    const cardElements = document.querySelectorAll('[data-calibration-camera]');
     const cards = {};
-    const lastStreamReconnectAt = {};
+
+    function csrfToken() {
+        return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    }
+
+    async function putJson(url, body) {
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+            body: JSON.stringify(body),
+        });
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+            throw new Error(result.message || 'Request failed.');
+        }
+
+        return result;
+    }
+
+    function clampRatio(value) {
+        return Number.isNaN(value) ? 0 : Math.min(Math.max(value, 0), 1);
+    }
+
+    /* Saved points are normalized (0-1) to the camera picture, as the detector uses them. */
+    function normalisePolygon(points, width, height) {
+        if (!Array.isArray(points) || points.length < 3 || width <= 0 || height <= 0) {
+            return null;
+        }
+
+        return points.map((point) => ({ x: clampRatio(point.x / width), y: clampRatio(point.y / height) }));
+    }
+
+    function denormalisePolygon(points, width, height) {
+        return Array.isArray(points) ? points.map((point) => ({ x: point.x * width, y: point.y * height })) : null;
+    }
+
+    function normaliseLine(line, width, height) {
+        if (!line || width <= 0 || height <= 0) {
+            return null;
+        }
+
+        return {
+            x1: clampRatio(line.x1 / width),
+            y1: clampRatio(line.y1 / height),
+            x2: clampRatio(line.x2 / width),
+            y2: clampRatio(line.y2 / height),
+        };
+    }
+
+    function denormaliseLine(line, width, height) {
+        return line ? { x1: line.x1 * width, y1: line.y1 * height, x2: line.x2 * width, y2: line.y2 * height } : null;
+    }
 
     class CalibrationCard {
         constructor(element, camera, routes) {
             this.element = element;
             this.camera = camera;
             this.routes = routes;
+            this.stage = element.querySelector('.camera-stage');
             this.video = element.querySelector('[data-video]');
+            this.lastPicture = element.querySelector('[data-last-picture]');
+            this.pictureBadge = element.querySelector('[data-picture-badge]');
             this.canvas = element.querySelector('[data-overlay]');
-            this.fallbackContainer = element.querySelector('.camera-fallback');
+            this.fallbackContainer = element.querySelector('[data-fallback-wrapper]');
             this.fallback = element.querySelector('[data-fallback]');
             this.fallbackDetail = element.querySelector('[data-fallback-detail]');
-            this.deviceSelect = element.querySelector('[data-device-select]');
             this.statusBadge = element.querySelector('[data-status-badge]');
             this.statusValue = element.querySelector('[data-status-value]');
-            this.sourceValue = element.querySelector('[data-source-value]');
-            this.browserValue = element.querySelector('[data-browser-value]');
             this.messageValue = element.querySelector('[data-message-value]');
             this.maskValue = element.querySelector('[data-mask-value]');
             this.lineValue = element.querySelector('[data-line-value]');
             this.directionValue = element.querySelector('[data-direction-value]');
             this.crossingList = element.querySelector('[data-crossings]');
             this.saveButton = element.querySelector('[data-save]');
-            this.ctx = this.canvas.getContext('2d');
-            this.streamUrl = camera.stream_url || this.video?.dataset.streamUrl || "";
-            this.selectedDevice = null;
-            this.availableDevices = [];
+            this.ctx = this.canvas?.getContext('2d');
+            this.connection = camera.connection || { state: 'offline', label: 'Offline', reason: '', tone: 'critical' };
+            this.snapshotUrl = camera.snapshot_url || null;
+            this.snapshotAt = camera.snapshot_at || null;
+            this.liveReady = false;
+            this.shown = null;
+            this.lastReconnectAt = 0;
             this.currentTool = 'mask';
             this.pointerStart = null;
             this.pointerId = null;
             this.draftShape = null;
+            // The saved zone and line, drawn as soon as there is a picture.
             this.maskShape = camera.calibration_mask || null;
             this.maskDraftPoints = [];
             this.lineShape = camera.calibration_line || null;
 
+            if (!this.canvas) {
+                return; // No camera at this gate: only the "Add camera" message.
+            }
+
             this.bindEvents();
             this.updateCalibrationSummary();
             this.setActiveTool('mask');
-            this.render();
+            this.applyConnection(this.connection);
         }
 
         bindEvents() {
-            this.deviceSelect?.addEventListener('change', async () => {
-                this.streamUrl = this.deviceSelect.value || this.streamUrl;
-                await this.connectStream();
-            });
-
             this.element.querySelectorAll('[data-tool]').forEach((button) => {
-                button.addEventListener('click', () => {
-                    this.setActiveTool(button.dataset.tool);
-                });
+                button.addEventListener('click', () => this.setActiveTool(button.dataset.tool));
             });
 
             this.element.querySelector('[data-clear]').addEventListener('click', () => {
@@ -74,7 +136,7 @@
             });
 
             // Phase 2: which side of the line is IN (the arrow on the canvas).
-            this.element.querySelector('[data-flip-direction]')?.addEventListener('click', () => {
+            this.element.querySelector('[data-flip-direction]').addEventListener('click', () => {
                 if (!this.lineShape) {
                     this.messageValue.textContent = 'Draw the trigger line first.';
                     return;
@@ -86,9 +148,7 @@
                 this.render();
             });
 
-            this.saveButton.addEventListener('click', async () => {
-                await this.saveCalibration();
-            });
+            this.saveButton.addEventListener('click', () => this.saveCalibration());
 
             this.canvas.addEventListener('pointerdown', (event) => this.handlePointerDown(event));
             this.canvas.addEventListener('pointermove', (event) => this.handlePointerMove(event));
@@ -96,169 +156,127 @@
             this.canvas.addEventListener('dblclick', (event) => event.preventDefault());
             this.canvas.addEventListener('pointercancel', () => this.cancelDraft());
             this.canvas.addEventListener('pointerleave', () => this.cancelDraft());
-            // Live view work: this.video is the live player (live-video.js); it
-            // says when its picture is ready, which mode it uses, or that it failed.
-            this.video.addEventListener('live:mode', () => {
-                this.resizeCanvas();
-                this.render();
-            });
+
+            // The live player says when its picture is ready, which mode it uses, or that it failed.
+            this.video.addEventListener('live:mode', () => this.refresh());
             this.video.addEventListener('live:ready', () => {
-                this.resizeCanvas();
-                this.hideFallback();
-                const mode = this.video.dataset.mode;
-                this.updateConnection('connected', 'Connected', mode === 'mjpeg' ? 'Basic live view (detector stream).' : 'Full-quality live view (camera main stream).');
-                this.syncState();
-                this.render();
+                this.liveReady = true;
+                this.showPicture();
             });
             this.video.addEventListener('live:error', () => {
-                // Say why, from the detector status, instead of a generic message.
-                const problem = this.streamProblem();
-                this.showFallback(problem.title, problem.detail);
-                this.updateConnection('unavailable', 'Not connected', problem.detail);
-                this.syncState();
+                this.liveReady = false;
+                this.showPicture();
             });
+            this.lastPicture?.addEventListener('load', () => this.refresh());
 
-            window.addEventListener('resize', () => {
-                this.resizeCanvas();
-                this.render();
-            });
+            window.addEventListener('resize', () => this.refresh());
         }
 
-        streamProblem() {
-            const detector = this.detectorState || {};
-            const camera = detector.camera || this.camera.detector_status || {};
+        /*
+         * Connected / Reconnecting / Offline from the detector (heartbeat);
+         * the live view is opened again when the camera comes back.
+         */
+        applyConnection(connection) {
+            const wasConnected = this.connection.state === 'connected';
+            this.connection = connection;
 
-            if (detector.running === false || (!detector.running && !camera.camera_running && !camera.last_capture_time)) {
-                return {
-                    title: 'Detector not running',
-                    detail: detector.message || 'The vehicle detector is starting. This view connects by itself when it is ready.',
-                };
+            this.statusBadge.textContent = connection.label;
+            this.statusBadge.className = `badge badge-tone-${connection.tone || 'neutral'}`;
+            this.statusValue.textContent = `${connection.label} · ${connection.reason}`;
+
+            if (connection.state === 'connected' && (!wasConnected || !this.liveReady)) {
+                const now = Date.now();
+                if (now - this.lastReconnectAt >= LIVE_RECONNECT_INTERVAL_MS) {
+                    this.lastReconnectAt = now;
+                    this.video.liveVideo?.reconnect();
+                }
             }
-            if (camera.last_error && !camera.camera_running) {
-                return { title: 'Camera not connected', detail: camera.last_error };
-            }
-            return { title: 'Stream unavailable', detail: 'The live view could not be loaded. Retrying…' };
+
+            this.showPicture();
         }
 
-        setAvailableDevices(devices, preferredDevice) {
-            this.availableDevices = devices;
-            this.deviceSelect.innerHTML = '';
-            this.deviceSelect.disabled = devices.length === 0;
-
-            const emptyOption = document.createElement('option');
-            emptyOption.value = '';
-            emptyOption.textContent = devices.length ? 'Select a camera source' : 'No camera source detected';
-            this.deviceSelect.appendChild(emptyOption);
-
-            devices.forEach((device, index) => {
-                const option = document.createElement('option');
-                option.value = device.deviceId;
-                option.textContent = device.label || `Camera ${index + 1}`;
-                this.deviceSelect.appendChild(option);
-            });
-
-            this.deviceSelect.value = preferredDevice?.deviceId || this.selectedDevice?.deviceId || '';
+        applySnapshot(url, at) {
+            this.snapshotUrl = url || null;
+            this.snapshotAt = at || null;
         }
 
-        async connectDevice(device) {
-            this.selectedDevice = device;
+        /* Live video when the camera is connected, else its last picture, else the reason. */
+        showPicture() {
+            const live = this.connection.state === 'connected' && this.liveReady;
+            const still = !live && !!this.snapshotUrl;
 
-            if (!device) {
-                this.deviceSelect.value = '';
-                this.showFallback('Not connected', 'Select or reconnect a browser camera source to continue calibration.');
-                this.updateConnection('not_connected', 'Not connected', 'No camera source selected.');
-                await this.syncState();
-                return;
+            this.video.classList.toggle('is-hidden', !live);
+            if (this.lastPicture) {
+                this.lastPicture.hidden = !still;
             }
+            this.fallbackContainer.classList.toggle('is-hidden', live || still);
+            this.canvas.classList.toggle('is-hidden', !(live || still));
 
-            try {
-                await cameraApi.attachDevice(this.video, device.deviceId);
-                this.resizeCanvas();
-                this.hideFallback();
-                this.updateConnection('connected', 'Connected', 'Browser preview connected.');
-                await this.syncState();
-            } catch (error) {
-                const errorState = cameraApi.mediaErrorState(error, 'Unable to open the selected camera.');
-                this.showFallback('Not connected', errorState.message);
-                this.updateConnection(errorState.status, errorState.label, errorState.message);
-                await this.syncState();
+            if (still) {
+                // Loaded only when shown (not every heartbeat behind the live video).
+                if (this.lastPicture.getAttribute('src') !== this.snapshotUrl) {
+                    this.lastPicture.src = this.snapshotUrl;
+                }
+                const time = this.snapshotAt ? ` (${this.snapshotAt})` : '';
+                const waiting = this.connection.state === 'connected';
+                this.pictureBadge.textContent = waiting
+                    ? `Last picture${time} · opening the live view…`
+                    : `${this.connection.label}: last picture${time}`;
+                this.pictureBadge.classList.toggle('is-waiting', waiting || this.connection.state === 'reconnecting');
+            } else if (!live) {
+                this.fallback.textContent = this.connection.label;
+                this.fallbackDetail.textContent = this.connection.state === 'connected'
+                    ? 'Opening the live view…'
+                    : this.connection.reason;
             }
+            this.pictureBadge.hidden = !still;
+
+            this.shown = live ? 'live' : (still ? 'still' : null);
+            this.refresh();
         }
 
-        async connectStream() {
-            if (!this.video || !this.streamUrl) {
-                this.showFallback('Stream unavailable', 'No detector stream URL is configured for this camera.');
-                this.updateConnection('unavailable', 'Not connected', 'No detector stream URL is configured.');
-                await this.syncState();
-                return;
-            }
-
-            this.video.liveVideo?.reconnect();
+        refresh() {
             this.resizeCanvas();
-            this.updateConnection('not_connected', 'Connecting', 'Opening the live view…');
             this.render();
-        }
-
-        updateConnection(status, label, message) {
-            this.connectionStatus = status;
-            this.statusValue.textContent = label;
-            this.messageValue.textContent = message;
-            this.sourceValue.textContent = this.camera.source_display || this.camera.source_type;
-            this.browserValue.textContent = this.streamUrl || this.camera.browser_label || 'No detector stream URL';
-            this.statusBadge.textContent = label;
-            this.statusBadge.className = `badge ${
-                status === 'connected'
-                    ? 'badge-matched'
-                    : (status === 'denied' || status === 'unavailable' ? 'badge-manual-review' : 'badge-unmatched')
-            }`;
-        }
-
-        showFallback(message, detailMessage = null) {
-            cameraApi.stopVideo(this.video);
-            this.video.classList.add('is-hidden');
-            this.fallback.textContent = message;
-            if (this.fallbackDetail) {
-                this.fallbackDetail.textContent = detailMessage || 'Allow browser camera access or reconnect this device to continue calibration.';
-            }
-            this.fallbackContainer?.classList.remove('is-hidden');
-        }
-
-        hideFallback() {
-            this.video.classList.remove('is-hidden');
-            this.fallbackContainer?.classList.add('is-hidden');
         }
 
         setActiveTool(tool) {
             this.currentTool = tool;
-
             this.element.querySelectorAll('[data-tool]').forEach((button) => {
                 button.classList.toggle('is-active', button.dataset.tool === tool);
             });
         }
 
         resizeCanvas() {
-            const width = this.video.clientWidth || this.element.querySelector('.camera-stage').clientWidth;
-            const height = this.video.clientHeight || this.element.querySelector('.camera-stage').clientHeight;
+            const width = this.stage.clientWidth;
+            const height = this.stage.clientHeight;
 
-            if (!width || !height) {
-                return;
+            if (width && height && (this.canvas.width !== width || this.canvas.height !== height)) {
+                this.canvas.width = width;
+                this.canvas.height = height;
+            }
+        }
+
+        /* The element showing the picture right now: the live video, or the last picture. */
+        pictureElement() {
+            if (this.shown === 'still') {
+                return this.lastPicture;
             }
 
-            this.canvas.width = width;
-            this.canvas.height = height;
+            return this.video.liveVideo?.activeElement() || this.video;
         }
 
         /*
-         * Where the camera image really is inside the canvas. The stream is
-         * shown with object-fit (cover crops, contain letterboxes), so a
-         * stream whose shape differs from the 16:9 box is not the whole
+         * Where the camera image really is inside the canvas. The picture is
+         * shown with object-fit (contain letterboxes, cover crops), so a
+         * picture whose shape differs from the 16:9 box is not the whole
          * canvas. Saved points are normalized (0-1) to the IMAGE, the same
          * frame the detector scales them to.
          */
         contentRect() {
             const width = this.canvas.width;
             const height = this.canvas.height;
-            const media = this.video.liveVideo?.activeElement() || this.video;
+            const media = this.pictureElement();
             const naturalWidth = media.naturalWidth || media.videoWidth || 0;
             const naturalHeight = media.naturalHeight || media.videoHeight || 0;
             const fit = window.getComputedStyle(media).objectFit;
@@ -267,9 +285,9 @@
                 return { x: 0, y: 0, width: width, height: height };
             }
 
-            const scale = fit === 'contain'
-                ? Math.min(width / naturalWidth, height / naturalHeight)
-                : Math.max(width / naturalWidth, height / naturalHeight);
+            const scale = fit === 'cover'
+                ? Math.max(width / naturalWidth, height / naturalHeight)
+                : Math.min(width / naturalWidth, height / naturalHeight);
             const shownWidth = naturalWidth * scale;
             const shownHeight = naturalHeight * scale;
 
@@ -280,12 +298,12 @@
             const rect = this.contentRect();
             const shifted = (points || []).map((point) => ({ x: point.x - rect.x, y: point.y - rect.y }));
 
-            return cameraApi.normalisePolygon(shifted, rect.width, rect.height);
+            return normalisePolygon(shifted, rect.width, rect.height);
         }
 
         toCanvasPolygon(shape) {
             const rect = this.contentRect();
-            const points = cameraApi.denormalisePolygon(shape, rect.width, rect.height);
+            const points = denormalisePolygon(shape, rect.width, rect.height);
 
             return points ? points.map((point) => ({ x: point.x + rect.x, y: point.y + rect.y })) : null;
         }
@@ -293,14 +311,14 @@
         toImageLine(line) {
             const rect = this.contentRect();
 
-            return line ? cameraApi.normaliseLine({
+            return line ? normaliseLine({
                 x1: line.x1 - rect.x, y1: line.y1 - rect.y, x2: line.x2 - rect.x, y2: line.y2 - rect.y,
             }, rect.width, rect.height) : null;
         }
 
         toCanvasLine(line) {
             const rect = this.contentRect();
-            const scaled = cameraApi.denormaliseLine(line, rect.width, rect.height);
+            const scaled = denormaliseLine(line, rect.width, rect.height);
 
             return scaled ? {
                 x1: scaled.x1 + rect.x, y1: scaled.y1 + rect.y, x2: scaled.x2 + rect.x, y2: scaled.y2 + rect.y,
@@ -310,14 +328,12 @@
         getCanvasPoint(event) {
             const bounds = this.canvas.getBoundingClientRect();
 
-            return {
-                x: event.clientX - bounds.left,
-                y: event.clientY - bounds.top,
-            };
+            return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
         }
 
         handlePointerDown(event) {
-            if (this.connectionStatus !== 'connected') {
+            // Draw on the live video or on the last picture, never on nothing.
+            if (!this.shown) {
                 return;
             }
 
@@ -344,12 +360,7 @@
             if (this.currentTool === 'line') {
                 this.draftShape = {
                     type: 'line',
-                    value: {
-                        x1: this.pointerStart.x,
-                        y1: this.pointerStart.y,
-                        x2: currentPoint.x,
-                        y2: currentPoint.y,
-                    },
+                    value: { x1: this.pointerStart.x, y1: this.pointerStart.y, x2: currentPoint.x, y2: currentPoint.y },
                 };
             }
 
@@ -382,9 +393,7 @@
 
             points.push(point);
             this.maskDraftPoints = points;
-            this.maskShape = points.length >= 3
-                ? this.toImagePolygon(points)
-                : null;
+            this.maskShape = points.length >= 3 ? this.toImagePolygon(points) : null;
             this.updateCalibrationSummary();
             this.render();
         }
@@ -397,19 +406,11 @@
         }
 
         updateCalibrationSummary() {
-            const pointCount = Array.isArray(this.maskShape)
-                ? this.maskShape.length
-                : this.maskDraftPoints.length;
+            const pointCount = Array.isArray(this.maskShape) ? this.maskShape.length : this.maskDraftPoints.length;
 
-            this.maskValue.textContent = pointCount >= 3
-                ? `${pointCount}-point polygon saved or drawn`
-                : 'No polygon yet';
-            this.lineValue.textContent = this.lineShape ? 'Line saved or drawn' : 'No line yet';
-            if (this.directionValue) {
-                this.directionValue.textContent = this.lineShape
-                    ? 'IN = the side the arrow points to'
-                    : 'Draw a line first';
-            }
+            this.maskValue.textContent = pointCount >= 3 ? `${pointCount}-point zone` : 'No zone yet';
+            this.lineValue.textContent = this.lineShape ? 'Line drawn' : 'No line yet';
+            this.directionValue.textContent = this.lineShape ? 'IN = the side the arrow points to' : 'Draw a line first';
         }
 
         inSide() {
@@ -450,17 +451,8 @@
         }
 
         async saveCalibration() {
-            if (this.maskShape && !Array.isArray(this.maskShape)) {
-                this.maskShape = this.toImagePolygon(this.toCanvasPolygon(this.maskShape));
-            }
-
-            if (!this.maskShape && this.maskDraftPoints.length > 0) {
-                this.messageValue.textContent = 'Add at least 3 ROI points before saving.';
-                return;
-            }
-
-            if (this.maskShape && (!Array.isArray(this.maskShape) || this.maskShape.length < 3)) {
-                this.messageValue.textContent = 'Add at least 3 ROI points before saving.';
+            if (this.maskDraftPoints.length > 0 && !this.maskShape) {
+                this.messageValue.textContent = 'Add at least 3 zone points before saving.';
                 return;
             }
 
@@ -468,12 +460,8 @@
             this.saveButton.textContent = 'Saving...';
 
             try {
-                const response = await cameraApi.putJson(this.routes.save, {
+                const response = await putJson(this.routes.save, {
                     camera_id: this.camera.id,
-                    browser_device_id: this.camera.browser_device_id,
-                    browser_label: this.streamUrl,
-                    last_connection_status: this.connectionStatus || 'unknown',
-                    last_connection_message: this.messageValue.textContent,
                     calibration_mask: this.maskShape,
                     calibration_line: this.lineShape,
                 });
@@ -488,35 +476,15 @@
             }
         }
 
-        async syncState() {
-            try {
-                const response = await cameraApi.putJson(this.routes.state, {
-                    camera_id: this.camera.id,
-                    browser_device_id: this.camera.browser_device_id,
-                    browser_label: this.streamUrl,
-                    last_connection_status: this.connectionStatus || 'unknown',
-                    last_connection_message: this.messageValue.textContent,
-                });
-
-                this.applyServerCamera(response.camera);
-            } catch (error) {
-                this.messageValue.textContent = error.message || this.messageValue.textContent;
-            }
-        }
-
         applyServerCamera(camera) {
             if (!camera) {
                 return;
             }
 
-            this.camera = camera;
-            payload.cameras[this.camera.camera_role] = camera;
+            this.camera = { ...this.camera, ...camera };
             this.maskShape = camera.calibration_mask || null;
             this.maskDraftPoints = [];
             this.lineShape = camera.calibration_line || null;
-            this.streamUrl = camera.stream_url || this.streamUrl;
-            this.sourceValue.textContent = camera.source_display || camera.source_type;
-            this.browserValue.textContent = this.streamUrl;
             this.updateCalibrationSummary();
             this.render();
         }
@@ -531,10 +499,7 @@
             this.ctx.lineWidth = 3;
             this.ctx.beginPath();
             this.ctx.moveTo(points[0].x, points[0].y);
-
-            points.slice(1).forEach((point) => {
-                this.ctx.lineTo(point.x, point.y);
-            });
+            points.slice(1).forEach((point) => this.ctx.lineTo(point.x, point.y));
 
             if (points.length >= 3) {
                 this.ctx.closePath();
@@ -607,6 +572,10 @@
         }
 
         render() {
+            if (!this.ctx) {
+                return;
+            }
+
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
             const savedMask = this.toCanvasPolygon(this.maskShape);
@@ -629,116 +598,49 @@
         }
     }
 
-    cardElements.forEach((element) => {
+    document.querySelectorAll('[data-calibration-camera]').forEach((element) => {
         const role = element.dataset.role;
         cards[role] = new CalibrationCard(element, payload.cameras[role], payload.routes);
     });
 
-    async function refreshDevices() {
-        try {
-            const devices = await cameraApi.listVideoInputs();
-            const assignments = cameraApi.chooseDevices(payload.cameras, devices);
-
-            for (const role of Object.keys(cards)) {
-                const card = cards[role];
-                const activeDeviceId = card.selectedDevice?.deviceId;
-                const existingDevice = devices.find((device) => device.deviceId === activeDeviceId) || null;
-                const preferredDevice = existingDevice || assignments[role] || null;
-
-                card.setAvailableDevices(devices, preferredDevice);
-                if (!existingDevice || card.connectionStatus !== 'connected') {
-                    await card.connectDevice(preferredDevice);
-                }
-            }
-        } catch (error) {
-                const errorState = cameraApi.mediaErrorState(error, 'Unable to refresh browser cameras.');
-
-            for (const card of Object.values(cards)) {
-                card.setAvailableDevices([], null);
-                card.showFallback('Not connected', errorState.message);
-                card.updateConnection(errorState.status, errorState.label, errorState.message);
-                await card.syncState();
-            }
-        }
-    }
-
-    async function boot() {
-        try {
-            for (const card of Object.values(cards)) {
-                await card.connectStream();
-            }
-
-            window.setInterval(() => {
-                for (const card of Object.values(cards)) {
-                    card.resizeCanvas();
-                    card.render();
-                }
-            }, 2000);
-
-            await sendCalibrationHeartbeat();
-            window.setInterval(sendCalibrationHeartbeat, HEARTBEAT_INTERVAL_MS);
-        } catch (error) {
-            const errorState = cameraApi.mediaErrorState(error, 'Unable to access detector streams.');
-
-            for (const card of Object.values(cards)) {
-                card.showFallback('Not connected', errorState.message);
-                card.updateConnection(errorState.status, errorState.label, errorState.message);
-                await card.syncState();
-            }
-        }
-    }
-
+    /* Status, last picture and recent crossings from the detector, every few seconds. */
     async function sendCalibrationHeartbeat() {
-        if (!payload.routes.heartbeat) {
-            return;
-        }
-
         try {
             const response = await fetch(payload.routes.heartbeat, {
-                headers: {
-                    'Accept': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                },
+                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
             });
 
             if (!response.ok) {
                 return;
             }
 
-            const body = await response.json().catch(function () {
-                return {};
-            });
-            const cameras = body.runtime?.cameras || {};
+            const body = await response.json().catch(() => ({}));
 
             for (const [role, crossings] of Object.entries(body.crossings || {})) {
                 cards[role]?.renderCrossings(crossings);
             }
 
-            for (const [role, cameraStatus] of Object.entries(cameras)) {
-                if (cards[role]) {
-                    cards[role].detectorState = {
-                        running: !!body.runtime?.service_running,
-                        message: body.runtime?.service_message,
-                        camera: cameraStatus,
-                    };
+            for (const [role, gate] of Object.entries(body.gates || {})) {
+                const card = cards[role];
+                if (!card) {
+                    continue;
                 }
-                if (cards[role] && cameraStatus.stream_url) {
-                    cards[role].streamUrl = cameraStatus.stream_url;
-
-                    if (cards[role].connectionStatus !== 'connected') {
-                        const now = Date.now();
-
-                        if (!lastStreamReconnectAt[role] || now - lastStreamReconnectAt[role] >= STREAM_RECONNECT_INTERVAL_MS) {
-                            lastStreamReconnectAt[role] = now;
-                            await cards[role].connectStream();
-                        }
-                    }
+                // A camera was added or removed in another tab: show the new setup.
+                if (gate.has_camera !== (card.element.dataset.hasCamera === '1')) {
+                    window.location.reload();
+                    return;
+                }
+                if (card.canvas) {
+                    card.applySnapshot(gate.snapshot_url, gate.snapshot_at);
+                    card.applyConnection(gate.connection);
                 }
             }
         } catch (error) {
-            return;
+            // Next heartbeat tries again.
         }
     }
 
-    boot();
+    window.setInterval(() => Object.values(cards).forEach((card) => card.canvas && card.refresh()), 2000);
+    sendCalibrationHeartbeat();
+    window.setInterval(sendCalibrationHeartbeat, HEARTBEAT_INTERVAL_MS);
 })();

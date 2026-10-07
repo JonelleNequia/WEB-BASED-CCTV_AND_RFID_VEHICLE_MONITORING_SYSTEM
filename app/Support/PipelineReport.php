@@ -146,6 +146,48 @@ final class PipelineReport
         return $gates;
     }
 
+    /** A camera that stopped this recently is "Reconnecting", after that "Offline". */
+    public const RECONNECTING_SECONDS = 60;
+
+    /**
+     * Calibration work: one connection state per gate, from the same detector
+     * status as System status: Connected, Reconnecting or Offline (with the
+     * reason), or no camera at the gate.
+     *
+     * @param  array<string, mixed>  $status  DetectorRuntimeService::readStatus()
+     * @param  bool|null  $hasCamera  whether the gate has a camera in Settings (null: trust the status)
+     * @return array{state: string, label: string, reason: string, tone: string}
+     */
+    public static function connection(array $status, string $gate, ?bool $hasCamera = null): array
+    {
+        $camera = (array) ($status['cameras'][$gate] ?? []);
+        $detection = DetectionStatus::forGate($status, $gate);
+        $reported = ($camera['error_code'] ?? null) === 'no_camera' || $detection['code'] === 'no_camera';
+
+        if ($hasCamera === false || ($hasCamera === null && $reported)) {
+            return ['state' => 'no_camera', 'label' => 'No camera', 'reason' => 'This gate has no camera yet.', 'tone' => 'neutral'];
+        }
+        if (! ($status['service_running'] ?? false)) {
+            return ['state' => 'offline', 'label' => 'Offline', 'reason' => 'The detector is not running.', 'tone' => 'critical'];
+        }
+        if ($reported) {
+            // Just added in Settings; the detector loads it within a few seconds.
+            return ['state' => 'reconnecting', 'label' => 'Reconnecting', 'reason' => 'The detector is loading this camera.', 'tone' => 'warning'];
+        }
+        if ($camera['camera_running'] ?? false) {
+            return ['state' => 'connected', 'label' => 'Connected', 'reason' => 'Live picture from the camera.', 'tone' => 'success'];
+        }
+
+        $reason = self::short((string) ($camera['last_error'] ?? '')) ?: 'The camera is not connected.';
+        $since = $camera['offline_since'] ?? null;
+        $recent = $since === null || (\Illuminate\Support\Carbon::parse($since)->diffInSeconds(now(), false) <= self::RECONNECTING_SECONDS);
+        if (in_array($detection['code'], ['connecting', 'model_loading'], true) || $recent) {
+            return ['state' => 'reconnecting', 'label' => 'Reconnecting', 'reason' => $reason, 'tone' => 'warning'];
+        }
+
+        return ['state' => 'offline', 'label' => 'Offline', 'reason' => $reason, 'tone' => 'critical'];
+    }
+
     public static function firstSentence(string $text): string
     {
         return self::short($text);

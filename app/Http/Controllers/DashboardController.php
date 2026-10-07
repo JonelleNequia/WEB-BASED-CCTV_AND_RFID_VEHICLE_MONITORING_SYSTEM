@@ -108,7 +108,11 @@ class DashboardController extends Controller
     {
         $rfidStats = $rfidService->stats();
         $cameraStatuses = collect($calibrationService->cameraPayload());
-        $connectedCameras = $cameraStatuses->where('last_connection_status', 'connected')->count();
+        // Calibration work: "connected" comes from the detector, as on System status.
+        $detectorStatus = app(\App\Services\DetectorRuntimeService::class)->readStatus();
+        $connectedCameras = $cameraStatuses->keys()
+            ->filter(fn (string $role): bool => \App\Support\PipelineReport::connection($detectorStatus, $role)['state'] === 'connected')
+            ->count();
         // Phase 7 (visitor model): one source for every IN / OUT number.
         $movementCounts = app(MovementCountService::class)->allPeriods();
         $trafficSummary = $this->trafficSummary($movementCounts);
