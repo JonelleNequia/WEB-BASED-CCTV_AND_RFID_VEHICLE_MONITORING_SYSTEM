@@ -12,6 +12,8 @@ on:
     paths:
       - 'build/windows/**'
       - 'deploy/windows/**'
+      - 'app/**'
+      - 'database/**'
       - 'school-vehicle-monitoring-detector/requirements-windows.txt'
       - '.github/workflows/windows-kit.yml'
 
@@ -55,3 +57,10 @@ jobs:
             build/windows/dist/*.sha256
           retention-days: 7
           compression-level: 0
+
+      # The real installer on this clean Windows: install, sign in, install
+      # again, uninstall (after the upload, so a failing check still leaves
+      # the installer to download).
+      - name: Install, sign in, reinstall, uninstall
+        shell: pwsh
+        run: ./build/windows/ci/install-check.ps1 -Setup (Get-ChildItem build/windows/dist/PHILCST-VMS-Setup-*.exe | Select-Object -First 1).FullName
