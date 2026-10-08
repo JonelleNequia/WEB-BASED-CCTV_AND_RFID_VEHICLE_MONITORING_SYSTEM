@@ -53,6 +53,8 @@ Name: "renamepc"; Description: "Rename this computer to PHILCST-VMS, to open it 
 Name: "desktopicon"; Description: "Desktop shortcut to open the system"
 
 [Files]
+; Run before copying (PrepareToInstall), never installed.
+Source: "stop-old.ps1"; Flags: dontcopy
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -114,10 +116,15 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
 begin
-  { Installing over an earlier version: stop its services so their files can be replaced. }
-  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    '-NoProfile -ExecutionPolicy Bypass -Command "Get-Service -Name ''PHILCST-*'' -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue"',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  { Installing over an earlier version: stop its services, pause its tasks and
+    end its programs (each wait is limited), so its files can be replaced. }
+  if DirExists(ExpandConstant('{app}\runtime')) then
+  begin
+    ExtractTemporaryFile('stop-old.ps1');
+    Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\stop-old.ps1') + '" -Root "' + ExpandConstant('{app}') + '"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
   Result := '';
 end;
 

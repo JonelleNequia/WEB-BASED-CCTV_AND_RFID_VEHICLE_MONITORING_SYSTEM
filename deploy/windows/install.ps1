@@ -68,7 +68,10 @@ function Install-VmsService {
     $existing = Get-Service -Name $Service.Name -ErrorAction SilentlyContinue
     if ($existing) {
         # An earlier install: stop it (if running) and install it again.
-        if ($existing.Status -ne 'Stopped') { Stop-Service -Name $Service.Name -Force -ErrorAction SilentlyContinue }
+        if ($existing.Status -ne 'Stopped') {
+            try { $existing.Stop() } catch { }
+            Wait-VmsServiceStatus -Name $Service.Name -Status 'Stopped' | Out-Null
+        }
         Invoke-VmsNative -Exe $nssm -Arguments @('remove', $Service.Name, 'confirm') -Quiet | Out-Null
         # Windows deletes a service only when nothing has it open (e.g. the Services window).
         for ($i = 0; $i -lt 20 -and (Get-Service -Name $Service.Name -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }

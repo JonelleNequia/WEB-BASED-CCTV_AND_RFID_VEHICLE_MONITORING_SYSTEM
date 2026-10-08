@@ -19,7 +19,18 @@ function Show-InstallLog {
 
 function Install-Once([int]$Round) {
     Write-Host "===== install, round $Round"
-    $process = Start-Process -FilePath $Setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$Dir", '/TASKS=', "/LOG=$env:RUNNER_TEMP\setup-$Round.log" -Wait -PassThru
+    $process = Start-Process -FilePath $Setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$Dir", '/TASKS=', "/LOG=$env:RUNNER_TEMP\setup-$Round.log" -PassThru
+    # Never wait without a limit: a hang shows what was running and where the install stopped.
+    if (-not $process.WaitForExit(15 * 60 * 1000)) {
+        Write-Host "Setup still running after 15 minutes (round $Round)."
+        Show-InstallLog
+        Get-Service 'PHILCST-*' -ErrorAction SilentlyContinue | Format-Table Name, Status -AutoSize | Out-String | Write-Host
+        Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(powershell|php|php-cgi|python|caddy|go2rtc|nssm|schtasks|sc|unins|setup|.*\.tmp)' } |
+            Format-Table ProcessId, ParentProcessId, Name, CommandLine -AutoSize -Wrap | Out-String -Width 300 | Write-Host
+        $setupLog = "$env:RUNNER_TEMP\setup-$Round.log"
+        if (Test-Path $setupLog) { Write-Host '----- Inno Setup log'; Get-Content $setupLog -Tail 40 | Write-Host }
+        throw "Setup hung (round $Round)."
+    }
     Write-Host "Setup exit code: $($process.ExitCode)"
     $info = Get-Content (Join-Path $Dir 'config\install.json') -Raw | ConvertFrom-Json
     Get-Content (Join-Path $Dir 'config\install-result.txt') | Where-Object { $_ -notmatch 'Password:' } | Write-Host
@@ -54,7 +65,11 @@ Install-Once 2 | Out-Null
 
 Write-Host '===== uninstall (with the data)'
 $uninstaller = Get-ChildItem (Join-Path $Dir 'uninstall') -Filter 'unins*.exe' | Select-Object -First 1
-Start-Process -FilePath $uninstaller.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/REMOVEDATA=yes' -Wait
+$process = Start-Process -FilePath $uninstaller.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/REMOVEDATA=yes' -PassThru
+if (-not $process.WaitForExit(10 * 60 * 1000)) { Get-Service 'PHILCST-*' | Format-Table Name, Status | Out-String | Write-Host; throw 'The uninstaller hung.' }
+# The uninstaller hands over to a copy of itself in %TEMP%; wait for that one too.
+Start-Sleep -Seconds 5
+Get-Process | Where-Object { $_.Name -like '_iu*' } | ForEach-Object { $_.WaitForExit(5 * 60 * 1000) | Out-Null }
 Start-Sleep -Seconds 5
 if (Get-Service 'PHILCST-*' -ErrorAction SilentlyContinue) { throw 'Services are left after uninstalling.' }
 if (Get-ScheduledTask -TaskName 'PHILCST VMS*' -ErrorAction SilentlyContinue) { throw 'Scheduled tasks are left after uninstalling.' }

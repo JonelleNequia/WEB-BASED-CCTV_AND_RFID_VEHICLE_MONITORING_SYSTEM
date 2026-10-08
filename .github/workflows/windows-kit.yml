@@ -63,4 +63,5 @@ jobs:
       # the installer to download).
       - name: Install, sign in, reinstall, uninstall
         shell: pwsh
+        timeout-minutes: 45
         run: ./build/windows/ci/install-check.ps1 -Setup (Get-ChildItem build/windows/dist/PHILCST-VMS-Setup-*.exe | Select-Object -First 1).FullName

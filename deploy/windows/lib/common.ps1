@@ -343,13 +343,31 @@ function Get-VmsInstalledServices {
     return @(Get-Service -Name ($script:VmsServicePrefix + '*') -ErrorAction SilentlyContinue)
 }
 
+# Start-Service / Stop-Service wait without a limit: a service that never
+# reaches the state (e.g. NSSM pausing a program that keeps exiting) hung the
+# reinstall. These wait at most $Seconds and say what happened.
+function Wait-VmsServiceStatus {
+    param([string]$Name, [string]$Status, [int]$Seconds = 30)
+    $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if (-not $service) { return $false }
+    try {
+        $service.WaitForStatus($Status, [TimeSpan]::FromSeconds($Seconds))
+        return $true
+    } catch {
+        $service.Refresh()
+        Write-VmsStep "$Name is $($service.Status) after $Seconds s (expected $Status)."
+        return $false
+    }
+}
+
 function Start-VmsServices {
     param([Parameter(Mandatory = $true)]$Paths)
     foreach ($service in Get-VmsServices $Paths) {
-        if (Get-Service -Name $service.Name -ErrorAction SilentlyContinue) {
-            Write-VmsStep "Starting $($service.Display)"
-            Start-Service -Name $service.Name -ErrorAction Continue
-        }
+        $installed = Get-Service -Name $service.Name -ErrorAction SilentlyContinue
+        if (-not $installed) { continue }
+        Write-VmsStep "Starting $($service.Display)"
+        try { $installed.Start() } catch { Write-VmsStep "$($service.Name): $($_.Exception.Message)" }
+        Wait-VmsServiceStatus -Name $service.Name -Status 'Running' | Out-Null
     }
 }
 
@@ -361,7 +379,25 @@ function Stop-VmsServices {
         $installed = Get-Service -Name $service.Name -ErrorAction SilentlyContinue
         if ($installed -and $installed.Status -ne 'Stopped') {
             Write-VmsStep "Stopping $($service.Display)"
-            Stop-Service -Name $service.Name -Force -ErrorAction Continue
+            try { $installed.Stop() } catch { Write-VmsStep "$($service.Name): $($_.Exception.Message)" }
+            Wait-VmsServiceStatus -Name $service.Name -Status 'Stopped' | Out-Null
+        }
+    }
+    Stop-VmsStrayProcesses $Paths
+}
+
+function Stop-VmsStrayProcesses {
+    # Programs of this install still running outside the services (a stopped
+    # service's leftover child, the every-minute scheduler): they keep files
+    # locked and ports taken during a reinstall or an update.
+    param([Parameter(Mandatory = $true)]$Paths)
+    $runtime = $Paths.Runtime.TrimEnd('\') + '\'
+    foreach ($process in @(Get-Process -ErrorAction SilentlyContinue)) {
+        $path = $null
+        try { $path = $process.Path } catch { $path = $null }
+        if ($path -and $path.StartsWith($runtime, [StringComparison]::OrdinalIgnoreCase) -and $process.Id -ne $PID) {
+            Write-VmsStep "Ending $($process.Name) ($($process.Id)) left from the earlier run"
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
         }
     }
 }
