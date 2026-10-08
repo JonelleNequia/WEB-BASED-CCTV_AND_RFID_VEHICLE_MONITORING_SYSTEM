@@ -68,8 +68,13 @@ function Install-VmsService {
     $existing = Get-Service -Name $Service.Name -ErrorAction SilentlyContinue
     if ($existing) {
         # An earlier install: stop it (if running) and install it again.
-        if ($existing.Status -ne 'Stopped') { Invoke-VmsQuiet -Exe $nssm -Arguments @('stop', $Service.Name) }
+        if ($existing.Status -ne 'Stopped') { Stop-Service -Name $Service.Name -Force -ErrorAction SilentlyContinue }
         Invoke-VmsNative -Exe $nssm -Arguments @('remove', $Service.Name, 'confirm') -Quiet | Out-Null
+        # Windows deletes a service only when nothing has it open (e.g. the Services window).
+        for ($i = 0; $i -lt 20 -and (Get-Service -Name $Service.Name -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
+        if (Get-Service -Name $Service.Name -ErrorAction SilentlyContinue) {
+            throw "The old service $($Service.Name) is still there. Close the Services window (services.msc) and run the installer again."
+        }
     }
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Service.Log) | Out-Null
     Invoke-VmsNative -Exe $nssm -Arguments @('install', $Service.Name, $Service.Exe) -Quiet | Out-Null
@@ -116,7 +121,8 @@ try {
         if (-not (Test-Path -LiteralPath $required)) { throw "Missing file: $required. Run the installer again." }
     }
 
-    Write-VmsStep "Installing into $Root"
+    $build = if (Test-Path -LiteralPath $paths.BuildInfo) { (Get-Content -LiteralPath $paths.BuildInfo -Raw | ConvertFrom-Json).version } else { 'unknown' }
+    Write-VmsStep "Installing PHILCST VMS $build into $Root"
     Stop-VmsServices $paths
     Install-VmsVcRedist
 

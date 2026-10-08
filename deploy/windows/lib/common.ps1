@@ -249,41 +249,72 @@ function Write-VmsStep {
     Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Text)
 }
 
+function ConvertTo-VmsArgument {
+    # One argument for a Windows command line (the rules CommandLineToArgvW reads).
+    param([AllowEmptyString()][string]$Value)
+    if ($Value -eq '') { return '""' }
+    if ($Value -notmatch '[\s"]') { return $Value }
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.Append('"')
+    $backslashes = 0
+    foreach ($char in $Value.ToCharArray()) {
+        if ($char -eq [char]'\') { $backslashes++; continue }
+        if ($char -eq [char]'"') {
+            [void]$builder.Append('\' * ($backslashes * 2 + 1)).Append('"')
+        } else {
+            [void]$builder.Append('\' * $backslashes).Append($char)
+        }
+        $backslashes = 0
+    }
+    [void]$builder.Append('\' * ($backslashes * 2)).Append('"')
+    return $builder.ToString()
+}
+
+function Start-VmsProcess {
+    # Runs a program with System.Diagnostics.Process, NOT "& prog 2>&1": on
+    # Windows PowerShell 5.1 a program's stderr line becomes a PowerShell error
+    # and stops the script (the installer stopped on nssm's
+    # "PHILCST-PHP1: STOP: The service has not been started.").
+    param([Parameter(Mandatory = $true)][string]$Exe, [string[]]$Arguments = @())
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $Exe
+    $info.Arguments = (@($Arguments | ForEach-Object { ConvertTo-VmsArgument $_ }) -join ' ')
+    $info.UseShellExecute = $false
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.CreateNoWindow = $true
+    $process = [System.Diagnostics.Process]::Start($info)
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    # NSSM writes UTF-16: drop the zero bytes so its messages stay readable.
+    $text = ($stdout.Result + "`n" + $stderr.Result).Replace([string][char]0, '')
+    return [pscustomobject]@{
+        ExitCode = $process.ExitCode
+        Output   = @($text -split "\r?\n" | Where-Object { $_.Trim() -ne '' })
+    }
+}
+
 function Invoke-VmsNative {
-    # Run a program; throw with its output when it fails.
+    # Run a program; throw with its output when its exit code is not OK.
     param([Parameter(Mandatory = $true)][string]$Exe, [string[]]$Arguments = @(), [int[]]$OkCodes = @(0), [switch]$Quiet)
-    # Windows PowerShell 5.1 turns a program's stderr into errors (fatal under
-    # 'Stop'); the exit code decides here.
-    $previous = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $output = @(& $Exe @Arguments 2>&1 | ForEach-Object { "$_" })
-        $code = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $previous
+    $result = Start-VmsProcess -Exe $Exe -Arguments $Arguments
+    if (-not $Quiet -and $result.Output) { $result.Output | ForEach-Object { Write-Host "    $_" } }
+    if ($OkCodes -notcontains $result.ExitCode) {
+        throw "$([IO.Path]::GetFileName($Exe)) $($Arguments -join ' ') failed (exit $($result.ExitCode)): $($result.Output -join ' ')"
     }
-    if (-not $Quiet -and $output) { $output | ForEach-Object { Write-Host "    $_" } }
-    if ($OkCodes -notcontains $code) {
-        throw "$([IO.Path]::GetFileName($Exe)) $($Arguments -join ' ') failed (exit $code): $($output -join ' ')"
-    }
-    return $output
+    return $result.Output
 }
 
 function Invoke-VmsQuiet {
-    # Run a program whose result does not matter (nssm stop on a stopped
-    # service, removing what may not exist). Never throws: on Windows
-    # PowerShell 5.1 "& prog 2>&1" under ErrorActionPreference 'Stop' turns
-    # the first stderr line into a fatal error (it stopped the installer with
-    # "PHILCST-PHP1: STOP: The service has not been started.").
+    # Run a program whose result does not matter (stopping a stopped service,
+    # removing what may not exist). Never throws.
     param([Parameter(Mandatory = $true)][string]$Exe, [string[]]$Arguments = @())
-    $previous = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
     try {
-        & $Exe @Arguments 2>&1 | Out-Null
+        $result = Start-VmsProcess -Exe $Exe -Arguments $Arguments
+        Write-Verbose "$Exe exit $($result.ExitCode): $($result.Output -join ' ')"
     } catch {
         Write-Verbose "$Exe $($Arguments -join ' '): $($_.Exception.Message)"
-    } finally {
-        $ErrorActionPreference = $previous
     }
 }
 

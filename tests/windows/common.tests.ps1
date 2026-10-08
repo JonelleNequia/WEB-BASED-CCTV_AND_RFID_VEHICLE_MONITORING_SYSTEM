@@ -177,6 +177,34 @@ Test-That 'a program whose result does not matter never stops the script' {
     Invoke-VmsQuiet -Exe $ls -Arguments $args2
 }
 
+Test-That 'Windows command-line quoting' {
+    Assert-Equal 'plain' (ConvertTo-VmsArgument 'plain')
+    Assert-Equal '""' (ConvertTo-VmsArgument '')
+    Assert-Equal '"two words"' (ConvertTo-VmsArgument 'two words')
+    Assert-Equal '"say \"hi\""' (ConvertTo-VmsArgument 'say "hi"')
+    Assert-Equal '"C:\a b\\"' (ConvertTo-VmsArgument 'C:\a b\')
+    Assert-Equal 'C:\PHILCST-VMS\config\php.ini' (ConvertTo-VmsArgument 'C:\PHILCST-VMS\config\php.ini')
+}
+
+Test-That 'programs: stderr and exit codes never stop the script; arguments arrive intact' {
+    $ErrorActionPreference = 'Stop'
+    if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+        $out = Invoke-VmsNative -Exe 'cmd.exe' -Arguments @('/c', 'echo out & echo err 1>&2 & exit 3') -OkCodes @(3) -Quiet
+    } else {
+        $out = Invoke-VmsNative -Exe '/bin/sh' -Arguments @('-c', 'echo out; echo err 1>&2; exit 3') -OkCodes @(3) -Quiet
+    }
+    Assert-True (($out -join ' ') -match 'out' -and ($out -join ' ') -match 'err') "output: $out"
+    if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
+        Assert-Throws { Invoke-VmsNative -Exe '/bin/sh' -Arguments @('-c', 'exit 4') -Quiet } 'exit 4'
+        Invoke-VmsQuiet -Exe '/bin/sh' -Arguments @('-c', 'echo boom 1>&2; exit 1')
+    }
+    $python = (Get-Command python3 -ErrorAction SilentlyContinue).Source
+    if ($python) {
+        $argv = Invoke-VmsNative -Exe $python -Arguments @('-c', 'import sys, json; print(json.dumps(sys.argv[1:]))', 'Runs the web app''s PHP', 'a "quoted" b', 'C:\x y\', '') -Quiet
+        Assert-Equal '["Runs the web app''s PHP", "a \"quoted\" b", "C:\\x y\\", ""]' ($argv -join '')
+    }
+}
+
 Write-Host ''
 Write-Host "$($script:count - $script:failures) of $($script:count) passed"
 if ($script:failures -gt 0) { exit 1 }
