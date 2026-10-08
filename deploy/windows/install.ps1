@@ -65,8 +65,10 @@ function Install-VmsVcRedist {
 function Install-VmsService {
     param($Service)
     $nssm = $paths.Nssm
-    if (Get-Service -Name $Service.Name -ErrorAction SilentlyContinue) {
-        & $nssm stop $Service.Name 2>&1 | Out-Null
+    $existing = Get-Service -Name $Service.Name -ErrorAction SilentlyContinue
+    if ($existing) {
+        # An earlier install: stop it (if running) and install it again.
+        if ($existing.Status -ne 'Stopped') { Invoke-VmsQuiet -Exe $nssm -Arguments @('stop', $Service.Name) }
         Invoke-VmsNative -Exe $nssm -Arguments @('remove', $Service.Name, 'confirm') -Quiet | Out-Null
     }
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Service.Log) | Out-Null
@@ -171,7 +173,7 @@ try {
         $adminPassword = $admin.password
         [IO.File]::WriteAllText($paths.FirstAdmin, "PHILCST VMS first sign-in`r`nEmail: $($admin.email)`r`nPassword: $adminPassword`r`nChange the password after signing in, then delete this file.`r`n")
         # Administrators and SYSTEM only.
-        & icacls.exe $paths.FirstAdmin /inheritance:r /grant:r '*S-1-5-32-544:F' '*S-1-5-18:F' 2>&1 | Out-Null
+        Invoke-VmsQuiet -Exe 'icacls.exe' -Arguments @($paths.FirstAdmin, '/inheritance:r', '/grant:r', '*S-1-5-32-544:F', '*S-1-5-18:F')
     }
 
     Write-VmsStep 'Public files, detector settings, live view config, caches'
@@ -243,7 +245,17 @@ try {
     # --- Web answers?
     Write-VmsStep 'Waiting for the web system'
     if (-not (Wait-VmsWeb -Port $port -Seconds 120)) {
-        throw "The web system did not answer on port $port. See $($paths.Logs) (web.log, php-*.log)."
+        # Say which services are down, and keep the end of their logs in this install log.
+        $down = @(foreach ($service in Get-VmsServices $paths) {
+            $state = Get-Service -Name $service.Name -ErrorAction SilentlyContinue
+            if (-not $state -or $state.Status -ne 'Running') { "$($service.Name) ($(if ($state) { $state.Status } else { 'missing' }))" }
+            if (Test-Path -LiteralPath $service.Log) {
+                Write-Host "--- end of $($service.Log)"
+                Get-Content -LiteralPath $service.Log -Tail 15 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $_" }
+            }
+        })
+        $which = if ($down.Count -gt 0) { " Not running: $($down -join ', ')." } else { '' }
+        throw "The web system did not answer on port $port.$which See $($paths.Logs)."
     }
 
     $result.local_url = Format-VmsUrl 'localhost' $port

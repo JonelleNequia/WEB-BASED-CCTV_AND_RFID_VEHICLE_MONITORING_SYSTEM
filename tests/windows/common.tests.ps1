@@ -169,6 +169,14 @@ Test-That 'update: .env, the database files and storage move into the new app' {
     } finally { Remove-Item -LiteralPath $root -Recurse -Force }
 }
 
+Test-That 'a program whose result does not matter never stops the script' {
+    $ErrorActionPreference = 'Stop'
+    Invoke-VmsQuiet -Exe 'this-program-does-not-exist-vms'
+    $ls = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'cmd.exe' } else { 'ls' }
+    $args2 = if ($ls -eq 'cmd.exe') { @('/c', 'dir', 'Z:\no-such-folder') } else { @('/no-such-folder') }
+    Invoke-VmsQuiet -Exe $ls -Arguments $args2
+}
+
 Write-Host ''
 Write-Host "$($script:count - $script:failures) of $($script:count) passed"
 if ($script:failures -gt 0) { exit 1 }

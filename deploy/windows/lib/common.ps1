@@ -269,6 +269,24 @@ function Invoke-VmsNative {
     return $output
 }
 
+function Invoke-VmsQuiet {
+    # Run a program whose result does not matter (nssm stop on a stopped
+    # service, removing what may not exist). Never throws: on Windows
+    # PowerShell 5.1 "& prog 2>&1" under ErrorActionPreference 'Stop' turns
+    # the first stderr line into a fatal error (it stopped the installer with
+    # "PHILCST-PHP1: STOP: The service has not been started.").
+    param([Parameter(Mandatory = $true)][string]$Exe, [string[]]$Arguments = @())
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Exe @Arguments 2>&1 | Out-Null
+    } catch {
+        Write-Verbose "$Exe $($Arguments -join ' '): $($_.Exception.Message)"
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 function Invoke-VmsArtisan {
     param([Parameter(Mandatory = $true)]$Paths, [Parameter(Mandatory = $true)][string[]]$Arguments, [switch]$Quiet)
     $args2 = @('-c', $Paths.PhpIni, $Paths.Artisan) + $Arguments

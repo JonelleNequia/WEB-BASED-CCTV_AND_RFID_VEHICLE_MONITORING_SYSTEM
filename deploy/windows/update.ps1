@@ -81,7 +81,7 @@ try {
     foreach ($old in $previousApp, $previousRuntime) { if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force } }
     # Unlink public\storage before moving the app (it points into storage\).
     $link = Join-VmsPath $paths.App 'public' 'storage'
-    if (Test-Path -LiteralPath $link) { & cmd.exe /c rmdir "$link" 2>&1 | Out-Null }
+    if (Test-Path -LiteralPath $link) { Invoke-VmsQuiet -Exe 'cmd.exe' -Arguments @('/c', 'rmdir', $link) }
 
     Write-VmsStep 'Replacing the program files (data kept)'
     Move-Item -LiteralPath $paths.App -Destination $previousApp
@@ -108,7 +108,7 @@ try {
         Stop-VmsServices $paths
         $failedApp = Join-VmsPath $Root "app.failed-$stamp"
         $link = Join-VmsPath $paths.App 'public' 'storage'
-        if (Test-Path -LiteralPath $link) { & cmd.exe /c rmdir "$link" 2>&1 | Out-Null }
+        if (Test-Path -LiteralPath $link) { Invoke-VmsQuiet -Exe 'cmd.exe' -Arguments @('/c', 'rmdir', $link) }
         if (Test-Path -LiteralPath $paths.App) {
             Move-Item -LiteralPath $paths.App -Destination $failedApp
             Move-VmsData -From $failedApp -To $previousApp

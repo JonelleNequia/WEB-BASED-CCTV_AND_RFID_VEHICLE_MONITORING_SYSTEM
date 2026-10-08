@@ -128,6 +128,19 @@ class WindowsInstallerTest extends TestCase
         }
     }
 
+    public function test_no_script_calls_a_program_with_stderr_redirected_outside_the_helpers(): void
+    {
+        // Windows PowerShell 5.1: "& prog 2>&1" under ErrorActionPreference
+        // 'Stop' turns the program's first stderr line into a fatal error
+        // (the first real install stopped on "nssm stop" of a stopped service).
+        foreach (File::allFiles(base_path('deploy/windows')) as $file) {
+            if ($file->getExtension() !== 'ps1' || $file->getFilename() === 'common.ps1') {
+                continue;
+            }
+            $this->assertDoesNotMatchRegularExpression('/2>&1/', $file->getContents(), $file->getFilename().': use Invoke-VmsNative or Invoke-VmsQuiet');
+        }
+    }
+
     public function test_the_powershell_functions_pass_their_tests(): void
     {
         $pwsh = (new ExecutableFinder)->find('pwsh');
