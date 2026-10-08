@@ -231,8 +231,30 @@ if ($Installer) {
             Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
     }
     if (-not $Iscc) { throw 'Inno Setup 6 (ISCC.exe) was not found: install it (choco install innosetup) or pass -Iscc.' }
-    & $Iscc /Qp "/DAppVersion=$Version" "/DSourceDir=$Stage" "/O$OutDir" (Join-Path $PSScriptRoot 'installer/PHILCST-VMS.iss')
-    if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed.' }
+    # Inno Setup reads files with the old 260-character path limit. The deepest
+    # files (Python packages) fit under C:\PHILCST-VMS\, but not under a long
+    # build folder (the CI checkout is ~120 characters): give it a short path.
+    $longest = Get-ChildItem -LiteralPath $Stage -Recurse -File | ForEach-Object { $_.FullName.Substring($Stage.Length + 1) } |
+        Sort-Object Length -Descending | Select-Object -First 1
+    $installedLength = 'C:\PHILCST-VMS\'.Length + $longest.Length
+    Write-Host "    longest installed path: C:\PHILCST-VMS\$longest ($installedLength characters)"
+    if ($installedLength -gt 259) { throw 'A file in the bundle would have a path over 259 characters under C:\PHILCST-VMS.' }
+    $source = $Stage
+    $junction = $null
+    if ($Stage.Length -gt 40) {
+        $junction = Join-Path $env:SystemDrive ('vms-build-' + $commit)
+        if (Test-Path $junction) { (Get-Item $junction).Delete() }
+        New-Item -ItemType Junction -Path $junction -Target $Stage | Out-Null
+        $source = $junction
+        Write-Host "    short source path for Inno Setup: $junction"
+    }
+    try {
+        & $Iscc /Qp "/DAppVersion=$Version" "/DSourceDir=$source" "/O$OutDir" (Join-Path $PSScriptRoot 'installer/PHILCST-VMS.iss')
+        if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed.' }
+    } finally {
+        # Remove the junction only (Delete on a junction never touches its target).
+        if ($junction -and (Test-Path $junction)) { (Get-Item $junction).Delete() }
+    }
     $setup = Join-Path $OutDir "PHILCST-VMS-Setup-$Version.exe"
     $hash = Get-Sha256 $setup
     Set-Content -LiteralPath "$setup.sha256" -Value "$hash  $([IO.Path]::GetFileName($setup))" -Encoding ascii
