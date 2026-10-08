@@ -9,13 +9,12 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - 'build/windows/**'
-      - 'deploy/windows/**'
-      - 'app/**'
-      - 'database/**'
-      - 'school-vehicle-monitoring-detector/requirements-windows.txt'
-      - '.github/workflows/windows-kit.yml'
+    # Every change that ends up in the installer (the app, its pages and
+    # scripts, the detector, the kit); not docs or the macOS-only tests.
+    paths-ignore:
+      - '**.md'
+      - 'tests/**'
+      - 'school-vehicle-monitoring-detector/tests/**'
 
 jobs:
   bundle:
