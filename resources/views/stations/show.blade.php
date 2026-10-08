@@ -105,7 +105,7 @@
     <script id="station-kiosk-data" type="application/json">{!! json_encode($stationPayload, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
     <script src="{{ asset('js/ui.js') }}"></script>
     <script src="{{ asset('vendor/hls/hls.light.min.js') }}"></script>
-    <script src="{{ asset('js/live-video.js') }}"></script>
-    <script src="{{ asset('js/station-kiosk.js') }}"></script>
+    <script src="{{ asset('js/live-video.js') }}?v={{ filemtime(public_path('js/live-video.js')) }}"></script>
+    <script src="{{ asset('js/station-kiosk.js') }}?v={{ filemtime(public_path('js/station-kiosk.js')) }}"></script>
 </body>
 </html>

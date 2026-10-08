@@ -86,6 +86,34 @@
         }
     }
 
+    /*
+     * "Offline" only when the player has no picture: the detector's status
+     * can be down for a moment (restarting, its own stream hiccuped) while
+     * the camera's live view is fine; hiding it then made the feed go black.
+     */
+    function renderFeed(card) {
+        const state = card.lastState;
+        const player = card.querySelector('[data-live-video]')?.liveVideo;
+        const picture = Boolean(player?.hasPicture?.());
+        const live = state ? state.detectorRunning && state.gate.camera_running : false;
+        card.querySelector('[data-gate-camera]')?.replaceChildren(
+            picture ? badge('success', 'Live') : badge(live ? 'warning' : 'critical', live ? 'Connecting' : 'Offline')
+        );
+        setOffline(card, picture || !state ? '' : (live ? '' : offlineText(state.detectorRunning, state.gate)));
+    }
+
+    document.querySelectorAll('[data-gate] [data-live-video]').forEach(function (root) {
+        ['live:ready', 'live:error', 'live:stalled'].forEach(function (name) {
+            root.addEventListener(name, function () {
+                // The player's own root has data-gate too: the card is its parent's.
+                const card = root.parentElement?.closest('[data-gate]');
+                if (card) {
+                    renderFeed(card);
+                }
+            });
+        });
+    });
+
     async function refresh() {
         if (!config.stateUrl) {
             return;
@@ -109,13 +137,13 @@
                 }
 
                 const live = body.detector_running && gate.camera_running;
-                card.querySelector('[data-gate-camera]')?.replaceChildren(badge(live ? 'success' : 'critical', live ? 'Live' : 'Offline'));
+                card.lastState = { detectorRunning: body.detector_running, gate: gate };
+                renderFeed(card);
 
-                setOffline(card, live ? '' : offlineText(body.detector_running, gate));
-
-                // Live view work: the camera is back: the player connects again (WebRTC first).
+                // Live view work: the camera is back: the player connects again
+                // (WebRTC first), unless it already shows the picture.
                 const player = card.querySelector('[data-live-video]')?.liveVideo;
-                if (live && card.dataset.wasLive === '0') {
+                if (live && card.dataset.wasLive === '0' && !player?.hasPicture?.()) {
                     player?.reconnect();
                 }
                 card.dataset.wasLive = live ? '1' : '0';

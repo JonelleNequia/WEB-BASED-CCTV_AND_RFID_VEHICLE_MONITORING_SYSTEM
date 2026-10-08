@@ -321,14 +321,33 @@
 
         lastRuntime = runtime;
         lastCamera = camera;
-        showFrameMessage(frameProblem(runtime, camera));
-        // The camera is back: connect the player again.
+        renderFrame();
+        // The camera is back: connect the player again, unless it already
+        // shows the picture (reconnecting a working view made it go black).
         const online = detectorOnline && cameraOnline;
-        if (online && wasOnline === false) {
+        if (online && wasOnline === false && !frame?.liveVideo?.hasPicture?.()) {
             frame?.liveVideo?.reconnect();
         }
         wasOnline = online;
     }
+
+    /*
+     * The picture stays while the player has one, even when the detector's
+     * status is down for a moment (it watches its own stream; the live view
+     * comes from the camera through go2rtc). The detector problem still shows
+     * in the chips above.
+     */
+    function renderFrame() {
+        const player = frame?.liveVideo;
+        if (player?.hasPicture?.()) {
+            showFrameMessage('');
+            return;
+        }
+        const failed = player && player.mode === 'mjpeg' && player.mjpegFailed;
+        showFrameMessage(frameProblem(lastRuntime, lastCamera) || (failed ? 'No picture from the camera. Retrying…' : ''));
+    }
+
+    ['live:ready', 'live:error', 'live:stalled'].forEach((name) => frame?.addEventListener(name, renderFrame));
 
     async function refreshState() {
         if (!payload.routes?.state) {

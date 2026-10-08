@@ -75,5 +75,5 @@
 @endsection
 
 @push('scripts')
-    <script src="{{ asset('js/gate-monitor.js') }}"></script>
+    <script src="{{ asset('js/gate-monitor.js') }}?v={{ filemtime(public_path('js/gate-monitor.js')) }}"></script>
 @endpush

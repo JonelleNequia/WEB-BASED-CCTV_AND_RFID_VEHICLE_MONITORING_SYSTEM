@@ -22,6 +22,12 @@
     const OVERLAY_KEY = 'live.overlay';
     const WEBRTC_TIMEOUT_MS = 8000;
     const HLS_TIMEOUT_MS = 12000;
+    // No new picture for this long while the page shows the video: the
+    // stream froze (or went black) although the connection still looks
+    // up, e.g. the camera dropped and came back. Connect again.
+    const STALL_MS = 8000;
+    // On the basic view, try the full-quality view again now and then.
+    const UPGRADE_AFTER_MS = 120000;
     const players = [];
 
     /*
@@ -60,7 +66,14 @@
             this.retries = 0;
             this.stopped = false;
             this.overlayData = null;
+            this.progressMark = null;
+            this.lastProgressAt = Date.now();
+            this.modeSince = Date.now();
+            this.stalls = 0;
+            this.pictureAt = 0;
+            this.mjpegFailed = false;
             this.start();
+            this.watchdog = window.setInterval(() => this.checkStall(), 2000);
             this.syncOverlay();
             window.addEventListener('resize', () => this.drawOverlay());
         }
@@ -75,6 +88,8 @@
 
         setMode(mode) {
             this.mode = mode;
+            this.modeSince = Date.now();
+            this.video.removeAttribute('poster');
             this.root.dataset.mode = mode;
             this.video.hidden = mode === 'mjpeg';
             this.img.hidden = mode !== 'mjpeg';
@@ -89,7 +104,10 @@
                 return;
             }
             this.connecting = true;
+            this.keepLastFrame();
             this.teardown();
+            this.progressMark = null;
+            this.lastProgressAt = Date.now();
             try {
                 if (this.root.dataset.webrtc === '1' && window.RTCPeerConnection) {
                     if (await this.tryWebRTC()) {
@@ -103,6 +121,96 @@
             } finally {
                 this.connecting = false;
             }
+        }
+
+        /*
+         * While it connects again, the last picture stays on screen (as the
+         * video's poster) with "Reconnecting…", instead of a black box.
+         */
+        keepLastFrame() {
+            if ((this.mode !== 'webrtc' && this.mode !== 'hls') || !this.video.videoWidth) {
+                return;
+            }
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = this.video.videoWidth;
+                canvas.height = this.video.videoHeight;
+                canvas.getContext('2d').drawImage(this.video, 0, 0);
+                this.video.poster = canvas.toDataURL('image/jpeg', 0.7);
+            } catch (error) {
+                // No poster: the box stays dark for the few seconds it takes.
+            }
+            if (this.badge) {
+                this.badge.textContent = 'Reconnecting…';
+            }
+        }
+
+        /* Something that grows while new pictures arrive (null: cannot tell). */
+        async progress() {
+            if (this.mode === 'webrtc' && this.pc) {
+                let frames = null;
+                (await this.pc.getStats()).forEach((item) => {
+                    if (item.type === 'inbound-rtp' && item.kind === 'video') {
+                        frames = item.framesDecoded ?? null;
+                    }
+                });
+                return frames;
+            }
+            if (this.mode === 'hls') {
+                return Math.round(this.video.currentTime * 10);
+            }
+            return null;
+        }
+
+        async checkStall() {
+            const now = Date.now();
+            // Another tab (the browser slows it down) or busy connecting. A video
+            // hidden by the page keeps decoding, so it is still checked.
+            if (this.stopped || this.connecting || document.hidden) {
+                this.lastProgressAt = now;
+                return;
+            }
+            if (this.mode === 'mjpeg') {
+                if (this.root.dataset.webrtc === '1' && now - this.modeSince > UPGRADE_AFTER_MS) {
+                    this.modeSince = now;
+                    this.start();
+                }
+                return;
+            }
+            let mark = null;
+            try {
+                mark = await this.progress();
+            } catch (error) {
+                mark = null;
+            }
+            if (mark === null) {
+                return;
+            }
+            if (mark !== this.progressMark) {
+                this.progressMark = mark;
+                this.lastProgressAt = now;
+                this.pictureAt = now;
+                return;
+            }
+            if (now - this.lastProgressAt > STALL_MS) {
+                this.stalls += 1;
+                this.root.dataset.stalls = String(this.stalls);
+                this.emit('live:stalled', { mode: this.mode, stalls: this.stalls });
+                this.start();
+            }
+        }
+
+        /*
+         * True while new pictures arrive (or the basic view shows one).
+         * Pages show "Camera offline" only when this is false: the detector's
+         * own status can be down (restarting, its stream hiccuped) while the
+         * camera's live view is fine, and the picture must not vanish then.
+         */
+        hasPicture() {
+            if (this.mode === 'mjpeg') {
+                return !this.mjpegFailed && this.img.naturalWidth > 0;
+            }
+            return this.pictureAt > 0 && Date.now() - this.pictureAt < STALL_MS + 3000;
         }
 
         /* Connect again (camera back, new address); ignored while connecting. */
@@ -155,6 +263,7 @@
             }
 
             this.setMode('webrtc');
+            this.pictureAt = Date.now();
             this.emit('live:ready');
             pc.onconnectionstatechange = () => {
                 // The camera or the network dropped: try again (WebRTC first).
@@ -260,6 +369,7 @@
                 return false;
             }
             this.setMode('hls');
+            this.pictureAt = Date.now();
             this.emit('live:ready');
             this.countFrames();
             this.statsTimer = window.setInterval(() => {
@@ -294,10 +404,13 @@
                 return;
             }
             this.img.onload = () => {
+                this.mjpegFailed = false;
+                this.pictureAt = Date.now();
                 this.emit('live:ready');
                 this.report({ mode: 'mjpeg', width: this.img.naturalWidth, height: this.img.naturalHeight });
             };
             this.img.onerror = () => {
+                this.mjpegFailed = true;
                 this.emit('live:error');
                 // The detector may be starting: try the best mode again later.
                 window.setTimeout(() => {

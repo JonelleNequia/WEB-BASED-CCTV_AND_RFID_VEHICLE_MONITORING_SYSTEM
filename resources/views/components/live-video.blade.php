@@ -36,6 +36,6 @@
 @once
     @push('scripts')
         <script src="{{ asset('vendor/hls/hls.light.min.js') }}"></script>
-        <script src="{{ asset('js/live-video.js') }}"></script>
+        <script src="{{ asset('js/live-video.js') }}?v={{ filemtime(public_path('js/live-video.js')) }}"></script>
     @endpush
 @endonce
