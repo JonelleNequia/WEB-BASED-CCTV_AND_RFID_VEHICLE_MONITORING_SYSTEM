@@ -108,6 +108,27 @@ class LineCrossingTests(unittest.TestCase):
                                       None, CAMERA, {"yolo_imgsz": 480}, state, FakeClient(), labels, "cpu")
         self.assertEqual(state["line_crossings"], 0)
 
+    def test_the_reason_says_which_way_it_went_in_the_picture(self):
+        from tracking import crossing_reason, describe_side
+        across = {"x1": 0, "y1": 100, "x2": 600, "y2": 110}       # drawn left to right
+        upright = {"x1": 300, "y1": 0, "x2": 310, "y2": 400}      # drawn top to bottom
+        self.assertEqual((describe_side(1, across), describe_side(-1, across)), ("below", "above"))
+        self.assertEqual((describe_side(1, upright), describe_side(-1, upright)), ("left of", "right of"))
+        self.assertEqual(crossing_reason(1, -1, across), "from below the line to above it")
+        self.assertEqual(crossing_reason(None, 1, across, straddled=True), "first seen on the line, then went below it")
+
+    def test_the_crossing_keeps_where_the_vehicle_was_first_seen_and_counted(self):
+        state = detector.initial_camera_state()
+        frame = np.zeros((416, 736, 3), dtype=np.uint8)
+        line_y = 0.6 * 416
+        for top in (line_y - 130, line_y - 90, line_y + 30):
+            detector.handle_detection("entrance", frame, tracked_results([[300, top, 380, top + 50, 7, 0.9, 2]]),
+                                      None, CAMERA, {"yolo_imgsz": 480}, state, FakeClient(), {2: "Car"}, "cpu")
+        path = state["pending_windows"][7]["path"]
+        self.assertEqual((path["from_side"], path["to_side"], path["first_seen_on_line"]), (-1, 1, False))
+        self.assertLess(path["first_point"][1], 0.6)
+        self.assertGreater(path["counted_point"][1], 0.6)
+
     def test_crossing_survives_a_missed_detection(self):
         state = detector.initial_camera_state()
         labels = {2: "Car"}
@@ -210,7 +231,7 @@ class DirectionTests(unittest.TestCase):
         self.step(camera, self.LINE_Y - 130, self.LINE_Y - 80)  # above
         self.step(camera, self.LINE_Y - 90, self.LINE_Y - 40)   # above, not touching
         self.step(camera, self.LINE_Y + 30, self.LINE_Y + 90)   # already below
-        self.assertEqual((self.window()["direction"], self.window()["direction_reason"]), ("IN", "crossed the line"))
+        self.assertEqual((self.window()["direction"], self.window()["direction_reason"]), ("IN", "from above the line to below it"))
 
     def test_same_gate_records_in_and_out_and_the_arrow_flips_it(self):
         for camera, expected in ((self.camera(1), "OUT"), (self.camera(-1), "IN")):
@@ -228,7 +249,7 @@ class DirectionTests(unittest.TestCase):
         self.step(camera, self.LINE_Y - 28, self.LINE_Y + 32)   # centre 2 px below: inside the margin
         self.assertNotIn(7, self.state["pending_windows"])
         self.step(camera, self.LINE_Y - 10, self.LINE_Y + 50)   # centre 20 px below (margin 15 px)
-        self.assertEqual((self.window()["direction"], self.window()["direction_reason"]), ("IN", "crossed the line"))
+        self.assertEqual((self.window()["direction"], self.window()["direction_reason"]), ("IN", "from above the line to below it"))
 
     def test_a_track_seen_once_on_the_line_is_not_counted(self):
         # A3: one sighting is not a crossing (it was an "UNKNOWN" crossing before).

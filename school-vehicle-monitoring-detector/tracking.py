@@ -370,6 +370,29 @@ class LineCrossing:
         return side
 
 
+def describe_side(side, line):
+    """
+    Where side +1 / -1 of the line is in the picture: "above", "below",
+    "left of" or "right of" (Phase 2: side +1 is to the right of the line's
+    direction in image coordinates).
+    """
+    if not side or not line:
+        return "on"
+    dx, dy = line["x2"] - line["x1"], line["y2"] - line["y1"]
+    nx, ny = -dy * side, dx * side
+    if abs(ny) >= abs(nx):
+        return "below" if ny > 0 else "above"
+    return "right of" if nx > 0 else "left of"
+
+
+def crossing_reason(start_side, moved_to, line, straddled=False):
+    """One line for Recent crossings: which way the vehicle went over the line."""
+    to = describe_side(moved_to, line)
+    if straddled or not start_side:
+        return f"first seen on the line, then went {to} it"
+    return f"from {describe_side(start_side, line)} the line to {to} it"
+
+
 def calibration_ready(camera_config):
     """
     Auto logging requires both an ROI mask and a trigger line.

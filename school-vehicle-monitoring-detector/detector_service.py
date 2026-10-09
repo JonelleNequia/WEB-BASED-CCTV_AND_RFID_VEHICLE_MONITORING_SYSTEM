@@ -58,6 +58,7 @@ from config import (
 from laravel_client import LaravelEventClient
 from tracking import (
     LineCrossing,
+    crossing_reason,
     bbox_intersects_line,
     bbox_center,
     calibration_ready,
@@ -2030,6 +2031,7 @@ def start_detection_window(
             "in_side": direction.get("in_side", 1),
             "start_side": direction.get("start_side"),
             "trail_length": int(direction.get("trail_length") or 0),
+            "path": direction.get("path"),
             "event_time": event_time,
             "started_at": now_monotonic,
             # Phase 3: Settings > Gates & Readers (tag read after / before the crossing).
@@ -2307,6 +2309,8 @@ def submit_crossing_for_window(role, state, track_id, window, rfid_status, larav
                 "detection_metadata": {
                     "bbox_xyxy": [round(float(value), 1) for value in window.get("xyxy", ())],
                     "in_side": window.get("in_side", 1),
+                    # Where the vehicle was first seen and where it counted (0-1 of the picture).
+                    "path": window.get("path"),
                     "rfid_status": rfid_status,
                     "vehicle_type": {key: value for key, value in type_decision.items() if key != "type"},
                 },
@@ -2896,7 +2900,18 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
         with state["lock"]:
             trail = list((state["track_points"].get(track_id) or {}).get("points") or [])
 
-        direction, direction_reason = crossing_direction(moved_to, in_side), "crossed the line"
+        # Which way it went in the picture ("from above the line to below
+        # it"), so a wrong IN arrow is easy to see in Recent crossings.
+        direction = crossing_direction(moved_to, in_side)
+        direction_reason = crossing_reason(crossing.start_side if not crossing.straddled else None, moved_to, line, crossing.straddled)
+        path = {
+            "first_point": [round(crossing.first_point[0] / frame_width, 3), round(crossing.first_point[1] / frame_height, 3)],
+            "counted_point": [round(center_point[0] / frame_width, 3), round(center_point[1] / frame_height, 3)],
+            "from_side": -moved_to,
+            "to_side": moved_to,
+            "first_seen_on_line": crossing.straddled,
+            "sightings": crossing.sightings,
+        }
 
         start_detection_window(
             role,
@@ -2913,6 +2928,7 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
                 "in_side": in_side,
                 "start_side": crossing.start_side,
                 "trail_length": crossing.sightings,
+                "path": path,
             },
             camera_config,
             vehicle_labels,
