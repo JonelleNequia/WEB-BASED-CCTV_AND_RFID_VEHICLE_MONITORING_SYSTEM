@@ -79,13 +79,13 @@ class Phase3RfidCameraFusionTest extends TestCase
         $this->assertSame(Vehicle::STATE_OUTSIDE, $vehicle->fresh()->current_state);
     }
 
-    public function test_crossing_that_arrives_first_is_used_when_the_tag_is_read_up_to_4_s_later(): void
+    public function test_crossing_that_arrives_first_is_used_when_the_tag_is_read_within_2_s(): void
     {
         $this->cameraOnline();
         $vehicle = $this->registeredVehicle('FUS 2002', 'FUS-TAG-2');
 
         $this->crossing('IN', 'k-first');
-        $this->travel(3)->seconds();
+        $this->travel(1)->seconds(); // the RFID check after a crossing lasts 2 s
         $this->cameraOnline();
 
         $read = $this->scan('FUS-TAG-2');
@@ -108,7 +108,7 @@ class Phase3RfidCameraFusionTest extends TestCase
         // The detector gets the window lengths from the export.
         app(\App\Services\SettingsService::class)->exportCameraRuntimeConfig();
         $config = json_decode(File::get(CameraFiles::path('camera_runtime_config.json')), true);
-        $this->assertSame([4, 3], [$config['cameras']['gate-1']['rfid_window_seconds'], $config['cameras']['gate-1']['rfid_lookback_seconds']]);
+        $this->assertSame([2, 3], [$config['cameras']['gate-1']['rfid_window_seconds'], $config['cameras']['gate-1']['rfid_lookback_seconds']]);
     }
 
     public function test_direction_that_does_not_fit_the_state_is_recorded_and_flagged(): void
@@ -163,7 +163,7 @@ class Phase3RfidCameraFusionTest extends TestCase
         $vehicle = $this->registeredVehicle('SCN 7007', 'SCN-TAG-7');
         $this->scan('SCN-TAG-7');
 
-        $this->travel(21)->seconds(); // lookback 10 + lookahead 4 + delivery 6
+        $this->travel(21)->seconds(); // lookback 10 + lookahead 2 + delivery 6 (+2 to spare)
         $this->cameraOnline();
         $this->actingAs($this->admin)->getJson(route('stations.state', 'gate-1'))->assertOk()->assertJsonMissing(['plate_number' => 'SCN 7007']);
 

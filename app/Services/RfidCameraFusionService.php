@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\DB;
  *
  * - The UHF reader reads a tag while the vehicle approaches, so a read from
  *   up to `rfid_lookback_seconds` (10) before the crossing, or up to
- *   `rfid_lookahead_seconds` (4) after it, belongs to that crossing.
+ *   `rfid_lookahead_seconds` (2) after it, belongs to that crossing.
  * - Camera IN / OUT sets the vehicle's state. A direction that does not fit
  *   the state (IN while already inside) is still recorded, and flagged.
  * - Camera direction unknown, no camera at the gate, or camera offline: the
@@ -34,7 +34,7 @@ class RfidCameraFusionService
 {
     public const DEFAULT_LOOKBACK_SECONDS = 10;
 
-    public const DEFAULT_LOOKAHEAD_SECONDS = 4;
+    public const DEFAULT_LOOKAHEAD_SECONDS = 2;
 
     /** After its window ends, the detector needs a moment to send the crossing. */
     public const CROSSING_DELIVERY_SECONDS = 6;

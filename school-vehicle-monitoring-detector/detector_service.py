@@ -2866,7 +2866,7 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
             # after enough sightings and movement; never twice per track.
             # Touching the line, stopping or backing up on it is not a crossing.
             crossing = state["track_crossings"].setdefault(track_id, LineCrossing())
-            moved_to = crossing.update(center_point, line, margin, min_points, min_move)
+            moved_to = crossing.update(center_point, line, margin, min_points, min_move, box=xyxy)
 
         if not moved_to:
             continue

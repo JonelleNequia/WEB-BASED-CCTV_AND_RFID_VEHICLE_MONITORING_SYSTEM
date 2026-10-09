@@ -209,3 +209,17 @@ test('a new edit after undo drops the redo steps', () => {
     editor.clear();
     assert.equal(editor.canRedo(), false);
 });
+
+test('a line near the edge of the zone warns (vehicles are first seen past it); the middle does not', () => {
+    const { linePositionInZone } = context.window.CalibrationEditor;
+    const nearTop = { x1: 0.03, y1: 0.18, x2: 0.99, y2: 0.23, in_side: 1 };
+    const zone = [{ x: 0.05, y: 0.08 }, { x: 0.97, y: 0.11 }, { x: 0.96, y: 0.84 }, { x: 0.07, y: 0.83 }];
+    assert.ok(linePositionInZone(nearTop, zone) < 0.25);
+    const warned = new Editor({ mask: zone, line: nearTop }).problems();
+    assert.deepEqual(plain(warned.errors), []);
+    assert.match(warned.warnings.join(' '), /close to the edge of the zone/);
+
+    const middle = { x1: 0.03, y1: 0.47, x2: 0.99, y2: 0.5, in_side: 1 };
+    near(Math.round(linePositionInZone(middle, zone) * 10) / 10, 0.5);
+    assert.deepEqual(plain(new Editor({ mask: zone, line: middle }).problems()), { errors: [], warnings: [] });
+});

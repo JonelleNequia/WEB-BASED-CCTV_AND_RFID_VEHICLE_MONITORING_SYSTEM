@@ -152,7 +152,7 @@ class SettingsGatesLayoutTest extends TestCase
 
         $this->actingAs($this->admin)->post(route('settings.restore-defaults'), ['section' => 'timing'])
             ->assertRedirect(route('settings.index', ['tab' => 'timing']));
-        $this->assertSame(['60', '10', '4'], [app(SettingsService::class)->get('rfid_cooldown_seconds'), app(SettingsService::class)->get('rfid_lookback_seconds'), app(SettingsService::class)->get('rfid_lookahead_seconds')]);
+        $this->assertSame(['60', '10', '2'], [app(SettingsService::class)->get('rfid_cooldown_seconds'), app(SettingsService::class)->get('rfid_lookback_seconds'), app(SettingsService::class)->get('rfid_lookahead_seconds')]);
         $this->actingAs($this->admin)->post(route('settings.restore-defaults'), ['section' => 'manual'])->assertSessionHasErrors('section');
 
         // Live view work: the Detection page (live view, vehicle type, counting) is gone.

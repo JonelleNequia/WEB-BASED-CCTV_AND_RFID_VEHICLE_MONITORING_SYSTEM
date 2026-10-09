@@ -80,6 +80,34 @@ class LineCrossingTests(unittest.TestCase):
         self.assertEqual(path_crosses_line((50, 200), (50, 420), LINE), 0)     # beside the drawn line
         self.assertEqual(path_crosses_line(None, (300, 420), LINE), 0)
 
+    def test_a_vehicle_first_seen_on_the_line_counts_in_the_direction_it_drives(self):
+        # It came into view already over the line (big near the camera, or a
+        # line near the zone's edge): its centre was never on the other side.
+        state = detector.initial_camera_state()
+        labels = {2: "Car"}
+        frame = np.zeros((416, 736, 3), dtype=np.uint8)
+        line_y = 0.6 * 416
+
+        def step(rows):
+            detector.handle_detection("entrance", frame, tracked_results(rows), None, CAMERA, {"yolo_imgsz": 480}, state, FakeClient(), labels, "cpu")
+
+        step([[300, line_y - 40, 420, line_y + 80, 9, 0.9, 2]])   # first seen: box over the line, centre already 20 px below
+        self.assertEqual(state["line_crossings"], 0)
+        step([[300, line_y - 10, 420, line_y + 110, 9, 0.9, 2]])
+        step([[300, line_y + 20, 420, line_y + 140, 9, 0.9, 2]])  # drove on, clearly past it
+        self.assertEqual(state["line_crossings"], 1)
+        self.assertEqual(state["pending_windows"][9]["direction"], "IN")
+
+    def test_a_vehicle_first_seen_on_the_line_that_stays_there_is_not_counted(self):
+        state = detector.initial_camera_state()
+        labels = {2: "Car"}
+        frame = np.zeros((416, 736, 3), dtype=np.uint8)
+        line_y = 0.6 * 416
+        for offset in (0, 6, -4, 5, 0, 3):
+            detector.handle_detection("entrance", frame, tracked_results([[300, line_y - 40 + offset, 420, line_y + 80 + offset, 4, 0.9, 2]]),
+                                      None, CAMERA, {"yolo_imgsz": 480}, state, FakeClient(), labels, "cpu")
+        self.assertEqual(state["line_crossings"], 0)
+
     def test_crossing_survives_a_missed_detection(self):
         state = detector.initial_camera_state()
         labels = {2: "Car"}

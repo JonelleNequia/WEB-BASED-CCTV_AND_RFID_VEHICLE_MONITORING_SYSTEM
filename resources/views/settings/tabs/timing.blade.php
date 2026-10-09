@@ -26,7 +26,7 @@
             </div>
             <div class="field">
                 <label for="rfid_lookahead_seconds">Tag read after the crossing (seconds)</label>
-                <input id="rfid_lookahead_seconds" type="number" name="rfid_lookahead_seconds" value="{{ old('rfid_lookahead_seconds', $settings['rfid_lookahead_seconds'] ?? 4) }}" min="1" max="10">
+                <input id="rfid_lookahead_seconds" type="number" name="rfid_lookahead_seconds" value="{{ old('rfid_lookahead_seconds', $settings['rfid_lookahead_seconds'] ?? 2) }}" min="1" max="10">
                 <span class="field-help">How long the camera waits for a tag after the crossing before it records an Unregistered Visitor.</span>
                 @error('rfid_lookahead_seconds')<span class="field-error">{{ $message }}</span>@enderror
             </div>

@@ -40,7 +40,7 @@ class SettingsService
             // Phase 3 (visitor model): a tag read belongs to a camera crossing
             // from this long before it to this long after it.
             'rfid_lookback_seconds' => '10',
-            'rfid_lookahead_seconds' => '4',
+            'rfid_lookahead_seconds' => '2',
             // RFID only with a vehicle: a tag read for longer than this is a
             // parked vehicle (never given to a passing one); with the camera
             // offline longer than the grace, registered tags are recorded
@@ -412,7 +412,7 @@ class SettingsService
             'calibration_line' => $cameraConfiguration['calibration_line'],
             // Phase 3: how long the detector waits for a tag read after a
             // crossing, and how far back a read still counts.
-            'rfid_window_seconds' => max(1, min(10, $this->getInt('rfid_lookahead_seconds', 4))),
+            'rfid_window_seconds' => max(1, min(10, $this->getInt('rfid_lookahead_seconds', 2))),
             'rfid_lookback_seconds' => max(1, min(15, $this->getInt('rfid_lookback_seconds', 10))),
         ];
     }

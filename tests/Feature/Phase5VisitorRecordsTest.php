@@ -139,7 +139,7 @@ class Phase5VisitorRecordsTest extends TestCase
         $vehicle->forceFill(['rfid_tag_id' => $tag->id, 'rfid_tag_uid' => $tag->uid])->save();
 
         $this->crossing('k-late', 'IN');
-        $this->travel(2)->seconds();
+        $this->travel(1)->seconds();
         $this->cameraOnline();
         app(RfidIngestService::class)->ingest(['tag_uid' => 'REG-TAG-1', 'scan_location' => 'gate-1'], 'hardware_placeholder');
 

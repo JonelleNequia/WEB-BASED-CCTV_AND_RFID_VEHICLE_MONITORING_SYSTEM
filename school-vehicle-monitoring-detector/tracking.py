@@ -315,6 +315,11 @@ class LineCrossing:
     A3 (detection): one vehicle = one crossing.
 
     - The side the vehicle came from is where it was first seen.
+    - First seen ON the line (its box already over it: it came into view
+      there, e.g. a big vehicle near the camera or a line close to the
+      zone's edge, or the tracker gave it a new id there): it came from the
+      side it then moves away from. Before, such a vehicle had its centre
+      already past the line, so it was never counted.
     - It counts only when its centre is clearly on the other side: at least
       `margin` pixels past the line (hysteresis), so a vehicle that stops on
       the line, rocks or backs up there is not counted twice.
@@ -326,10 +331,12 @@ class LineCrossing:
     def __init__(self):
         self.start_side = None
         self.first_point = None
+        self.first_distance = 0.0
+        self.straddled = False
         self.sightings = 0
         self.counted = False
 
-    def update(self, point, line, margin, min_points, min_move):
+    def update(self, point, line, margin, min_points, min_move, box=None):
         """Return the side the vehicle moved to (+1 / -1) when it now counts, else 0."""
         if not line:
             return 0
@@ -338,7 +345,12 @@ class LineCrossing:
         self.sightings += 1
         if self.first_point is None:
             self.first_point = (float(point[0]), float(point[1]))
-        if self.start_side is None:
+            self.first_distance = distance
+            self.straddled = box is not None and bbox_intersects_line(box, line)
+            if not self.straddled:
+                self.start_side = side or None
+            return 0
+        if self.start_side is None and not self.straddled:
             self.start_side = side or None
             return 0
         if self.counted or not side or side == self.start_side or abs(distance) < margin:
@@ -348,6 +360,12 @@ class LineCrossing:
         moved = ((point[0] - self.first_point[0]) ** 2 + (point[1] - self.first_point[1]) ** 2) ** 0.5
         if moved < min_move:
             return 0
+        if self.start_side is None:
+            # First seen on the line: it must be moving towards this side
+            # (not back away from where it came into view).
+            if (distance - self.first_distance) * side < margin:
+                return 0
+            self.start_side = -side
         self.counted = True
         return side
 

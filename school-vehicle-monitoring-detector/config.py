@@ -54,7 +54,8 @@ DETECTION_FRAME_INTERVAL = 3
 CAPTURE_DRAIN_FRAMES = 1
 STREAM_FRAME_MAX_WIDTH = 1280
 YOLO_IMAGE_SIZE = 640
-RFID_DETECTION_WINDOW_SECONDS = 4.0
+# The RFID check after a crossing ends within 2 s (Settings > Timing).
+RFID_DETECTION_WINDOW_SECONDS = 2.0
 # Phase 5: accept RFID reads from this many seconds BEFORE the vehicle crosses
 # the trigger line (a UHF reader reads the tag while the car is approaching).
 RFID_LOOKBACK_SECONDS = 10.0

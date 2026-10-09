@@ -125,6 +125,30 @@
         return !insideA && !insideB && edgeHits >= 2 ? 'crosses' : 'partial';
     }
 
+    /*
+     * Where the line sits in the zone, across the direction vehicles drive
+     * (along the line's normal): 0 = at one edge, 0.5 = middle, 1 = other edge.
+     */
+    function linePositionInZone(line, polygon) {
+        if (!line || !Array.isArray(polygon) || polygon.length < 3) {
+            return null;
+        }
+        const dx = line.x2 - line.x1;
+        const dy = line.y2 - line.y1;
+        const length = Math.hypot(dx, dy);
+        if (!length) {
+            return null;
+        }
+        const nx = -dy / length;
+        const ny = dx / length;
+        const mid = { x: (line.x1 + line.x2) / 2, y: (line.y1 + line.y2) / 2 };
+        const offsets = polygon.map((p) => (p.x - mid.x) * nx + (p.y - mid.y) * ny);
+        const low = Math.min(...offsets);
+        const high = Math.max(...offsets);
+
+        return high - low > 0 ? (0 - low) / (high - low) : null;
+    }
+
     /* The IN arrow, in pixels: from the middle of the line toward the IN side. */
     function arrowGeometry(a, b, inSide) {
         const dx = b.x - a.x;
@@ -532,6 +556,12 @@
                 } else if (where === 'inside') {
                     warnings.push('The line does not reach the zone\'s edges: a vehicle may pass beside it.');
                 }
+                if (where !== 'outside') {
+                    const position = linePositionInZone(this.line, this.mask);
+                    if (position !== null && (position < 0.25 || position > 0.75)) {
+                        warnings.push('The line is close to the edge of the zone: a vehicle can already be past it when it is first seen, or leave the zone before it reaches it, and is then not counted. Put the line across the middle of the zone.');
+                    }
+                }
             }
 
             return { errors, warnings };
@@ -698,6 +728,6 @@
     }
 
     root.CalibrationEditor = {
-        Editor, draw, cursorFor, toPx, toNorm, selfIntersects, lineAgainstZone, pointInPolygon, arrowGeometry,
+        Editor, draw, cursorFor, toPx, toNorm, selfIntersects, lineAgainstZone, linePositionInZone, pointInPolygon, arrowGeometry,
     };
 })(typeof window !== 'undefined' ? window : globalThis);
