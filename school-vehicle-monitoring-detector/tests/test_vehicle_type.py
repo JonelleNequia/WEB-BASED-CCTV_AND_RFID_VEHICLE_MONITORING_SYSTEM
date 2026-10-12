@@ -114,13 +114,13 @@ class PipelineTests(unittest.TestCase):
                                   self.state, FakeClient(), LABELS, "cpu")
 
     def test_the_crossing_gets_the_voted_type_not_the_trigger_frame(self):
-        line_y = 0.6 * 416
-        self.step(line_y - 140, line_y - 60, 2)          # Car, above the line
-        self.step(line_y - 100, line_y - 10, 2)          # Car
-        self.step(line_y - 20, line_y + 70, 7, 0.55)     # "truck" just past the line (the trigger frame)
-        self.step(line_y + 20, line_y + 120, 2)          # Car, below
-        window = self.state["pending_windows"][7]
-        self.assertEqual(window["detected_vehicle_type"], vtype.TRUCK_BUS)  # the trigger frame alone said truck
+        with mock.patch("detector_service.threading.Thread"):
+            self.step(150, 230, 2)                           # Car
+            self.step(170, 250, 2)                           # Car
+            self.step(190, 280, 7, 0.55)                     # "truck" (the frame it was Detected on)
+            self.step(230, 330, 2)                           # Car
+        window = self.state["pending_windows"][detector.PASS_KEY_START + 1]
+        self.assertEqual(window["detected_vehicle_type"], vtype.TRUCK_BUS)  # the Detected frame alone said truck
         self.assertEqual(window["vote"].frames, 4)
 
         sent = []
@@ -130,9 +130,8 @@ class PipelineTests(unittest.TestCase):
                 sent.append(payload)
                 return {"accepted": True}
 
-        window["deadline_at"] = 0
         with mock.patch.object(detector, "performance_settings", return_value={**vtype.DEFAULTS, "type_second_pass": 0}):
-            detector.submit_crossing_for_window("gate-1", self.state, 7, window, "no_pass", Client())
+            detector.record_pass("gate-1", self.state, 7, window, "no_pass", Client())
 
         self.assertEqual(sent[0]["detected_vehicle_type"], vtype.CAR)
         self.assertEqual(sent[0]["detection_metadata"]["vehicle_type"]["frames"], 4)

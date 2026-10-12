@@ -110,8 +110,8 @@ class CameraDeviceSourceTest extends TestCase
     public function test_a_new_address_for_the_same_mac_keeps_working_on_another_network(): void
     {
         $this->assign();
-        $calibration = ['x1' => 0.1, 'y1' => 0.6, 'x2' => 0.9, 'y2' => 0.6, 'in_side' => -1];
-        Camera::query()->forRole('gate-1')->update(['calibration_line_json' => json_encode($calibration)]);
+        $calibration = ['x1' => 0.5, 'y1' => 0.9, 'x2' => 0.5, 'y2' => 0.5];
+        Camera::query()->forRole('gate-1')->update(['calibration_direction_json' => json_encode($calibration)]);
 
         // Plugged into another router: the scan finds the same MAC at another address.
         app(DeviceRegistryService::class)->ingestScan($this->scan('203.0.113.'));
@@ -119,7 +119,7 @@ class CameraDeviceSourceTest extends TestCase
         $detector = $this->detectorCamera();
         $this->assertSame('rtsp://203.0.113.20:8554/h264/ch1/sub', $detector['source_value']);
         $this->assertSame('secret', $detector['source_password'], 'The login stays.');
-        $this->assertSame(-1, $detector['calibration_line']['in_side'], 'The calibration stays.');
+        $this->assertSame($calibration, $detector['calibration_direction'], 'The calibration stays.');
         $this->assertSame(['gate-1' => 'rtsp://admin:secret@203.0.113.20:8554/h264/ch1/main'], app(Go2rtcService::class)->streams());
         $this->assertSame('', (string) Camera::query()->forRole('gate-1')->value('source_value'), 'Still no stored URL.');
     }

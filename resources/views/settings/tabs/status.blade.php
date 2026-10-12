@@ -66,8 +66,8 @@
                         <strong>{{ $detection['last_raw_detections'] ?? '—' }} / {{ $detection['last_vehicles'] ?? '—' }} / {{ $detection['last_in_zone'] ?? '—' }}</strong>
                     </div>
                     <div>
-                        <span>Line crossings</span>
-                        <strong>{{ $detection['line_crossings'] ?? 0 }}</strong>
+                        <span>Vehicles detected / recorded</span>
+                        <strong>{{ $detection['passes_detected'] ?? 0 }} / {{ $detection['passes_recorded'] ?? 0 }}</strong>
                     </div>
                     @if (! empty($detection['last_error']))
                         <div class="span-full">

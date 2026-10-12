@@ -14,9 +14,9 @@ class CalibrationSaveTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * One camera's zone and line are saved; calibration work: no browser camera details.
+     * One camera's zone and IN arrow are saved; calibration work: no browser camera details.
      */
-    public function test_calibration_endpoint_saves_mask_and_line_for_a_camera(): void
+    public function test_calibration_endpoint_saves_mask_and_in_arrow_for_a_camera(): void
     {
         $this->seed(DatabaseSeeder::class);
 
@@ -32,11 +32,11 @@ class CalibrationSaveTest extends TestCase
                     ['x' => 0.72, 'y' => 0.55],
                     ['x' => 0.10, 'y' => 0.55],
                 ],
-                'calibration_line' => [
-                    'x1' => 0.10,
-                    'y1' => 0.80,
-                    'x2' => 0.90,
-                    'y2' => 0.80,
+                'calibration_direction' => [
+                    'x1' => 0.40,
+                    'y1' => 0.25,
+                    'x2' => 0.40,
+                    'y2' => 0.50,
                 ],
             ])
             ->assertOk()
@@ -52,13 +52,13 @@ class CalibrationSaveTest extends TestCase
             ['x' => 0.72, 'y' => 0.55],
             ['x' => 0.10, 'y' => 0.55],
         ], $camera->calibration_mask_json);
+        // ROI work: the IN arrow, tail -> head (no trigger line).
         $this->assertSame([
-            'x1' => 0.10,
-            'y1' => 0.80,
-            'x2' => 0.90,
-            'y2' => 0.80,
-            'in_side' => 1, // Phase 2: IN side, not flipped
-        ], $camera->calibration_line_json);
+            'x1' => 0.40,
+            'y1' => 0.25,
+            'x2' => 0.40,
+            'y2' => 0.50,
+        ], $camera->calibration_direction_json);
     }
 
     public function test_calibration_heartbeat_keeps_detector_camera_runtime_active(): void

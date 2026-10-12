@@ -61,7 +61,7 @@ class CalibrationService
     }
 
     /**
-     * Save one camera's zone, trigger line and IN side (normalized 0-1 to the
+     * Save one camera's zone and IN arrow (normalized 0-1 to the
      * camera picture). Calibration work: drawn on the gate's own camera
      * stream, so no browser camera details are kept.
      *
@@ -74,7 +74,7 @@ class CalibrationService
 
             $camera->fill([
                 'calibration_mask_json' => $data['calibration_mask'] ?? null,
-                'calibration_line_json' => $this->lineWithInSide($data['calibration_line'] ?? null),
+                'calibration_direction_json' => $this->arrow($data['calibration_direction'] ?? null),
             ]);
             $camera->save();
 
@@ -118,24 +118,19 @@ class CalibrationService
     }
 
     /**
-     * Phase 2: every saved line says which side is IN (+1 unless flipped).
+     * ROI work: the IN arrow (tail -> head), or null when it has no length.
      *
-     * @param  array<string, mixed>|null  $line
-     * @return array<string, mixed>|null
+     * @param  array<string, mixed>|null  $arrow
+     * @return array{x1: float, y1: float, x2: float, y2: float}|null
      */
-    protected function lineWithInSide(?array $line): ?array
+    protected function arrow(?array $arrow): ?array
     {
-        if (! $line) {
+        if (! $arrow) {
             return null;
         }
+        $points = ['x1' => (float) $arrow['x1'], 'y1' => (float) $arrow['y1'], 'x2' => (float) $arrow['x2'], 'y2' => (float) $arrow['y2']];
 
-        return [
-            'x1' => (float) $line['x1'],
-            'y1' => (float) $line['y1'],
-            'x2' => (float) $line['x2'],
-            'y2' => (float) $line['y2'],
-            'in_side' => (int) ($line['in_side'] ?? 1) < 0 ? -1 : 1,
-        ];
+        return $points['x1'] === $points['x2'] && $points['y1'] === $points['y2'] ? null : $points;
     }
 
     /**
@@ -174,7 +169,7 @@ class CalibrationService
             'source_username' => $camera->source_username ?? '',
             'has_password' => filled($camera->source_password),
             'calibration_mask' => $camera->calibration_mask_json,
-            'calibration_line' => $camera->calibration_line_json,
+            'calibration_direction' => $camera->calibration_direction_json,
             'status' => $camera->status,
         ];
     }

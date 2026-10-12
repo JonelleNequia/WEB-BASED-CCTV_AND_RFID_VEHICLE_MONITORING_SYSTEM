@@ -3,10 +3,10 @@
  * camera, the same live stream as its kiosk and Gate Monitor (live-video.js);
  * this page never asks for the browser's camera. The status comes from the
  * detector (as on System status). While the camera is offline the detector's
- * last picture is shown, so the zone and line can still be drawn.
+ * last picture is shown, so the zone and IN arrow can still be drawn.
  *
- * Editing (drag points, line ends, whole shapes, "+" on edges, remove a
- * point, flip IN) is in calibration-editor.js; this file connects it to the
+ * Editing (drag points, arrow ends, whole shapes, "+" on edges, remove a
+ * point, flip the IN arrow) is in calibration-editor.js; this file connects it to the
  * page: the picture, the pointer, the buttons and saving.
  */
 (function () {
@@ -67,7 +67,7 @@
             this.messageValue = element.querySelector('[data-message-value]');
             this.problemsList = element.querySelector('[data-problems]');
             this.maskValue = element.querySelector('[data-mask-value]');
-            this.lineValue = element.querySelector('[data-line-value]');
+            this.arrowValue = element.querySelector('[data-arrow-value]');
             this.directionValue = element.querySelector('[data-direction-value]');
             this.crossingList = element.querySelector('[data-crossings]');
             this.saveButton = element.querySelector('[data-save]');
@@ -85,8 +85,8 @@
             this.touch = false;
             this.cssWidth = 0;
             this.cssHeight = 0;
-            // The saved zone and line, drawn as soon as there is a picture.
-            this.saved = { mask: camera.calibration_mask, line: camera.calibration_line };
+            // The saved zone and IN arrow, drawn as soon as there is a picture.
+            this.saved = { mask: camera.calibration_mask, direction: camera.calibration_direction };
             this.editor = new Calib.Editor(this.saved);
             this.saving = false;
             this.lastSaveAt = 0;
@@ -98,8 +98,8 @@
             }
 
             this.bindEvents();
-            // Saved shapes are only dragged; the Line tool is chosen when the line is missing.
-            this.setActiveTool(this.editor.closed && !this.editor.line ? 'line' : 'mask');
+            // Saved shapes are only dragged; the arrow tool is chosen when the arrow is missing.
+            this.setActiveTool(this.editor.closed && !this.editor.arrow ? 'arrow' : 'mask');
             this.updateSummary();
             this.applyConnection(this.connection);
         }
@@ -110,18 +110,18 @@
             });
             this.doneButton.addEventListener('click', () => {
                 this.edited(this.editor.closeMask(), 'Zone closed. Drag its points to adjust it.');
-                if (!this.editor.line) {
-                    this.setActiveTool('line');
+                if (!this.editor.arrow) {
+                    this.setActiveTool('arrow');
                 }
             });
             this.element.querySelector('[data-clear]').addEventListener('click', () => {
-                this.edited(this.editor.clear(), 'Cleared. Draw the zone again, then the line.');
+                this.edited(this.editor.clear(), 'Cleared. Draw the zone again, then the IN arrow.');
                 this.setActiveTool('mask');
             });
-            // Phase 2: which side of the line is IN (also: click the arrow).
+            // Turn the IN arrow around (its tail and head swap).
             this.element.querySelector('[data-flip-direction]').addEventListener('click', () => {
-                if (!this.editor.line) {
-                    this.message('Draw the trigger line first.');
+                if (!this.editor.arrow) {
+                    this.message('Draw the IN arrow first.');
                     return;
                 }
                 this.edited(this.editor.flip(), 'IN direction flipped. Save to apply it.');
@@ -130,7 +130,7 @@
             this.undoButton.addEventListener('click', () => this.undo());
             this.redoButton.addEventListener('click', () => this.redo());
             this.element.querySelector('[data-discard]').addEventListener('click', () => {
-                this.edited(this.editor.replace(this.saved), 'Changes discarded: back to the saved zone and line (Undo brings them back).');
+                this.edited(this.editor.replace(this.saved), 'Changes discarded: back to the saved zone and IN arrow (Undo brings them back).');
             });
             this.element.querySelector('[data-reset]').addEventListener('click', () => this.resetToSaved());
             // Keyboard shortcuts go to the card used last.
@@ -343,12 +343,12 @@
             }
 
             const messages = {
-                close: 'Zone closed. Drag its points to adjust it; use the Line tool for the trigger line.',
-                flip: 'IN direction flipped. Save to apply it.',
+                close: 'Zone closed. Drag its points to adjust it; then draw the IN arrow (the way vehicles drive into campus).',
+                'draw-arrow': 'IN arrow drawn. Drag its ends or its middle to adjust it; Save to apply it.',
                 'add-point': this.editor.mask.length >= 3 ? 'Click point 1 or press Done to close the zone.' : 'Click the next point of the zone.',
             };
-            if (result.action === 'close' && !this.editor.line) {
-                this.setActiveTool('line');
+            if (result.action === 'close' && !this.editor.arrow) {
+                this.setActiveTool('arrow');
             }
             this.edited(true, messages[result.action]);
         }
@@ -453,7 +453,7 @@
                 }
                 this.saved = saved;
                 const changed = this.editor.replace(saved);
-                this.edited(changed, changed ? 'Loaded the saved zone and line (Undo brings your changes back).' : 'This is already the saved zone and line.');
+                this.edited(changed, changed ? 'Loaded the saved zone and IN arrow (Undo brings your changes back).' : 'This is already the saved zone and IN arrow.');
             } catch (error) {
                 this.message('Could not load the saved calibration. Try again.');
             }
@@ -470,8 +470,8 @@
             this.maskValue.textContent = editor.closed
                 ? `${count}-point zone`
                 : (count ? `Drawing: ${count} point${count === 1 ? '' : 's'}` : 'No zone yet');
-            this.lineValue.textContent = editor.line ? 'Line drawn' : 'No line yet';
-            this.directionValue.textContent = editor.line ? 'IN = the side the arrow points to (click it to flip)' : 'Draw a line first';
+            this.arrowValue.textContent = editor.arrow ? 'IN arrow drawn' : 'No IN arrow yet';
+            this.directionValue.textContent = editor.arrow ? 'Along the arrow = IN, against it = OUT' : 'Draw the IN arrow first';
             this.doneButton.disabled = editor.closed || count < 3;
             this.undoButton.disabled = !editor.canUndo();
             this.redoButton.disabled = !editor.canRedo();
@@ -502,7 +502,7 @@
             if (crossings.length === 0) {
                 const empty = document.createElement('li');
                 empty.className = 'field-help';
-                empty.textContent = 'No crossing recorded yet.';
+                empty.textContent = 'Nothing recorded yet.';
                 this.crossingList.appendChild(empty);
                 return;
             }
@@ -548,7 +548,7 @@
                 const response = await putJson(this.routes.save, { camera_id: this.camera.id, ...data });
                 const camera = response.camera || {};
                 this.camera = { ...this.camera, ...camera };
-                this.saved = { mask: camera.calibration_mask ?? data.calibration_mask, line: camera.calibration_line ?? data.calibration_line };
+                this.saved = { mask: camera.calibration_mask ?? data.calibration_mask, direction: camera.calibration_direction ?? data.calibration_direction };
                 this.lastSaveAt = Date.now();
                 // Same shapes as on screen (kept, with their undo history).
                 this.editor.replace(this.saved);
@@ -567,7 +567,7 @@
 
         /*
          * The detector re-reads the calibration every frame (no restart). Its
-         * overlay endpoint answers with the zone and line it reads, so the
+         * overlay endpoint answers with the zone and arrow it reads, so the
          * toast says so once they match what was saved.
          */
         async confirmApplied(saved) {
@@ -578,8 +578,8 @@
                 try {
                     const response = await fetch(url, { cache: 'no-store' });
                     const overlay = await response.json();
-                    if (overlay.ready && same({ mask: overlay.zone, line: overlay.line }, saved)) {
-                        window.ui?.toast(`${this.camera.role_label}: saved. The detector is using the new zone and line now.`, 'success');
+                    if (overlay.ready && same({ mask: overlay.zone, direction: overlay.direction }, saved)) {
+                        window.ui?.toast(`${this.camera.role_label}: saved. The detector is using the new zone and IN arrow now.`, 'success');
                         return;
                     }
                 } catch (error) {

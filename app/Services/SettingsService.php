@@ -126,6 +126,10 @@ class SettingsService
         }
 
         $this->saveGates($values['gates'] ?? []);
+        // ROI work (Settings › Advanced › Timing): minimum movement per gate, percent (empty = default).
+        foreach ((array) ($values['pass_min_move'] ?? []) as $code => $percent) {
+            Gate::query()->where('code', $code)->update(['pass_min_move' => filled($percent) ? (int) $percent : null]);
+        }
         $this->saveCameraConfigurations($values['camera_configs'] ?? []);
         $this->exportCameraRuntimeConfig($this->all());
     }
@@ -379,6 +383,14 @@ class SettingsService
         ];
     }
 
+    /** ROI work: the gate's minimum movement along the IN arrow (0-1), or the default. */
+    public function passMinMove(string $gate): float
+    {
+        $percent = Gate::query()->where('code', $gate)->value('pass_min_move');
+
+        return $percent ? round($percent / 100, 3) : (float) config('monitoring.detection.pass_min_move', 0.2);
+    }
+
     protected function runtimeCameraPayload(array $cameraConfiguration): array
     {
         // Camera source work: an assigned camera's URLs are built from its
@@ -409,7 +421,10 @@ class SettingsService
             // full-resolution main stream, which needs FFmpeg's threading to keep up.
             'decoder_threads' => $streams['source'] === CameraStreams::SOURCE_DEVICE && $streams['stream'] === 'main' ? 0 : 1,
             'calibration_mask' => $cameraConfiguration['calibration_mask'],
-            'calibration_line' => $cameraConfiguration['calibration_line'],
+            // ROI work: the zone's IN arrow, and how far a vehicle must move
+            // along it (share of the zone) for a sure IN / OUT at this gate.
+            'calibration_direction' => $cameraConfiguration['calibration_direction'],
+            'pass_min_move' => $this->passMinMove((string) $cameraConfiguration['camera_role']),
             // Phase 3: how long the detector waits for a tag read after a
             // crossing, and how far back a read still counts.
             'rfid_window_seconds' => max(1, min(10, $this->getInt('rfid_lookahead_seconds', 2))),

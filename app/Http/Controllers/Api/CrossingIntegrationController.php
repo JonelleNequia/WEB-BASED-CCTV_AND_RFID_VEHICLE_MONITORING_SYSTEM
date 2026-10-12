@@ -16,9 +16,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 
 /**
- * Phase 2 (visitor model): the detector reports every vehicle that crossed a
- * gate's trigger line, with the direction it worked out from the camera.
- * Sending the same event key again (a retry) does not add a second row.
+ * Phase 2 (visitor model): the detector reports every vehicle pass through a
+ * gate's zone, with the direction it worked out from the camera (along or
+ * against the IN arrow). Sending the same event key again does not add a
+ * second row: it updates the record (a sharper picture, plate or type found
+ * before the vehicle left the zone).
  */
 class CrossingIntegrationController extends Controller
 {
@@ -58,14 +60,28 @@ class CrossingIntegrationController extends Controller
         $existing = VehicleCrossing::query()->where('external_event_key', $validated['external_event_key'])->first();
 
         if ($existing) {
-            if (! $existing->snapshot_path && $request->hasFile('snapshot')) {
-                $existing->update(['snapshot_path' => $request->file('snapshot')->store('crossing_snapshots', 'public')]);
+            // ROI work: the detector updates the SAME record until the vehicle
+            // left the zone (clearer picture, type, how it moved). The
+            // direction, time and RFID link stay as they were recorded.
+            $updates = array_filter([
+                'vehicle_type' => $validated['detected_vehicle_type'] ?? null,
+                'confidence' => $validated['confidence'] ?? null,
+                'detection_metadata_json' => isset($validated['detection_metadata'])
+                    ? array_replace((array) $existing->detection_metadata_json, $validated['detection_metadata'])
+                    : null,
+            ], fn ($value) => $value !== null);
+            if ($request->hasFile('snapshot')) {
+                $updates['snapshot_path'] = $request->file('snapshot')->store('crossing_snapshots', 'public');
+                // The visitor record of this pass shows the clearer picture too.
+                \App\Models\VisitorRecord::query()->where('vehicle_crossing_id', $existing->id)
+                    ->where('snapshot_path', $existing->snapshot_path)->update(['snapshot_path' => $updates['snapshot_path']]);
             }
+            $existing->update($updates);
 
             return response()->json([
-                'message' => 'Crossing already stored.',
+                'message' => 'Crossing updated.',
                 'duplicate' => true,
-                'crossing' => $this->payload($existing),
+                'crossing' => $this->payload($existing->fresh()),
             ]);
         }
 

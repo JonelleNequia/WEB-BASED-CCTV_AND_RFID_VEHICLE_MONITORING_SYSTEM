@@ -1,15 +1,17 @@
 """
 Run the detector pipeline on a video file: no camera and no real vehicle
-needed. Same code as the live detector (YOLO + ByteTrack -> zone -> line
-crossing -> RFID window -> "no pass" alert), at the same detection rate.
+needed. Same code as the live detector (YOLO + ByteTrack -> zone -> vehicle
+pass: Detected -> Recorded -> Left zone, RFID window -> "no pass" alert), at
+the same detection rate.
 
     python detector_service.py --video FILE [options]
 
-Zone and line (normalized 0-1, like Settings > Calibration):
-    --use-calibration          the station's saved zone and line (--role)
+Zone and IN arrow (normalized 0-1, like Settings > Calibration):
+    --use-calibration          the station's saved zone and IN arrow (--role)
     --roi "x,y x,y x,y ..."    zone polygon
-    --line "x1,y1,x2,y2[,in]"  trigger line; in = -1 flips the IN side (default 1)
-    (default: the whole frame and a horizontal line at 60% height)
+    --arrow "x1,y1,x2,y2"      IN arrow, tail -> head (default: pointing down the picture)
+    --min-move SHARE           movement along the arrow for a sure IN / OUT (default: the gate's)
+    (default zone: the whole frame)
 
     --post        send events/alerts to Laravel for real (default: dry run)
     --app-url URL with --post: another Laravel (e.g. a test copy), not the live one
@@ -74,12 +76,8 @@ def parse_points(text):
     return points
 
 
-def parse_line(text):
-    values = [float(value) for value in text.split(",")]
-    line = dict(zip(("x1", "y1", "x2", "y2"), values[:4]))
-    # Optional 5th value: the IN side, +1 (default) or -1 (flipped arrow).
-    line["in_side"] = -1 if len(values) > 4 and values[4] < 0 else 1
-    return line
+def parse_arrow(text):
+    return dict(zip(("x1", "y1", "x2", "y2"), (float(value) for value in text.split(","))))
 
 
 def with_app_url(runtime, app_url):
@@ -108,10 +106,12 @@ def run(args):
     camera_config = dict((runtime.get("cameras") or {}).get(args.role) or {})
     if not args.use_calibration:
         camera_config["calibration_mask"] = parse_points(args.roi) if args.roi else parse_points("0.02,0.02 0.98,0.02 0.98,0.98 0.02,0.98")
-        camera_config["calibration_line"] = parse_line(args.line) if args.line else parse_line("0.02,0.6,0.98,0.6")
+        camera_config["calibration_direction"] = parse_arrow(args.arrow) if args.arrow else parse_arrow("0.5,0.3,0.5,0.7")
+    if getattr(args, "min_move", None):
+        camera_config["pass_min_move"] = float(args.min_move)
     camera_config["snapshot_source_value"] = None
     if not detector.calibration_ready(camera_config):
-        print(f"The {args.role} station has no saved zone and line. Draw them in Calibration, or pass --roi and --line.")
+        print(f"The {args.role} station has no saved zone and IN arrow. Draw them in Calibration, or pass --roi and --arrow.")
         return 2
 
     capture = cv2.VideoCapture(args.video)
@@ -143,7 +143,7 @@ def run(args):
     started = time.monotonic()
     frame_index = detections = raw_total = vehicle_total = 0
     track_ids = set()
-    crossings = []
+    passes = []
     errors = {}
     results = None
 
@@ -164,7 +164,7 @@ def run(args):
                 next_detection = video_time + interval
             try:
                 results, crop, _shape, device = detector.run_yolo(args.role, model_info, frame, camera_config, perf, state)
-                before = state["line_crossings"]
+                before = state["passes_detected"]
                 results = detector.handle_detection(args.role, frame, results, crop, camera_config, perf, state, client, vehicle_labels, device)
             except Exception as error:  # reported, never hidden
                 errors[str(error)] = errors.get(str(error), 0) + 1
@@ -175,14 +175,13 @@ def run(args):
             raw_total += debug.get("raw_count", 0)
             vehicle_total += debug.get("vehicle_count", 0)
             track_ids.update(item["track_id"] for item in debug.get("raw", []) if item["kept"] and item["track_id"] is not None)
-            if state["line_crossings"] > before:
+            if state["passes_detected"] > before:
                 with state["lock"]:
                     windows = {tid: dict(window) for tid, window in state["pending_windows"].items()}
                 for track_id, window in windows.items():
-                    if not any(item["track"] == track_id for item in crossings):
-                        crossings.append({"t": round(video_time, 1), "track": track_id,
-                                          "class": window.get("detected_vehicle_type"), "direction": window.get("direction")})
-                        print(f"  {video_time:5.1f}s  CROSSING  track {track_id}  {window.get('detected_vehicle_type')}  {window.get('direction') or 'direction pending'}", flush=True)
+                    if not any(item["track"] == track_id for item in passes):
+                        passes.append({"t": round(video_time, 1), "track": track_id, "class": window.get("detected_vehicle_type")})
+                        print(f"  {video_time:5.1f}s  DETECTED  track {track_id}  {window.get('detected_vehicle_type')}", flush=True)
 
         if writer is not None:
             writer.write(detector.render_annotated_frame(args.role, frame, results, camera_config, state, vehicle_labels))
@@ -191,9 +190,18 @@ def run(args):
     if writer is not None:
         writer.release()
 
-    # Let the RFID windows finish (no match -> "no pass" alert).
+    # The video ended: every vehicle still in the zone has Left zone.
+    with state["lock"]:
+        for key, vehicle_pass in list(state["passes"].items()):
+            detector.leave_zone_locked(
+                state, key, vehicle_pass,
+                detector.normalized_arrow_to_pixels(camera_config.get("calibration_direction"), width, height),
+                detector.normalized_polygon_to_pixels(camera_config.get("calibration_mask"), width, height),
+                detector.pass_settings(perf, camera_config)[2],
+            )
+    # Let the passes finish (RFID window, Recorded, no match -> "no pass" alert).
     deadline = time.monotonic() + detector.RFID_DETECTION_WINDOW_SECONDS + 30
-    while (state["pending_windows"] or state["open_crossings"]) and time.monotonic() < deadline:
+    while state["pending_windows"] and time.monotonic() < deadline:
         time.sleep(0.2)
     # Phase 5: plate OCR runs after each no-pass alert; wait for every vote.
     if not args.post:
@@ -212,11 +220,12 @@ def run(args):
         "raw_detections": raw_total,
         "vehicle_detections": vehicle_total,
         "vehicle_track_ids": len(track_ids),
-        "line_crossings": state["line_crossings"],
-        "crossings": crossings,
-        # Phase 2: the direction each crossing was finally sent with.
+        "passes_detected": state["passes_detected"],
+        "passes_recorded": state["passes_recorded"],
+        "passes": passes,
+        # The direction each record was sent with.
         "directions": dict(state["direction_counts"]),
-        "crossings_sent": getattr(client, "crossings", None) if not args.post else "sent to Laravel",
+        "records_sent": getattr(client, "crossings", None) if not args.post else "sent to Laravel",
         # Phase 5: plate vote of each vehicle with no pass.
         "visitor_plates": getattr(client, "visitor_plates", None) if not args.post else "sent to Laravel",
         "rfid_checks": getattr(client, "rfid_checks", None),

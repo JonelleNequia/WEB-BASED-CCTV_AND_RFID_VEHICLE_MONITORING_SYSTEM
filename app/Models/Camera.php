@@ -35,6 +35,8 @@ class Camera extends Model
         'source_password',
         'calibration_mask_json',
         'calibration_line_json',
+        // ROI work: the IN arrow (direction into campus), tail -> head, 0-1.
+        'calibration_direction_json',
         'last_connection_status',
         'last_connection_message',
         'last_connected_at',
@@ -62,6 +64,7 @@ class Camera extends Model
             'source_password' => EncryptedSecret::class,
             'calibration_mask_json' => 'array',
             'calibration_line_json' => 'array',
+            'calibration_direction_json' => 'array',
             'last_connected_at' => 'datetime',
         ];
     }

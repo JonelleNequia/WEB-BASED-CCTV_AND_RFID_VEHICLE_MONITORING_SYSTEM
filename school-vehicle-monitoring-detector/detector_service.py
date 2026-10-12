@@ -57,19 +57,16 @@ from config import (
 )
 from laravel_client import LaravelEventClient
 from tracking import (
-    LineCrossing,
-    crossing_reason,
-    bbox_intersects_line,
+    STILL_SHARE,
+    VehiclePass,
+    arrow_unit,
+    bbox_bottom_center,
     bbox_center,
     calibration_ready,
-    crossing_direction,
-    line_in_side,
-    normalized_line_to_pixels,
+    describe_arrow,
+    normalized_arrow_to_pixels,
     normalized_polygon_to_pixels,
-    path_crosses_line,
     point_in_polygon,
-    point_side_of_line,
-    trail_direction,
 )
 from anpr import detect_vehicle_color, ocr_runtime_status, read_license_plate_details
 from plate_voting import frames_agree, vote_plate
@@ -1011,13 +1008,15 @@ def initial_camera_state():
         "confirmed_tracks": {},
         # A2: every frame of a track votes for its type (vehicle_type.TrackVote).
         "track_votes": {},
-        # A3: per track, where it came from and whether it was counted (tracking.LineCrossing).
-        "track_crossings": {},
-        "line_crossings": 0,
-        # Phase 2: crossings whose direction is still being decided / sent,
-        # and the latest decided ones (debug view).
-        "open_crossings": {},
-        "recent_crossings": [],
+        # ROI work: one pass per vehicle in the zone (tracking.VehiclePass),
+        # keyed by the track that opened it; a track ID the tracker gave the
+        # same vehicle later points to it (pass_alias).
+        "passes": {},
+        "pass_alias": {},
+        "passes_detected": 0,
+        "passes_recorded": 0,
+        # The latest records (debug view, live overlay).
+        "recent_records": [],
         "direction_counts": {"IN": 0, "OUT": 0, "UNKNOWN": 0},
         "detection_times": [],
         "debug": None,
@@ -1263,7 +1262,7 @@ def detection_status(role, state, camera_config, model_info):
             backoff.seconds_left(now),
         )
     if not calibration_ready(camera_config):
-        return result("no_zone", "Zone not set", "No detection zone and trigger line yet.",
+        return result("no_zone", "Zone not set", "No detection zone and IN arrow yet.",
                       "Draw them in Settings › Calibration.")
     if model_info.get("model") is None:
         if "could not be loaded" in str(state.get("last_error")):
@@ -1292,7 +1291,8 @@ def log_status_change(role, status):
 def detection_counters(state):
     debug = state.get("debug") or {}
     return {
-        "line_crossings": int(state.get("line_crossings", 0)),
+        "passes_detected": int(state.get("passes_detected", 0)),
+        "passes_recorded": int(state.get("passes_recorded", 0)),
         "last_raw_detections": debug.get("raw_count"),
         "last_vehicles": debug.get("vehicle_count"),
         "last_in_zone": debug.get("in_roi"),
@@ -1615,7 +1615,7 @@ def waiting_overlay():
     Temporary label while the RFID detection window is still open.
     """
     return {
-        "label": "CHECKING RFID...",
+        "label": "DETECTED - CHECKING RFID...",
         "color": "amber",
         "verification": "pending",
     }
@@ -1636,7 +1636,7 @@ def registered_overlay(plate_number=None):
 
 def detection_overlay():
     """
-    Neutral label for vehicles YOLO sees before the RFID trigger window starts.
+    Neutral label for vehicles YOLO sees before their pass is Detected (a few frames in the zone).
     """
     return {
         "label": "VEHICLE DETECTED",
@@ -1688,8 +1688,8 @@ OVERLAY_COLORS = {"green": "#16a34a", "blue": "#2563eb", "amber": "#f59e0b", "re
 def overlay_payload(state, camera_config, now=None):
     """
     Live view work: what the browser draws over the video: each vehicle in
-    the zone (box, label, color), the zone and the trigger line, and the
-    latest crossings. Coordinates are 0-1 of the detection frame (same
+    the zone (box, label, color), the zone and the IN arrow, and the
+    latest records. Coordinates are 0-1 of the detection frame (same
     shape as the camera's main stream).
     """
     now = time.monotonic() if now is None else now
@@ -1697,7 +1697,7 @@ def overlay_payload(state, camera_config, now=None):
         frame = state.get("latest_frame")
         boxes = {track_id: box.copy() for track_id, box in state.get("track_boxes", {}).items()}
         overlays = {track_id: overlay.copy() for track_id, overlay in state.get("track_overlays", {}).items()}
-        recent = list(state.get("recent_crossings", []))
+        recent = list(state.get("recent_records", []))
         debug = state.get("debug") or {}
     if frame is None:
         return {"tracks": [], "ready": False}
@@ -1719,7 +1719,7 @@ def overlay_payload(state, camera_config, now=None):
         "ready": True,
         "age_ms": round((now - debug["at"]) * 1000) if debug.get("at") else None,
         "zone": camera_config.get("calibration_mask"),
-        "line": camera_config.get("calibration_line"),
+        "direction": camera_config.get("calibration_direction"),
         "tracks": tracks,
         "crossings": [{"direction": item.get("direction"), "seconds_ago": round(now - item.get("at", now), 1)} for item in recent[-3:]],
     }
@@ -1811,7 +1811,6 @@ def render_annotated_frame(role, frame, results, camera_config, state, vehicle_l
 
 DEBUG_COLORS = {
     "zone": (255, 255, 0),       # cyan
-    "line": (255, 0, 255),       # magenta
     "crop": (160, 160, 160),
     "vehicle": (0, 220, 0),
     "low confidence": (0, 215, 255),
@@ -1832,44 +1831,31 @@ def draw_debug_panel(frame, lines, color=(255, 255, 255)):
         cv2.putText(frame, text, (8, height * (index + 1)), cv2.FONT_HERSHEY_SIMPLEX, scale, color, 1, cv2.LINE_AA)
 
 
-def draw_in_arrow(frame, line, in_side, thickness=1):
-    """
-    Phase 2: arrow from the middle of the trigger line toward the IN side
-    (the same arrow as in Settings > Calibration).
-    """
-    dx, dy = line["x2"] - line["x1"], line["y2"] - line["y1"]
-    length = float(np.hypot(dx, dy))
-    if length < 4:
-        return
-
-    size = max(24.0, min(70.0, length * 0.25))
-    nx, ny = -dy / length * in_side, dx / length * in_side
-    mid = ((line["x1"] + line["x2"]) / 2, (line["y1"] + line["y2"]) / 2)
-    tip = (int(mid[0] + nx * size), int(mid[1] + ny * size))
-    cv2.arrowedLine(frame, (int(mid[0]), int(mid[1])), tip, DEBUG_COLORS["in_arrow"], thickness + 2, cv2.LINE_AA, tipLength=0.35)
-    cv2.putText(frame, "IN", (int(tip[0] + nx * 12) - 8, int(tip[1] + ny * 12) + 5), cv2.FONT_HERSHEY_SIMPLEX,
+def draw_in_arrow(frame, arrow, thickness=1):
+    """The IN arrow of the zone (the same arrow as in Settings > Calibration)."""
+    tail = (int(arrow["x1"]), int(arrow["y1"]))
+    head = (int(arrow["x2"]), int(arrow["y2"]))
+    cv2.arrowedLine(frame, tail, head, DEBUG_COLORS["in_arrow"], thickness + 2, cv2.LINE_AA, tipLength=0.2)
+    cv2.putText(frame, "IN", (head[0] + 8, head[1] + 5), cv2.FONT_HERSHEY_SIMPLEX,
                 0.5 * max(1, thickness), DEBUG_COLORS["in_arrow"], max(1, thickness), cv2.LINE_AA)
 
 
 def draw_debug_overlay(frame, camera_config, state, message=None):
     """
     Debug view (Settings > Calibration): every raw YOLO detection before any
-    filter, the zone and trigger line as the detector uses them (scaled to
-    this frame), the crop YOLO saw, track IDs with their last positions, and
+    filter, the zone and IN arrow as the detector uses them (scaled to this
+    frame), the crop YOLO saw, track IDs with their last positions, and
     counters. Drawn only while the debug switch is on.
     """
     height, width = frame.shape[:2]
     thickness = max(1, width // 640)
     polygon = normalized_polygon_to_pixels(camera_config.get("calibration_mask"), width, height)
-    line = normalized_line_to_pixels(camera_config.get("calibration_line"), width, height)
+    arrow = normalized_arrow_to_pixels(camera_config.get("calibration_direction"), width, height)
 
     if polygon:
         cv2.polylines(frame, [np.array(polygon, dtype=np.int32)], True, DEBUG_COLORS["zone"], thickness + 1)
-    if line:
-        cv2.line(frame, (line["x1"], line["y1"]), (line["x2"], line["y2"]), DEBUG_COLORS["line"], thickness + 2)
-        for x, y in ((line["x1"], line["y1"]), (line["x2"], line["y2"])):
-            cv2.circle(frame, (x, y), thickness * 4, DEBUG_COLORS["line"], -1)
-        draw_in_arrow(frame, line, line_in_side(camera_config), thickness)
+    if arrow:
+        draw_in_arrow(frame, arrow, thickness)
 
     with state["lock"]:
         debug = dict(state.get("debug") or {})
@@ -1907,9 +1893,9 @@ def draw_debug_overlay(frame, camera_config, state, message=None):
     age = time.monotonic() - float(debug.get("at") or 0)
     draw_debug_panel(frame, [
         f"DEBUG  detections/frame {debug.get('raw_count', 0)}  vehicles {debug.get('vehicle_count', 0)}  in zone {debug.get('in_roi', 0)}",
-        f"line crossings {debug.get('line_crossings', 0)}  detection {debug.get('detection_fps', 0)} fps  on {debug.get('device') or '-'} @{debug.get('imgsz')}",
+        f"detected {debug.get('passes_detected', 0)}  recorded {debug.get('passes_recorded', 0)}  in zone now {len(state.get('passes') or {})}  detection {debug.get('detection_fps', 0)} fps  on {debug.get('device') or '-'} @{debug.get('imgsz')}",
         "IN {IN}  OUT {OUT}  unknown {UNKNOWN}".format(**{"IN": 0, "OUT": 0, "UNKNOWN": 0, **(state.get("direction_counts") or {})})
-        + ("  last: " + ", ".join(f"{item['direction']} #{item['track_id']}" for item in reversed(state.get("recent_crossings") or [])) if state.get("recent_crossings") else ""),
+        + ("  last: " + ", ".join(f"{item['direction']} #{item['track_id']}" for item in reversed(state.get("recent_records") or [])) if state.get("recent_records") else ""),
         f"frame {source[0]}x{source[1]}  last detection {age:.1f}s ago" + (f"  ERROR {state.get('last_detection_error')}" if state.get("last_detection_error") else ""),
     ])
 
@@ -1970,32 +1956,19 @@ def rfid_seconds(camera_config, key, default):
     return max(1.0, min(15.0, value))
 
 
-def start_detection_window(
-    role,
-    frame,
-    state,
-    track_id,
-    class_id,
-    confidence,
-    xyxy,
-    direction,
-    camera_config,
-    vehicle_labels,
-    laravel_client,
-):
+def detect_pass(role, frame, state, track_id, class_id, confidence, xyxy, camera_config, vehicle_labels, laravel_client, yolo_track_id=None):
     """
-    Start one RFID matching window for a triggered vehicle.
-
-    direction: {"direction": "IN" / "OUT" / None, "reason", "line" (pixels),
-    "in_side", "start_side"}; None is decided from the track while the
-    window is open (Phase 2).
+    Detected: the vehicle was seen in the zone for a few frames. Its pass
+    opens: the Gate Monitor / kiosk show "Vehicle detected · checking RFID…"
+    at once and the RFID window starts (tag reads from the lookback before
+    now count too). The pass's worker (pass_worker) makes the record.
     """
-    if not isinstance(direction, dict):
-        direction = {"direction": direction, "reason": "crossed the line" if direction else None}
-
+    # track_id here is the PASS key (unique per pass); the record shows the
+    # tracker's own ID (the tracker can give a new vehicle an old ID).
+    yolo_track_id = track_id if yolo_track_id is None else yolo_track_id
     now_monotonic = time.monotonic()
     window_seconds = rfid_seconds(camera_config, "rfid_window_seconds", RFID_DETECTION_WINDOW_SECONDS)
-    event_key = f"{role}-track-{track_id}-{int(time.time() * 1000)}"
+    event_key = f"{role}-track-{yolo_track_id}-{int(time.time() * 1000)}"
     event_time = datetime.now().astimezone().isoformat()
     display_label = vehicle_labels[class_id]
 
@@ -2012,6 +1985,7 @@ def start_detection_window(
         })
         frame_height, frame_width = frame.shape[:2]
         zone = normalized_polygon_to_pixels(camera_config.get("calibration_mask"), frame_width, frame_height) or []
+        x1, y1, x2, y2 = xyxy
         state["pending_windows"][track_id] = {
             # A2: the track's type votes (still filled while it is in view) and
             # the zone height in pixels (size rule).
@@ -2020,35 +1994,44 @@ def start_detection_window(
             "event_key": event_key,
             "camera_role": role,
             "camera_id": camera_config.get("camera_id"),
-            "track_id": track_id,
+            "track_id": yolo_track_id,
             "class_id": class_id,
             "detected_vehicle_type": display_label,
             "confidence": confidence,
             "xyxy": xyxy,
-            "direction": direction.get("direction"),
-            "direction_reason": direction.get("reason"),
-            "line": direction.get("line"),
-            "in_side": direction.get("in_side", 1),
-            "start_side": direction.get("start_side"),
-            "trail_length": int(direction.get("trail_length") or 0),
-            "path": direction.get("path"),
+            # IN / OUT / UNKNOWN / STILL once decided (process_results / Left zone).
+            "direction": None,
+            "direction_reason": None,
+            "direction_confidence": None,
+            "measure": None,
             "event_time": event_time,
             "started_at": now_monotonic,
-            # Phase 3: Settings > Gates & Readers (tag read after / before the crossing).
+            # Phase 3: Settings > Timing (tag read after / before the vehicle is detected).
             "window_seconds": window_seconds,
             "lookback_seconds": rfid_seconds(camera_config, "rfid_lookback_seconds", RFID_LOOKBACK_SECONDS),
             "deadline_at": now_monotonic + window_seconds,
+            "rfid_status": None,
+            "left_zone_at": None,
+            "recorded_at": None,
             "snapshot_frame": frame.copy(),
+            # The clearest picture so far: the vehicle at its largest in the zone.
+            "best_frame": frame.copy(),
+            "best_xyxy": tuple(xyxy),
+            "best_area": float((x2 - x1) * (y2 - y1)),
+            "best_at": now_monotonic,
             "last_snapshot_refresh_at": now_monotonic,
             "analysis_frames": [(frame.copy(), tuple(xyxy))],
             "last_analysis_frame_at": now_monotonic,
             "last_message": "Waiting for RFID scan.",
         }
-        state["open_crossings"][track_id] = state["pending_windows"][track_id]
         state["track_overlays"][track_id] = waiting_overlay()
+        # "Vehicle detected · checking RFID…" on the vehicle's own box right away.
+        state["track_overlays"][yolo_track_id] = state["track_overlays"][track_id]
+        state["passes_detected"] += 1
 
+    print(f"{role} pass track {yolo_track_id}: Detected, checking RFID", flush=True)
     worker = threading.Thread(
-        target=rfid_detection_window_worker,
+        target=pass_worker,
         args=(role, state, track_id, laravel_client),
         daemon=True,
     )
@@ -2088,18 +2071,49 @@ def apply_rfid_match_result(state, track_id, match):
             "registered_at_monotonic": now_monotonic,
         })
         remember_recent_resolution_locked(state, track_id, window.get("xyxy", (0, 0, 0, 0)), overlay, now_monotonic)
-        state["crossings_logged"] += 1
-        state["pending_windows"].pop(track_id, None)
+        # ROI work: the pass stays open; its record is made once the
+        # direction is sure (pass_worker).
+        window["rfid_status"] = "matched"
         state["last_error"] = ""
 
         return True
 
 
-def rfid_detection_window_worker(role, state, track_id, laravel_client):
+# A pass whose vehicle never leaves the zone (parked) is closed after this long.
+PASS_MAX_OPEN_SECONDS = 600.0
+# Update the record at Left zone when the clearest picture grew this much since it was made.
+BETTER_PICTURE_RATIO = 1.2
+
+
+def wait_for_window(state, track_id, window, ready, max_seconds):
     """
-    Poll Laravel for a pass read; on timeout send an Unregistered Visitor record, all outside
-    the frame capture loop. Either way the crossing itself (gate, direction,
-    time, track, snapshot) is sent once (Phase 2).
+    Wait (outside the frame loop) until ready(window): "ready", "timeout"
+    after max_seconds, or "gone" when the pass was dropped (detector reset).
+    """
+    deadline = time.monotonic() + max_seconds
+    while True:
+        with state["lock"]:
+            if state["pending_windows"].get(track_id) is not window:
+                return "gone"
+            if ready(window):
+                return "ready"
+        if time.monotonic() >= deadline:
+            return "timeout"
+        time.sleep(0.2)
+
+
+def pass_worker(role, state, track_id, laravel_client):
+    """
+    One vehicle pass, outside the frame loop:
+
+    1. RFID window: poll Laravel for this vehicle's tag (matched / no pass).
+    2. Recorded: once the direction is sure (it moved far enough along the IN
+       arrow) AND the RFID window is over, even while it is still in the zone;
+       or when it left the zone / was lost before that (IN / OUT if the data
+       allows, else "Direction unknown"). A vehicle that never moved is not
+       recorded.
+    3. Until Left zone the SAME record is updated: a clearer picture (and the
+       plate, type) replaces the first one. Never a second record.
     """
     with state["lock"]:
         window = state["pending_windows"].get(track_id)
@@ -2107,11 +2121,46 @@ def rfid_detection_window_worker(role, state, track_id, laravel_client):
     if not window:
         return
 
-    matched = wait_for_rfid_match(role, state, track_id, laravel_client)
-    submit_crossing_for_window(role, state, track_id, window, "matched" if matched else "no_pass", laravel_client)
+    try:
+        matched = wait_for_rfid_match(role, state, track_id, laravel_client)
+        with state["lock"]:
+            window["rfid_status"] = "matched" if matched else "no_pass"
 
-    if not matched:
-        submit_guest_observation_for_window(role, state, track_id, laravel_client)
+        waited = wait_for_window(state, track_id, window, lambda w: w.get("direction") is not None or w.get("left_zone_at"), PASS_MAX_OPEN_SECONDS)
+        if waited == "gone":
+            return
+        if waited == "timeout":
+            with state["lock"]:
+                # Still in the zone after all this time and never sure: a parked vehicle.
+                measure = window.get("measure") or {}
+                if measure.get("moved", 0.0) < STILL_SHARE:
+                    window.update(direction="STILL", direction_reason="did not move")
+                else:
+                    window.update(direction="UNKNOWN", direction_reason=measure.get("reason") or "Direction unknown")
+
+        with state["lock"]:
+            direction = window.get("direction")
+
+        if direction == "STILL":
+            with state["lock"]:
+                state["track_overlays"][track_id] = default_overlay()
+            print(f"{role} pass track {track_id}: Left zone without moving, not recorded", flush=True)
+            return
+
+        record_pass(role, state, track_id, window, "matched" if matched else "no_pass", laravel_client)
+
+        if not matched:
+            submit_guest_observation_for_window(role, state, track_id, laravel_client)
+
+        if wait_for_window(state, track_id, window, lambda w: w.get("left_zone_at"), PASS_MAX_OPEN_SECONDS) == "gone":
+            return
+        update_record_after_left_zone(role, state, track_id, window, matched, laravel_client)
+    finally:
+        with state["lock"]:
+            state["pending_windows"].pop(track_id, None)
+            tracked = state.get("tracked_vehicles", {}).get(track_id)
+            if tracked is not None and tracked.get("status") == "checking":
+                tracked["status"] = "processed"
 
 
 def wait_for_rfid_match(role, state, track_id, laravel_client):
@@ -2164,42 +2213,12 @@ def wait_for_rfid_match(role, state, track_id, laravel_client):
     return False
 
 
-# Phase 2: fewer sightings than this and no crossing seen = "track too short".
-MIN_DIRECTION_TRAIL_POINTS = 3
-
-
-def resolve_window_direction_locked(window, center_point):
-    """
-    Phase 2: a vehicle that only touched the line when its window started
-    gets its direction once its centre is on the other side of the line.
-    """
-    if window.get("direction") or not window.get("line"):
-        return
-
-    side = point_side_of_line(center_point, window["line"])
-    start_side = window.get("start_side")
-
-    if not start_side:
-        window["start_side"] = side or None
-        return
-
-    if side and side != start_side:
-        window["direction"] = crossing_direction(side, window.get("in_side", 1))
-        window["direction_reason"] = "moved across the line"
-
-
-def final_direction_locked(window):
-    """
-    IN / OUT, or UNKNOWN with the reason (the track was too short or never
-    reached the other side of the line).
-    """
-    if window.get("direction") in {"IN", "OUT"}:
-        return window["direction"], window.get("direction_reason") or "crossed the line"
-
-    if not window.get("start_side") or window.get("trail_length", 0) < MIN_DIRECTION_TRAIL_POINTS:
-        return "UNKNOWN", "track too short"
-
-    return "UNKNOWN", "never reached the other side"
+def set_window_direction_locked(window, decision):
+    """The pass's direction (IN / OUT / UNKNOWN / STILL), why, and how sure."""
+    window["direction"] = decision.get("direction")
+    window["direction_reason"] = decision.get("reason")
+    window["direction_confidence"] = decision.get("confidence")
+    window["measure"] = decision
 
 
 _SECOND_PASS = {"path": None, "model": None, "labels": {}, "lock": threading.Lock()}
@@ -2270,70 +2289,129 @@ def final_vehicle_type(window, hires_frame):
     return vtype.decide(vote, second, float(window.get("zone_height") or 0.0), settings, fallback=window.get("detected_vehicle_type"))
 
 
-def submit_crossing_for_window(role, state, track_id, window, rfid_status, laravel_client):
-    """
-    Phase 2: send one crossing (gate, IN / OUT / UNKNOWN, time, track ID,
-    confidence, snapshot) to Laravel. A pass read can end the RFID window
-    before a vehicle that only touched the line has crossed it, so the
-    direction may still be decided until the window's deadline.
-    """
-    try:
-        while True:
-            with state["lock"]:
-                decided = window.get("direction") in {"IN", "OUT"}
-            if decided or time.monotonic() >= window["deadline_at"]:
-                break
-            time.sleep(0.2)
+def best_picture_locked(window):
+    """The clearest picture of the pass so far (the vehicle at its largest) and its box."""
+    frame = window.get("best_frame")
+    if frame is None:
+        frame = window.get("snapshot_frame")
+        return (frame.copy() if frame is not None else None), tuple(window.get("xyxy", ()))
+    return frame.copy(), tuple(window.get("best_xyxy") or window.get("xyxy", ()))
 
-        # The full-resolution frame from the moment of the crossing when there is one.
-        hires_frame = HIRES[role].frame_near(window["started_at"]) if role in HIRES else None
-        # A2: the final type from every frame, a second check and the size rule.
-        type_decision = final_vehicle_type(window, hires_frame)
 
+def crossing_payload_locked(role, track_id, window, rfid_status, type_decision, picture_xyxy):
+    return {
+        "external_event_key": window["event_key"],
+        "camera_role": role,
+        "camera_id": window.get("camera_id"),
+        "direction": window.get("direction") if window.get("direction") in {"IN", "OUT"} else "UNKNOWN",
+        "direction_reason": (window.get("direction_reason") or "")[:120] or None,
+        "event_time": window["event_time"],
+        "track_id": window.get("track_id", track_id),
+        "confidence": round(float(window.get("confidence") or 0.0), 4),
+        "detected_vehicle_type": window.get("detected_vehicle_type"),
+        "detection_metadata": {
+            "bbox_xyxy": [round(float(value), 1) for value in picture_xyxy],
+            # ROI work: how the direction was decided (share of the zone along
+            # the IN arrow, box size change, confidence) and the pass's stages.
+            "direction_confidence": window.get("direction_confidence"),
+            "movement": {key: value for key, value in (window.get("measure") or {}).items() if key in {"along", "moved", "size"}},
+            "pass": {
+                "detected_at": window["event_time"],
+                "recorded_at": window.get("recorded_at"),
+                "left_zone": bool(window.get("left_zone_at")),
+            },
+            "rfid_status": rfid_status,
+            "vehicle_type": {key: value for key, value in type_decision.items() if key != "type"},
+        },
+    }
+
+
+def record_pass(role, state, track_id, window, rfid_status, laravel_client):
+    """
+    Recorded: send the pass as one record (gate, IN / OUT / UNKNOWN, the time
+    it was detected, track, type, the clearest picture so far) to Laravel.
+    """
+    # A2: the final type from every frame, a second check and the size rule.
+    hires_frame = HIRES[role].frame_near(window.get("best_at", window["started_at"])) if role in HIRES else None
+    type_decision = final_vehicle_type(window, hires_frame)
+
+    with state["lock"]:
+        window["detected_vehicle_type"] = type_decision["type"] or window.get("detected_vehicle_type")
+        window["recorded_at"] = datetime.now().astimezone().isoformat()
+        window["recorded_area"] = float(window.get("best_area") or 0.0)
+        picture, picture_xyxy = best_picture_locked(window)
+        payload = crossing_payload_locked(role, track_id, window, rfid_status, type_decision, picture_xyxy)
+        direction = payload["direction"]
+        state["direction_counts"][direction] = state["direction_counts"].get(direction, 0) + 1
+        state["recent_records"].append({"track_id": window.get("track_id", track_id), "direction": direction, "at": time.monotonic()})
+        del state["recent_records"][:-5]
+        state["passes_recorded"] += 1
+        state["crossings_logged"] += 1
+
+    print(f"{role} pass track {window.get('track_id', track_id)}: Recorded {direction} ({payload['direction_reason']}), "
+          f"{payload['detected_vehicle_type']} ({type_decision['rule']}), RFID {rfid_status}", flush=True)
+
+    frame = hires_frame if hires_frame is not None else picture
+    snapshot = encode_frame_snapshot(role, frame, f"crossing-{window['event_key']}") if frame is not None else None
+    submit = getattr(laravel_client, "submit_crossing", None)
+    if submit is None:
+        return
+    result = submit(payload, snapshot["bytes"] if snapshot else None, snapshot["filename"] if snapshot else None)
+
+    if not result.get("accepted"):
         with state["lock"]:
-            direction, reason = final_direction_locked(window)
-            window["direction"], window["direction_reason"] = direction, reason
-            window["detected_vehicle_type"] = type_decision["type"] or window.get("detected_vehicle_type")
-            snapshot_frame = window.get("snapshot_frame")
-            snapshot_frame = snapshot_frame.copy() if snapshot_frame is not None else None
-            payload = {
-                "external_event_key": window["event_key"],
-                "camera_role": role,
-                "camera_id": window.get("camera_id"),
-                "direction": direction,
-                "direction_reason": reason,
-                "event_time": window["event_time"],
-                "track_id": track_id,
-                "confidence": round(float(window.get("confidence") or 0.0), 4),
-                "detected_vehicle_type": window.get("detected_vehicle_type"),
-                "detection_metadata": {
-                    "bbox_xyxy": [round(float(value), 1) for value in window.get("xyxy", ())],
-                    "in_side": window.get("in_side", 1),
-                    # Where the vehicle was first seen and where it counted (0-1 of the picture).
-                    "path": window.get("path"),
-                    "rfid_status": rfid_status,
-                    "vehicle_type": {key: value for key, value in type_decision.items() if key != "type"},
-                },
-            }
-            state["direction_counts"][direction] = state["direction_counts"].get(direction, 0) + 1
-            state["recent_crossings"].append({"track_id": track_id, "direction": direction, "at": time.monotonic()})
-            del state["recent_crossings"][:-5]
+            state["last_error"] = result.get("message", "Vehicle record could not be saved.")
 
-        print(f"{role} crossing track {track_id}: {direction} ({reason}), {payload['detected_vehicle_type']} ({type_decision['rule']})", flush=True)
 
-        snapshot = encode_frame_snapshot(role, hires_frame if hires_frame is not None else snapshot_frame, f"crossing-{window['event_key']}") \
-            if (hires_frame is not None or snapshot_frame is not None) else None
-        submit = getattr(laravel_client, "submit_crossing", None)
-        if submit is None:
+def update_record_after_left_zone(role, state, track_id, window, matched, laravel_client):
+    """
+    Left zone: the same record gets the clearest picture the pass had (and,
+    for an unregistered vehicle, the plate read from every frame), when it is
+    clearly better than the one sent when it was Recorded.
+    """
+    with state["lock"]:
+        better = float(window.get("best_area") or 0.0) >= float(window.get("recorded_area") or 0.0) * BETTER_PICTURE_RATIO
+        if not better:
             return
-        result = submit(payload, snapshot["bytes"] if snapshot else None, snapshot["filename"] if snapshot else None)
+        picture, picture_xyxy = best_picture_locked(window)
 
-        if not result.get("accepted"):
-            with state["lock"]:
-                state["last_error"] = result.get("message", "Crossing could not be saved.")
-    finally:
-        with state["lock"]:
-            state["open_crossings"].pop(track_id, None)
+    hires_frame = HIRES[role].frame_near(window.get("best_at", window["started_at"])) if role in HIRES else None
+    type_decision = final_vehicle_type(window, hires_frame)
+    with state["lock"]:
+        window["detected_vehicle_type"] = type_decision["type"] or window.get("detected_vehicle_type")
+        payload = crossing_payload_locked(role, track_id, window, "matched" if matched else "no_pass", type_decision, picture_xyxy)
+        analysis_frames = [(frame.copy(), tuple(xyxy)) for frame, xyxy in window.get("analysis_frames", []) if frame is not None]
+        hires_frames = list(window.get("hires_frames", []))
+
+    frame = hires_frame if hires_frame is not None else picture
+    snapshot = encode_frame_snapshot(role, frame, f"crossing-{window['event_key']}-left") if frame is not None else None
+    submit = getattr(laravel_client, "submit_crossing", None)
+    if submit is not None:
+        submit(payload, snapshot["bytes"] if snapshot else None, snapshot["filename"] if snapshot else None)
+    print(f"{role} pass track {track_id}: Left zone, record updated with a clearer picture", flush=True)
+
+    submit_visitor_plate = getattr(laravel_client, "submit_visitor_plate", None)
+    if matched or submit_visitor_plate is None:
+        return
+    # Phase 5: the plate again, from every sharp frame of the whole pass.
+    vote, vehicle_color, _, analysis_details, plate_crop = analyze_guest_vehicle_details(hires_frames + analysis_frames, payload["detected_vehicle_type"])
+    plate_image = encode_frame_snapshot(role, plate_crop, f"plate-{window['event_key']}") if plate_crop is not None else None
+    submit_visitor_plate(
+        {
+            "external_event_key": window["event_key"],
+            "camera_role": role,
+            "event_time": window["event_time"],
+            "plate_number": vote["plate"],
+            "plate_status": vote["status"],
+            "plate_confidence": vote["confidence"],
+            "best_guess": vote["best_guess"],
+            "vehicle_color": vehicle_color,
+            "detected_vehicle_type": payload["detected_vehicle_type"],
+            "ocr_details": analysis_details,
+        },
+        plate_image["bytes"] if plate_image else None,
+        plate_image["filename"] if plate_image else None,
+    )
 
 
 def most_common_value(values):
@@ -2510,9 +2588,8 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
         if not window:
             return
 
-        snapshot_frame = window.get("snapshot_frame")
-        if snapshot_frame is not None:
-            snapshot_frame = snapshot_frame.copy()
+        # ROI work: the clearest picture of the pass so far, not the last frame.
+        snapshot_frame, best_xyxy = best_picture_locked(window)
 
         analysis_frames = [
             (analysis_frame.copy(), tuple(analysis_xyxy))
@@ -2526,16 +2603,15 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             "camera_id": window.get("camera_id"),
             "detected_vehicle_type": window["detected_vehicle_type"],
             "event_time": window["event_time"],
-            "xyxy": tuple(window["xyxy"]),
+            "xyxy": best_xyxy,
             "confidence": window["confidence"],
-            "direction": window["direction"],
+            "direction": window["direction"] if window.get("direction") in {"IN", "OUT"} else "UNKNOWN",
             "window_seconds": window.get("window_seconds", RFID_DETECTION_WINDOW_SECONDS),
             "lookback_seconds": window.get("lookback_seconds", RFID_LOOKBACK_SECONDS),
         }
         tracked = ensure_tracked_vehicle_locked(state, track_id, now_monotonic)
 
         if tracked.get("status") != "checking":
-            state["pending_windows"].pop(track_id, None)
             return
 
         tracked.update({
@@ -2550,7 +2626,6 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             default_overlay(),
             now_monotonic,
         )
-        state["pending_windows"].pop(track_id, None)
 
     if snapshot_frame is None:
         with state["lock"]:
@@ -2559,7 +2634,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
 
     # A full-resolution frame from the moment of the crossing, when available:
     # sharper snapshot and plate reading than the small live-stream frame.
-    hires_frame = HIRES[role].frame_near(window_started_at) if role in HIRES else None
+    hires_frame = HIRES[role].frame_near(window.get("best_at", window_started_at)) if role in HIRES else None
     if hires_frame is not None:
         hires_box = scale_box(window_payload["xyxy"], snapshot_frame.shape, hires_frame.shape)
         analysis_frames = [(hires_frame, hires_box)] + analysis_frames
@@ -2710,41 +2785,47 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
 
 def update_detection_windows(role, frame, results, state, laravel_client):
     """
-    Refresh pending window snapshots while background workers handle API I/O.
+    Keep each open pass's latest box, frames for the plate and type, and its
+    clearest picture (the vehicle at its largest), while the workers handle
+    the API I/O.
     """
     visible_boxes = current_track_boxes(results)
     now_monotonic = time.monotonic()
 
     with state["lock"]:
-        for track_id, window in list(state["open_crossings"].items()):
-            visible_box = visible_boxes.get(track_id)
-            if visible_box:
-                # Sightings of the track (the trail before the window, plus every frame since).
-                window["trail_length"] = window.get("trail_length", 0) + 1
-                resolve_window_direction_locked(window, bbox_center(visible_box["xyxy"]))
+        # A track ID the tracker gave the vehicle later counts for its pass.
+        for track_id, key in state.get("pass_alias", {}).items():
+            if track_id in visible_boxes and key not in visible_boxes:
+                visible_boxes[key] = visible_boxes[track_id]
 
         for track_id, window in list(state["pending_windows"].items()):
             visible_box = visible_boxes.get(track_id)
-            if visible_box:
-                window["xyxy"] = visible_box["xyxy"]
-                window["confidence"] = visible_box["confidence"]
-                window["snapshot_frame"] = frame.copy()
+            if not visible_box or window.get("left_zone_at"):
+                if window.get("snapshot_frame") is None:
+                    window["snapshot_frame"] = frame.copy()
+                continue
 
-                if now_monotonic - float(window.get("last_analysis_frame_at", 0.0)) >= GUEST_ANALYSIS_FRAME_INTERVAL_SECONDS:
-                    analysis_frames = window.setdefault("analysis_frames", [])
-                    analysis_frames.append((frame.copy(), tuple(visible_box["xyxy"])))
-                    del analysis_frames[:-MAX_GUEST_ANALYSIS_FRAMES]
-                    window["last_analysis_frame_at"] = now_monotonic
-                    # Phase 5: the full-resolution frame of the same moment, for
-                    # plate voting over several sharp frames (the grabber only
-                    # keeps the last ~1.6 s, so it is taken now).
-                    hires_frame = HIRES[role].frame_near(now_monotonic) if role in HIRES else None
-                    if hires_frame is not None:
-                        hires_frames = window.setdefault("hires_frames", [])
-                        hires_frames.append((hires_frame, scale_box(visible_box["xyxy"], frame.shape, hires_frame.shape)))
-                        del hires_frames[:-MAX_GUEST_ANALYSIS_FRAMES]
-            elif window.get("snapshot_frame") is None:
-                window["snapshot_frame"] = frame.copy()
+            x1, y1, x2, y2 = visible_box["xyxy"]
+            window["xyxy"] = visible_box["xyxy"]
+            window["confidence"] = visible_box["confidence"]
+            window["snapshot_frame"] = frame.copy()
+            area = float((x2 - x1) * (y2 - y1))
+            if area > float(window.get("best_area") or 0.0):
+                window.update(best_frame=frame.copy(), best_xyxy=tuple(visible_box["xyxy"]), best_area=area, best_at=now_monotonic)
+
+            if now_monotonic - float(window.get("last_analysis_frame_at", 0.0)) >= GUEST_ANALYSIS_FRAME_INTERVAL_SECONDS:
+                analysis_frames = window.setdefault("analysis_frames", [])
+                analysis_frames.append((frame.copy(), tuple(visible_box["xyxy"])))
+                del analysis_frames[:-MAX_GUEST_ANALYSIS_FRAMES]
+                window["last_analysis_frame_at"] = now_monotonic
+                # Phase 5: the full-resolution frame of the same moment, for
+                # plate voting over several sharp frames (the grabber only
+                # keeps the last ~1.6 s, so it is taken now).
+                hires_frame = HIRES[role].frame_near(now_monotonic) if role in HIRES else None
+                if hires_frame is not None:
+                    hires_frames = window.setdefault("hires_frames", [])
+                    hires_frames.append((hires_frame, scale_box(visible_box["xyxy"], frame.shape, hires_frame.shape)))
+                    del hires_frames[:-MAX_GUEST_ANALYSIS_FRAMES]
 
 
 def remember_track_point(state, track_id, point):
@@ -2763,7 +2844,6 @@ def remember_track_point(state, track_id, point):
             previous = entry["points"][-1]
         elif entry:
             entry["points"] = []
-            state["track_crossings"].pop(track_id, None)
 
         entry = entry or {"points": []}
         entry["points"].append((float(point[0]), float(point[1])))
@@ -2775,165 +2855,182 @@ def remember_track_point(state, track_id, point):
             if now_monotonic - stale["last_seen"] > max(TRACK_MEMORY_SECONDS * 1.5, 6.0):
                 state["track_points"].pop(stale_id, None)
                 state["confirmed_tracks"].pop(stale_id, None)
-                state["track_crossings"].pop(stale_id, None)
 
     return previous
 
 
-def crossing_limits(perf, mask_polygon, frame_height):
-    """A3: hysteresis margin and minimum movement in pixels, from shares of the zone's height."""
+def pass_settings(perf, camera_config):
+    """
+    ROI work: frames in the zone before a vehicle is Detected, missed frames
+    before it Left zone, and the share of the zone it must move along the IN
+    arrow before IN / OUT is sure (per gate: Settings > Advanced; default in
+    config/monitoring.php).
+    """
     settings = {**PERFORMANCE_DEFAULTS, **(perf or {})}
-    ys = [point[1] for point in mask_polygon or []]
-    zone_height = (max(ys) - min(ys)) if ys else float(frame_height)
+    min_move = (camera_config or {}).get("pass_min_move")
+    if min_move in (None, ""):
+        min_move = settings["pass_min_move"]
+    try:
+        min_move = float(min_move)
+    except (TypeError, ValueError):
+        min_move = float(PERFORMANCE_DEFAULTS["pass_min_move"])
     return (
-        float(settings["cross_margin"]) * zone_height,
-        max(1, int(settings["cross_min_points"])),
-        float(settings["cross_min_move"]) * zone_height,
+        max(1, int(settings["pass_min_frames"])),
+        max(1, int(settings["pass_lost_frames"])),
+        min(0.9, max(0.02, min_move)),
     )
+
+
+# Pass keys never collide with the tracker's IDs.
+PASS_KEY_START = 1_000_000
+
+
+def boxes_overlap_mostly(left, right, share=0.7):
+    """One box mostly inside the other: YOLO's second box on the same vehicle."""
+    x1, y1 = max(left[0], right[0]), max(left[1], right[1])
+    x2, y2 = min(left[2], right[2]), min(left[3], right[3])
+    inside = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    smaller = min((left[2] - left[0]) * (left[3] - left[1]), (right[2] - right[0]) * (right[3] - right[1]))
+    return smaller > 0 and inside / smaller >= share
+
+
+def adopt_pass_locked(state, track_id, xyxy, seen_keys=()):
+    """
+    One vehicle = one pass. A new track continues an open pass when:
+    - the tracker gave the vehicle a new ID where that pass's vehicle just
+      disappeared (missed this frame or the last ones), or
+    - it is a second box YOLO put on the same vehicle (mostly overlapping
+      the pass's box in this very frame).
+    Returns that pass's key, or None.
+    """
+    for key, vehicle_pass in state["passes"].items():
+        last = getattr(vehicle_pass, "last_xyxy", None)
+        if last is None:
+            continue
+        if key in seen_keys:
+            if boxes_overlap_mostly(xyxy, last):
+                return key
+        elif vehicle_pass.missed > 0 and bboxes_look_like_same_vehicle(xyxy, last):
+            return key
+    return None
+
+
+def leave_zone_locked(state, key, vehicle_pass, arrow, mask_polygon, min_move):
+    """Left zone: the pass ends; an undecided one gets its final direction (UNKNOWN / STILL)."""
+    state["passes"].pop(key, None)
+    for alias, target in list(state["pass_alias"].items()):
+        if target == key:
+            state["pass_alias"].pop(alias, None)
+    window = state["pending_windows"].get(key)
+    if window is None or window.get("left_zone_at"):
+        return
+    if window.get("direction") is None:
+        set_window_direction_locked(window, vehicle_pass.decide(arrow, mask_polygon, min_move, final=True))
+    window["left_zone_at"] = time.monotonic()
 
 
 def process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels, perf=None):
     """
-    Filter detections to supported vehicle classes, track them, and log one
-    event per valid crossing. Uses ANPR for license plate detection.
+    ROI work: every vehicle in the zone is one pass (tracking.VehiclePass):
+
+    - Detected after a few frames in the zone (detect_pass: RFID check starts);
+    - its direction is decided as soon as it moved far enough along the IN
+      arrow (pass_worker then makes the record once the RFID window is over);
+    - Left zone when it is out of the zone, or not seen, for a few frames.
     """
     frame_height, frame_width = frame.shape[:2]
     mask_polygon = normalized_polygon_to_pixels(camera_config.get("calibration_mask"), frame_width, frame_height)
-    line = normalized_line_to_pixels(camera_config.get("calibration_line"), frame_width, frame_height)
-    margin, min_points, min_move = crossing_limits(perf, mask_polygon, frame_height)
-    boxes = results.boxes
-
-    if not mask_polygon or not line:
-        state["active_detections"] = 0
-        cleanup_tracks_outside_roi(state, set())
-        cleanup_stale_tracks(state)
-        return
-
-    if boxes is None or boxes.id is None:
-        state["active_detections"] = 0
-        update_detection_windows(role, frame, results, state, laravel_client)
-        cleanup_tracks_outside_roi(state, set())
-        cleanup_stale_tracks(state)
-        return
-
-    ids = boxes.id.int().cpu().tolist()
-    classes = boxes.cls.int().cpu().tolist()
-    confidences = boxes.conf.cpu().tolist()
-    coordinates = boxes.xyxy.cpu().tolist()
-    active_detections = 0
+    arrow = normalized_arrow_to_pixels(camera_config.get("calibration_direction"), frame_width, frame_height)
+    min_frames, lost_frames, min_move = pass_settings(perf, camera_config)
+    boxes = results.boxes if results is not None else None
+    seen_keys = set()
     visible_roi_track_ids = set()
+    active_detections = 0
 
-    for track_id, class_id, confidence, xyxy in zip(ids, classes, confidences, coordinates):
-        if class_id not in vehicle_labels:
-            continue
+    if mask_polygon and arrow and boxes is not None and boxes.id is not None:
+        ids = boxes.id.int().cpu().tolist()
+        classes = boxes.cls.int().cpu().tolist()
+        confidences = boxes.conf.cpu().tolist()
+        coordinates = boxes.xyxy.cpu().tolist()
 
-        # Where the track was at its previous detection (inside the zone or
-        # not), then remember where it is now.
-        center_point = bbox_center(xyxy)
-        previous_point = remember_track_point(state, track_id, center_point)
-        inside_roi = bbox_inside_roi(xyxy, mask_polygon)
-
-        if not inside_roi:
-            with state["lock"]:
-                forget_track_locked(state, track_id)
-            continue
-
-        visible_roi_track_ids.add(track_id)
-        active_detections += 1
-        now_monotonic = time.monotonic()
-
-        with state["lock"]:
-            state["detections_seen"] += 1
-            # A2: this frame's vote for the vehicle's type.
-            state["track_votes"].setdefault(track_id, vtype.TrackVote()).add(
-                vehicle_labels[class_id], confidence, xyxy, (frame_width, frame_height)
-            )
-            state["track_last_seen"][track_id] = now_monotonic
-            state["track_boxes"][track_id] = {
-                "class_id": class_id,
-                "confidence": confidence,
-                "xyxy": xyxy,
-                "last_seen": now_monotonic,
-            }
-            state["track_overlays"].setdefault(track_id, detection_overlay())
-
-        with state["lock"]:
-            if track_is_processed_as_guest_locked(state, track_id, inside_roi, now_monotonic):
-                state["track_overlays"][track_id] = state["track_overlays"].get(track_id) or default_overlay()
+        for track_id, class_id, confidence, xyxy in zip(ids, classes, confidences, coordinates):
+            if class_id not in vehicle_labels:
                 continue
 
-        current_side = point_side_of_line(center_point, line)
+            # The trail drawn in the debug view: where the vehicle touches the ground.
+            remember_track_point(state, track_id, bbox_bottom_center(xyxy))
 
-        with state["lock"]:
-            state["track_sides"][track_id] = current_side
-            # A3: counted only once it is clearly past the line (hysteresis),
-            # after enough sightings and movement; never twice per track.
-            # Touching the line, stopping or backing up on it is not a crossing.
-            crossing = state["track_crossings"].setdefault(track_id, LineCrossing())
-            moved_to = crossing.update(center_point, line, margin, min_points, min_move, box=xyxy)
+            if not bbox_inside_roi(xyxy, mask_polygon):
+                continue
 
-        if not moved_to:
-            continue
+            visible_roi_track_ids.add(track_id)
+            active_detections += 1
+            now_monotonic = time.monotonic()
 
-        with state["lock"]:
-            already_handled = track_id in state["crossed_track_ids"] or track_id in state["pending_windows"]
-            active_decision_overlay = None
+            with state["lock"]:
+                key = state["pass_alias"].get(track_id)
+                fresh = False
+                if key not in state["passes"]:
+                    # A new pass (or this track's earlier pass ended): a fresh key,
+                    # unless this is the vehicle of an open pass (new ID, second box).
+                    key = adopt_pass_locked(state, track_id, xyxy, seen_keys)
+                    if key is None:
+                        state["pass_counter"] = state.get("pass_counter", PASS_KEY_START) + 1
+                        key = state["pass_counter"]
+                        state["passes"][key] = VehiclePass(xyxy)
+                        fresh = True
+                    state["pass_alias"][track_id] = key
+                vehicle_pass = state["passes"][key]
+                if key in seen_keys:
+                    # A second box on a vehicle already seen this frame: its label only.
+                    state["track_last_seen"][track_id] = now_monotonic
+                    if key in state["track_overlays"]:
+                        state["track_overlays"][track_id] = state["track_overlays"][key]
+                    continue
+                if not fresh:
+                    vehicle_pass.observe(xyxy)
+                state["detections_seen"] += 1
+                # A2: this frame's vote for the vehicle's type.
+                state["track_votes"].setdefault(key, vtype.TrackVote()).add(
+                    vehicle_labels[class_id], confidence, xyxy, (frame_width, frame_height)
+                )
+                state["track_last_seen"][track_id] = now_monotonic
+                state["track_boxes"][track_id] = {
+                    "class_id": class_id,
+                    "confidence": confidence,
+                    "xyxy": xyxy,
+                    "last_seen": now_monotonic,
+                }
+                state["track_overlays"].setdefault(track_id, detection_overlay())
 
-            if not already_handled:
-                active_decision_overlay = matching_active_decision_locked(state, xyxy, now_monotonic)
+                vehicle_pass.last_xyxy = tuple(xyxy)
+                seen_keys.add(key)
 
-                if active_decision_overlay:
-                    state["crossed_track_ids"][track_id] = now_monotonic
-                    state["track_overlays"][track_id] = active_decision_overlay
-                    already_handled = True
+                if key in state["track_overlays"]:
+                    # The pass's label ("checking RFID", registered, visitor) on the vehicle's box.
+                    state["track_overlays"][track_id] = state["track_overlays"][key]
 
-        if already_handled:
-            continue
+                detected_now = not vehicle_pass.opened and vehicle_pass.frames >= min_frames
+                if detected_now:
+                    vehicle_pass.opened = True
 
-        with state["lock"]:
-            state["line_crossings"] += 1
+                window = state["pending_windows"].get(key)
+                if window is not None and window.get("direction") is None:
+                    decision = vehicle_pass.decide(arrow, mask_polygon, min_move)
+                    window["measure"] = decision
+                    if decision["direction"] in {"IN", "OUT"}:
+                        set_window_direction_locked(window, decision)
 
-        # Phase 2: the direction is the side of the line the vehicle moved TO
-        # (the gate's calibration says which side is IN). A3: it is known
-        # whenever a crossing counts.
-        in_side = line_in_side(camera_config)
-        with state["lock"]:
-            trail = list((state["track_points"].get(track_id) or {}).get("points") or [])
+            if detected_now:
+                detect_pass(role, frame, state, key, class_id, confidence, xyxy, camera_config, vehicle_labels, laravel_client, yolo_track_id=track_id)
 
-        # Which way it went in the picture ("from above the line to below
-        # it"), so a wrong IN arrow is easy to see in Recent crossings.
-        direction = crossing_direction(moved_to, in_side)
-        direction_reason = crossing_reason(crossing.start_side if not crossing.straddled else None, moved_to, line, crossing.straddled)
-        path = {
-            "first_point": [round(crossing.first_point[0] / frame_width, 3), round(crossing.first_point[1] / frame_height, 3)],
-            "counted_point": [round(center_point[0] / frame_width, 3), round(center_point[1] / frame_height, 3)],
-            "from_side": -moved_to,
-            "to_side": moved_to,
-            "first_seen_on_line": crossing.straddled,
-            "sightings": crossing.sightings,
-        }
-
-        start_detection_window(
-            role,
-            frame,
-            state,
-            track_id,
-            class_id,
-            confidence,
-            xyxy,
-            {
-                "direction": direction,
-                "reason": direction_reason,
-                "line": line,
-                "in_side": in_side,
-                "start_side": crossing.start_side,
-                "trail_length": crossing.sightings,
-                "path": path,
-            },
-            camera_config,
-            vehicle_labels,
-            laravel_client,
-        )
+    with state["lock"]:
+        for key, vehicle_pass in list(state["passes"].items()):
+            if key in seen_keys:
+                continue
+            # Out of the zone or not seen: Left zone after a few frames.
+            if vehicle_pass.miss() >= lost_frames or not (mask_polygon and arrow):
+                leave_zone_locked(state, key, vehicle_pass, arrow, mask_polygon, min_move)
 
     state["active_detections"] = active_detections
     update_detection_windows(role, frame, results, state, laravel_client)
@@ -2976,7 +3073,7 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
         publish_stream_frame(role, frame)
         state["detection_ready"] = False
         state["retry_count"] = 0
-        state["last_error"] = "Calibration ROI mask and trigger line are required before auto logging starts."
+        state["last_error"] = "Calibration zone (ROI) and IN arrow are required before automatic records start."
         return True
 
     vehicle_labels = model_info["vehicle_labels"]
@@ -3171,11 +3268,11 @@ def camera_stream_worker(role, state, model_info, stop_event):
                     if not calibration_ready(camera_config):
                         state["detection_ready"] = False
                         state["retry_count"] = 0
-                        state["last_error"] = "Calibration ROI mask and trigger line are required before auto logging starts."
+                        state["last_error"] = "Calibration zone (ROI) and IN arrow are required before automatic records start."
                         if viewer_active and publish_due(state, perf):
                             if perf.get("debug_overlay"):
                                 frame = frame.copy()
-                                draw_debug_overlay(frame, camera_config, state, "No detection: draw the zone AND the trigger line in Calibration.")
+                                draw_debug_overlay(frame, camera_config, state, "No detection: draw the zone AND the IN arrow in Calibration.")
                             publish_stream_frame(role, frame, frame_time, perf)
                     elif not vehicle_labels:
                         state["detection_ready"] = False
@@ -3417,12 +3514,11 @@ def run_yolo(role, model_info, frame, camera_config, perf, state):
 def handle_detection(role, frame, results, crop, camera_config, perf, state, laravel_client, vehicle_labels, device=None):
     """
     Everything after YOLO, shared by the live worker and the video test:
-    crop offset, vehicle filter, zone + line crossing, debug counters.
+    crop offset, vehicle filter, zone passes (Detected / Left zone), debug counters.
     """
     if crop is not None:
         results = offset_results(results, crop[0], crop[1], frame.shape)
     raw = split_raw_detections(results, state, vehicle_labels)
-    crossings_before = state["line_crossings"]
 
     with metrics.timed(role, "process"):
         process_results(role, frame, results, camera_config, state, laravel_client, vehicle_labels, perf)
@@ -3442,8 +3538,8 @@ def handle_detection(role, frame, results, crop, camera_config, perf, state, lar
             "raw_count": len(raw),
             "vehicle_count": sum(1 for item in raw if item["kept"]),
             "in_roi": int(state.get("active_detections", 0)),
-            "line_crossings": int(state["line_crossings"]),
-            "new_crossings": int(state["line_crossings"] - crossings_before),
+            "passes_detected": int(state["passes_detected"]),
+            "passes_recorded": int(state["passes_recorded"]),
             "detection_fps": round(fps, 1),
             "device": device,
             "imgsz": int(perf["yolo_imgsz"]),
@@ -3680,9 +3776,10 @@ def main():
     parser = argparse.ArgumentParser(description="PHILCST dual-camera vehicle detector")
     parser.add_argument("--video", help="run the detection pipeline on a video file instead of the cameras")
     parser.add_argument("--role", default=None, help="gate code (default: the first gate)")
-    parser.add_argument("--use-calibration", action="store_true", help="use the station's saved zone and line")
+    parser.add_argument("--use-calibration", action="store_true", help="use the station's saved zone and IN arrow")
     parser.add_argument("--roi", help='zone polygon, normalized: "x,y x,y x,y ..."')
-    parser.add_argument("--line", help='trigger line, normalized: "x1,y1,x2,y2"')
+    parser.add_argument("--arrow", help='IN arrow, normalized tail -> head: "x1,y1,x2,y2"')
+    parser.add_argument("--min-move", type=float, help="share of the zone along the IN arrow for a sure IN / OUT (e.g. 0.2)")
     parser.add_argument("--detection-fps", type=float)
     parser.add_argument("--imgsz", type=int)
     parser.add_argument("--post", action="store_true", help="send events and alerts to Laravel (default: dry run)")

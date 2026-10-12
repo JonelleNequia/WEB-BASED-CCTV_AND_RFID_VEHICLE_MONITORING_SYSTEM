@@ -53,6 +53,19 @@
                 @error('rfid_offline_grace_seconds')<span class="field-error">{{ $message }}</span>@enderror
             </div>
         </div>
+
+        {{-- ROI work: how far a vehicle must move along the gate's IN arrow before IN / OUT is sure. --}}
+        <h3 class="panel-subtitle">IN / OUT: minimum movement</h3>
+        <p class="field-help">A vehicle is recorded as IN or OUT once it moved this share of the detection zone along the gate's IN arrow (and the RFID check is over). Empty = the default ({{ round(config('monitoring.detection.pass_min_move', 0.2) * 100) }}%). Lower decides sooner; higher ignores more back-and-forth.</p>
+        <div class="form-grid">
+            @foreach (\App\Models\Gate::ordered() as $timingGate)
+                <div class="field">
+                    <label for="pass_min_move_{{ $timingGate->code }}">{{ $timingGate->name }} (% of the zone)</label>
+                    <input id="pass_min_move_{{ $timingGate->code }}" type="number" name="pass_min_move[{{ $timingGate->code }}]" value="{{ old('pass_min_move.'.$timingGate->code, $timingGate->pass_min_move) }}" min="5" max="60" placeholder="{{ round(config('monitoring.detection.pass_min_move', 0.2) * 100) }}">
+                    @error('pass_min_move.'.$timingGate->code)<span class="field-error">{{ $message }}</span>@enderror
+                </div>
+            @endforeach
+        </div>
         <div class="button-row button-row-end">
             <button type="submit" class="button button-primary">Save</button>
         </div>

@@ -7003,6 +7003,16 @@ img.thumb-plate {
     stroke-width: 0.025;
 }
 
+/* ROI work: the IN arrow on the gate card's zone preview. */
+.zone-arrow {
+    stroke: #38bdf8;
+    stroke-width: 0.02;
+}
+
+.zone-arrow-head {
+    fill: #38bdf8;
+}
+
 .setup-device-text {
     display: grid;
     gap: 0.15rem;
@@ -7797,4 +7807,9 @@ img.thumb-plate {
 
 .calibration-crossing-list li.is-new {
     background: #dcfce7;
+}
+
+.panel-subtitle {
+    margin: 1.5rem 0 0.25rem;
+    font-size: 1rem;
 }

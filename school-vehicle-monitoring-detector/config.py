@@ -74,17 +74,17 @@ PERFORMANCE_DEFAULTS = {
     "yolo_device": "auto",     # auto = cuda, then Apple mps, then cpu
     "roi_crop": 1,             # run YOLO only on the calibrated zone when it is smaller than the frame
     "hires_on_trigger": 1,     # fetch a full-resolution frame from the snapshot stream on each trigger
-    "debug_overlay": 0,        # draw raw detections, zone, line, tracks and counters on the live view
+    "debug_overlay": 0,        # draw raw detections, zone, IN arrow, tracks and counters on the live view
     # A2: vehicle type (vehicle_type.py).
     "type_second_pass": 1,          # second check on the best full-resolution crop
     "type_model": "yolov8s.pt",     # model of the second check (once per vehicle; yolov8n.pt when missing)
     "type_second_pass_imgsz": 960,  # input size of the second check
     "type_truck_min_height": 0.35,  # Truck/Bus needs a back at least this share of the zone's height...
     "type_car_min_aspect": 1.05,    # ...and narrower (width / height) than this; otherwise it is a Car
-    # A3: one vehicle = one crossing (tracking.LineCrossing).
-    "cross_margin": 0.05,           # the centre must be this far past the line (share of the zone's height)
-    "cross_min_points": 3,          # sightings of the track before it can count
-    "cross_min_move": 0.10,         # movement since it was first seen (share of the zone's height)
+    # ROI work: one vehicle = one pass through the zone (tracking.VehiclePass).
+    "pass_min_frames": 3,           # frames in the zone before it is Detected
+    "pass_lost_frames": 6,          # detection frames out of the zone / not seen before it Left zone
+    "pass_min_move": 0.20,          # share of the zone's length along the IN arrow for a sure IN / OUT (per gate)
 }
 # The full-resolution stream is decoded with more threads, which delays it by
 # about this much against the low-delay live stream (measured on the VIGI C240).
@@ -168,7 +168,7 @@ def default_camera_config(role):
         "source_username": "",
         "source_password": "",
         "calibration_mask": None,
-        "calibration_line": None,
+        "calibration_direction": None,
     }
 
 
@@ -237,7 +237,7 @@ def normalize_camera_config(role, loaded_config):
     except (TypeError, ValueError):
         config["decoder_threads"] = 1
     config["calibration_mask"] = config.get("calibration_mask")
-    config["calibration_line"] = config.get("calibration_line")
+    config["calibration_direction"] = config.get("calibration_direction")
 
     if source_type == "webcam":
         try:

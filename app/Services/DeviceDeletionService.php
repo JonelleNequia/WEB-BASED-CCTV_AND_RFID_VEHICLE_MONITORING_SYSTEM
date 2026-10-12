@@ -48,7 +48,7 @@ class DeviceDeletionService
 
         $removes = ['The device and its place at the gate'];
         if ($camera) {
-            array_push($removes, 'The saved camera login and video settings', "The gate's detection zone, trigger line and IN direction", 'The last picture and the status of this camera');
+            array_push($removes, 'The saved camera login and video settings', "The gate's detection zone and IN arrow", 'The last picture and the status of this camera');
         }
         if ($reader) {
             array_push($removes, 'The reader connection settings and the temporary workaround address', 'The tags waiting in its memory and its diagnostics');
@@ -204,6 +204,7 @@ class DeviceDeletionService
                 'source_password' => null,
                 'calibration_mask_json' => null,
                 'calibration_line_json' => null,
+                'calibration_direction_json' => null,
                 'last_connection_status' => 'unknown',
                 'last_connection_message' => null,
                 'last_connected_at' => null,

@@ -72,7 +72,7 @@ class DeviceDeletionTest extends TestCase
         $this->actingAs($this->admin)->postJson(route('settings.devices.assign', $this->device(self::READER_MAC)), ['station' => 'gate-1', 'role' => 'reader'])->assertOk();
         Camera::query()->forRole('gate-1')->update([
             'calibration_mask_json' => json_encode([[0.1, 0.3], [0.9, 0.3], [0.9, 1], [0.1, 1]]),
-            'calibration_line_json' => json_encode(['x1' => 0.1, 'y1' => 0.6, 'x2' => 0.9, 'y2' => 0.6, 'in_side' => -1]),
+            'calibration_direction_json' => json_encode(['x1' => 0.5, 'y1' => 0.9, 'x2' => 0.5, 'y2' => 0.5]),
         ]);
     }
 
@@ -97,7 +97,7 @@ class DeviceDeletionTest extends TestCase
 
         $this->actingAs($this->admin)->getJson(route('settings.devices.delete-summary', $this->device(self::CAMERA_MAC)))->assertOk()
             ->assertJsonPath('kind', 'camera')->assertJsonPath('gates.0.name', 'Gate 1')->assertJsonPath('records_kept', 2)
-            ->assertJsonFragment(["The gate's detection zone, trigger line and IN direction"]);
+            ->assertJsonFragment(["The gate's detection zone and IN arrow"]);
         $this->actingAs($this->admin)->deleteJson(route('settings.devices.destroy', $this->device(self::CAMERA_MAC)))->assertUnprocessable();
         $this->actingAs($this->admin)->deleteJson(route('settings.devices.destroy', $this->device(self::CAMERA_MAC)), ['confirm' => true])->assertOk()
             ->assertJsonPath('message', 'TP-Link VIGI-C240 Camera deleted from Gate 1. Its records are kept.');
@@ -106,7 +106,7 @@ class DeviceDeletionTest extends TestCase
         $this->assertNull(NetworkDevice::query()->where('mac', self::CAMERA_MAC)->first());
         $this->assertFalse(DeviceAssignment::query()->where('role', 'camera')->exists());
         $camera = Camera::query()->forRole('gate-1')->firstOrFail();
-        $this->assertSame(['none', null, null, null, null], [$camera->source_type, $camera->source_username, $camera->source_password, $camera->calibration_mask_json, $camera->calibration_line_json]);
+        $this->assertSame(['none', null, null, null, null], [$camera->source_type, $camera->source_username, $camera->source_password, $camera->calibration_mask_json, $camera->calibration_direction_json]);
         $this->assertFileDoesNotExist(CameraFiles::framePath('gate-1'));
         $this->assertFileExists(CameraFiles::framePath('gate-2'), 'Another gate is not touched.');
         app(SettingsService::class)->exportCameraRuntimeConfig();

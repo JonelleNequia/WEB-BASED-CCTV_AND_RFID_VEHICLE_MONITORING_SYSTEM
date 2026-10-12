@@ -114,12 +114,13 @@ class VehicleTypeAccuracyTest extends TestCase
         // old saved setting no longer changes them.
         $performance = app(SettingsService::class)->performanceSettings(['perf_type_truck_min_height' => '60', 'perf_type_car_min_aspect' => '1.4']);
         $this->assertSame([0.35, 1.05, 'yolov8s.pt', 1], [$performance['type_truck_min_height'], $performance['type_car_min_aspect'], $performance['type_model'], $performance['type_second_pass']]);
-        // A3 (detection): counting limits, as shares of the zone's height.
-        $this->assertSame([0.05, 3, 0.10], [$performance['cross_margin'], $performance['cross_min_points'], $performance['cross_min_move']]);
+        // ROI work: frames before Detected, missed frames before Left zone, default minimum movement along the IN arrow.
+        $this->assertSame([3, 6, 0.2], [$performance['pass_min_frames'], $performance['pass_lost_frames'], $performance['pass_min_move']]);
+        $this->assertArrayNotHasKey('cross_margin', $performance);
 
         app(SettingsService::class)->exportCameraRuntimeConfig();
         $exported = json_decode(File::get(app(SettingsService::class)->cameraRuntimeConfigPath()), true)['system_settings']['performance'];
-        $this->assertSame([0.35, 1.05, 0.05], [$exported['type_truck_min_height'], $exported['type_car_min_aspect'], $exported['cross_margin']]);
+        $this->assertSame([0.35, 1.05, 0.2], [$exported['type_truck_min_height'], $exported['type_car_min_aspect'], $exported['pass_min_move']]);
     }
 
     protected function visitorRecord(string $detected): VisitorRecord

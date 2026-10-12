@@ -1,3 +1,22 @@
+"""
+Zone (ROI) geometry and the vehicle pass.
+
+ROI work: there is no trigger line any more. A vehicle is a PASS while its
+track is in the zone:
+
+    Detected   seen in the zone for a few frames: the pass opens, the RFID
+               check starts ("Vehicle detected · checking RFID…")
+    Recorded   the record is made once the vehicle moved far enough along
+               the IN arrow AND the RFID window is over (even while it is
+               still in the zone); it keeps being updated until it leaves
+    Left zone  out of the zone, or not seen for a few frames: the pass ends
+
+IN / OUT (into / out of campus) comes from the vehicle's path: the movement
+of the bottom-centre of its box (where it touches the ground) along the IN
+arrow drawn in Calibration, as a share of the zone's length along that
+arrow.
+"""
+
 import cv2
 import numpy as np
 
@@ -63,19 +82,25 @@ def normalized_polygon_to_pixels(polygon, frame_width, frame_height):
     return points
 
 
-def normalized_line_to_pixels(line, frame_width, frame_height):
+def normalized_arrow_to_pixels(arrow, frame_width, frame_height):
     """
-    Convert a saved normalized trigger line into pixel coordinates.
+    The IN arrow (tail x1,y1 -> head x2,y2, normalized 0-1) in pixels, or
+    None when it is missing or has no length.
     """
-    if not line:
+    if not isinstance(arrow, dict):
         return None
-
-    return {
-        "x1": clamp(int(line["x1"] * frame_width), 0, frame_width),
-        "y1": clamp(int(line["y1"] * frame_height), 0, frame_height),
-        "x2": clamp(int(line["x2"] * frame_width), 0, frame_width),
-        "y2": clamp(int(line["y2"] * frame_height), 0, frame_height),
-    }
+    try:
+        pixels = {
+            "x1": float(arrow["x1"]) * frame_width,
+            "y1": float(arrow["y1"]) * frame_height,
+            "x2": float(arrow["x2"]) * frame_width,
+            "y2": float(arrow["y2"]) * frame_height,
+        }
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not np.hypot(pixels["x2"] - pixels["x1"], pixels["y2"] - pixels["y1"]):
+        return None
+    return pixels
 
 
 def bbox_center(xyxy):
@@ -87,103 +112,11 @@ def bbox_center(xyxy):
     return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
 
-def _orientation(a, b, c):
-    """
-    Return the orientation for three points.
-    """
-    value = (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1])
-
-    if value > 0:
-        return 1
-
-    if value < 0:
-        return -1
-
-    return 0
-
-
-def _on_segment(a, b, c):
-    """
-    Check whether point b sits on line segment ac.
-    """
-    return (
-        min(a[0], c[0]) <= b[0] <= max(a[0], c[0])
-        and min(a[1], c[1]) <= b[1] <= max(a[1], c[1])
-    )
-
-
-def _segments_intersect(a, b, c, d):
-    """
-    Check whether segment ab intersects segment cd.
-    """
-    orientation_1 = _orientation(a, b, c)
-    orientation_2 = _orientation(a, b, d)
-    orientation_3 = _orientation(c, d, a)
-    orientation_4 = _orientation(c, d, b)
-
-    if orientation_1 != orientation_2 and orientation_3 != orientation_4:
-        return True
-
-    if orientation_1 == 0 and _on_segment(a, c, b):
-        return True
-
-    if orientation_2 == 0 and _on_segment(a, d, b):
-        return True
-
-    if orientation_3 == 0 and _on_segment(c, a, d):
-        return True
-
-    return orientation_4 == 0 and _on_segment(c, b, d)
-
-
-def bbox_intersects_line(xyxy, line):
-    """
-    Treat a vehicle as triggered when its box touches the saved trigger line.
-    This handles tracks that start on the line and never get a center-point
-    sign flip.
-    """
-    if not line:
-        return False
-
+def bbox_bottom_center(xyxy):
+    """Where the vehicle touches the ground: the middle of the box's bottom edge."""
     x1, y1, x2, y2 = xyxy
-    line_start = (line["x1"], line["y1"])
-    line_end = (line["x2"], line["y2"])
 
-    if (
-        min(x1, x2) <= line_start[0] <= max(x1, x2)
-        and min(y1, y2) <= line_start[1] <= max(y1, y2)
-    ):
-        return True
-
-    if (
-        min(x1, x2) <= line_end[0] <= max(x1, x2)
-        and min(y1, y2) <= line_end[1] <= max(y1, y2)
-    ):
-        return True
-
-    rect_edges = [
-        ((x1, y1), (x2, y1)),
-        ((x2, y1), (x2, y2)),
-        ((x2, y2), (x1, y2)),
-        ((x1, y2), (x1, y1)),
-    ]
-
-    return any(_segments_intersect(line_start, line_end, edge_start, edge_end) for edge_start, edge_end in rect_edges)
-
-
-def point_in_mask(point, mask_rect):
-    """
-    Keep detections inside the saved mask rectangle only.
-    """
-    if not mask_rect:
-        return False
-
-    x, y = point
-
-    return (
-        mask_rect["x"] <= x <= mask_rect["x"] + mask_rect["width"]
-        and mask_rect["y"] <= y <= mask_rect["y"] + mask_rect["height"]
-    )
+    return ((x1 + x2) / 2.0, float(y2))
 
 
 def point_in_polygon(point, polygon):
@@ -198,203 +131,128 @@ def point_in_polygon(point, polygon):
     return cv2.pointPolygonTest(contour, (float(point[0]), float(point[1])), False) >= 0
 
 
-def point_side_of_line(point, line):
+def arrow_unit(arrow):
+    """Unit vector of the IN arrow (pixels)."""
+    dx, dy = arrow["x2"] - arrow["x1"], arrow["y2"] - arrow["y1"]
+    length = float(np.hypot(dx, dy)) or 1.0
+    return dx / length, dy / length
+
+
+def zone_length_along(polygon, unit):
+    """The zone's length along a direction: the spread of its corners projected on it."""
+    projections = [point[0] * unit[0] + point[1] * unit[1] for point in polygon or []]
+    return (max(projections) - min(projections)) if projections else 0.0
+
+
+def describe_arrow(unit):
+    """"down", "up", "right" or "left": where the IN arrow points in the picture."""
+    if abs(unit[1]) >= abs(unit[0]):
+        return "down" if unit[1] > 0 else "up"
+    return "right" if unit[0] > 0 else "left"
+
+
+def _median_point(points):
+    return (float(np.median([point[0] for point in points])), float(np.median([point[1] for point in points])))
+
+
+# Below this share of the zone a pass never moved at all (a parked vehicle,
+# a detection that flickered): it is not counted.
+STILL_SHARE = 0.05
+# Box height change (last frames against first) that counts as a clear
+# "came closer" / "went away" for a medium-confidence direction.
+SIZE_CHANGE = 0.20
+
+
+class VehiclePass:
     """
-    Return which side of the trigger line the point is on.
-    """
-    if not line:
-        return 0
+    One vehicle's pass through the zone (one track = one pass).
 
-    x, y = point
-    line_value = (
-        (line["x2"] - line["x1"]) * (y - line["y1"])
-        - (line["y2"] - line["y1"]) * (x - line["x1"])
-    )
-
-    if line_value > 0:
-        return 1
-
-    if line_value < 0:
-        return -1
-
-    return 0
-
-
-def crossed_line(previous_side, current_side):
-    """
-    Treat a sign flip as one valid line crossing.
-    """
-    if previous_side in (None, 0) or current_side == 0:
-        return False
-
-    return previous_side != current_side
-
-
-def path_crosses_line(previous_point, current_point, line):
-    """
-    Did the track's path from its previous to its current position cross the
-    trigger line SEGMENT? Returns +1 / -1 (the side it moved to) or 0.
-
-    A fast vehicle at 7-8 detections per second can jump over the line
-    between two frames: the segment test still counts it, while a
-    "point is on the line" test misses it. Movement beyond the ends of the
-    drawn line does not count.
-    """
-    if not line or previous_point is None or current_point is None:
-        return 0
-
-    start = (line["x1"], line["y1"])
-    end = (line["x2"], line["y2"])
-    before = point_side_of_line(previous_point, line)
-    after = point_side_of_line(current_point, line)
-
-    if before == after or after == 0:
-        # Same side, or stopped exactly on the line: counted on the next move.
-        return 0
-
-    if not _segments_intersect(tuple(previous_point), tuple(current_point), start, end):
-        return 0
-
-    return after
-
-
-def line_in_side(camera_config):
-    """
-    Phase 2: which side of the trigger line is "inside" (+1 or -1), saved
-    with the line in Calibration (the IN arrow points to it). +1 is the side
-    left of the line from (x1, y1) to (x2, y2) in image coordinates, i.e.
-    below a line drawn left to right. Old calibrations default to +1.
-    """
-    line = (camera_config or {}).get("calibration_line") or {}
-    try:
-        return -1 if int(line.get("in_side", 1)) < 0 else 1
-    except (TypeError, ValueError):
-        return 1
-
-
-def crossing_direction(side_moved_to, in_side):
-    """IN when the track moved to the inside, OUT when it moved away; None if it did not cross."""
-    if not side_moved_to:
-        return None
-    return "IN" if side_moved_to == in_side else "OUT"
-
-
-def trail_direction(points, line, in_side):
-    """
-    Direction from a track's trail: the side of its first point against the
-    side of its last one. None while it has not been seen on both sides
-    (track too short, or it stopped on the line).
-    """
-    sides = [side for side in (point_side_of_line(point, line) for point in points or []) if side]
-    if len(sides) < 2 or sides[0] == sides[-1]:
-        return None
-    return crossing_direction(sides[-1], in_side)
-
-
-def signed_distance(point, line):
-    """Distance in pixels from the trigger line (its sign = point_side_of_line)."""
-    dx, dy = line["x2"] - line["x1"], line["y2"] - line["y1"]
-    length = (dx * dx + dy * dy) ** 0.5
-    if not length:
-        return 0.0
-    return (dx * (point[1] - line["y1"]) - dy * (point[0] - line["x1"])) / length
-
-
-def within_line_span(point, line, tolerance=0.1):
-    """The point is beside the drawn line, not beyond its ends (10% slack)."""
-    dx, dy = line["x2"] - line["x1"], line["y2"] - line["y1"]
-    length_squared = dx * dx + dy * dy
-    if not length_squared:
-        return False
-    t = ((point[0] - line["x1"]) * dx + (point[1] - line["y1"]) * dy) / length_squared
-    return -tolerance <= t <= 1 + tolerance
-
-
-class LineCrossing:
-    """
-    A3 (detection): one vehicle = one crossing.
-
-    - The side the vehicle came from is where it was first seen.
-    - First seen ON the line (its box already over it: it came into view
-      there, e.g. a big vehicle near the camera or a line close to the
-      zone's edge, or the tracker gave it a new id there): it came from the
-      side it then moves away from. Before, such a vehicle had its centre
-      already past the line, so it was never counted.
-    - It counts only when its centre is clearly on the other side: at least
-      `margin` pixels past the line (hysteresis), so a vehicle that stops on
-      the line, rocks or backs up there is not counted twice.
-    - It needs `min_points` sightings and `min_move` pixels of movement, so a
-      parked vehicle (or one detected for a moment) is never counted.
-    - Once counted, the same track is not counted again.
+    It keeps the bottom-centre of the box and the box height of every frame
+    the vehicle is seen in the zone, and how many detection frames in a row
+    it was missed (out of the zone, or not seen).
     """
 
-    def __init__(self):
-        self.start_side = None
-        self.first_point = None
-        self.first_distance = 0.0
-        self.straddled = False
-        self.sightings = 0
-        self.counted = False
+    def __init__(self, xyxy):
+        self.points = [bbox_bottom_center(xyxy)]
+        self.heights = [float(xyxy[3] - xyxy[1])]
+        self.frames = 1
+        self.missed = 0
+        self.opened = False
 
-    def update(self, point, line, margin, min_points, min_move, box=None):
-        """Return the side the vehicle moved to (+1 / -1) when it now counts, else 0."""
-        if not line:
-            return 0
-        distance = signed_distance(point, line)
-        side = 1 if distance > 0 else (-1 if distance < 0 else 0)
-        self.sightings += 1
-        if self.first_point is None:
-            self.first_point = (float(point[0]), float(point[1]))
-            self.first_distance = distance
-            self.straddled = box is not None and bbox_intersects_line(box, line)
-            if not self.straddled:
-                self.start_side = side or None
-            return 0
-        if self.start_side is None and not self.straddled:
-            self.start_side = side or None
-            return 0
-        if self.counted or not side or side == self.start_side or abs(distance) < margin:
-            return 0
-        if self.sightings < min_points or not within_line_span(point, line):
-            return 0
-        moved = ((point[0] - self.first_point[0]) ** 2 + (point[1] - self.first_point[1]) ** 2) ** 0.5
-        if moved < min_move:
-            return 0
-        if self.start_side is None:
-            # First seen on the line: it must be moving towards this side
-            # (not back away from where it came into view).
-            if (distance - self.first_distance) * side < margin:
-                return 0
-            self.start_side = -side
-        self.counted = True
-        return side
+    def observe(self, xyxy):
+        self.points.append(bbox_bottom_center(xyxy))
+        self.heights.append(float(xyxy[3] - xyxy[1]))
+        del self.points[:-240]
+        del self.heights[:-240]
+        self.frames += 1
+        self.missed = 0
 
+    def miss(self):
+        self.missed += 1
+        return self.missed
 
-def describe_side(side, line):
-    """
-    Where side +1 / -1 of the line is in the picture: "above", "below",
-    "left of" or "right of" (Phase 2: side +1 is to the right of the line's
-    direction in image coordinates).
-    """
-    if not side or not line:
-        return "on"
-    dx, dy = line["x2"] - line["x1"], line["y2"] - line["y1"]
-    nx, ny = -dy * side, dx * side
-    if abs(ny) >= abs(nx):
-        return "below" if ny > 0 else "above"
-    return "right of" if nx > 0 else "left of"
+    def _ends(self):
+        count = min(3, max(1, len(self.points) // 3))
+        return _median_point(self.points[:count]), _median_point(self.points[-count:])
 
+    def measure(self, arrow, polygon):
+        """
+        along: movement along the IN arrow as a share of the zone's length
+               along it (+ = with the arrow, - = against it)
+        moved: how far it is from where it was first seen, any way (share; a
+               vehicle that rocks or wobbles in place ends near where it began)
+        size:  box height of the last frames against the first (1.0 = same)
+        """
+        unit = arrow_unit(arrow)
+        length = zone_length_along(polygon, unit) or 1.0
+        first, last = self._ends()
+        along = ((last[0] - first[0]) * unit[0] + (last[1] - first[1]) * unit[1]) / length
+        moved = float(np.hypot(last[0] - first[0], last[1] - first[1])) / length
+        count = min(3, max(1, len(self.heights) // 3))
+        size = float(np.median(self.heights[-count:])) / (float(np.median(self.heights[:count])) or 1.0)
+        return {"along": along, "moved": moved, "size": size, "first": first, "last": last, "unit": unit}
 
-def crossing_reason(start_side, moved_to, line, straddled=False):
-    """One line for Recent crossings: which way the vehicle went over the line."""
-    to = describe_side(moved_to, line)
-    if straddled or not start_side:
-        return f"first seen on the line, then went {to} it"
-    return f"from {describe_side(start_side, line)} the line to {to} it"
+    def decide(self, arrow, polygon, min_move, final=False):
+        """
+        IN / OUT with its confidence, or None while it is not sure yet.
+
+        high:   moved at least `min_move` of the zone along the IN arrow
+        medium: moved less, but at least half of that, and the box clearly
+                grew while it went down the picture (or shrank going up):
+                the movement is real, not jitter
+        final:  the pass ended (left the zone, track lost): an undecided pass
+                becomes UNKNOWN, a pass that never moved is "still"
+        """
+        m = self.measure(arrow, polygon)
+        along, size = m["along"], m["size"]
+        direction = "IN" if along > 0 else "OUT"
+        share = round(abs(along) * 100)
+        way = "with" if along > 0 else "against"
+        result = {"direction": None, "confidence": None, "along": round(along, 3), "moved": round(m["moved"], 3),
+                  "size": round(size, 3), "reason": f"moved {share}% of the zone along the IN arrow"}
+
+        if abs(along) >= min_move:
+            result.update(direction=direction, confidence="high", reason=f"moved {share}% of the zone {way} the IN arrow")
+            return result
+
+        went_down = m["last"][1] > m["first"][1]
+        size_agrees = (size >= 1 + SIZE_CHANGE and went_down) or (size <= 1 - SIZE_CHANGE and not went_down)
+        if abs(along) >= max(STILL_SHARE, min_move / 2) and size_agrees:
+            change = "grew" if size > 1 else "shrank"
+            result.update(direction=direction, confidence="medium",
+                          reason=f"moved {share}% of the zone {way} the IN arrow; box {change} {round(abs(size - 1) * 100)}%")
+            return result
+
+        if final:
+            if m["moved"] < STILL_SHARE:
+                result.update(direction="STILL", reason="did not move")
+            else:
+                result.update(direction="UNKNOWN", reason=f"Direction unknown: moved only {share}% of the zone along the IN arrow")
+        return result
 
 
 def calibration_ready(camera_config):
     """
-    Auto logging requires both an ROI mask and a trigger line.
+    Automatic records need the zone and the IN arrow.
     """
-    return bool(camera_config.get("calibration_mask")) and bool(camera_config.get("calibration_line"))
+    return bool(camera_config.get("calibration_mask")) and bool(camera_config.get("calibration_direction"))

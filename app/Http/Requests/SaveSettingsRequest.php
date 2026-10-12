@@ -47,6 +47,7 @@ class SaveSettingsRequest extends FormRequest
         'timing' => [
             'rfid_cooldown_seconds', 'rfid_lookback_seconds', 'rfid_lookahead_seconds',
             'rfid_stationary_seconds', 'rfid_offline_fallback', 'rfid_offline_grace_seconds',
+            'pass_min_move',
         ],
         'manual' => ['camera_configs', 'camera_source_placeholder', 'camera_streams', 'gates'],
         // Phase 1: Gates & Readers (name, reader type, manual reader address per gate).
@@ -94,6 +95,9 @@ class SaveSettingsRequest extends FormRequest
             'rfid_stationary_seconds' => ['sometimes', 'integer', 'min:10', 'max:3600'],
             'rfid_offline_fallback' => ['sometimes', 'in:0,1'],
             'rfid_offline_grace_seconds' => ['sometimes', 'integer', 'min:0', 'max:300'],
+            // ROI work: movement along the IN arrow for a sure IN / OUT, percent of the zone, per gate.
+            'pass_min_move' => ['sometimes', 'array'],
+            'pass_min_move.*' => ['nullable', 'integer', 'min:5', 'max:60'],
             // Cameras tab: one camera per gate (keys = gate codes).
             'camera_configs' => ['required', 'array'],
             'camera_configs.*.camera_name' => ['required', 'string', 'max:100'],

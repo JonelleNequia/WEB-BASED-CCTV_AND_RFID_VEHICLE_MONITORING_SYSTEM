@@ -89,6 +89,11 @@ class SettingsController extends Controller
         $section = (string) $request->validate(['section' => ['required', 'in:'.implode(',', array_keys(self::RESTORABLE))]])['section'];
         $defaults = $settingsService->defaults();
         $settingsService->save(array_intersect_key($defaults, array_flip(self::RESTORABLE[$section])));
+        if ($section === 'timing') {
+            // ROI work: every gate back to the default minimum movement.
+            Gate::query()->update(['pass_min_move' => null]);
+            $settingsService->exportCameraRuntimeConfig();
+        }
         app(DeviceRegistryService::class)->exportRuntimeConfig();
 
         return redirect()->route('settings.index', ['tab' => $section])

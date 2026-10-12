@@ -285,12 +285,13 @@ class GateSetupService
     protected function zone(Gate $gate, array $config): array
     {
         $mask = $config['calibration_mask'] ?? null;
-        $line = $config['calibration_line'] ?? null;
+        $arrow = $config['calibration_direction'] ?? null;
 
         return [
-            'ready' => ! empty($mask) && ! empty($line),
+            'ready' => ! empty($mask) && ! empty($arrow),
             'points' => collect((array) $mask)->map(fn ($point): string => round((float) data_get($point, 'x', 0), 4).','.round((float) data_get($point, 'y', 0), 4))->implode(' '),
-            'line' => is_array($line) ? $line : null,
+            // ROI work: the IN arrow drawn on the gate card's zone preview.
+            'arrow' => is_array($arrow) ? $arrow : null,
             'frame_url' => route('camera.frame', $gate->code),
             'setup_url' => route('settings.index', ['tab' => 'calibration', 'gate' => $gate->code]),
         ];

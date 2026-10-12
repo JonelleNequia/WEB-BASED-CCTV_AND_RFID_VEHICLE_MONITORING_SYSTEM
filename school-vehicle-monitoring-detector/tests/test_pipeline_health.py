@@ -18,14 +18,14 @@ import detector_service as detector  # noqa: E402
 from camera_health import ReconnectBackoff, strip_credentials  # noqa: E402
 
 ZONE = [{"x": 0.0, "y": 0.3}, {"x": 1.0, "y": 0.3}, {"x": 1.0, "y": 1.0}, {"x": 0.0, "y": 1.0}]
-LINE = {"x1": 0.1, "y1": 0.6, "x2": 0.9, "y2": 0.6}
+ARROW = {"x1": 0.5, "y1": 0.4, "x2": 0.5, "y2": 0.8}
 
 
 def camera(role="gate-2", source="rtsp://camera.test:554/stream1", calibrated=True):
     return {
         "camera_role": role, "camera_id": 2, "camera_name": "Gate 2 Camera", "source_type": "rtsp", "source_value": source,
         "source_username": "admin", "source_password": "secret", "decoder_threads": 1,
-        "calibration_mask": ZONE if calibrated else None, "calibration_line": LINE if calibrated else None,
+        "calibration_mask": ZONE if calibrated else None, "calibration_direction": ARROW if calibrated else None,
     }
 
 

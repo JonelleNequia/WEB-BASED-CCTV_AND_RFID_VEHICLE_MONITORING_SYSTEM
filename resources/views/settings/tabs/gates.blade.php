@@ -166,7 +166,9 @@
                             <img src="{{ $gate['zone']['frame_url'] }}" alt="" loading="lazy" onerror="this.remove()">
                             <svg viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
                                 <polygon points="{{ $gate['zone']['points'] }}" class="zone-area" />
-                                <line x1="{{ $gate['zone']['line']['x1'] ?? 0 }}" y1="{{ $gate['zone']['line']['y1'] ?? 0 }}" x2="{{ $gate['zone']['line']['x2'] ?? 0 }}" y2="{{ $gate['zone']['line']['y2'] ?? 0 }}" class="zone-line" />
+                                {{-- ROI work: the IN arrow (direction into campus). --}}
+                                <line x1="{{ $gate['zone']['arrow']['x1'] ?? 0 }}" y1="{{ $gate['zone']['arrow']['y1'] ?? 0 }}" x2="{{ $gate['zone']['arrow']['x2'] ?? 0 }}" y2="{{ $gate['zone']['arrow']['y2'] ?? 0 }}" class="zone-line zone-arrow" />
+                                <circle cx="{{ $gate['zone']['arrow']['x2'] ?? 0 }}" cy="{{ $gate['zone']['arrow']['y2'] ?? 0 }}" r="0.025" class="zone-arrow-head" />
                             </svg>
                         @else
                             <span class="setup-preview-off" aria-hidden="true">

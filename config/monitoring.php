@@ -181,10 +181,11 @@ return [
         'type_model' => 'yolov8s.pt',
         'type_truck_min_height' => 0.35,
         'type_car_min_aspect' => 1.05,
-        // A3: one vehicle = one event.
-        'cross_margin' => 0.05,
-        'cross_min_points' => 3,
-        'cross_min_move' => 0.10,
+        // ROI work: one vehicle = one pass through the zone. A gate can
+        // override pass_min_move in Settings > Advanced > Timing.
+        'pass_min_frames' => 3,
+        'pass_lost_frames' => 6,
+        'pass_min_move' => 0.20,
     ],
 
     /*

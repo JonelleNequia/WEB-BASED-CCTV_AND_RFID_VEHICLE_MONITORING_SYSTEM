@@ -125,15 +125,16 @@ Artisan::command('devices:listen {address : Reader IP:PORT} {--udp : Use UDP ins
 // (detection -> zone -> line crossing -> RFID window -> alert) on a video file.
 Artisan::command('detector:test-video {file : Video file (e.g. a clip of vehicles passing)}
     {--role=entrance : Station whose settings (and, with --use-calibration, zone and line) to use}
-    {--use-calibration : Use the station\'s saved zone and trigger line}
+    {--use-calibration : Use the station\'s saved zone and IN arrow}
     {--roi= : Zone polygon, normalized "x,y x,y x,y ..."}
-    {--line= : Trigger line, normalized "x1,y1,x2,y2"}
+    {--arrow= : IN arrow, normalized tail -> head "x1,y1,x2,y2"}
+    {--min-move= : Share of the zone along the IN arrow for a sure IN / OUT (e.g. 0.2)}
     {--post : Send events and alerts to Laravel for real (default: dry run)}
     {--app-url= : With --post, send to this Laravel instead (e.g. a test copy)}
     {--out= : Write the video with the debug overlay here}
     {--fast : Do not wait for real time}', function () {
     $arguments = [PythonLauncher::pythonExecutable(), 'detector_service.py', '--video', (string) realpath((string) $this->argument('file')) ?: (string) $this->argument('file'), '--role', (string) $this->option('role')];
-    foreach (['roi', 'line', 'app-url', 'out'] as $option) {
+    foreach (['roi', 'arrow', 'min-move', 'app-url', 'out'] as $option) {
         if (filled($this->option($option))) {
             $arguments[] = '--'.$option;
             $arguments[] = (string) $this->option($option);
@@ -148,7 +149,7 @@ Artisan::command('detector:test-video {file : Video file (e.g. a clip of vehicle
     $process = new Process($arguments, PythonLauncher::directory(), ['PYTHONUNBUFFERED' => '1'], null, 3600);
 
     return $process->run(fn (string $type, string $buffer) => $this->output->write($buffer));
-})->purpose('Run the vehicle detector on a video file and count line crossings');
+})->purpose('Run the vehicle detector on a video file: vehicle passes through the zone, IN / OUT');
 
 // Raw hex dump from a UHF reader (troubleshooting an unknown data format).
 // When the background service is connected to the reader, it copies what it
