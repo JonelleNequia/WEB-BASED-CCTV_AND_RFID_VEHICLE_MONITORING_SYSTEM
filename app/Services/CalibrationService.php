@@ -61,9 +61,10 @@ class CalibrationService
     }
 
     /**
-     * Save one camera's zone and IN arrow (normalized 0-1 to the
-     * camera picture). Calibration work: drawn on the gate's own camera
-     * stream, so no browser camera details are kept.
+     * Save one camera's zone (normalized 0-1 to the camera picture) and its
+     * gate's direction: a vehicle moving away from the camera is IN or OUT.
+     * Calibration work: drawn on the gate's own camera stream, so no browser
+     * camera details are kept.
      *
      * @param  array<string, mixed>  $data
      */
@@ -72,11 +73,12 @@ class CalibrationService
         return DB::transaction(function () use ($data): Camera {
             $camera = Camera::query()->findOrFail($data['camera_id']);
 
-            $camera->fill([
-                'calibration_mask_json' => $data['calibration_mask'] ?? null,
-                'calibration_direction_json' => $this->arrow($data['calibration_direction'] ?? null),
-            ]);
+            $camera->fill(['calibration_mask_json' => $data['calibration_mask'] ?? null]);
             $camera->save();
+
+            if (array_key_exists('away_direction', $data)) {
+                Gate::query()->where('code', $camera->camera_role)->update(['away_direction' => $data['away_direction'] ?: null]);
+            }
 
             return $camera->fresh();
         });
@@ -118,22 +120,6 @@ class CalibrationService
     }
 
     /**
-     * ROI work: the IN arrow (tail -> head), or null when it has no length.
-     *
-     * @param  array<string, mixed>|null  $arrow
-     * @return array{x1: float, y1: float, x2: float, y2: float}|null
-     */
-    protected function arrow(?array $arrow): ?array
-    {
-        if (! $arrow) {
-            return null;
-        }
-        $points = ['x1' => (float) $arrow['x1'], 'y1' => (float) $arrow['y1'], 'x2' => (float) $arrow['x2'], 'y2' => (float) $arrow['y2']];
-
-        return $points['x1'] === $points['x2'] && $points['y1'] === $points['y2'] ? null : $points;
-    }
-
-    /**
      * Convert a camera record into a simple array for Blade and JavaScript.
      *
      * @return array<string, mixed>
@@ -169,7 +155,8 @@ class CalibrationService
             'source_username' => $camera->source_username ?? '',
             'has_password' => filled($camera->source_password),
             'calibration_mask' => $camera->calibration_mask_json,
-            'calibration_direction' => $camera->calibration_direction_json,
+            // ROI work: a vehicle moving away from the camera is "IN" / "OUT" (null: not set).
+            'away_direction' => Gate::query()->where('code', $camera->camera_role)->first()?->awayDirection(),
             'status' => $camera->status,
         ];
     }

@@ -81,6 +81,9 @@
 
         const movement = el('td');
         movement.append(el('span', `badge badge-tone-${tone[String(log.event_type).toLowerCase()] || 'neutral'}`, log.movement_label || log.event_type));
+        if (log.set_direction_url) {
+            movement.append(setDirectionForm(log.set_direction_url));
+        }
         tr.append(movement);
 
         const type = el('td');
@@ -106,6 +109,30 @@
         tr.append(actions);
 
         return tr;
+    }
+
+    /* ROI work: "Set IN" / "Set OUT" on a Direction unknown record (same form as the x-set-direction component). */
+    function setDirectionForm(url) {
+        const form = el('form', 'set-direction');
+        form.method = 'POST';
+        form.action = url;
+        form.dataset.setDirection = '';
+        const hidden = (name, value) => {
+            const input = el('input');
+            input.type = 'hidden';
+            input.name = name;
+            input.value = value;
+            return input;
+        };
+        form.append(hidden('_token', document.querySelector('meta[name="csrf-token"]')?.content || ''), hidden('_method', 'PATCH'));
+        ['IN', 'OUT'].forEach((direction) => {
+            const button = el('button', 'button button-secondary button-sm', `Set ${direction}`);
+            button.type = 'submit';
+            button.name = 'direction';
+            button.value = direction;
+            form.append(button);
+        });
+        return form;
     }
 
     function renderRows(items) {

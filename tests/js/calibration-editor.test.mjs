@@ -12,7 +12,6 @@ const { Editor, toPx, selfIntersects } = context.window.CalibrationEditor;
 const WIDE = { x: 0, y: 60, width: 800, height: 450 };
 const SMALL = { x: 100, y: 0, width: 400, height: 225 };
 const SQUARE = [{ x: 0.2, y: 0.2 }, { x: 0.8, y: 0.2 }, { x: 0.8, y: 0.8 }, { x: 0.2, y: 0.8 }];
-const ARROW = { x1: 0.5, y1: 0.3, x2: 0.5, y2: 0.7 };
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const near = (actual, expected, digits = 6) => assert.equal(Number(actual.toFixed(digits)), Number(expected.toFixed(digits)));
@@ -24,10 +23,10 @@ const drag = (editor, from, to, view, options = {}) => {
     return editor.pointerUp(view);
 };
 
-test('a saved zone and IN arrow load closed and save back unchanged', () => {
-    const editor = new Editor({ mask: SQUARE, direction: ARROW });
+test('a saved zone loads closed and save back unchanged', () => {
+    const editor = new Editor({ mask: SQUARE });
     assert.equal(editor.closed, true);
-    assert.deepEqual(plain(editor.serialize()), { calibration_mask: SQUARE, calibration_direction: ARROW });
+    assert.deepEqual(plain(editor.serialize()), { calibration_mask: SQUARE });
     assert.equal(editor.canUndo(), false);
 });
 
@@ -49,7 +48,7 @@ test('a zone is drawn point by point and closed by clicking point 1', () => {
 });
 
 test('dragging a point moves it, and undo / redo bring it back and forth', () => {
-    const editor = new Editor({ mask: SQUARE, direction: null });
+    const editor = new Editor({ mask: SQUARE });
     assert.equal(drag(editor, px(SQUARE[2], WIDE), { x: 720, y: 420 }, WIDE), true);
     near(editor.mask[2].x, 720 / 800);
     near(editor.mask[2].y, (420 - 60) / 450);
@@ -63,7 +62,7 @@ test('dragging a point moves it, and undo / redo bring it back and forth', () =>
 
 test('the same drag on the picture gives the same saved point at any screen size', () => {
     const results = [WIDE, SMALL].map((view) => {
-        const editor = new Editor({ mask: SQUARE, direction: ARROW });
+        const editor = new Editor({ mask: SQUARE });
         // Point 1 to 30% / 40% of the picture, wherever the picture is on screen.
         drag(editor, px(SQUARE[0], view), px({ x: 0.3, y: 0.4 }, view), view);
         return plain(editor.serialize());
@@ -124,84 +123,32 @@ test('dragging inside the zone moves all of it, never past the picture', () => {
     near(Math.min(...editor.mask.map((p) => p.x)), 0.4);
 });
 
-test('the IN arrow: drawn, ends dragged, moved whole, flipped (ends swap)', () => {
-    const editor = new Editor({ mask: SQUARE });
-    editor.tool = 'arrow';
-    // A click is not an arrow.
-    editor.pointerDown(px({ x: 0.5, y: 0.5 }, WIDE), WIDE);
-    assert.equal(editor.pointerUp(WIDE), false);
-    assert.equal(editor.arrow, null);
-
-    drag(editor, px({ x: 0.5, y: 0.3 }, WIDE), px({ x: 0.5, y: 0.7 }, WIDE), WIDE, { tool: 'arrow' });
-    assert.deepEqual(Object.keys(plain(editor.arrow)).sort(), ['x1', 'x2', 'y1', 'y2']);
-    near(editor.arrow.y1, 0.3);
-    near(editor.arrow.y2, 0.7);
-
-    // The head is dragged.
-    drag(editor, px({ x: 0.5, y: 0.7 }, WIDE), px({ x: 0.6, y: 0.75 }, WIDE), WIDE);
-    near(editor.arrow.x2, 0.6);
-    near(editor.arrow.y2, 0.75);
-    near(editor.arrow.y1, 0.3);
-
-    // Its body moves the whole arrow.
-    drag(editor, px({ x: 0.525, y: 0.4 }, WIDE), px({ x: 0.425, y: 0.4 }, WIDE), WIDE);
-    near(editor.arrow.x1, 0.4);
-    near(editor.arrow.x2, 0.5);
-
-    assert.equal(editor.flip(), true);
-    near(editor.arrow.y1, 0.75);
-    near(editor.arrow.y2, 0.3);
-    editor.undo();
-    near(editor.arrow.y1, 0.3);
-
-    // Selected (a click on it) and Delete removes it.
-    editor.pointerDown(px({ x: 0.4, y: 0.3 }, WIDE), WIDE);
-    editor.pointerUp(WIDE);
-    assert.deepEqual(plain(editor.selected), { type: 'arrow' });
-    assert.equal(editor.removeSelected(), true);
-    assert.equal(editor.arrow, null);
-});
-
-test('a new arrow replaces the old one', () => {
-    const editor = new Editor({ mask: SQUARE, direction: ARROW });
-    drag(editor, px({ x: 0.3, y: 0.7 }, WIDE), px({ x: 0.3, y: 0.3 }, WIDE), WIDE, { tool: 'arrow' });
-    near(editor.arrow.x1, 0.3);
-    near(editor.arrow.y1, 0.7);
-    near(editor.arrow.y2, 0.3);
-});
-
-test('crossing edges block saving; a missing, outside or short arrow only warns', () => {
+test('crossing edges block saving; a good zone has no problem', () => {
     assert.equal(selfIntersects(SQUARE), false);
     const bow = [{ x: 0.2, y: 0.2 }, { x: 0.8, y: 0.8 }, { x: 0.8, y: 0.2 }, { x: 0.2, y: 0.8 }];
     assert.equal(selfIntersects(bow), true);
     const crossed = new Editor({ mask: bow });
     assert.match(crossed.problems().errors[0], /edges cross/);
-
-    assert.deepEqual(plain(new Editor({ mask: SQUARE, direction: ARROW }).problems()), { errors: [], warnings: [] });
-    assert.match(new Editor({ mask: SQUARE }).problems().warnings[0], /Draw the IN arrow/);
-    const outside = new Editor({ mask: SQUARE, direction: { x1: 0.1, y1: 0.9, x2: 0.9, y2: 0.95 } });
-    assert.deepEqual(plain(outside.problems().errors), []);
-    assert.match(outside.problems().warnings[0], /inside the zone/);
-    const short = new Editor({ mask: SQUARE, direction: { x1: 0.5, y1: 0.5, x2: 0.5, y2: 0.52 } });
-    assert.match(short.problems().warnings[0], /very short/);
+    assert.deepEqual(plain(new Editor({ mask: SQUARE }).problems()), { errors: [], warnings: [] });
 });
 
-test('an old saved trigger line is not loaded as an arrow', () => {
-    const editor = new Editor({ mask: SQUARE, line: { x1: 0.1, y1: 0.5, x2: 0.9, y2: 0.5, in_side: 1 } });
-    assert.equal(editor.arrow, null);
-    assert.equal(editor.serialize().calibration_direction, null);
+test('no IN arrow or trigger line any more: old saved ones are ignored, only the zone is saved', () => {
+    const editor = new Editor({ mask: SQUARE, line: { x1: 0.1, y1: 0.5, x2: 0.9, y2: 0.5, in_side: 1 }, direction: { x1: 0.5, y1: 0.3, x2: 0.5, y2: 0.7 } });
+    assert.deepEqual(plain(editor.serialize()), { calibration_mask: SQUARE });
+    assert.equal(editor.arrow, undefined);
+    assert.equal(typeof editor.flip, 'undefined');
 });
 
 test('clear can be undone', () => {
-    const editor = new Editor({ mask: SQUARE, direction: ARROW });
+    const editor = new Editor({ mask: SQUARE });
     editor.clear();
-    assert.deepEqual(plain(editor.serialize()), { calibration_mask: null, calibration_direction: null });
+    assert.deepEqual(plain(editor.serialize()), { calibration_mask: null });
     editor.undo();
-    assert.deepEqual(plain(editor.serialize()), { calibration_mask: SQUARE, calibration_direction: ARROW });
+    assert.deepEqual(plain(editor.serialize()), { calibration_mask: SQUARE });
 });
 
 test('"Discard changes" / "Reset to saved" put the saved shapes back, and can be undone', () => {
-    const saved = { mask: SQUARE, direction: ARROW };
+    const saved = { mask: SQUARE };
     const editor = new Editor(saved);
     assert.equal(editor.matches(saved), true);
     drag(editor, px(SQUARE[0], WIDE), px({ x: 0.1, y: 0.1 }, WIDE), WIDE);
@@ -217,8 +164,8 @@ test('"Discard changes" / "Reset to saved" put the saved shapes back, and can be
 });
 
 test('a new edit after undo drops the redo steps', () => {
-    const editor = new Editor({ mask: SQUARE, direction: ARROW });
-    editor.flip();
+    const editor = new Editor({ mask: SQUARE });
+    drag(editor, px(SQUARE[0], WIDE), px({ x: 0.1, y: 0.1 }, WIDE), WIDE);
     editor.undo();
     assert.equal(editor.canRedo(), true);
     editor.clear();

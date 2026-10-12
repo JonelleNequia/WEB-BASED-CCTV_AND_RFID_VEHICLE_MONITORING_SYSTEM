@@ -41,7 +41,7 @@ class CalibrationEditorScriptTest extends TestCase
         $page = strpos($html, 'js/calibration-page.js?v=');
         $this->assertNotFalse($editor);
         $this->assertGreaterThan($editor, $page);
-        foreach (['data-tool="mask"', 'data-tool="arrow"', 'data-done', 'data-problems', 'data-point-menu', 'Remove point'] as $part) {
+        foreach (['data-tool="mask"', 'data-away-direction', 'data-done', 'data-problems', 'data-point-menu', 'Remove point'] as $part) {
             $this->assertStringContainsString($part, $html);
         }
     }
@@ -80,16 +80,16 @@ class CalibrationEditorScriptTest extends TestCase
 
         $this->actingAs($admin)->putJson(route('calibration.update'), [
             'camera_id' => $camera->id, 'calibration_mask' => $mask,
-            'calibration_direction' => ['x1' => 0.5, 'y1' => 0.7, 'x2' => 0.5, 'y2' => 0.3],
+            'away_direction' => 'IN',
         ])->assertOk();
 
         $this->actingAs($admin)->getJson(route('calibration.heartbeat'))
             ->assertJsonPath('gates.gate-1.calibration.mask', $mask)
-            ->assertJsonPath('gates.gate-1.calibration.direction', ['x1' => 0.5, 'y1' => 0.7, 'x2' => 0.5, 'y2' => 0.3]);
+            ->assertJsonPath('gates.gate-1.calibration.away_direction', 'IN');
         // Saving also writes the detector's runtime file right away (it re-reads it every frame).
         $runtime = json_decode((string) \Illuminate\Support\Facades\File::get(app(\App\Services\SettingsService::class)->cameraRuntimeConfigPath()), true);
         $this->assertSame($mask, $runtime['cameras']['gate-1']['calibration_mask']);
-        $this->assertSame(['x1' => 0.5, 'y1' => 0.7, 'x2' => 0.5, 'y2' => 0.3], $runtime['cameras']['gate-1']['calibration_direction']);
-        $this->assertArrayNotHasKey('calibration_line', $runtime['cameras']['gate-1']);
+        $this->assertSame('IN', $runtime['cameras']['gate-1']['away_direction']);
+        $this->assertArrayNotHasKey('calibration_direction', $runtime['cameras']['gate-1']);
     }
 }

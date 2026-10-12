@@ -519,6 +519,19 @@ class VehicleEventController extends Controller
         'no_pass_alert' => 'Unregistered Visitor (camera)',
     ];
 
+    /**
+     * ROI work, Phase 2: Set IN / Set OUT on a registered record the camera
+     * could not tell (Activity Logs, Visitors › Review).
+     */
+    public function setDirection(Request $request, VehicleEvent $vehicleEvent, \App\Services\DirectionCorrectionService $service): RedirectResponse
+    {
+        $validated = $request->validate(['direction' => ['required', 'in:IN,OUT']]);
+        $event = $service->setForEvent($vehicleEvent, $validated['direction'], $request->user());
+        $plate = $event->plate_text ?: 'Record #'.$event->id;
+
+        return back()->with('status', "{$plate} set to {$validated['direction']}.".($event->anomaly_reason ? ' '.$event->anomaly_reason : ''));
+    }
+
     /** UI Phase 4: filter chips on Activity Logs › All Events. (Guest Pass removed in Phase 0; old rows keep their label.) */
     public const LOG_FILTER_CHIPS = [
         '' => 'All',
@@ -718,8 +731,11 @@ class VehicleEventController extends Controller
             'movement_label' => match ($event->event_type) {
                 'ENTRY' => 'IN',
                 'EXIT' => 'OUT',
+                VehicleEvent::TYPE_UNKNOWN => 'Direction unknown',
                 default => $event->event_type,
             },
+            // ROI work: a "Direction unknown" record can be set to IN / OUT in one click.
+            'set_direction_url' => $event->event_type === VehicleEvent::TYPE_UNKNOWN ? route('vehicle-events.direction', $event) : null,
             'state_label' => $event->resulting_state_label,
             'display_time' => DisplayTime::datetime($time, 'No time'),
             'summary_label' => 'Vehicle Event #'.$event->id.' • '.(DisplayTime::datetime($time, 'No time')),
@@ -903,6 +919,8 @@ class VehicleEventController extends Controller
                 default => 'UNKNOWN',
             },
             'movement_label' => $record->direction === 'UNKNOWN' ? 'Direction unknown' : $record->direction,
+            'set_direction_url' => $record->direction === 'UNKNOWN' && $record->status === VisitorRecord::STATUS_ACTIVE
+                ? route('visitors.records.direction', $record) : null,
             'plate_number' => $record->plateLabel(),
             'owner_name' => $vehicle?->vehicle_owner_name ?: 'N/A',
             'vehicle_type' => $record->vehicle_type ?: 'Vehicle',
@@ -949,6 +967,7 @@ class VehicleEventController extends Controller
     protected function vehicleEventStatus(VehicleEvent $event): array
     {
         return match (true) {
+            $event->event_type === VehicleEvent::TYPE_UNKNOWN => ['status_label' => 'Direction unknown', 'status_badge_class' => 'manual-review'],
             filled($event->anomaly_reason) && ! in_array($event->event_origin, ['guest_cctv', 'guest_manual'], true)
                 && $event->match_status !== VehicleEvent::MATCH_NO_PASS_RESOLVED => ['status_label' => 'Anomaly', 'status_badge_class' => 'unmatched'],
             in_array($event->event_origin, ['guest_cctv', 'guest_manual'], true) || ! $event->vehicle_id => ['status_label' => 'Unregistered', 'status_badge_class' => 'secondary'],

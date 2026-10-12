@@ -499,7 +499,7 @@ class GuestObservationController extends Controller
                 'event_type' => $eventType,
                 'event_status' => VehicleEvent::STATUS_COMPLETED,
                 'event_origin' => 'guest_cctv',
-                'direction' => $eventType === 'EXIT' ? 'OUT' : 'IN',
+                'direction' => VehicleEvent::directionForEventType($eventType),
                 'plate_text' => $plateNumber,
                 'plate_number' => $plateNumber !== null ? substr($plateNumber, 0, 20) : null,
                 'plate_confidence' => null,

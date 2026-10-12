@@ -101,6 +101,11 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
     Route::patch('/visitors/records/{visitorRecord}/plate', [VisitorController::class, 'correctPlate'])->name('visitors.records.plate');
     Route::patch('/visitors/records/{visitorRecord}/dismiss', [VisitorController::class, 'dismiss'])->name('visitors.records.dismiss');
     Route::patch('/visitors/records/{visitorRecord}/type', [VisitorController::class, 'correctType'])->name('visitors.records.type');
+    // ROI work, Phase 2: Set IN / Set OUT on a "Direction unknown" record (Visitors › Review, Activity Logs).
+    Route::patch('/visitors/records/{visitorRecord}/direction', [VisitorController::class, 'setDirection'])->name('visitors.records.direction');
+    Route::patch('/vehicle-events/{vehicleEvent}/direction', [VehicleEventController::class, 'setDirection'])
+        ->whereNumber('vehicleEvent')
+        ->name('vehicle-events.direction');
     Route::patch('/visitors/plates/{plateProfile}/note', [VisitorController::class, 'updateNote'])->name('visitors.profiles.note');
     Route::post('/visitors/plates/{plateProfile}/merge', [VisitorController::class, 'merge'])
         ->middleware('admin')

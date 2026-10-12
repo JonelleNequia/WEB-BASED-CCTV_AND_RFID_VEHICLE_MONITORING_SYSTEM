@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Concerns\ResolvesTab;
 use App\Models\Gate;
 use App\Models\PlateProfile;
+use App\Models\VehicleEvent;
 use App\Models\VisitorRecord;
+use App\Services\DirectionCorrectionService;
 use App\Services\VisitorRecordService;
 use App\Support\PlateNumber;
 use Illuminate\Database\Eloquent\Builder;
@@ -25,6 +27,8 @@ class VisitorController extends Controller
     public const TABS = [
         'records' => 'Unregistered Visitors',
         'plates' => 'Plate Profiles',
+        // ROI work, Phase 2: passes the camera could not tell IN from OUT.
+        'review' => 'Review',
     ];
 
     public function index(Request $request): View
@@ -55,7 +59,60 @@ class VisitorController extends Controller
                 ? PlateProfile::query()->current()->orderBy('plate_number')->get(['id', 'plate_number', 'visit_count'])
                 : collect(),
             'gates' => Gate::options(),
+            'review' => $tab === 'review' ? $this->directionUnknown() : null,
+            // ROI work: how many wait for Set IN / Set OUT (shown on the Review tab).
+            'reviewCount' => VisitorRecord::query()->active()->where('direction', 'UNKNOWN')->count()
+                + VehicleEvent::query()->where('event_type', VehicleEvent::TYPE_UNKNOWN)->whereNotNull('vehicle_id')->count(),
         ]);
+    }
+
+    /**
+     * ROI work, Phase 2: every counted record whose direction the camera
+     * could not tell (registered and unregistered), newest first, to set
+     * IN or OUT in one click.
+     *
+     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
+     */
+    protected function directionUnknown(): \Illuminate\Support\Collection
+    {
+        $visitors = VisitorRecord::query()->active()->where('direction', 'UNKNOWN')
+            ->with(['crossing', 'plateProfile'])->latest('seen_at')->limit(200)->get()
+            ->map(fn (VisitorRecord $record): array => [
+                'key' => 'visitor-'.$record->id,
+                'time' => $record->seen_at,
+                'gate' => $record->gate,
+                'plate' => $record->plateLabel(),
+                'who' => 'Unregistered Visitor',
+                'snapshot_url' => $record->snapshot_url,
+                'reason' => $record->crossing?->direction_reason,
+                'url' => route('visitors.records.direction', $record),
+            ]);
+
+        $registered = VehicleEvent::query()->where('event_type', VehicleEvent::TYPE_UNKNOWN)->whereNotNull('vehicle_id')
+            ->with(['vehicle', 'rfidScanLog.vehicleCrossing'])->latest('event_time')->limit(200)->get()
+            ->map(fn (VehicleEvent $event): array => [
+                'key' => 'event-'.$event->id,
+                'time' => $event->event_time,
+                'gate' => $event->rfidScanLog?->scan_location,
+                'plate' => $event->plate_text ?: $event->vehicle?->plate_number ?: 'No plate',
+                'who' => 'Registered · '.($event->vehicle?->vehicle_owner_name ?: $event->vehicle?->owner_name ?: 'owner not set'),
+                'snapshot_url' => $event->rfidScanLog?->vehicleCrossing?->snapshot_url,
+                'reason' => $event->rfidScanLog?->vehicleCrossing?->direction_reason,
+                'url' => route('vehicle-events.direction', $event),
+            ]);
+
+        return $visitors->concat($registered)->sortByDesc(fn (array $item) => $item['time']?->getTimestamp() ?? 0)->values();
+    }
+
+    /**
+     * ROI work, Phase 2: Set IN / Set OUT on an Unregistered Visitor record the camera could not tell.
+     */
+    public function setDirection(Request $request, VisitorRecord $visitorRecord, DirectionCorrectionService $service): RedirectResponse
+    {
+        $validated = $request->validate(['direction' => ['required', 'in:IN,OUT']]);
+        $record = $service->setForVisitorRecord($visitorRecord, $validated['direction'], $request->user());
+
+        return back()->with('status', "Record #{$record->id} set to {$record->direction}.");
     }
 
     public function showProfile(PlateProfile $plateProfile): View|RedirectResponse

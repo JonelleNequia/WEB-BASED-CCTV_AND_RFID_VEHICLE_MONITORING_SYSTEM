@@ -501,7 +501,7 @@
             const r = this.contentRect(width, height);
             const px = (x, y) => [r.x + x * r.w, r.y + y * r.h];
 
-            // Calibration draws its own zone and arrow (being edited): boxes only there.
+            // Calibration draws its own zone (being edited): boxes only there.
             const shapes = this.root.dataset.overlayShapes !== '0';
             if (shapes && Array.isArray(data.zone) && data.zone.length > 2) {
                 ctx.beginPath();
@@ -513,30 +513,6 @@
                 ctx.strokeStyle = 'rgba(111, 75, 174, 0.7)';
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
-            }
-            // The IN arrow: the way vehicles drive into campus.
-            if (shapes && data.direction) {
-                const [x1, y1] = px(data.direction.x1, data.direction.y1);
-                const [x2, y2] = px(data.direction.x2, data.direction.y2);
-                const length = Math.hypot(x2 - x1, y2 - y1);
-                if (length > 4) {
-                    const ux = (x2 - x1) / length;
-                    const uy = (y2 - y1) / length;
-                    const head = 14;
-                    ctx.beginPath();
-                    ctx.moveTo(x1, y1);
-                    ctx.lineTo(x2 - ux * head, y2 - uy * head);
-                    ctx.strokeStyle = '#38bdf8';
-                    ctx.lineWidth = 3;
-                    ctx.stroke();
-                    ctx.beginPath();
-                    ctx.moveTo(x2, y2);
-                    ctx.lineTo(x2 - ux * head - uy * head * 0.6, y2 - uy * head + ux * head * 0.6);
-                    ctx.lineTo(x2 - ux * head + uy * head * 0.6, y2 - uy * head - ux * head * 0.6);
-                    ctx.closePath();
-                    ctx.fillStyle = '#38bdf8';
-                    ctx.fill();
-                }
             }
             ctx.font = '600 13px system-ui, sans-serif';
             (data.tracks || []).forEach((track) => {

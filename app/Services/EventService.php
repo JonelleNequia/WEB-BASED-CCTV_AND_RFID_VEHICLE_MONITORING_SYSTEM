@@ -196,6 +196,8 @@ class EventService
                 'vehicle_image_path' => null,
                 'plate_image_path' => null,
                 'match_status' => $eventType === 'ENTRY' ? 'open' : 'closed',
+                // ROI work: IN / OUT, or UNKNOWN until staff set it.
+                'direction' => VehicleEvent::directionForEventType($eventType),
                 'resulting_state' => $resultingState,
                 'daily_entries_count' => $transition['daily_entries_count'] ?? null,
                 'daily_exits_count' => $transition['daily_exits_count'] ?? null,
@@ -231,8 +233,13 @@ class EventService
     /**
      * Apply lightweight session updates for state-based RFID events.
      */
-    protected function applyRfidSessionState(VehicleEvent $event): VehicleEvent
+    public function applyRfidSessionState(VehicleEvent $event): VehicleEvent
     {
+        if (! in_array($event->event_type, ['ENTRY', 'EXIT'], true)) {
+            // ROI work: "Direction unknown" opens or closes no session (until it is set).
+            return $event->fresh(['camera']);
+        }
+
         if ($event->event_type === 'ENTRY') {
             // Phase 3: a new ENTRY for a vehicle that is still "inside" means
             // its exit was missed. Close the old session so it is not counted twice.

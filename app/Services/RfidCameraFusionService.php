@@ -6,6 +6,7 @@ use App\Models\Gate;
 use App\Models\RfidScanLog;
 use App\Models\Vehicle;
 use App\Models\VehicleCrossing;
+use App\Models\VehicleEvent;
 use App\Support\PhilippineTime;
 use App\Support\RfidIngestResult;
 use Carbon\Carbon;
@@ -20,8 +21,11 @@ use Illuminate\Support\Facades\DB;
  *   `rfid_lookahead_seconds` (2) after it, belongs to that crossing.
  * - Camera IN / OUT sets the vehicle's state. A direction that does not fit
  *   the state (IN while already inside) is still recorded, and flagged.
- * - Camera direction unknown, no camera at the gate, or camera offline: the
- *   vehicle's state decides (OUTSIDE -> IN, INSIDE -> OUT).
+ * - ROI work, Phase 2: the camera saw the vehicle but could not tell IN
+ *   from OUT: the record is "Direction unknown", the vehicle's state is not
+ *   changed, and staff set it (DirectionCorrectionService).
+ * - No camera at the gate, or camera offline: the vehicle's state decides
+ *   (OUTSIDE -> IN, INSIDE -> OUT).
  * - The camera was watching but no crossing came: "scan only", no movement.
  *
  * RFID only with a vehicle: reads are no longer saved while the camera is
@@ -254,7 +258,9 @@ class RfidCameraFusionService
 
     /**
      * Record the movement of a registered read: camera direction when there
-     * is one, else the vehicle's state. Returns RECORDED or ANOMALY.
+     * is one; "Direction unknown" when the camera saw it but could not tell;
+     * the vehicle's state when there was no crossing (camera offline).
+     * Returns RECORDED or ANOMALY.
      */
     public function applyMovement(RfidScanLog $scan, ?VehicleCrossing $crossing, ?string $toggleNote = null): string
     {
@@ -266,6 +272,11 @@ class RfidCameraFusionService
                 ? $crossing->direction
                 : null;
             $anomalyReason = null;
+
+            if ($crossing && $cameraDirection === null) {
+                // ROI work: never a guess. Not counted, state unchanged, until staff set it.
+                return $this->recordUnknownDirection($scan, $crossing, $vehicle, $currentState, $eventTime);
+            }
 
             if ($cameraDirection !== null) {
                 $eventType = $cameraDirection === VehicleCrossing::DIRECTION_OUT ? 'EXIT' : 'ENTRY';
@@ -280,9 +291,7 @@ class RfidCameraFusionService
             } else {
                 $eventType = $currentState === Vehicle::STATE_INSIDE ? 'EXIT' : 'ENTRY';
                 $fusionStatus = RfidScanLog::FUSION_TOGGLE;
-                $note = $crossing
-                    ? 'Camera direction unknown ('.($crossing->direction_reason ?: 'unclear').'); vehicle state used.'
-                    : ($toggleNote ?? 'Vehicle state used.');
+                $note = $toggleNote ?? 'Vehicle state used.';
             }
 
             $transition = $this->moveVehicle($vehicle, $eventType, $eventTime) + [
@@ -319,11 +328,46 @@ class RfidCameraFusionService
     }
 
     /**
+     * The camera saw this registered vehicle pass but could not tell IN from
+     * OUT: one "Direction unknown" record, linked to the read and the
+     * crossing; the vehicle's state and counters stay as they are.
+     */
+    protected function recordUnknownDirection(RfidScanLog $scan, VehicleCrossing $crossing, Vehicle $vehicle, string $currentState, Carbon $eventTime): string
+    {
+        $scan->forceFill([
+            'resolved_event_type' => VehicleEvent::TYPE_UNKNOWN,
+            'scan_direction' => null,
+            'resulting_state' => $currentState,
+            'vehicle_crossing_id' => $crossing->id,
+            'fusion_status' => RfidScanLog::FUSION_DIRECTION_UNKNOWN,
+            'fusion_note' => 'Camera could not tell IN from OUT ('.($crossing->direction_reason ?: 'unclear').'); set it in Review.',
+            'is_anomaly' => false,
+            'anomaly_reason' => null,
+            'outcome' => RfidIngestResult::RECORDED,
+        ])->save();
+
+        $crossing->forceFill(['rfid_scan_log_id' => $scan->id])->save();
+        $this->visitorRecordService->dismissForCrossing($crossing, 'Registered tag read for '.$vehicle->plate_number.'.');
+
+        $event = $this->eventService->createFromRfidScan($scan, [
+            'event_type' => VehicleEvent::TYPE_UNKNOWN,
+            'resulting_state' => $currentState,
+            'daily_entries_count' => (int) $vehicle->entries_today_count,
+            'daily_exits_count' => (int) $vehicle->exits_today_count,
+            'anomaly_reason' => null,
+            'event_time' => $eventTime,
+        ]);
+        $scan->forceFill(['correlated_vehicle_event_id' => $event?->id])->save();
+
+        return RfidIngestResult::RECORDED;
+    }
+
+    /**
      * Update the vehicle's state and today's counters.
      *
      * @return array{event_type: string, resulting_state: string, daily_entries_count: int, daily_exits_count: int}
      */
-    protected function moveVehicle(Vehicle $vehicle, string $eventType, Carbon $eventTime): array
+    public function moveVehicle(Vehicle $vehicle, string $eventType, Carbon $eventTime): array
     {
         $date = PhilippineTime::localDateString($eventTime);
 

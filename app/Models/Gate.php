@@ -37,7 +37,15 @@ class Gate extends Model
         'reader_ip',
         'reader_port',
         'reader_transport',
+        'away_direction',
     ];
+
+    /**
+     * ROI work: a vehicle moving away from the camera (its box shrinks and
+     * goes up the picture) is going IN or OUT of campus at this gate. Not set
+     * (null): every pass at this gate is Direction unknown.
+     */
+    public const AWAY_DIRECTIONS = ['IN' => 'IN (into campus)', 'OUT' => 'OUT (out of campus)'];
 
     protected function casts(): array
     {
@@ -137,6 +145,14 @@ class Gate extends Model
             ->max() ?? 0;
 
         return 'gate-'.($highest + 1);
+    }
+
+    /** "IN" / "OUT" for a vehicle moving away from the camera, or null (not set). */
+    public function awayDirection(): ?string
+    {
+        $value = strtoupper((string) $this->away_direction);
+
+        return array_key_exists($value, self::AWAY_DIRECTIONS) ? $value : null;
     }
 
     public function readerTypeLabel(): string

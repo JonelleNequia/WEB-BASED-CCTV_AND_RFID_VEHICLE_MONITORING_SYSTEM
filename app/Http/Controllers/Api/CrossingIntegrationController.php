@@ -17,8 +17,8 @@ use Illuminate\Support\Carbon;
 
 /**
  * Phase 2 (visitor model): the detector reports every vehicle pass through a
- * gate's zone, with the direction it worked out from the camera (along or
- * against the IN arrow). Sending the same event key again does not add a
+ * gate's zone, with the direction it worked out from the camera (away from
+ * it or toward it, and the gate's setting). Sending the same event key again does not add a
  * second row: it updates the record (a sharper picture, plate or type found
  * before the vehicle left the zone).
  */

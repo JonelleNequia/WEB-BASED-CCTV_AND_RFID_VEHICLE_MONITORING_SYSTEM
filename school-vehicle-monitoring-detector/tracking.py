@@ -1,20 +1,22 @@
 """
 Zone (ROI) geometry and the vehicle pass.
 
-ROI work: there is no trigger line any more. A vehicle is a PASS while its
-track is in the zone:
+ROI work: there is no trigger line and no IN arrow. A vehicle is a PASS
+while its track is in the zone:
 
     Detected   seen in the zone for a few frames: the pass opens, the RFID
                check starts ("Vehicle detected · checking RFID…")
-    Recorded   the record is made once the vehicle moved far enough along
-               the IN arrow AND the RFID window is over (even while it is
-               still in the zone); it keeps being updated until it leaves
+    Recorded   the record is made once it is clear whether the vehicle drives
+               away from the camera or toward it AND the RFID window is over
+               (even while it is still in the zone); it keeps being updated
+               until it leaves
     Left zone  out of the zone, or not seen for a few frames: the pass ends
 
-IN / OUT (into / out of campus) comes from the vehicle's path: the movement
-of the bottom-centre of its box (where it touches the ground) along the IN
-arrow drawn in Calibration, as a share of the zone's length along that
-arrow.
+Away from the camera = the box shrinks AND its bottom-centre (where it
+touches the ground) goes up the picture; toward the camera = it grows AND
+goes down. Each gate says which of the two is IN (into campus): "a vehicle
+moving away from the camera is IN / OUT". Until that is set every pass is
+"Direction unknown".
 """
 
 import cv2
@@ -82,25 +84,10 @@ def normalized_polygon_to_pixels(polygon, frame_width, frame_height):
     return points
 
 
-def normalized_arrow_to_pixels(arrow, frame_width, frame_height):
-    """
-    The IN arrow (tail x1,y1 -> head x2,y2, normalized 0-1) in pixels, or
-    None when it is missing or has no length.
-    """
-    if not isinstance(arrow, dict):
-        return None
-    try:
-        pixels = {
-            "x1": float(arrow["x1"]) * frame_width,
-            "y1": float(arrow["y1"]) * frame_height,
-            "x2": float(arrow["x2"]) * frame_width,
-            "y2": float(arrow["y2"]) * frame_height,
-        }
-    except (KeyError, TypeError, ValueError):
-        return None
-    if not np.hypot(pixels["x2"] - pixels["x1"], pixels["y2"] - pixels["y1"]):
-        return None
-    return pixels
+def normalized_away_direction(value):
+    """The gate's setting: "IN" / "OUT" for a vehicle moving away from the camera, or None (not set)."""
+    value = str(value or "").strip().upper()
+    return value if value in {"IN", "OUT"} else None
 
 
 def bbox_center(xyxy):
@@ -131,24 +118,19 @@ def point_in_polygon(point, polygon):
     return cv2.pointPolygonTest(contour, (float(point[0]), float(point[1])), False) >= 0
 
 
-def arrow_unit(arrow):
-    """Unit vector of the IN arrow (pixels)."""
-    dx, dy = arrow["x2"] - arrow["x1"], arrow["y2"] - arrow["y1"]
-    length = float(np.hypot(dx, dy)) or 1.0
-    return dx / length, dy / length
+def zone_height(polygon):
+    """The zone's height in the picture (pixels)."""
+    ys = [point[1] for point in polygon or []]
+    return (max(ys) - min(ys)) if ys else 0.0
 
 
-def zone_length_along(polygon, unit):
-    """The zone's length along a direction: the spread of its corners projected on it."""
-    projections = [point[0] * unit[0] + point[1] * unit[1] for point in polygon or []]
-    return (max(projections) - min(projections)) if projections else 0.0
-
-
-def describe_arrow(unit):
-    """"down", "up", "right" or "left": where the IN arrow points in the picture."""
-    if abs(unit[1]) >= abs(unit[0]):
-        return "down" if unit[1] > 0 else "up"
-    return "right" if unit[0] > 0 else "left"
+def touches_frame_edge(xyxy, frame_size, margin=3):
+    """The box reaches the edge of the picture: the vehicle is cut off, so its box size is not its real size."""
+    if not frame_size:
+        return False
+    width, height = frame_size
+    x1, y1, x2, y2 = xyxy
+    return x1 <= margin or y1 <= margin or x2 >= width - margin or y2 >= height - margin
 
 
 def _median_point(points):
@@ -159,31 +141,39 @@ def _median_point(points):
 # a detection that flickered): it is not counted.
 STILL_SHARE = 0.05
 # Box height change (last frames against first) that counts as a clear
-# "came closer" / "went away" for a medium-confidence direction.
+# "came closer" (grew) / "went away" (shrank).
 SIZE_CHANGE = 0.20
+
+OPPOSITE = {"IN": "OUT", "OUT": "IN"}
 
 
 class VehiclePass:
     """
     One vehicle's pass through the zone (one track = one pass).
 
-    It keeps the bottom-centre of the box and the box height of every frame
-    the vehicle is seen in the zone, and how many detection frames in a row
-    it was missed (out of the zone, or not seen).
+    It keeps the bottom-centre of the box, the box height and whether the
+    box touched the edge of the picture for every frame the vehicle is seen
+    in the zone, and how many detection frames in a row it was missed (out
+    of the zone, or not seen).
     """
 
-    def __init__(self, xyxy):
-        self.points = [bbox_bottom_center(xyxy)]
-        self.heights = [float(xyxy[3] - xyxy[1])]
-        self.frames = 1
+    def __init__(self, xyxy, frame_size=None):
+        self.frame_size = frame_size
+        self.points = []
+        self.heights = []
+        self.clipped = []
+        self.frames = 0
         self.missed = 0
         self.opened = False
+        self.observe(xyxy)
 
     def observe(self, xyxy):
         self.points.append(bbox_bottom_center(xyxy))
         self.heights.append(float(xyxy[3] - xyxy[1]))
+        self.clipped.append(touches_frame_edge(xyxy, self.frame_size))
         del self.points[:-240]
         del self.heights[:-240]
+        del self.clipped[:-240]
         self.frames += 1
         self.missed = 0
 
@@ -195,64 +185,101 @@ class VehiclePass:
         count = min(3, max(1, len(self.points) // 3))
         return _median_point(self.points[:count]), _median_point(self.points[-count:])
 
-    def measure(self, arrow, polygon):
+    def _size(self):
+        """Box height of the last frames against the first, from frames where the box is whole (None: cannot tell)."""
+        whole = [height for height, clipped in zip(self.heights, self.clipped) if not clipped]
+        if len(whole) < 2:
+            return None
+        count = min(3, max(1, len(whole) // 3))
+        first = float(np.median(whole[:count])) or 1.0
+        return float(np.median(whole[-count:])) / first
+
+    def measure(self, polygon):
         """
-        along: movement along the IN arrow as a share of the zone's length
-               along it (+ = with the arrow, - = against it)
+        rise:  how far it went UP the picture as a share of the zone's
+               height (+ = up = away from the camera, - = down = toward it)
         moved: how far it is from where it was first seen, any way (share; a
                vehicle that rocks or wobbles in place ends near where it began)
-        size:  box height of the last frames against the first (1.0 = same)
+        size:  box height of the last frames against the first (1.0 = same;
+               None when the box was cut off by the edge of the picture)
         """
-        unit = arrow_unit(arrow)
-        length = zone_length_along(polygon, unit) or 1.0
+        height = zone_height(polygon) or 1.0
         first, last = self._ends()
-        along = ((last[0] - first[0]) * unit[0] + (last[1] - first[1]) * unit[1]) / length
-        moved = float(np.hypot(last[0] - first[0], last[1] - first[1])) / length
-        count = min(3, max(1, len(self.heights) // 3))
-        size = float(np.median(self.heights[-count:])) / (float(np.median(self.heights[:count])) or 1.0)
-        return {"along": along, "moved": moved, "size": size, "first": first, "last": last, "unit": unit}
+        rise = (first[1] - last[1]) / height
+        moved = float(np.hypot(last[0] - first[0], last[1] - first[1])) / height
+        return {"rise": rise, "moved": moved, "size": self._size()}
 
-    def decide(self, arrow, polygon, min_move, final=False):
+    def decide(self, polygon, min_move, away_direction=None, final=False):
         """
-        IN / OUT with its confidence, or None while it is not sure yet.
+        Away from the camera or toward it, as IN / OUT with its confidence,
+        or None while it is not sure yet.
 
-        high:   moved at least `min_move` of the zone along the IN arrow
-        medium: moved less, but at least half of that, and the box clearly
-                grew while it went down the picture (or shrank going up):
-                the movement is real, not jitter
-        final:  the pass ended (left the zone, track lost): an undecided pass
-                becomes UNKNOWN, a pass that never moved is "still"
+        high:    moved at least `min_move` of the zone's height up or down,
+                 and the box size changed the same way (shrank going up)
+        medium:  moved that far but the size does not tell (cut off, about
+                 the same); or moved less, but at least half of that, and
+                 the size clearly agrees
+        unknown: the movement and the size disagree (only when the pass
+                 ends: more frames may still settle it), or the gate's
+                 "away from the camera" is not set
+        final:   the pass ended (left the zone, track lost): an undecided
+                 pass becomes UNKNOWN, a pass that never moved is "still"
         """
-        m = self.measure(arrow, polygon)
-        along, size = m["along"], m["size"]
-        direction = "IN" if along > 0 else "OUT"
-        share = round(abs(along) * 100)
-        way = "with" if along > 0 else "against"
-        result = {"direction": None, "confidence": None, "along": round(along, 3), "moved": round(m["moved"], 3),
-                  "size": round(size, 3), "reason": f"moved {share}% of the zone along the IN arrow"}
+        m = self.measure(polygon)
+        rise, size = m["rise"], m["size"]
+        way = "away" if rise > 0 else "toward"
+        share = round(abs(rise) * 100)
+        moved_text = f"went {'up' if rise > 0 else 'down'} {share}% of the zone"
+        size_way = None
+        if size is not None and size <= 1 - SIZE_CHANGE:
+            size_way = "away"
+        elif size is not None and size >= 1 + SIZE_CHANGE:
+            size_way = "toward"
+        if size is None:
+            size_text = "box size unclear (cut off by the edge)"
+        elif size_way is None:
+            size_text = f"box size changed only {round(abs(size - 1) * 100)}%"
+        else:
+            size_text = f"box {'grew' if size > 1 else 'shrank'} {round(abs(size - 1) * 100)}%"
+        result = {"direction": None, "confidence": None, "movement": None, "rise": round(rise, 3),
+                  "moved": round(m["moved"], 3), "size": None if size is None else round(size, 3),
+                  "reason": f"{moved_text}; {size_text}"}
 
-        if abs(along) >= min_move:
-            result.update(direction=direction, confidence="high", reason=f"moved {share}% of the zone {way} the IN arrow")
-            return result
+        confidence = None
+        if abs(rise) >= min_move:
+            if size_way is None:
+                confidence = "medium"
+            elif size_way == way:
+                confidence = "high"
+            elif final:
+                result.update(direction="UNKNOWN",
+                              reason=f"Direction unknown: {moved_text} but the {size_text} (they disagree)")
+                return result
+        elif abs(rise) >= max(STILL_SHARE, min_move / 2) and size_way == way:
+            confidence = "medium"
 
-        went_down = m["last"][1] > m["first"][1]
-        size_agrees = (size >= 1 + SIZE_CHANGE and went_down) or (size <= 1 - SIZE_CHANGE and not went_down)
-        if abs(along) >= max(STILL_SHARE, min_move / 2) and size_agrees:
-            change = "grew" if size > 1 else "shrank"
-            result.update(direction=direction, confidence="medium",
-                          reason=f"moved {share}% of the zone {way} the IN arrow; box {change} {round(abs(size - 1) * 100)}%")
+        if confidence:
+            camera_way = "away from the camera" if way == "away" else "toward the camera"
+            result.update(movement=way, confidence=confidence, reason=f"{camera_way}: {moved_text}; {size_text}")
+            gate_in = normalized_away_direction(away_direction)
+            if gate_in is None:
+                result.update(direction="UNKNOWN", confidence=None,
+                              reason=f"Direction unknown: {camera_way}, but this gate's direction is not set")
+            else:
+                result["direction"] = gate_in if way == "away" else OPPOSITE[gate_in]
             return result
 
         if final:
             if m["moved"] < STILL_SHARE:
                 result.update(direction="STILL", reason="did not move")
             else:
-                result.update(direction="UNKNOWN", reason=f"Direction unknown: moved only {share}% of the zone along the IN arrow")
+                result.update(direction="UNKNOWN", reason=f"Direction unknown: {moved_text}; {size_text}")
         return result
 
 
 def calibration_ready(camera_config):
     """
-    Automatic records need the zone and the IN arrow.
+    Automatic records need the zone. (IN / OUT also needs the gate's "away
+    from the camera" setting; without it every pass is Direction unknown.)
     """
-    return bool(camera_config.get("calibration_mask")) and bool(camera_config.get("calibration_direction"))
+    return bool(camera_config.get("calibration_mask"))

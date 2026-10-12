@@ -126,8 +126,9 @@ class Phase3RfidCameraFusionTest extends TestCase
         $this->assertNotNull(VehicleEvent::query()->sole()->anomaly_reason);
     }
 
-    public function test_unknown_camera_direction_falls_back_to_the_vehicle_state(): void
+    public function test_unknown_camera_direction_is_recorded_as_unknown_and_the_state_is_kept(): void
     {
+        // ROI work, Phase 2: the camera saw it but could not tell: no guess from the vehicle's state.
         $this->cameraOnline();
         $vehicle = $this->registeredVehicle('UNK 5005', 'UNK-TAG-5', Vehicle::STATE_INSIDE);
 
@@ -135,9 +136,83 @@ class Phase3RfidCameraFusionTest extends TestCase
         $this->crossing('UNKNOWN', 'k-unknown', 'track too short');
 
         $scan = RfidScanLog::query()->sole();
-        $this->assertSame(['EXIT', RfidScanLog::FUSION_TOGGLE], [$scan->resolved_event_type, $scan->fusion_status]);
-        $this->assertStringContainsString('Camera direction unknown (track too short)', $scan->fusion_note);
-        $this->assertSame(Vehicle::STATE_OUTSIDE, $vehicle->fresh()->current_state);
+        $this->assertSame([VehicleEvent::TYPE_UNKNOWN, RfidScanLog::FUSION_DIRECTION_UNKNOWN, RfidIngestResult::RECORDED],
+            [$scan->resolved_event_type, $scan->fusion_status, $scan->outcome]);
+        $this->assertStringContainsString('could not tell IN from OUT (track too short)', $scan->fusion_note);
+        $this->assertSame([Vehicle::STATE_INSIDE, 0, 0], [$vehicle->fresh()->current_state, (int) $vehicle->fresh()->entries_today_count, (int) $vehicle->fresh()->exits_today_count]);
+        $event = VehicleEvent::query()->sole();
+        $this->assertSame([VehicleEvent::TYPE_UNKNOWN, 'UNKNOWN'], [$event->event_type, $event->direction]);
+        $this->assertSame(0, \App\Models\ActiveSession::query()->count());
+        // Not counted as IN or OUT.
+        $counts = app(\App\Services\MovementCountService::class)->counts('today');
+        $this->assertSame([0, 0, 1], [$counts['in'], $counts['out'], $counts['unknown']]);
+    }
+
+    public function test_set_out_on_a_registered_unknown_record_moves_the_vehicle_and_is_logged(): void
+    {
+        $this->cameraOnline();
+        $vehicle = $this->registeredVehicle('SET 7007', 'SET-TAG-7', Vehicle::STATE_INSIDE);
+        $this->scan('SET-TAG-7');
+        $this->crossing('UNKNOWN', 'k-set', 'went up 9% of the zone');
+        $event = VehicleEvent::query()->sole();
+
+        // In Visitors › Review (guards too) and Activity Logs.
+        $this->actingAs($this->admin)->get(route('visitors.index', ['tab' => 'review']))
+            ->assertOk()->assertSee('SET 7007')->assertSee('Review (1)')->assertSee(route('vehicle-events.direction', $event));
+        $this->actingAs($this->admin)->get(route('logs.index'))->assertOk()->assertSee(route('vehicle-events.direction', $event));
+
+        $this->actingAs($this->admin)->patch(route('vehicle-events.direction', $event), ['direction' => 'OUT'])
+            ->assertSessionHas('status', 'SET 7007 set to OUT.');
+
+        $event->refresh();
+        $this->assertSame(['EXIT', 'OUT'], [$event->event_type, $event->direction]);
+        $this->assertSame([Vehicle::STATE_OUTSIDE, 1], [$vehicle->fresh()->current_state, (int) $vehicle->fresh()->exits_today_count]);
+        $scan = RfidScanLog::query()->sole();
+        $this->assertSame(['EXIT', RfidScanLog::FUSION_SET_BY_STAFF, false], [$scan->resolved_event_type, $scan->fusion_status, $scan->is_anomaly]);
+        $this->assertSame('OUT', VehicleCrossing::query()->sole()->direction);
+        $correction = \App\Models\DirectionCorrection::query()->sole();
+        $this->assertSame(['UNKNOWN', 'OUT', 'went up 9% of the zone', $this->admin->id], [$correction->detected_direction, $correction->corrected_direction, $correction->detected_reason, $correction->corrected_by]);
+        $this->assertSame(1, app(\App\Services\MovementCountService::class)->counts('today')['out']);
+
+        // Only once: it has a direction now.
+        $this->actingAs($this->admin)->patch(route('vehicle-events.direction', $event), ['direction' => 'IN'])->assertSessionHasErrors('direction');
+        $this->actingAs($this->admin)->get(route('visitors.index', ['tab' => 'review']))->assertOk()->assertSee('Nothing to review');
+    }
+
+    public function test_set_in_while_already_inside_is_flagged_like_a_camera_anomaly(): void
+    {
+        $this->cameraOnline();
+        $vehicle = $this->registeredVehicle('ANO 8008', 'ANO-TAG-8', Vehicle::STATE_INSIDE);
+        $this->scan('ANO-TAG-8');
+        $this->crossing('UNKNOWN', 'k-ano');
+
+        $this->actingAs($this->admin)->patch(route('vehicle-events.direction', VehicleEvent::query()->sole()), ['direction' => 'IN']);
+
+        $this->assertStringContainsString('already inside', (string) VehicleEvent::query()->sole()->anomaly_reason);
+        $this->assertTrue(RfidScanLog::query()->sole()->is_anomaly);
+        $this->assertSame(Vehicle::STATE_INSIDE, $vehicle->fresh()->current_state);
+    }
+
+    public function test_an_unknown_unregistered_visitor_is_set_from_the_review_tab_by_a_guard(): void
+    {
+        $this->cameraOnline();
+        $guard = User::query()->where('role', '!=', 'admin')->first()
+            ?? User::factory()->create(['role' => 'guard']);
+        $this->crossing('UNKNOWN', 'k-visitor')->assertCreated();
+        // The detector says there was no tag (its RFID window ran out).
+        $crossing = VehicleCrossing::query()->sole();
+        $crossing->forceFill(['detection_metadata_json' => ['rfid_status' => 'no_pass']])->save();
+        $record = app(\App\Services\VisitorRecordService::class)->createFromCrossing($crossing->fresh());
+        $this->assertSame('UNKNOWN', $record->direction);
+
+        $this->actingAs($guard)->get(route('visitors.index', ['tab' => 'review']))->assertOk()->assertSee('Unregistered Visitor');
+        $this->actingAs($guard)->patch(route('visitors.records.direction', $record), ['direction' => 'IN'])
+            ->assertSessionHas('status', "Record #{$record->id} set to IN.");
+
+        $this->assertSame('IN', $record->fresh()->direction);
+        $this->assertSame('IN', $crossing->fresh()->direction);
+        $this->assertSame(1, app(\App\Services\MovementCountService::class)->counts('today')['in']);
+        $this->assertSame($guard->id, \App\Models\DirectionCorrection::query()->sole()->corrected_by);
     }
 
     public function test_no_camera_or_camera_offline_uses_the_vehicle_state_at_once(): void

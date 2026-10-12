@@ -285,13 +285,13 @@ class GateSetupService
     protected function zone(Gate $gate, array $config): array
     {
         $mask = $config['calibration_mask'] ?? null;
-        $arrow = $config['calibration_direction'] ?? null;
 
         return [
-            'ready' => ! empty($mask) && ! empty($arrow),
+            'ready' => ! empty($mask),
             'points' => collect((array) $mask)->map(fn ($point): string => round((float) data_get($point, 'x', 0), 4).','.round((float) data_get($point, 'y', 0), 4))->implode(' '),
-            // ROI work: the IN arrow drawn on the gate card's zone preview.
-            'arrow' => is_array($arrow) ? $arrow : null,
+            // ROI work: a vehicle moving away from the camera is IN / OUT here
+            // (null: not set yet, every pass is Direction unknown: the card warns).
+            'away_direction' => $gate->awayDirection(),
             'frame_url' => route('camera.frame', $gate->code),
             'setup_url' => route('settings.index', ['tab' => 'calibration', 'gate' => $gate->code]),
         ];

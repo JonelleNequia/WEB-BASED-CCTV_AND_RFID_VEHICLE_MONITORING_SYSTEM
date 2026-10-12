@@ -86,25 +86,41 @@ class Phase2CrossingDirectionTest extends TestCase
             ->assertUnauthorized();
     }
 
-    public function test_calibration_saves_the_in_arrow_and_exports_it_to_the_detector(): void
+    public function test_calibration_saves_the_gate_direction_and_exports_it_to_the_detector(): void
     {
         $camera = Camera::query()->forRole('gate-1')->firstOrFail();
-        $save = fn (array $arrow) => $this->actingAs($this->admin)->putJson(route('calibration.update'), [
+        $save = fn (array $data) => $this->actingAs($this->admin)->putJson(route('calibration.update'), [
             'camera_id' => $camera->id,
             'calibration_mask' => [['x' => 0, 'y' => 0.3], ['x' => 1, 'y' => 0.3], ['x' => 1, 'y' => 1]],
-            'calibration_direction' => $arrow,
-        ]);
+        ] + $data);
+        $exported = fn () => json_decode(File::get(CameraFiles::path('camera_runtime_config.json')), true)['cameras']['gate-1'];
 
-        // ROI work: the IN arrow (tail -> head); turning it around swaps the ends.
-        $up = ['x1' => 0.5, 'y1' => 0.9, 'x2' => 0.5, 'y2' => 0.5];
-        $save($up)->assertOk()->assertJsonPath('camera.calibration_direction', $up);
-        $config = json_decode(File::get(CameraFiles::path('camera_runtime_config.json')), true);
-        $this->assertSame($up, $config['cameras']['gate-1']['calibration_direction']);
-        $this->assertSame(0.2, $config['cameras']['gate-1']['pass_min_move']);
-        $this->assertStringEndsWith('/api/v1/integration/crossings', $config['system_settings']['crossing_url']);
+        // ROI work: only the zone is drawn; a vehicle moving away from the camera is IN or OUT here.
+        $save(['away_direction' => 'OUT'])->assertOk()->assertJsonPath('camera.away_direction', 'OUT');
+        $this->assertSame(['OUT', 0.15], [$exported()['away_direction'], $exported()['pass_min_move']]);
+        $this->assertArrayNotHasKey('calibration_direction', $exported());
+        $this->assertStringEndsWith('/api/v1/integration/crossings', json_decode(File::get(CameraFiles::path('camera_runtime_config.json')), true)['system_settings']['crossing_url']);
 
-        $save(['x1' => 0.5, 'y1' => 0.5, 'x2' => 0.5])->assertUnprocessable();
-        $save(['x1' => 0.5, 'y1' => 0.5, 'x2' => 0.5, 'y2' => 1.4])->assertUnprocessable();
+        $save([])->assertOk()->assertJsonPath('camera.away_direction', 'OUT');     // the zone only: the direction stays
+        $save(['away_direction' => null])->assertOk()->assertJsonPath('camera.away_direction', null);
+        $this->assertNull($exported()['away_direction']);
+        $save(['away_direction' => 'UP'])->assertUnprocessable();
+    }
+
+    public function test_a_gate_without_its_direction_warns_on_its_card(): void
+    {
+        Camera::query()->forRole('gate-1')->update(['calibration_mask_json' => json_encode([['x' => 0, 'y' => 0.3], ['x' => 1, 'y' => 0.3], ['x' => 1, 'y' => 1]])]);
+        \App\Models\Gate::query()->where('code', 'gate-1')->update(['away_direction' => null]);
+
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'gates']))
+            ->assertOk()
+            ->assertSee('Zone set · IN / OUT not set')
+            ->assertSee('Every vehicle is recorded as &quot;Direction unknown&quot; until IN / OUT is set.', false)
+            ->assertSee('data-away-warning', false);
+
+        \App\Models\Gate::query()->where('code', 'gate-1')->update(['away_direction' => 'IN']);
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'gates']))
+            ->assertOk()->assertSee('Zone set · moving away from the camera = IN');
     }
 
     public function test_the_minimum_movement_is_set_per_gate_under_advanced_timing(): void
@@ -112,7 +128,7 @@ class Phase2CrossingDirectionTest extends TestCase
         $this->actingAs($this->admin)->put(route('settings.update'), ['section' => 'timing', 'pass_min_move' => ['gate-1' => 30, 'gate-2' => null]])
             ->assertSessionHasNoErrors();
         $config = json_decode(File::get(CameraFiles::path('camera_runtime_config.json')), true);
-        $this->assertSame([0.3, 0.2], [$config['cameras']['gate-1']['pass_min_move'], $config['cameras']['gate-2']['pass_min_move']]);
+        $this->assertSame([0.3, 0.15], [$config['cameras']['gate-1']['pass_min_move'], $config['cameras']['gate-2']['pass_min_move']]);
 
         $this->actingAs($this->admin)->put(route('settings.update'), ['section' => 'timing', 'pass_min_move' => ['gate-1' => 90]])
             ->assertSessionHasErrors('pass_min_move.gate-1');
@@ -122,38 +138,36 @@ class Phase2CrossingDirectionTest extends TestCase
         $this->assertNull(\App\Models\Gate::query()->where('code', 'gate-1')->value('pass_min_move'));
     }
 
-    public function test_migration_turns_a_saved_trigger_line_into_an_arrow_towards_its_in_side(): void
+    public function test_migration_turns_the_saved_arrow_or_line_into_the_gate_setting_and_removes_them(): void
     {
-        $migration = require database_path('migrations/2026_10_12_000001_roi_pass_in_arrow.php');
+        $migration = require database_path('migrations/2026_10_12_000002_gate_away_direction.php');
+
+        // The IN arrow pointing down the picture (toward the camera): away from it is OUT.
+        $this->assertSame('OUT', $migration::awayFromArrow(['x1' => 0.5, 'y1' => 0.2, 'x2' => 0.5, 'y2' => 0.6]));
+        $this->assertSame('IN', $migration::awayFromArrow(['x1' => 0.5, 'y1' => 0.86, 'x2' => 0.53, 'y2' => 0.46]));
+        $this->assertNull($migration::awayFromArrow(['x1' => 0.1, 'y1' => 0.5, 'x2' => 0.9, 'y2' => 0.52]));   // sideways
+        // An older trigger line: its IN side (+1 = below a line drawn left to right).
         $line = ['x1' => 0.1, 'y1' => 0.7, 'x2' => 0.9, 'y2' => 0.7];
-
-        // Side +1 of a line drawn left to right is below it: IN = down the picture.
-        $this->assertSame(['x1' => 0.5, 'y1' => 0.5, 'x2' => 0.5, 'y2' => 0.9], $migration::arrowFromLine($line + ['in_side' => 1]));
-        $this->assertSame(['x1' => 0.5, 'y1' => 0.9, 'x2' => 0.5, 'y2' => 0.5], $migration::arrowFromLine($line + ['in_side' => -1]));
-        $this->assertNull($migration::arrowFromLine(null));
+        $this->assertSame('OUT', $migration::awayFromSaved((object) ['calibration_line_json' => json_encode($line + ['in_side' => 1])]));
+        $this->assertSame('IN', $migration::awayFromSaved((object) ['calibration_line_json' => json_encode($line + ['in_side' => -1])]));
+        $this->assertNull($migration::awayFromSaved((object) []));
 
         $migration->down();
-        DB::table('cameras')->where('camera_role', 'gate-1')->update(['calibration_line_json' => json_encode($line + ['in_side' => -1])]);
-        $migration->up();
-        $arrow = Camera::query()->forRole('gate-1')->value('calibration_direction_json');
-        $this->assertSame(['x1' => 0.5, 'y1' => 0.9, 'x2' => 0.5, 'y2' => 0.5], is_string($arrow) ? json_decode($arrow, true) : $arrow);
-    }
-
-    public function test_migration_gives_existing_lines_the_old_in_side(): void
-    {
-        $migration = require database_path('migrations/2026_10_01_000003_create_vehicle_crossings.php');
-        $migration->down();
-        DB::table('cameras')->where('camera_role', 'gate-1')
-            ->update(['calibration_line_json' => json_encode(['x1' => 0.1, 'y1' => 0.6, 'x2' => 0.9, 'y2' => 0.6])]);
-
+        DB::table('cameras')->where('camera_role', 'gate-1')->update(['calibration_direction_json' => json_encode(['x1' => 0.5, 'y1' => 0.86, 'x2' => 0.53, 'y2' => 0.46])]);
+        DB::table('cameras')->where('camera_role', 'gate-2')->update(['calibration_line_json' => json_encode($line + ['in_side' => 1])]);
         $migration->up();
 
-        $line = Camera::query()->forRole('gate-1')->value('calibration_line_json');
-        $this->assertSame(1, json_decode(is_string($line) ? $line : json_encode($line), true)['in_side']);
+        $this->assertSame(['IN', 'OUT'], [
+            \App\Models\Gate::query()->where('code', 'gate-1')->value('away_direction'),
+            \App\Models\Gate::query()->where('code', 'gate-2')->value('away_direction'),
+        ]);
+        $this->assertFalse(\Illuminate\Support\Facades\Schema::hasColumn('cameras', 'calibration_line_json'));
+        $this->assertFalse(\Illuminate\Support\Facades\Schema::hasColumn('cameras', 'calibration_direction_json'));
     }
 
-    public function test_calibration_page_has_the_flip_button_and_recent_records(): void
+    public function test_calibration_page_has_the_direction_setting_and_recent_records(): void
     {
+        Camera::query()->forRole('gate-1')->update(['source_type' => 'rtsp', 'source_value' => 'rtsp://198.51.100.20:554/stream2']);
         VehicleCrossing::query()->create([
             'gate' => 'gate-1', 'direction' => 'IN', 'direction_reason' => 'moved across the line',
             'crossed_at' => now(), 'track_id' => 42, 'confidence' => 0.91, 'external_event_key' => 'page-1',
@@ -161,7 +175,8 @@ class Phase2CrossingDirectionTest extends TestCase
 
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'calibration']))
             ->assertOk()
-            ->assertSee('Flip IN arrow')
+            ->assertSee('A vehicle moving away from the camera is going')
+            ->assertDontSee('Flip IN')
             ->assertSee('Recent records')
             ->assertSee('track #42');
 

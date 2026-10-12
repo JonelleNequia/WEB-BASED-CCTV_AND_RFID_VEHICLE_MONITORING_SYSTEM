@@ -95,7 +95,7 @@ class SaveSettingsRequest extends FormRequest
             'rfid_stationary_seconds' => ['sometimes', 'integer', 'min:10', 'max:3600'],
             'rfid_offline_fallback' => ['sometimes', 'in:0,1'],
             'rfid_offline_grace_seconds' => ['sometimes', 'integer', 'min:0', 'max:300'],
-            // ROI work: movement along the IN arrow for a sure IN / OUT, percent of the zone, per gate.
+            // ROI work: movement up / down for a sure IN / OUT, percent of the zone's height, per gate.
             'pass_min_move' => ['sometimes', 'array'],
             'pass_min_move.*' => ['nullable', 'integer', 'min:5', 'max:60'],
             // Cameras tab: one camera per gate (keys = gate codes).

@@ -74,7 +74,7 @@ PERFORMANCE_DEFAULTS = {
     "yolo_device": "auto",     # auto = cuda, then Apple mps, then cpu
     "roi_crop": 1,             # run YOLO only on the calibrated zone when it is smaller than the frame
     "hires_on_trigger": 1,     # fetch a full-resolution frame from the snapshot stream on each trigger
-    "debug_overlay": 0,        # draw raw detections, zone, IN arrow, tracks and counters on the live view
+    "debug_overlay": 0,        # draw raw detections, zone, tracks and counters on the live view
     # A2: vehicle type (vehicle_type.py).
     "type_second_pass": 1,          # second check on the best full-resolution crop
     "type_model": "yolov8s.pt",     # model of the second check (once per vehicle; yolov8n.pt when missing)
@@ -84,7 +84,7 @@ PERFORMANCE_DEFAULTS = {
     # ROI work: one vehicle = one pass through the zone (tracking.VehiclePass).
     "pass_min_frames": 3,           # frames in the zone before it is Detected
     "pass_lost_frames": 6,          # detection frames out of the zone / not seen before it Left zone
-    "pass_min_move": 0.20,          # share of the zone's length along the IN arrow for a sure IN / OUT (per gate)
+    "pass_min_move": 0.15,          # share of the zone's height a vehicle moves up / down for a sure IN / OUT (per gate)
 }
 # The full-resolution stream is decoded with more threads, which delays it by
 # about this much against the low-delay live stream (measured on the VIGI C240).
@@ -168,7 +168,8 @@ def default_camera_config(role):
         "source_username": "",
         "source_password": "",
         "calibration_mask": None,
-        "calibration_direction": None,
+        # ROI work: a vehicle moving away from the camera is "IN" or "OUT" here (None: not set yet).
+        "away_direction": None,
     }
 
 
@@ -237,7 +238,7 @@ def normalize_camera_config(role, loaded_config):
     except (TypeError, ValueError):
         config["decoder_threads"] = 1
     config["calibration_mask"] = config.get("calibration_mask")
-    config["calibration_direction"] = config.get("calibration_direction")
+    config["away_direction"] = str(config.get("away_direction") or "").strip().upper() or None
 
     if source_type == "webcam":
         try:

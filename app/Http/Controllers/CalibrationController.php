@@ -19,7 +19,7 @@ use Illuminate\View\View;
 class CalibrationController extends Controller
 {
     /**
-     * Show the admin-only camera calibration page for the zone (ROI) and IN arrow.
+     * Show the admin-only camera calibration page for the zone (ROI) and the gate's IN / OUT direction.
      */
     public function index(
         CalibrationService $calibrationService,
@@ -93,7 +93,7 @@ class CalibrationController extends Controller
     }
 
     /**
-     * Save one camera's zone and IN arrow.
+     * Save one camera's zone and its gate's direction (away from the camera = IN / OUT).
      */
     public function update(
         SaveCalibrationRequest $request,
@@ -127,12 +127,12 @@ class CalibrationController extends Controller
         $frame = CameraFiles::framePath($role, 'latest');
         $mtime = $hasCamera && is_file($frame) && filesize($frame) > 0 ? filemtime($frame) : false;
 
-        $camera = \App\Models\Camera::query()->forRole($role)->first(['calibration_mask_json', 'calibration_direction_json']);
+        $camera = \App\Models\Camera::query()->forRole($role)->first(['calibration_mask_json']);
 
         return [
             'has_camera' => $hasCamera,
             // Calibration editor: "Reset to saved" and changes saved in another tab.
-            'calibration' => ['mask' => $camera?->calibration_mask_json, 'direction' => $camera?->calibration_direction_json],
+            'calibration' => ['mask' => $camera?->calibration_mask_json, 'away_direction' => \App\Models\Gate::query()->where('code', $role)->first()?->awayDirection()],
             'connection' => PipelineReport::connection($detectorStatus, $role, $hasCamera),
             'snapshot_url' => $mtime ? route('camera.frame', [$role, 'latest'], false).'?t='.$mtime : null,
             'snapshot_at' => $mtime ? DisplayTime::datetimeSeconds(Carbon::createFromTimestamp($mtime)) : null,

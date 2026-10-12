@@ -3,11 +3,11 @@
  * camera, the same live stream as its kiosk and Gate Monitor (live-video.js);
  * this page never asks for the browser's camera. The status comes from the
  * detector (as on System status). While the camera is offline the detector's
- * last picture is shown, so the zone and IN arrow can still be drawn.
+ * last picture is shown, so the zone can still be drawn.
  *
- * Editing (drag points, arrow ends, whole shapes, "+" on edges, remove a
- * point, flip the IN arrow) is in calibration-editor.js; this file connects it to the
- * page: the picture, the pointer, the buttons and saving.
+ * Editing (drag points, the whole zone, "+" on edges, remove a point) is in
+ * calibration-editor.js; this file connects it to the page: the picture,
+ * the pointer, the buttons, the gate's IN / OUT setting and saving.
  */
 (function () {
     const payloadNode = document.getElementById('camera-calibration-data');
@@ -67,7 +67,8 @@
             this.messageValue = element.querySelector('[data-message-value]');
             this.problemsList = element.querySelector('[data-problems]');
             this.maskValue = element.querySelector('[data-mask-value]');
-            this.arrowValue = element.querySelector('[data-arrow-value]');
+            // ROI work: a vehicle moving away from the camera is IN or OUT at this gate.
+            this.awaySelect = element.querySelector('[data-away-direction]');
             this.directionValue = element.querySelector('[data-direction-value]');
             this.crossingList = element.querySelector('[data-crossings]');
             this.saveButton = element.querySelector('[data-save]');
@@ -85,8 +86,8 @@
             this.touch = false;
             this.cssWidth = 0;
             this.cssHeight = 0;
-            // The saved zone and IN arrow, drawn as soon as there is a picture.
-            this.saved = { mask: camera.calibration_mask, direction: camera.calibration_direction };
+            // The saved zone (drawn as soon as there is a picture) and the gate's direction.
+            this.saved = { mask: camera.calibration_mask, away_direction: camera.away_direction || null };
             this.editor = new Calib.Editor(this.saved);
             this.saving = false;
             this.lastSaveAt = 0;
@@ -98,8 +99,7 @@
             }
 
             this.bindEvents();
-            // Saved shapes are only dragged; the arrow tool is chosen when the arrow is missing.
-            this.setActiveTool(this.editor.closed && !this.editor.arrow ? 'arrow' : 'mask');
+            this.setActiveTool('mask');
             this.updateSummary();
             this.applyConnection(this.connection);
         }
@@ -110,27 +110,23 @@
             });
             this.doneButton.addEventListener('click', () => {
                 this.edited(this.editor.closeMask(), 'Zone closed. Drag its points to adjust it.');
-                if (!this.editor.arrow) {
-                    this.setActiveTool('arrow');
-                }
             });
             this.element.querySelector('[data-clear]').addEventListener('click', () => {
-                this.edited(this.editor.clear(), 'Cleared. Draw the zone again, then the IN arrow.');
+                this.edited(this.editor.clear(), 'Cleared. Draw the zone again.');
                 this.setActiveTool('mask');
             });
-            // Turn the IN arrow around (its tail and head swap).
-            this.element.querySelector('[data-flip-direction]').addEventListener('click', () => {
-                if (!this.editor.arrow) {
-                    this.message('Draw the IN arrow first.');
-                    return;
-                }
-                this.edited(this.editor.flip(), 'IN direction flipped. Save to apply it.');
+            this.awaySelect?.addEventListener('change', () => {
+                this.message(this.awaySelect.value
+                    ? `A vehicle moving away from the camera will be ${this.awaySelect.value}, toward it ${this.awaySelect.value === 'IN' ? 'OUT' : 'IN'}. Save to apply it.`
+                    : 'Not set: every vehicle at this gate will be "Direction unknown". Save to apply it.');
+                this.updateSummary();
             });
             this.saveButton.addEventListener('click', () => this.saveCalibration());
             this.undoButton.addEventListener('click', () => this.undo());
             this.redoButton.addEventListener('click', () => this.redo());
             this.element.querySelector('[data-discard]').addEventListener('click', () => {
-                this.edited(this.editor.replace(this.saved), 'Changes discarded: back to the saved zone and IN arrow (Undo brings them back).');
+                this.setAway(this.saved.away_direction);
+                this.edited(this.editor.replace(this.saved) || true, 'Changes discarded: back to the saved zone and direction (Undo brings the zone back).');
             });
             this.element.querySelector('[data-reset]').addEventListener('click', () => this.resetToSaved());
             // Keyboard shortcuts go to the card used last.
@@ -343,13 +339,11 @@
             }
 
             const messages = {
-                close: 'Zone closed. Drag its points to adjust it; then draw the IN arrow (the way vehicles drive into campus).',
-                'draw-arrow': 'IN arrow drawn. Drag its ends or its middle to adjust it; Save to apply it.',
+                close: this.awayValue()
+                    ? 'Zone closed. Drag its points to adjust it, then Save.'
+                    : 'Zone closed. Now choose whether a vehicle moving away from the camera is IN or OUT, then Save.',
                 'add-point': this.editor.mask.length >= 3 ? 'Click point 1 or press Done to close the zone.' : 'Click the next point of the zone.',
             };
-            if (result.action === 'close' && !this.editor.arrow) {
-                this.setActiveTool('arrow');
-            }
             this.edited(true, messages[result.action]);
         }
 
@@ -438,8 +432,18 @@
             this.edited(this.editor.redo(), 'Redone.');
         }
 
+        awayValue() {
+            return this.awaySelect?.value || null;
+        }
+
+        setAway(value) {
+            if (this.awaySelect) {
+                this.awaySelect.value = value || '';
+            }
+        }
+
         isDirty() {
-            return !!this.canvas && !this.editor.matches(this.saved);
+            return !!this.canvas && (!this.editor.matches(this.saved) || this.awayValue() !== (this.saved.away_direction || null));
         }
 
         /* The calibration saved on the server now (maybe from another tab). */
@@ -451,9 +455,11 @@
                 if (!response.ok || !saved) {
                     throw new Error();
                 }
+                const awayChanged = this.awayValue() !== (saved.away_direction || null);
                 this.saved = saved;
-                const changed = this.editor.replace(saved);
-                this.edited(changed, changed ? 'Loaded the saved zone and IN arrow (Undo brings your changes back).' : 'This is already the saved zone and IN arrow.');
+                this.setAway(saved.away_direction);
+                const changed = this.editor.replace(saved) || awayChanged;
+                this.edited(changed, changed ? 'Loaded the saved zone and direction (Undo brings your zone changes back).' : 'This is already the saved zone and direction.');
             } catch (error) {
                 this.message('Could not load the saved calibration. Try again.');
             }
@@ -470,8 +476,11 @@
             this.maskValue.textContent = editor.closed
                 ? `${count}-point zone`
                 : (count ? `Drawing: ${count} point${count === 1 ? '' : 's'}` : 'No zone yet');
-            this.arrowValue.textContent = editor.arrow ? 'IN arrow drawn' : 'No IN arrow yet';
-            this.directionValue.textContent = editor.arrow ? 'Along the arrow = IN, against it = OUT' : 'Draw the IN arrow first';
+            const away = this.awayValue();
+            this.directionValue.textContent = away
+                ? `Away from the camera = ${away} · toward it = ${away === 'IN' ? 'OUT' : 'IN'}`
+                : 'Not set: every vehicle is "Direction unknown"';
+            this.directionValue.classList.toggle('text-warning', !away);
             this.doneButton.disabled = editor.closed || count < 3;
             this.undoButton.disabled = !editor.canUndo();
             this.redoButton.disabled = !editor.canRedo();
@@ -545,10 +554,10 @@
             const data = this.editor.serialize();
 
             try {
-                const response = await putJson(this.routes.save, { camera_id: this.camera.id, ...data });
+                const response = await putJson(this.routes.save, { camera_id: this.camera.id, ...data, away_direction: this.awayValue() });
                 const camera = response.camera || {};
                 this.camera = { ...this.camera, ...camera };
-                this.saved = { mask: camera.calibration_mask ?? data.calibration_mask, direction: camera.calibration_direction ?? data.calibration_direction };
+                this.saved = { mask: camera.calibration_mask ?? data.calibration_mask, away_direction: camera.away_direction ?? this.awayValue() };
                 this.lastSaveAt = Date.now();
                 // Same shapes as on screen (kept, with their undo history).
                 this.editor.replace(this.saved);
@@ -567,7 +576,7 @@
 
         /*
          * The detector re-reads the calibration every frame (no restart). Its
-         * overlay endpoint answers with the zone and arrow it reads, so the
+         * overlay endpoint answers with the zone it reads, so the
          * toast says so once they match what was saved.
          */
         async confirmApplied(saved) {
@@ -578,8 +587,8 @@
                 try {
                     const response = await fetch(url, { cache: 'no-store' });
                     const overlay = await response.json();
-                    if (overlay.ready && same({ mask: overlay.zone, direction: overlay.direction }, saved)) {
-                        window.ui?.toast(`${this.camera.role_label}: saved. The detector is using the new zone and IN arrow now.`, 'success');
+                    if (overlay.ready && same({ mask: overlay.zone }, saved)) {
+                        window.ui?.toast(`${this.camera.role_label}: saved. The detector is using the new zone now.`, 'success');
                         return;
                     }
                 } catch (error) {
@@ -595,8 +604,9 @@
             if (!saved || this.saving || sentAt < this.lastSaveAt || this.editor.drag || this.isDirty()) {
                 return;
             }
-            if (!this.editor.matches(saved)) {
+            if (!this.editor.matches(saved) || (saved.away_direction || null) !== this.awayValue()) {
                 this.saved = saved;
+                this.setAway(saved.away_direction);
                 this.editor.load(saved);
                 this.edited(true, 'The calibration was changed and saved somewhere else; showing it now.');
             }

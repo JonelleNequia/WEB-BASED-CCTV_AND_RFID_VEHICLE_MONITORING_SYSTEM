@@ -62,6 +62,12 @@ class RfidScanLog extends Model
     /** The camera was watching but saw no crossing: no movement recorded. */
     public const FUSION_SCAN_ONLY = 'scan_only';
 
+    /** ROI work, Phase 2: the camera saw the vehicle but could not tell IN from OUT (staff set it). */
+    public const FUSION_DIRECTION_UNKNOWN = 'direction_unknown';
+
+    /** ROI work, Phase 2: a "Direction unknown" record set to IN / OUT by staff. */
+    public const FUSION_SET_BY_STAFF = 'set_by_staff';
+
     /**
      * Attribute casting.
      *
@@ -118,6 +124,8 @@ class RfidScanLog extends Model
             self::FUSION_CAMERA => 'Direction from camera',
             self::FUSION_TOGGLE => 'Direction from vehicle state',
             self::FUSION_SCAN_ONLY => 'Scan only (no crossing seen)',
+            self::FUSION_DIRECTION_UNKNOWN => 'Direction unknown (set it in Review)',
+            self::FUSION_SET_BY_STAFF => 'Direction set by staff',
             default => null,
         };
     }

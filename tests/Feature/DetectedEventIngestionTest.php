@@ -355,7 +355,7 @@ class DetectedEventIngestionTest extends TestCase
             ->where('external_event_key', 'guest-window-timeout-upload-001')
             ->firstOrFail();
 
-        $this->assertSame('ENTRY', $event->event_type);
+        $this->assertSame('UNKNOWN', $event->event_type); // ROI work: no direction sent = not counted as IN
         $this->assertSame('guest_cctv', $event->event_origin);
         $this->assertNull($event->vehicle_category);
         $this->assertSame('ABC1234', $event->plate_number);
@@ -695,7 +695,7 @@ class DetectedEventIngestionTest extends TestCase
                 'guest-window-plate-long-002',
             ])
             ->count());
-        $this->assertSame('ENTRY', $event->event_type);
+        $this->assertSame('UNKNOWN', $event->event_type); // ROI work: no direction sent = not counted as IN
         $this->assertSame('guest_cctv', $event->event_origin);
         $this->assertSame($observation->snapshot_path, $event->vehicle_image_path);
 
@@ -781,7 +781,7 @@ class DetectedEventIngestionTest extends TestCase
             ->where('external_event_key', 'guest-window-stale-same-source-001')
             ->firstOrFail();
 
-        $this->assertSame('ENTRY', $event->event_type);
+        $this->assertSame('UNKNOWN', $event->event_type); // ROI work: no direction sent = not counted as IN
         $this->assertSame('guest_cctv', $event->event_origin);
     }
 

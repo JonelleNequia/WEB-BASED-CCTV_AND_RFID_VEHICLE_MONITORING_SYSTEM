@@ -1,5 +1,5 @@
 /*
- * Calibration editor: the zone (polygon) and the IN arrow of one gate.
+ * Calibration editor: the zone (polygon) of one gate.
  *
  * No DOM here (tests run it in Node): the page passes pointer positions in
  * canvas pixels and the "view", the rectangle where the camera picture is
@@ -7,18 +7,17 @@
  * to the camera picture, the frame the detector scales them to, so they
  * are the same at every screen size.
  *
- *   const editor = new CalibrationEditor.Editor({ mask, direction });
- *   editor.pointerDown(point, view, { touch, tool });  // tool: 'mask' | 'arrow'
+ *   const editor = new CalibrationEditor.Editor({ mask });
+ *   editor.pointerDown(point, view, { touch, tool });  // tool: 'mask'
  *   editor.pointerMove(point, view); editor.pointerUp();
  *   CalibrationEditor.draw(ctx, editor, view);
  *
- * There is no trigger line: a vehicle moving through the zone along the IN
- * arrow (tail x1,y1 -> head x2,y2) is going IN to campus, against it OUT.
+ * ROI work: only the zone is drawn (no trigger line, no IN arrow). Each
+ * gate says whether a vehicle moving away from the camera is IN or OUT.
  */
 (function (root) {
     const HIT_MOUSE = 12;
     const HIT_TOUCH = 22;
-    const MIN_ARROW_PX = 12;
     const HISTORY_LIMIT = 100;
 
     const clamp = (value) => Math.min(Math.max(Number.isFinite(value) ? value : 0, 0), 1);
@@ -34,10 +33,6 @@
             x: clamp(view.width ? (point.x - view.x) / view.width : 0),
             y: clamp(view.height ? (point.y - view.y) / view.height : 0),
         };
-    }
-
-    function arrowEnds(arrow) {
-        return arrow ? [{ x: arrow.x1, y: arrow.y1 }, { x: arrow.x2, y: arrow.y2 }] : [];
     }
 
     function distanceToSegment(p, a, b) {
@@ -103,24 +98,6 @@
         return false;
     }
 
-    /* The arrowhead (pixels) at b of an arrow from a to b, or null when it is too short. */
-    function arrowHead(a, b, size) {
-        const length = Math.hypot(b.x - a.x, b.y - a.y);
-        if (length < 4) {
-            return null;
-        }
-        const ux = (b.x - a.x) / length;
-        const uy = (b.y - a.y) / length;
-
-        return {
-            ux,
-            uy,
-            base: { x: b.x - ux * size, y: b.y - uy * size },
-            left: { x: b.x - ux * size - uy * size * 0.6, y: b.y - uy * size + ux * size * 0.6 },
-            right: { x: b.x - ux * size + uy * size * 0.6, y: b.y - uy * size - ux * size * 0.6 },
-        };
-    }
-
     class Editor {
         constructor(saved) {
             this.load(saved || {});
@@ -136,11 +113,6 @@
             const mask = Array.isArray(saved.mask) && saved.mask.length >= 3 ? saved.mask : null;
             this.mask = mask ? mask.map((p) => ({ x: clamp(Number(p.x)), y: clamp(Number(p.y)) })) : [];
             this.closed = mask !== null;
-            const arrow = saved.direction;
-            this.arrow = arrow ? {
-                x1: clamp(Number(arrow.x1)), y1: clamp(Number(arrow.y1)),
-                x2: clamp(Number(arrow.x2)), y2: clamp(Number(arrow.y2)),
-            } : null;
             this.undoStack = [];
             this.redoStack = [];
             this.selected = null;
@@ -154,7 +126,6 @@
             return this.change(() => {
                 this.mask = next.mask;
                 this.closed = next.closed;
-                this.arrow = next.arrow;
                 this.selected = null;
             });
         }
@@ -165,13 +136,12 @@
         }
 
         snapshot() {
-            return { mask: copy(this.mask), closed: this.closed, arrow: copy(this.arrow) };
+            return { mask: copy(this.mask), closed: this.closed };
         }
 
         restore(state) {
             this.mask = copy(state.mask) || [];
             this.closed = state.closed;
-            this.arrow = copy(state.arrow);
             this.selected = null;
             this.drag = null;
         }
@@ -240,14 +210,6 @@
                 return best;
             }
 
-            if (this.arrow) {
-                const [a, b] = arrowEnds(this.arrow).map((q) => toPx(q, view));
-                const ends = [[1, distance(p, a)], [2, distance(p, b)]].filter(([, d]) => d <= radius).sort((x, y) => x[1] - y[1]);
-                if (ends.length) {
-                    return { type: 'arrow-end', end: ends[0][0] };
-                }
-            }
-
             if (this.closed) {
                 for (let i = 0; i < points.length; i++) {
                     const a = points[i];
@@ -256,13 +218,6 @@
                     if (distance(p, mid) <= radius) {
                         return { type: 'midpoint', index: i };
                     }
-                }
-            }
-
-            if (this.arrow) {
-                const [a, b] = arrowEnds(this.arrow).map((q) => toPx(q, view));
-                if (distanceToSegment(p, a, b).distance <= radius) {
-                    return { type: 'arrow-body' };
                 }
             }
 
@@ -299,12 +254,6 @@
                 return { action: 'drag' };
             }
 
-            if (hit?.type === 'arrow-end') {
-                this.selected = { type: 'arrow' };
-                this.drag = { kind: 'arrow-end', end: hit.end, before };
-                return { action: 'drag' };
-            }
-
             if (hit?.type === 'midpoint') {
                 // "+" in the middle of an edge: a new point there, dragged right away.
                 const a = this.mask[hit.index];
@@ -313,21 +262,6 @@
                 this.selected = { type: 'vertex', index: hit.index + 1 };
                 this.drag = { kind: 'vertex', index: hit.index + 1, before, inserted: true };
                 return { action: 'insert' };
-            }
-
-            if (hit?.type === 'arrow-body') {
-                this.selected = { type: 'arrow' };
-                this.drag = { kind: 'arrow-move', start, origin: copy(this.arrow), before };
-                return { action: 'drag' };
-            }
-
-            if (tool === 'arrow') {
-                // A new IN arrow (replaces the old one): from where vehicles come
-                // from toward where they drive into campus.
-                this.selected = { type: 'arrow' };
-                this.drag = { kind: 'arrow-new', start, before, previous: copy(this.arrow) };
-                this.arrow = { x1: start.x, y1: start.y, x2: start.x, y2: start.y };
-                return { action: 'draw-arrow' };
             }
 
             if (hit?.type === 'edge' || hit?.type === 'mask-body') {
@@ -363,15 +297,6 @@
 
             if (drag.kind === 'vertex') {
                 this.mask[drag.index] = here;
-            } else if (drag.kind === 'arrow-end') {
-                this.arrow = drag.end === 1 ? { ...this.arrow, x1: here.x, y1: here.y } : { ...this.arrow, x2: here.x, y2: here.y };
-            } else if (drag.kind === 'arrow-new') {
-                this.arrow = { x1: drag.start.x, y1: drag.start.y, x2: here.x, y2: here.y };
-            } else if (drag.kind === 'arrow-move') {
-                const o = drag.origin;
-                const dx = Math.min(Math.max(here.x - drag.start.x, -Math.min(o.x1, o.x2)), 1 - Math.max(o.x1, o.x2));
-                const dy = Math.min(Math.max(here.y - drag.start.y, -Math.min(o.y1, o.y2)), 1 - Math.max(o.y1, o.y2));
-                this.arrow = { ...o, x1: o.x1 + dx, y1: o.y1 + dy, x2: o.x2 + dx, y2: o.y2 + dy };
             } else if (drag.kind === 'mask-move') {
                 // The whole zone moves, but never past the edge of the picture.
                 const xs = drag.origin.map((q) => q.x);
@@ -389,14 +314,6 @@
             this.drag = null;
             if (!drag) {
                 return false;
-            }
-
-            if (drag.kind === 'arrow-new' && view) {
-                const [a, b] = arrowEnds(this.arrow).map((q) => toPx(q, view));
-                if (distance(a, b) < MIN_ARROW_PX) {
-                    this.arrow = drag.previous; // a click, not an arrow
-                    return false;
-                }
             }
 
             if (JSON.stringify(drag.before) !== JSON.stringify(this.snapshot())) {
@@ -450,38 +367,19 @@
             });
         }
 
-        /* Delete / Backspace: the selected point (or the selected arrow). */
+        /* Delete / Backspace: the selected point. */
         removeSelected() {
             if (this.selected?.type === 'vertex') {
                 return this.removeVertex(this.selected.index);
             }
-            if (this.selected?.type === 'arrow') {
-                return this.change(() => {
-                    this.arrow = null;
-                    this.selected = null;
-                });
-            }
 
             return false;
-        }
-
-        /* The IN arrow turns around: tail and head swap. */
-        flip() {
-            if (!this.arrow) {
-                return false;
-            }
-
-            return this.change(() => {
-                const a = this.arrow;
-                this.arrow = { x1: a.x2, y1: a.y2, x2: a.x1, y2: a.y1 };
-            });
         }
 
         clear() {
             return this.change(() => {
                 this.mask = [];
                 this.closed = false;
-                this.arrow = null;
                 this.selected = null;
             });
         }
@@ -499,20 +397,6 @@
             if (this.closed && selfIntersects(this.mask)) {
                 errors.push('The zone\'s edges cross each other. Drag the points so the edges do not cross.');
             }
-            if (this.closed && errors.length === 0) {
-                if (!this.arrow) {
-                    warnings.push('Draw the IN arrow: drag inside the zone the way vehicles drive INTO campus.');
-                } else {
-                    const mid = { x: (this.arrow.x1 + this.arrow.x2) / 2, y: (this.arrow.y1 + this.arrow.y2) / 2 };
-                    if (!pointInPolygon(mid, this.mask)) {
-                        warnings.push('Put the IN arrow inside the zone.');
-                    }
-                    if (Math.hypot(this.arrow.x2 - this.arrow.x1, this.arrow.y2 - this.arrow.y1) < 0.05) {
-                        warnings.push('The IN arrow is very short: draw it along the road so its direction is clear.');
-                    }
-                }
-            }
-
             return { errors, warnings };
         }
 
@@ -520,7 +404,6 @@
         serialize() {
             return {
                 calibration_mask: this.closed && this.mask.length >= 3 ? copy(this.mask) : null,
-                calibration_direction: copy(this.arrow),
             };
         }
     }
@@ -532,7 +415,6 @@
         zoneFill: 'rgba(245, 158, 11, 0.16)',
         invalid: '#ef4444',
         invalidFill: 'rgba(239, 68, 68, 0.18)',
-        arrow: '#38bdf8',
         handle: '#ffffff',
         selected: '#fde047',
     };
@@ -617,58 +499,24 @@
                 label(ctx, String(i + 1), q.x + size + 4, q.y - size - 2);
             });
         }
-
-        // The IN arrow: the way vehicles drive into campus.
-        if (editor.arrow) {
-            const [a, b] = arrowEnds(editor.arrow).map((q) => toPx(q, view));
-            const active = editor.selected?.type === 'arrow' || hover?.type === 'arrow-body';
-            const head = arrowHead(a, b, active ? 24 : 20);
-            ctx.beginPath();
-            ctx.moveTo(a.x, a.y);
-            ctx.lineTo(head ? head.base.x : b.x, head ? head.base.y : b.y);
-            ctx.lineWidth = active ? 6 : 5;
-            ctx.strokeStyle = COLORS.arrow;
-            ctx.stroke();
-            handle(ctx, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, size - 2, active ? COLORS.arrow : 'rgba(17, 24, 39, 0.75)', COLORS.arrow, 1.5);
-            // The ends can be dragged; the head is drawn over its handle so it stays an arrow.
-            [a, b].forEach((q, i) => {
-                const hovered = hover?.type === 'arrow-end' && hover.end === i + 1;
-                handle(ctx, q, hovered ? size + 2 : size - (i ? 2 : 0), hovered ? COLORS.arrow : COLORS.handle, COLORS.arrow, 2.5);
-            });
-            if (head) {
-                ctx.beginPath();
-                ctx.moveTo(b.x + head.ux * 6, b.y + head.uy * 6);
-                ctx.lineTo(head.left.x, head.left.y);
-                ctx.lineTo(head.right.x, head.right.y);
-                ctx.closePath();
-                ctx.fillStyle = COLORS.arrow;
-                ctx.fill();
-                ctx.lineWidth = 1.5;
-                ctx.strokeStyle = '#ffffff';
-                ctx.stroke();
-                label(ctx, 'IN', b.x + head.ux * 22 - 8, b.y + head.uy * 22 + 5);
-            }
-        }
     }
 
     /* Pointer cursor for what is under it. */
     function cursorFor(hit, tool, closed) {
         switch (hit?.type) {
             case 'vertex':
-            case 'arrow-end':
                 return 'grab';
             case 'midpoint':
                 return 'pointer';
-            case 'arrow-body':
             case 'mask-body':
             case 'edge':
                 return 'move';
             default:
-                return tool === 'arrow' || !closed ? 'crosshair' : 'default';
+                return !closed ? 'crosshair' : 'default';
         }
     }
 
     root.CalibrationEditor = {
-        Editor, draw, cursorFor, toPx, toNorm, selfIntersects, pointInPolygon, arrowHead,
+        Editor, draw, cursorFor, toPx, toNorm, selfIntersects, pointInPolygon,
     };
 })(typeof window !== 'undefined' ? window : globalThis);

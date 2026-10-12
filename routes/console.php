@@ -124,17 +124,17 @@ Artisan::command('devices:listen {address : Reader IP:PORT} {--udp : Use UDP ins
 // Detector test without a camera or a real vehicle: the same pipeline
 // (detection -> zone -> line crossing -> RFID window -> alert) on a video file.
 Artisan::command('detector:test-video {file : Video file (e.g. a clip of vehicles passing)}
-    {--role=entrance : Station whose settings (and, with --use-calibration, zone and line) to use}
-    {--use-calibration : Use the station\'s saved zone and IN arrow}
+    {--role=entrance : Station whose settings (and, with --use-calibration, zone and direction) to use}
+    {--use-calibration : Use the station\'s saved zone and direction}
     {--roi= : Zone polygon, normalized "x,y x,y x,y ..."}
-    {--arrow= : IN arrow, normalized tail -> head "x1,y1,x2,y2"}
-    {--min-move= : Share of the zone along the IN arrow for a sure IN / OUT (e.g. 0.2)}
+    {--away= : A vehicle moving away from the camera is IN or OUT}
+    {--min-move= : Share of the zone\'s height to move up / down for a sure IN / OUT (e.g. 0.2)}
     {--post : Send events and alerts to Laravel for real (default: dry run)}
     {--app-url= : With --post, send to this Laravel instead (e.g. a test copy)}
     {--out= : Write the video with the debug overlay here}
     {--fast : Do not wait for real time}', function () {
     $arguments = [PythonLauncher::pythonExecutable(), 'detector_service.py', '--video', (string) realpath((string) $this->argument('file')) ?: (string) $this->argument('file'), '--role', (string) $this->option('role')];
-    foreach (['roi', 'arrow', 'min-move', 'app-url', 'out'] as $option) {
+    foreach (['roi', 'away', 'min-move', 'app-url', 'out'] as $option) {
         if (filled($this->option($option))) {
             $arguments[] = '--'.$option;
             $arguments[] = (string) $this->option($option);

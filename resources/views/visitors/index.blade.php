@@ -10,10 +10,12 @@
         </x-slot:actions>
     </x-page-header>
 
-    <x-tabs :tabs="\App\Http\Controllers\VisitorController::TABS" :active="$tab" />
+    <x-tabs :tabs="array_replace(\App\Http\Controllers\VisitorController::TABS, ['review' => 'Review'.($reviewCount ? ' ('.$reviewCount.')' : '')])" :active="$tab" />
 
     @if ($tab === 'plates')
         @include('visitors.partials.plates')
+    @elseif ($tab === 'review')
+        @include('visitors.partials.review')
     @else
         <x-table title="Unregistered Visitors" :paginator="$records" :empty="$records->isEmpty()" empty-title="No unregistered visitors yet" empty-text="Vehicles that cross a gate without a registered tag appear here.">
             <x-slot:filters>

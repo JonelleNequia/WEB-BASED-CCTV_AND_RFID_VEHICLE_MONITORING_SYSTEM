@@ -35,7 +35,8 @@ return new class extends Migration
             $table->timestamps();
         });
 
-        foreach (DB::table('cameras')->whereNotNull('calibration_line_json')->get(['id', 'calibration_line_json']) as $camera) {
+        // ROI work removed the trigger line (2026_10_12_000002): nothing to do then.
+        foreach (Schema::hasColumn('cameras', 'calibration_line_json') ? DB::table('cameras')->whereNotNull('calibration_line_json')->get(['id', 'calibration_line_json']) : [] as $camera) {
             $line = json_decode((string) $camera->calibration_line_json, true);
 
             if (is_array($line) && ! array_key_exists('in_side', $line)) {
@@ -47,7 +48,8 @@ return new class extends Migration
 
     public function down(): void
     {
-        foreach (DB::table('cameras')->whereNotNull('calibration_line_json')->get(['id', 'calibration_line_json']) as $camera) {
+        // ROI work removed the trigger line (2026_10_12_000002): nothing to do then.
+        foreach (Schema::hasColumn('cameras', 'calibration_line_json') ? DB::table('cameras')->whereNotNull('calibration_line_json')->get(['id', 'calibration_line_json']) : [] as $camera) {
             $line = json_decode((string) $camera->calibration_line_json, true);
 
             if (is_array($line) && array_key_exists('in_side', $line)) {

@@ -33,8 +33,8 @@ class CalibrationCameraSourceTest extends TestCase
         Camera::query()->forRole('gate-1')->firstOrFail()->update([
             'source_type' => 'rtsp', 'source_value' => 'rtsp://198.51.100.20:554/stream2', 'test_webcam_index' => null,
             'calibration_mask_json' => [['x' => 0.1, 'y' => 0.2], ['x' => 0.8, 'y' => 0.2], ['x' => 0.8, 'y' => 0.9]],
-            'calibration_direction_json' => ['x1' => 0.45, 'y1' => 0.8, 'x2' => 0.45, 'y2' => 0.4],
         ]);
+        \App\Models\Gate::query()->where('code', 'gate-1')->update(['away_direction' => 'IN']);
         Camera::query()->forRole('gate-2')->firstOrFail()->update(['source_type' => Camera::SOURCE_NONE, 'source_value' => '', 'test_webcam_index' => null]);
     }
 
@@ -110,7 +110,7 @@ class CalibrationCameraSourceTest extends TestCase
         $this->assertStringNotContainsString("querySelector('[data-overlay]')", $script);
     }
 
-    public function test_the_saved_zone_and_in_arrow_are_on_the_page(): void
+    public function test_the_saved_zone_and_the_gate_direction_are_on_the_page(): void
     {
         $this->detector(['camera_running' => true]);
         $html = $this->page();
@@ -118,10 +118,12 @@ class CalibrationCameraSourceTest extends TestCase
         $this->assertSame(1, preg_match('#<script id="camera-calibration-data" type="application/json">(.*?)</script>#s', $html, $match));
         $camera = json_decode($match[1], true)['cameras']['gate-1'];
         $this->assertCount(3, $camera['calibration_mask']);
-        $this->assertSame(['x1' => 0.45, 'y1' => 0.8, 'x2' => 0.45, 'y2' => 0.4], $camera['calibration_direction']);
+        $this->assertSame('IN', $camera['away_direction']);
+        $this->assertArrayNotHasKey('calibration_direction', $camera);
         $this->assertArrayNotHasKey('browser_device_id', $camera);
         $this->assertStringContainsString('3-point zone saved', $html);
-        $this->assertStringContainsString('IN arrow saved', $html);
+        $this->assertStringContainsString('Away from the camera = IN · toward it = OUT', $html);
+        $this->assertMatchesRegularExpression('#<option value="IN"\s+selected#', $html);
     }
 
     public function test_an_offline_camera_shows_its_last_picture_and_why(): void

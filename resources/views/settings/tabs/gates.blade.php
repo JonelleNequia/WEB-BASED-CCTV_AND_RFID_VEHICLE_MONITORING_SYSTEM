@@ -166,9 +166,6 @@
                             <img src="{{ $gate['zone']['frame_url'] }}" alt="" loading="lazy" onerror="this.remove()">
                             <svg viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
                                 <polygon points="{{ $gate['zone']['points'] }}" class="zone-area" />
-                                {{-- ROI work: the IN arrow (direction into campus). --}}
-                                <line x1="{{ $gate['zone']['arrow']['x1'] ?? 0 }}" y1="{{ $gate['zone']['arrow']['y1'] ?? 0 }}" x2="{{ $gate['zone']['arrow']['x2'] ?? 0 }}" y2="{{ $gate['zone']['arrow']['y2'] ?? 0 }}" class="zone-line zone-arrow" />
-                                <circle cx="{{ $gate['zone']['arrow']['x2'] ?? 0 }}" cy="{{ $gate['zone']['arrow']['y2'] ?? 0 }}" r="0.025" class="zone-arrow-head" />
                             </svg>
                         @else
                             <span class="setup-preview-off" aria-hidden="true">
@@ -176,14 +173,22 @@
                             </span>
                         @endif
                     </div>
+                    {{-- ROI work: the zone, and which way is IN (a vehicle moving away from the camera is IN or OUT). --}}
+                    @php($awaySet = $gate['zone']['away_direction'] !== null)
                     <div class="setup-device-text">
-                        <strong>{{ $gate['zone']['ready'] ? 'Zone and line set' : 'Not set up yet' }}</strong>
-                        <span class="status-line"><span @class(['status-dot', 'is-online' => $gate['zone']['ready'], 'is-warning' => ! $gate['zone']['ready']]) aria-hidden="true"></span>{{ $gate['zone']['ready'] ? 'Vehicles are counted when they cross the line.' : 'Vehicles are not counted yet.' }}</span>
-                        @unless ($gate['zone']['ready'])
-                            <span class="next-step">→ Draw where vehicles pass and the line they cross.</span>
-                        @endunless
+                        <strong>{{ $gate['zone']['ready'] ? ($awaySet ? 'Zone set · moving away from the camera = '.$gate['zone']['away_direction'] : 'Zone set · IN / OUT not set') : 'Not set up yet' }}</strong>
+                        <span class="status-line"><span @class(['status-dot', 'is-online' => $gate['zone']['ready'] && $awaySet, 'is-warning' => ! ($gate['zone']['ready'] && $awaySet)]) aria-hidden="true"></span>{{ match (true) {
+                            ! $gate['zone']['ready'] => 'Vehicles are not counted yet.',
+                            ! $awaySet => 'Every vehicle is recorded as "Direction unknown" until IN / OUT is set.',
+                            default => 'Every vehicle passing through the zone is recorded.',
+                        } }}</span>
+                        @if (! $gate['zone']['ready'])
+                            <span class="next-step">→ Draw where vehicles pass.</span>
+                        @elseif (! $awaySet)
+                            <span class="next-step" data-away-warning>→ In Calibration, choose whether a vehicle moving away from the camera is IN or OUT.</span>
+                        @endif
                     </div>
-                    <a href="{{ $gate['zone']['setup_url'] }}" class="button {{ $gate['zone']['ready'] ? 'button-secondary' : 'button-primary' }}">{{ $gate['zone']['ready'] ? 'Edit' : 'Set up' }}</a>
+                    <a href="{{ $gate['zone']['setup_url'] }}" class="button {{ $gate['zone']['ready'] && $awaySet ? 'button-secondary' : 'button-primary' }}">{{ $gate['zone']['ready'] && $awaySet ? 'Edit' : 'Set up' }}</a>
                 </div>
             </section>
         </article>

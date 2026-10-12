@@ -59,12 +59,10 @@ from laravel_client import LaravelEventClient
 from tracking import (
     STILL_SHARE,
     VehiclePass,
-    arrow_unit,
     bbox_bottom_center,
     bbox_center,
     calibration_ready,
-    describe_arrow,
-    normalized_arrow_to_pixels,
+    normalized_away_direction,
     normalized_polygon_to_pixels,
     point_in_polygon,
 )
@@ -1262,8 +1260,8 @@ def detection_status(role, state, camera_config, model_info):
             backoff.seconds_left(now),
         )
     if not calibration_ready(camera_config):
-        return result("no_zone", "Zone not set", "No detection zone and IN arrow yet.",
-                      "Draw them in Settings › Calibration.")
+        return result("no_zone", "Zone not set", "No detection zone yet.",
+                      "Draw it in Settings › Calibration.")
     if model_info.get("model") is None:
         if "could not be loaded" in str(state.get("last_error")):
             return result("model_error", "Model error", short_reason(state.get("last_error")),
@@ -1688,7 +1686,7 @@ OVERLAY_COLORS = {"green": "#16a34a", "blue": "#2563eb", "amber": "#f59e0b", "re
 def overlay_payload(state, camera_config, now=None):
     """
     Live view work: what the browser draws over the video: each vehicle in
-    the zone (box, label, color), the zone and the IN arrow, and the
+    the zone (box, label, color), the zone, and the
     latest records. Coordinates are 0-1 of the detection frame (same
     shape as the camera's main stream).
     """
@@ -1719,7 +1717,6 @@ def overlay_payload(state, camera_config, now=None):
         "ready": True,
         "age_ms": round((now - debug["at"]) * 1000) if debug.get("at") else None,
         "zone": camera_config.get("calibration_mask"),
-        "direction": camera_config.get("calibration_direction"),
         "tracks": tracks,
         "crossings": [{"direction": item.get("direction"), "seconds_ago": round(now - item.get("at", now), 1)} for item in recent[-3:]],
     }
@@ -1816,7 +1813,6 @@ DEBUG_COLORS = {
     "low confidence": (0, 215, 255),
     "not a vehicle": (150, 150, 150),
     "track": (0, 140, 255),
-    "in_arrow": (248, 189, 56),  # sky blue, like the calibration page
 }
 
 
@@ -1831,31 +1827,19 @@ def draw_debug_panel(frame, lines, color=(255, 255, 255)):
         cv2.putText(frame, text, (8, height * (index + 1)), cv2.FONT_HERSHEY_SIMPLEX, scale, color, 1, cv2.LINE_AA)
 
 
-def draw_in_arrow(frame, arrow, thickness=1):
-    """The IN arrow of the zone (the same arrow as in Settings > Calibration)."""
-    tail = (int(arrow["x1"]), int(arrow["y1"]))
-    head = (int(arrow["x2"]), int(arrow["y2"]))
-    cv2.arrowedLine(frame, tail, head, DEBUG_COLORS["in_arrow"], thickness + 2, cv2.LINE_AA, tipLength=0.2)
-    cv2.putText(frame, "IN", (head[0] + 8, head[1] + 5), cv2.FONT_HERSHEY_SIMPLEX,
-                0.5 * max(1, thickness), DEBUG_COLORS["in_arrow"], max(1, thickness), cv2.LINE_AA)
-
-
 def draw_debug_overlay(frame, camera_config, state, message=None):
     """
     Debug view (Settings > Calibration): every raw YOLO detection before any
-    filter, the zone and IN arrow as the detector uses them (scaled to this
+    filter, the zone as the detector uses it (scaled to this
     frame), the crop YOLO saw, track IDs with their last positions, and
     counters. Drawn only while the debug switch is on.
     """
     height, width = frame.shape[:2]
     thickness = max(1, width // 640)
     polygon = normalized_polygon_to_pixels(camera_config.get("calibration_mask"), width, height)
-    arrow = normalized_arrow_to_pixels(camera_config.get("calibration_direction"), width, height)
 
     if polygon:
         cv2.polylines(frame, [np.array(polygon, dtype=np.int32)], True, DEBUG_COLORS["zone"], thickness + 1)
-    if arrow:
-        draw_in_arrow(frame, arrow, thickness)
 
     with state["lock"]:
         debug = dict(state.get("debug") or {})
@@ -2108,7 +2092,8 @@ def pass_worker(role, state, track_id, laravel_client):
 
     1. RFID window: poll Laravel for this vehicle's tag (matched / no pass).
     2. Recorded: once the direction is sure (it moved far enough along the IN
-       arrow) AND the RFID window is over, even while it is still in the zone;
+       is away from the camera or toward it) AND the RFID window is over,
+       even while it is still in the zone;
        or when it left the zone / was lost before that (IN / OUT if the data
        allows, else "Direction unknown"). A vehicle that never moved is not
        recorded.
@@ -2311,10 +2296,11 @@ def crossing_payload_locked(role, track_id, window, rfid_status, type_decision, 
         "detected_vehicle_type": window.get("detected_vehicle_type"),
         "detection_metadata": {
             "bbox_xyxy": [round(float(value), 1) for value in picture_xyxy],
-            # ROI work: how the direction was decided (share of the zone along
-            # the IN arrow, box size change, confidence) and the pass's stages.
+            # ROI work: how the direction was decided (away from / toward the
+            # camera, share of the zone's height, box size change, confidence)
+            # and the pass's stages.
             "direction_confidence": window.get("direction_confidence"),
-            "movement": {key: value for key, value in (window.get("measure") or {}).items() if key in {"along", "moved", "size"}},
+            "movement": {key: value for key, value in (window.get("measure") or {}).items() if key in {"movement", "rise", "moved", "size"}},
             "pass": {
                 "detected_at": window["event_time"],
                 "recorded_at": window.get("recorded_at"),
@@ -2862,9 +2848,9 @@ def remember_track_point(state, track_id, point):
 def pass_settings(perf, camera_config):
     """
     ROI work: frames in the zone before a vehicle is Detected, missed frames
-    before it Left zone, and the share of the zone it must move along the IN
-    arrow before IN / OUT is sure (per gate: Settings > Advanced; default in
-    config/monitoring.php).
+    before it Left zone, and the share of the zone's height it must move up
+    or down before IN / OUT is sure (per gate: Settings > Advanced; default
+    in config/monitoring.php).
     """
     settings = {**PERFORMANCE_DEFAULTS, **(perf or {})}
     min_move = (camera_config or {}).get("pass_min_move")
@@ -2915,7 +2901,7 @@ def adopt_pass_locked(state, track_id, xyxy, seen_keys=()):
     return None
 
 
-def leave_zone_locked(state, key, vehicle_pass, arrow, mask_polygon, min_move):
+def leave_zone_locked(state, key, vehicle_pass, mask_polygon, min_move, away_direction=None):
     """Left zone: the pass ends; an undecided one gets its final direction (UNKNOWN / STILL)."""
     state["passes"].pop(key, None)
     for alias, target in list(state["pass_alias"].items()):
@@ -2925,7 +2911,7 @@ def leave_zone_locked(state, key, vehicle_pass, arrow, mask_polygon, min_move):
     if window is None or window.get("left_zone_at"):
         return
     if window.get("direction") is None:
-        set_window_direction_locked(window, vehicle_pass.decide(arrow, mask_polygon, min_move, final=True))
+        set_window_direction_locked(window, vehicle_pass.decide(mask_polygon, min_move, away_direction, final=True))
     window["left_zone_at"] = time.monotonic()
 
 
@@ -2934,20 +2920,22 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
     ROI work: every vehicle in the zone is one pass (tracking.VehiclePass):
 
     - Detected after a few frames in the zone (detect_pass: RFID check starts);
-    - its direction is decided as soon as it moved far enough along the IN
-      arrow (pass_worker then makes the record once the RFID window is over);
+    - its direction is decided as soon as it is clear it drives away from the
+      camera or toward it (pass_worker then makes the record once the RFID
+      window is over); the gate's setting says which of the two is IN;
     - Left zone when it is out of the zone, or not seen, for a few frames.
     """
     frame_height, frame_width = frame.shape[:2]
     mask_polygon = normalized_polygon_to_pixels(camera_config.get("calibration_mask"), frame_width, frame_height)
-    arrow = normalized_arrow_to_pixels(camera_config.get("calibration_direction"), frame_width, frame_height)
+    # Which way is IN at this gate: a vehicle moving away from the camera is IN or OUT (None: not set).
+    away_direction = normalized_away_direction(camera_config.get("away_direction"))
     min_frames, lost_frames, min_move = pass_settings(perf, camera_config)
     boxes = results.boxes if results is not None else None
     seen_keys = set()
     visible_roi_track_ids = set()
     active_detections = 0
 
-    if mask_polygon and arrow and boxes is not None and boxes.id is not None:
+    if mask_polygon and boxes is not None and boxes.id is not None:
         ids = boxes.id.int().cpu().tolist()
         classes = boxes.cls.int().cpu().tolist()
         confidences = boxes.conf.cpu().tolist()
@@ -2977,7 +2965,7 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
                     if key is None:
                         state["pass_counter"] = state.get("pass_counter", PASS_KEY_START) + 1
                         key = state["pass_counter"]
-                        state["passes"][key] = VehiclePass(xyxy)
+                        state["passes"][key] = VehiclePass(xyxy, (frame_width, frame_height))
                         fresh = True
                     state["pass_alias"][track_id] = key
                 vehicle_pass = state["passes"][key]
@@ -3016,9 +3004,9 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
 
                 window = state["pending_windows"].get(key)
                 if window is not None and window.get("direction") is None:
-                    decision = vehicle_pass.decide(arrow, mask_polygon, min_move)
+                    decision = vehicle_pass.decide(mask_polygon, min_move, away_direction)
                     window["measure"] = decision
-                    if decision["direction"] in {"IN", "OUT"}:
+                    if decision["movement"]:
                         set_window_direction_locked(window, decision)
 
             if detected_now:
@@ -3029,8 +3017,8 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
             if key in seen_keys:
                 continue
             # Out of the zone or not seen: Left zone after a few frames.
-            if vehicle_pass.miss() >= lost_frames or not (mask_polygon and arrow):
-                leave_zone_locked(state, key, vehicle_pass, arrow, mask_polygon, min_move)
+            if vehicle_pass.miss() >= lost_frames or not mask_polygon:
+                leave_zone_locked(state, key, vehicle_pass, mask_polygon, min_move, away_direction)
 
     state["active_detections"] = active_detections
     update_detection_windows(role, frame, results, state, laravel_client)
@@ -3073,7 +3061,7 @@ def process_camera(role, camera_config, state, model_info, laravel_client):
         publish_stream_frame(role, frame)
         state["detection_ready"] = False
         state["retry_count"] = 0
-        state["last_error"] = "Calibration zone (ROI) and IN arrow are required before automatic records start."
+        state["last_error"] = "A calibration zone (ROI) is required before automatic records start."
         return True
 
     vehicle_labels = model_info["vehicle_labels"]
@@ -3268,11 +3256,11 @@ def camera_stream_worker(role, state, model_info, stop_event):
                     if not calibration_ready(camera_config):
                         state["detection_ready"] = False
                         state["retry_count"] = 0
-                        state["last_error"] = "Calibration zone (ROI) and IN arrow are required before automatic records start."
+                        state["last_error"] = "A calibration zone (ROI) is required before automatic records start."
                         if viewer_active and publish_due(state, perf):
                             if perf.get("debug_overlay"):
                                 frame = frame.copy()
-                                draw_debug_overlay(frame, camera_config, state, "No detection: draw the zone AND the IN arrow in Calibration.")
+                                draw_debug_overlay(frame, camera_config, state, "No detection: draw the zone in Calibration.")
                             publish_stream_frame(role, frame, frame_time, perf)
                     elif not vehicle_labels:
                         state["detection_ready"] = False
@@ -3776,10 +3764,10 @@ def main():
     parser = argparse.ArgumentParser(description="PHILCST dual-camera vehicle detector")
     parser.add_argument("--video", help="run the detection pipeline on a video file instead of the cameras")
     parser.add_argument("--role", default=None, help="gate code (default: the first gate)")
-    parser.add_argument("--use-calibration", action="store_true", help="use the station's saved zone and IN arrow")
+    parser.add_argument("--use-calibration", action="store_true", help="use the station's saved zone and direction")
     parser.add_argument("--roi", help='zone polygon, normalized: "x,y x,y x,y ..."')
-    parser.add_argument("--arrow", help='IN arrow, normalized tail -> head: "x1,y1,x2,y2"')
-    parser.add_argument("--min-move", type=float, help="share of the zone along the IN arrow for a sure IN / OUT (e.g. 0.2)")
+    parser.add_argument("--away", choices=["IN", "OUT"], help="a vehicle moving away from the camera is IN or OUT at this gate")
+    parser.add_argument("--min-move", type=float, help="share of the zone's height a vehicle must move up or down for a sure IN / OUT (e.g. 0.2)")
     parser.add_argument("--detection-fps", type=float)
     parser.add_argument("--imgsz", type=int)
     parser.add_argument("--post", action="store_true", help="send events and alerts to Laravel (default: dry run)")

@@ -331,7 +331,10 @@ class DashboardController extends Controller
                 $eventType = VehicleEvent::eventTypeForDirection(data_get($observation->detection_metadata_json, 'direction'));
 
                 return [
-                    'title' => ($eventType === 'EXIT' ? 'OUT' : 'IN').' • '.$this->guestDisplayPlate($observation),
+                    'title' => match (VehicleEvent::directionForEventType($eventType)) {
+                        'UNKNOWN' => 'Direction unknown',
+                        default => VehicleEvent::directionForEventType($eventType),
+                    }.' • '.$this->guestDisplayPlate($observation),
                     'summary' => 'Unregistered Visitor • '.Gate::labelFor($observation->location),
                     'display_time' => DisplayTime::datetime($time, 'No time'),
                     'badge_label' => 'Unregistered',

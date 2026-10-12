@@ -6,12 +6,12 @@ the same detection rate.
 
     python detector_service.py --video FILE [options]
 
-Zone and IN arrow (normalized 0-1, like Settings > Calibration):
-    --use-calibration          the station's saved zone and IN arrow (--role)
-    --roi "x,y x,y x,y ..."    zone polygon
-    --arrow "x1,y1,x2,y2"      IN arrow, tail -> head (default: pointing down the picture)
-    --min-move SHARE           movement along the arrow for a sure IN / OUT (default: the gate's)
-    (default zone: the whole frame)
+Zone and direction (zone normalized 0-1, like Settings > Calibration):
+    --use-calibration          the station's saved zone and direction (--role)
+    --roi "x,y x,y x,y ..."    zone polygon (default: the whole frame)
+    --away IN|OUT              a vehicle moving away from the camera is IN or OUT
+                               (default: the gate's setting; not set = Direction unknown)
+    --min-move SHARE           share of the zone's height to move up / down for a sure IN / OUT (default: the gate's)
 
     --post        send events/alerts to Laravel for real (default: dry run)
     --app-url URL with --post: another Laravel (e.g. a test copy), not the live one
@@ -76,10 +76,6 @@ def parse_points(text):
     return points
 
 
-def parse_arrow(text):
-    return dict(zip(("x1", "y1", "x2", "y2"), (float(value) for value in text.split(","))))
-
-
 def with_app_url(runtime, app_url):
     """Send to another Laravel (e.g. a copy of the database) instead of the live one."""
     settings = dict(runtime.get("system_settings") or {})
@@ -106,12 +102,13 @@ def run(args):
     camera_config = dict((runtime.get("cameras") or {}).get(args.role) or {})
     if not args.use_calibration:
         camera_config["calibration_mask"] = parse_points(args.roi) if args.roi else parse_points("0.02,0.02 0.98,0.02 0.98,0.98 0.02,0.98")
-        camera_config["calibration_direction"] = parse_arrow(args.arrow) if args.arrow else parse_arrow("0.5,0.3,0.5,0.7")
+    if getattr(args, "away", None):
+        camera_config["away_direction"] = args.away
     if getattr(args, "min_move", None):
         camera_config["pass_min_move"] = float(args.min_move)
     camera_config["snapshot_source_value"] = None
     if not detector.calibration_ready(camera_config):
-        print(f"The {args.role} station has no saved zone and IN arrow. Draw them in Calibration, or pass --roi and --arrow.")
+        print(f"The {args.role} station has no saved zone. Draw it in Calibration, or pass --roi.")
         return 2
 
     capture = cv2.VideoCapture(args.video)
@@ -195,9 +192,9 @@ def run(args):
         for key, vehicle_pass in list(state["passes"].items()):
             detector.leave_zone_locked(
                 state, key, vehicle_pass,
-                detector.normalized_arrow_to_pixels(camera_config.get("calibration_direction"), width, height),
                 detector.normalized_polygon_to_pixels(camera_config.get("calibration_mask"), width, height),
                 detector.pass_settings(perf, camera_config)[2],
+                detector.normalized_away_direction(camera_config.get("away_direction")),
             )
     # Let the passes finish (RFID window, Recorded, no match -> "no pass" alert).
     deadline = time.monotonic() + detector.RFID_DETECTION_WINDOW_SECONDS + 30

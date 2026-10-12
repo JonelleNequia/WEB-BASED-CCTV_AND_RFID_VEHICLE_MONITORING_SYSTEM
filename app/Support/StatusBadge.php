@@ -76,7 +76,7 @@ final class StatusBadge
 
         return match (true) {
             ! empty($log['anomaly']) => 'critical',
-            in_array($type, ['UNKNOWN TAG', 'SCAN ONLY'], true) => 'warning',
+            in_array($type, ['UNKNOWN TAG', 'SCAN ONLY', 'UNKNOWN'], true) => 'warning',
             $type === 'UNREGISTERED', ! empty($log['no_pass_alert']), ($log['verification_label'] ?? '') === 'Unregistered Visitor' => 'neutral',
             in_array($type, ['ENTRY', 'EXIT', 'IN', 'OUT'], true) => 'info',
             default => 'neutral',

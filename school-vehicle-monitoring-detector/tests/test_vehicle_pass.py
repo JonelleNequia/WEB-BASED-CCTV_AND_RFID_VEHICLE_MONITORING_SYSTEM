@@ -1,7 +1,8 @@
 """
-ROI work: no trigger line. A vehicle is one pass through the zone:
-Detected (a few frames in the zone: RFID check starts), Recorded (moved far
-enough along the IN arrow and the RFID window is over), Left zone. One
+ROI work: no trigger line and no IN arrow. A vehicle is one pass through
+the zone: Detected (a few frames in the zone: RFID check starts), Recorded
+(clearly away from the camera or toward it, and the RFID window is over),
+Left zone. Each gate says whether away from the camera is IN or OUT. One
 track = one pass = one record, updated (never doubled) until it leaves.
 
 Run: .venv/bin/python -m unittest discover -s tests -p "test_*.py"
@@ -27,11 +28,9 @@ RealThread = threading.Thread
 
 H, W = 416, 736
 ZONE = [{"x": 0.0, "y": 0.3}, {"x": 1.0, "y": 0.3}, {"x": 1.0, "y": 1.0}, {"x": 0.0, "y": 1.0}]
-DOWN = {"x1": 0.5, "y1": 0.45, "x2": 0.5, "y2": 0.85}       # IN = driving down the picture
-CAMERA = {"calibration_mask": ZONE, "calibration_direction": DOWN, "camera_id": 1}
-ZONE_PX = [(0, int(0.3 * H)), (W, int(0.3 * H)), (W, H), (0, H)]
-ARROW_PX = {"x1": 368, "y1": 0.45 * H, "x2": 368, "y2": 0.85 * H}
-ZONE_LEN = 0.7 * H                                            # the zone's length along the arrow: 291 px
+# Away from the camera (up the picture) is OUT at this gate, so IN = driving down toward it.
+CAMERA = {"calibration_mask": ZONE, "away_direction": "OUT", "camera_id": 1}
+ZONE_PX = [(0, int(0.3 * H)), (W, int(0.3 * H)), (W, H), (0, H)]   # 291 px high
 FIRST_PASS = detector.PASS_KEY_START + 1                      # the key of a fresh state's first pass
 
 
@@ -40,47 +39,59 @@ def box(bottom, height=60, x=340, width=80):
 
 
 class PassDecisionTests(unittest.TestCase):
-    def path(self, bottoms, heights=None):
+    def path(self, bottoms, heights=None, x=340):
         heights = heights or [60] * len(bottoms)
-        vehicle_pass = VehiclePass(box(bottoms[0], heights[0]))
+        vehicle_pass = VehiclePass(box(bottoms[0], heights[0], x), (W, H))
         for bottom, height in zip(bottoms[1:], heights[1:]):
-            vehicle_pass.observe(box(bottom, height))
+            vehicle_pass.observe(box(bottom, height, x))
         return vehicle_pass
 
-    def test_moving_far_enough_along_the_arrow_is_in_against_it_out(self):
-        down = self.path([200, 230, 260, 290, 320])               # 120 px = 41% of the zone
-        decision = down.decide(ARROW_PX, ZONE_PX, 0.20)
-        self.assertEqual((decision["direction"], decision["confidence"]), ("IN", "high"))
-        self.assertEqual(decision["reason"], "moved 41% of the zone with the IN arrow")
-        up = self.path([320, 290, 260, 230, 200])
-        self.assertEqual(up.decide(ARROW_PX, ZONE_PX, 0.20)["direction"], "OUT")
-        self.assertIn("against the IN arrow", up.decide(ARROW_PX, ZONE_PX, 0.20)["reason"])
+    def test_toward_the_camera_and_growing_is_sure_and_the_gate_setting_says_in_or_out(self):
+        toward = self.path([200, 230, 260, 290, 320], [60, 70, 80, 90, 100])   # down 41%, box grew 67%
+        decision = toward.decide(ZONE_PX, 0.20, "OUT")
+        self.assertEqual((decision["direction"], decision["confidence"], decision["movement"]), ("IN", "high", "toward"))
+        self.assertEqual(decision["reason"], "toward the camera: went down 41% of the zone; box grew 67%")
+        self.assertEqual(toward.decide(ZONE_PX, 0.20, "IN")["direction"], "OUT")
+        away = self.path([320, 290, 260, 230, 200], [100, 90, 80, 70, 60])
+        self.assertEqual((away.decide(ZONE_PX, 0.20, "IN")["direction"], away.decide(ZONE_PX, 0.20, "OUT")["direction"]), ("IN", "OUT"))
 
-    def test_the_share_is_of_the_zone_along_the_arrow_not_its_height(self):
-        right = {"x1": 100, "y1": 300, "x2": 500, "y2": 300}       # arrow across the picture: zone length = 736 px
-        vehicle_pass = VehiclePass([100, 240, 180, 300])
-        for x in (200, 300):
-            vehicle_pass.observe([x, 240, x + 80, 300])
-        decision = vehicle_pass.decide(right, ZONE_PX, 0.20)
-        self.assertEqual(decision["along"], round(200 / 736, 3))
-        self.assertEqual(decision["direction"], "IN")
+    def test_without_the_gate_setting_every_pass_is_direction_unknown(self):
+        decision = self.path([200, 230, 260, 290, 320], [60, 70, 80, 90, 100]).decide(ZONE_PX, 0.20, None)
+        self.assertEqual((decision["direction"], decision["movement"]), ("UNKNOWN", "toward"))
+        self.assertEqual(decision["reason"], "Direction unknown: toward the camera, but this gate's direction is not set")
 
-    def test_not_far_enough_waits_then_is_unknown_and_a_still_vehicle_is_not_counted(self):
-        short = self.path([300, 310, 320, 330])                   # 30 px = 10%
-        self.assertIsNone(short.decide(ARROW_PX, ZONE_PX, 0.20)["direction"])
-        final = short.decide(ARROW_PX, ZONE_PX, 0.20, final=True)
-        self.assertEqual(final["direction"], "UNKNOWN")
-        self.assertTrue(final["reason"].startswith("Direction unknown: moved only 10%"))
-        still = self.path([300, 303, 299, 302, 300, 301])
-        self.assertEqual(still.decide(ARROW_PX, ZONE_PX, 0.20, final=True)["direction"], "STILL")
-
-    def test_a_clear_matching_size_change_makes_a_shorter_move_medium_confidence(self):
-        closer = self.path([280, 295, 310, 325], [60, 70, 80, 90])  # 15% down, box grew 50%
-        decision = closer.decide(ARROW_PX, ZONE_PX, 0.20)
+    def test_far_enough_but_the_size_does_not_tell_is_medium(self):
+        same = self.path([200, 230, 260, 290, 320])                # box size the same
+        decision = same.decide(ZONE_PX, 0.20, "OUT")
         self.assertEqual((decision["direction"], decision["confidence"]), ("IN", "medium"))
-        self.assertIn("box grew 50%", decision["reason"])
-        odd = self.path([280, 295, 310, 325], [90, 80, 70, 60])     # went down but got smaller: not trusted
-        self.assertIsNone(odd.decide(ARROW_PX, ZONE_PX, 0.20)["direction"])
+        self.assertIn("box size changed only 0%", decision["reason"])
+        cut_off = self.path([200, 230, 260, 290, 320], [60, 40, 30, 20, 10], x=40)   # at the left edge: size not used
+        decision = cut_off.decide(ZONE_PX, 0.20, "OUT")
+        self.assertEqual((decision["direction"], decision["confidence"], decision["size"]), ("IN", "medium", None))
+        self.assertIn("cut off by the edge", decision["reason"])
+
+    def test_movement_and_size_that_disagree_wait_then_are_unknown(self):
+        odd = self.path([200, 230, 260, 290, 320], [100, 90, 80, 70, 60])   # went down (toward) but shrank (away)
+        self.assertIsNone(odd.decide(ZONE_PX, 0.20, "OUT")["direction"])
+        final = odd.decide(ZONE_PX, 0.20, "OUT", final=True)
+        self.assertEqual(final["direction"], "UNKNOWN")
+        self.assertEqual(final["reason"], "Direction unknown: went down 41% of the zone but the box shrank 40% (they disagree)")
+
+    def test_a_shorter_move_counts_only_when_the_size_clearly_agrees(self):
+        closer = self.path([280, 295, 310, 325], [60, 70, 80, 90])  # down 15%, box grew 50%
+        decision = closer.decide(ZONE_PX, 0.20, "OUT")
+        self.assertEqual((decision["direction"], decision["confidence"]), ("IN", "medium"))
+        short = self.path([300, 310, 320, 330])                    # down 10%, same size
+        self.assertIsNone(short.decide(ZONE_PX, 0.20, "OUT")["direction"])
+        final = short.decide(ZONE_PX, 0.20, "OUT", final=True)
+        self.assertEqual(final["direction"], "UNKNOWN")
+        self.assertTrue(final["reason"].startswith("Direction unknown: went down 10% of the zone"))
+        still = self.path([300, 303, 299, 302, 300, 301])
+        self.assertEqual(still.decide(ZONE_PX, 0.20, "OUT", final=True)["direction"], "STILL")
+
+    def test_the_share_is_of_the_zone_height(self):
+        decision = self.path([200, 260]).decide([(0, 100), (W, 100), (W, 400), (0, 400)], 0.20, "OUT")
+        self.assertEqual(decision["rise"], round(-60 / 300, 3))
 
 
 class Gate(unittest.TestCase):
@@ -116,7 +127,7 @@ class PassLifecycleTests(Gate):
     def test_one_vehicle_driving_through_is_one_pass_with_its_direction_then_left_zone(self):
         for bottom in range(200, 400, 25):
             self.seen(bottom)
-        self.assertEqual((self.window()["direction"], self.window()["direction_confidence"]), ("IN", "high"))
+        self.assertEqual((self.window()["direction"], self.window()["direction_confidence"]), ("IN", "medium"))  # same box size
         self.assertIsNone(self.window()["left_zone_at"])
         for _ in range(6):                                         # out of view: Left zone after 6 frames
             self.seen(None)
@@ -174,9 +185,16 @@ class PassLifecycleTests(Gate):
             self.seen(bottom)
         self.assertEqual(self.state["passes_detected"], 0)
 
+    def test_a_gate_without_its_direction_set_records_direction_unknown(self):
+        unset = {**CAMERA, "away_direction": None}
+        for bottom in (200, 230, 260, 290, 320):
+            self.seen(bottom, camera=unset)
+        self.assertEqual(self.window()["direction"], "UNKNOWN")
+        self.assertIn("direction is not set", self.window()["direction_reason"])
+
     def test_the_minimum_movement_is_a_gate_setting(self):
         strict = {**CAMERA, "pass_min_move": 0.6}
-        for bottom in (200, 230, 260, 290, 320):                   # 41%: enough at 20%, not at 60%
+        for bottom in (200, 230, 260, 290, 320):                   # 41% of the zone's height: enough at 20%, not at 60%
             self.seen(bottom, camera=strict)
         self.assertIsNone(self.window()["direction"])
 
@@ -232,8 +250,10 @@ class PassWorkerTests(Gate):
         self.assertEqual(len(client.crossings), 2)                 # Recorded + the update at Left zone
         first, second = client.crossings[0][0], client.crossings[1][0]
         self.assertEqual(first["external_event_key"], second["external_event_key"])
-        self.assertEqual((first["direction"], first["direction_reason"]), ("IN", "moved 31% of the zone with the IN arrow"))  # decided as soon as it was sure
-        self.assertEqual(first["detection_metadata"]["direction_confidence"], "high")
+        # Decided as soon as it was sure (4th frame), while still in the zone.
+        self.assertEqual((first["direction"], first["direction_reason"]), ("IN", "toward the camera: went down 31% of the zone; box size changed only 0%"))
+        self.assertEqual(first["detection_metadata"]["direction_confidence"], "medium")
+        self.assertEqual(first["detection_metadata"]["movement"]["movement"], "toward")
         self.assertEqual(first["detection_metadata"]["rfid_status"], "matched")
         self.assertTrue(second["detection_metadata"]["pass"]["left_zone"])
         self.assertEqual(self.state["passes_recorded"], 1)

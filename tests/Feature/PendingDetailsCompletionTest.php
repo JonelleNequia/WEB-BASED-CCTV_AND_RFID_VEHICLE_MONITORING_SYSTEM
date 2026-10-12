@@ -33,6 +33,7 @@ class PendingDetailsCompletionTest extends TestCase
             'vehicle_image_path' => 'detected-vehicle-images/entrance/pending-entry-test.jpg',
             'external_event_key' => 'pending-entry-session-001',
             'roi_name' => 'Entrance Trigger Line',
+            'direction' => 'IN',
             'detection_metadata_json' => [
                 'track_id' => 17,
                 'confidence' => 0.91,

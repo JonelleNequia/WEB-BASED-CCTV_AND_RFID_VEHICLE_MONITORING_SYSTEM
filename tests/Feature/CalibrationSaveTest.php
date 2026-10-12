@@ -14,9 +14,9 @@ class CalibrationSaveTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * One camera's zone and IN arrow are saved; calibration work: no browser camera details.
+     * One camera's zone and its gate's IN / OUT direction are saved; calibration work: no browser camera details.
      */
-    public function test_calibration_endpoint_saves_mask_and_in_arrow_for_a_camera(): void
+    public function test_calibration_endpoint_saves_mask_and_the_gate_direction(): void
     {
         $this->seed(DatabaseSeeder::class);
 
@@ -32,12 +32,7 @@ class CalibrationSaveTest extends TestCase
                     ['x' => 0.72, 'y' => 0.55],
                     ['x' => 0.10, 'y' => 0.55],
                 ],
-                'calibration_direction' => [
-                    'x1' => 0.40,
-                    'y1' => 0.25,
-                    'x2' => 0.40,
-                    'y2' => 0.50,
-                ],
+                'away_direction' => 'OUT',
             ])
             ->assertOk()
             ->assertJsonPath('camera.camera_role', 'gate-1');
@@ -52,13 +47,10 @@ class CalibrationSaveTest extends TestCase
             ['x' => 0.72, 'y' => 0.55],
             ['x' => 0.10, 'y' => 0.55],
         ], $camera->calibration_mask_json);
-        // ROI work: the IN arrow, tail -> head (no trigger line).
-        $this->assertSame([
-            'x1' => 0.40,
-            'y1' => 0.25,
-            'x2' => 0.40,
-            'y2' => 0.50,
-        ], $camera->calibration_direction_json);
+        // ROI work: no arrow or line; a vehicle moving away from the camera is OUT at this gate.
+        $this->assertFalse(\Illuminate\Support\Facades\Schema::hasColumn('cameras', 'calibration_line_json'));
+        $this->assertFalse(\Illuminate\Support\Facades\Schema::hasColumn('cameras', 'calibration_direction_json'));
+        $this->assertSame('OUT', \App\Models\Gate::query()->where('code', 'gate-1')->value('away_direction'));
     }
 
     public function test_calibration_heartbeat_keeps_detector_camera_runtime_active(): void

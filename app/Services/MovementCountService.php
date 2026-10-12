@@ -63,7 +63,8 @@ class MovementCountService
     {
         $registered = VehicleEvent::query()
             ->with(['vehicle:id,category', 'rfidScanLog:id,scan_location', 'camera:id,camera_role'])
-            ->whereIn('event_type', ['ENTRY', 'EXIT'])
+            // ROI work: a registered pass the camera could not tell is counted as "unknown".
+            ->whereIn('event_type', ['ENTRY', 'EXIT', VehicleEvent::TYPE_UNKNOWN])
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->whereNull('guest_visit_id')
             ->whereNotIn('event_origin', ['guest_cctv', 'guest_manual', 'guest_pass'])
@@ -72,7 +73,7 @@ class MovementCountService
             ->get()
             ->map(fn (VehicleEvent $event): array => [
                 'time' => $event->event_time,
-                'direction' => $event->event_type === 'EXIT' ? 'OUT' : 'IN',
+                'direction' => VehicleEvent::directionForEventType($event->event_type),
                 'category' => $event->vehicle_id
                     ? VehicleCategory::normalize($event->vehicle_category ?: $event->vehicle?->category)
                     : VehicleCategory::UNREGISTERED_VISITOR,
@@ -118,8 +119,8 @@ class MovementCountService
             ->get(['observed_at', 'location', 'detection_metadata_json'])
             ->map(fn (GuestVehicleObservation $observation): array => [
                 'time' => $observation->observed_at,
-                // Before Phase 2 the detector sent IN unless it saw an OUT.
-                'direction' => VehicleEvent::eventTypeForDirection(data_get($observation->detection_metadata_json, 'direction')) === 'EXIT' ? 'OUT' : 'IN',
+                // ROI work: a missing or unknown direction is not counted as IN.
+                'direction' => VehicleEvent::directionForEventType(VehicleEvent::eventTypeForDirection(data_get($observation->detection_metadata_json, 'direction'))),
                 'category' => VehicleCategory::UNREGISTERED_VISITOR,
                 'gate' => $this->gate($observation->location),
                 'source' => self::SOURCE_LEGACY_CAMERA,

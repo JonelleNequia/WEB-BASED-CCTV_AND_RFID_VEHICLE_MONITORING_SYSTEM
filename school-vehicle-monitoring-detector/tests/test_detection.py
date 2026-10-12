@@ -17,8 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import detector_service as detector  # noqa: E402
 
 ZONE = [{"x": 0.0, "y": 0.3}, {"x": 1.0, "y": 0.3}, {"x": 1.0, "y": 1.0}, {"x": 0.0, "y": 1.0}]
-# ROI work: the zone and the IN arrow (IN = driving down the picture); no trigger line.
-CAMERA = {"calibration_mask": ZONE, "calibration_direction": {"x1": 0.5, "y1": 0.45, "x2": 0.5, "y2": 0.85}, "camera_id": 1}
+# ROI work: the zone; a vehicle moving away from the camera (up the picture) is OUT here, so IN = driving down.
+CAMERA = {"calibration_mask": ZONE, "away_direction": "OUT", "camera_id": 1}
 
 
 def tracked_results(rows, shape=(416, 736)):

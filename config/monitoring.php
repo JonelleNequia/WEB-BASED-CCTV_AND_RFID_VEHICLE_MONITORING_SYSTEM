@@ -181,11 +181,14 @@ return [
         'type_model' => 'yolov8s.pt',
         'type_truck_min_height' => 0.35,
         'type_car_min_aspect' => 1.05,
-        // ROI work: one vehicle = one pass through the zone. A gate can
-        // override pass_min_move in Settings > Advanced > Timing.
+        // ROI work: one vehicle = one pass through the zone. pass_min_move:
+        // share of the zone's height it moves away from / toward the camera
+        // for a sure IN / OUT. 15% was best on the test videos (Phase 2:
+        // 100% direction accuracy, nothing missed; 20% 96-100%, 25-30%
+        // 76-92%). A gate can override it in Settings > Advanced > Timing.
         'pass_min_frames' => 3,
         'pass_lost_frames' => 6,
-        'pass_min_move' => 0.20,
+        'pass_min_move' => 0.15,
     ],
 
     /*

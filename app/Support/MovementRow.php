@@ -20,8 +20,8 @@ final class MovementRow
     }
 
     /**
-     * A camera event keeps the direction the detector reported; an unknown
-     * direction is stored as ENTRY (Phase 1) but is shown as unknown.
+     * A camera event keeps the direction the detector reported (ROI work:
+     * an unknown direction is stored as UNKNOWN, shown as unknown).
      */
     public static function eventDirection(VehicleEvent $event): ?string
     {
@@ -61,6 +61,7 @@ final class MovementRow
             'TAG ALERT' => 'ALERT',
             'WAITING' => 'WAIT',
             'SCAN ONLY' => 'TAG',
+            'UNKNOWN' => 'IN/OUT?',
             default => '—',
         };
 

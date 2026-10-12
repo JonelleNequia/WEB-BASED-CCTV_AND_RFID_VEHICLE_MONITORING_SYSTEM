@@ -24,6 +24,13 @@ class VehicleEvent extends Model
 
     public const STATUS_REQUIRES_MANUAL_REVIEW = 'requires_manual_review';
 
+    /**
+     * ROI work, Phase 2: the camera could not tell IN from OUT. Not counted
+     * as IN or OUT, and the vehicle's state is not changed, until staff set
+     * it (Set IN / Set OUT).
+     */
+    public const TYPE_UNKNOWN = 'UNKNOWN';
+
     /** Phase 5: match_status of a detector "Vehicle with no pass" alert. */
     public const MATCH_NO_PASS_ALERT = 'no_pass_alert';
 
@@ -165,12 +172,26 @@ class VehicleEvent extends Model
     /**
      * Phase 1 (gates): a camera event's type comes from the crossing
      * direction the detector reports (IN / OUT), not from the gate, because
-     * every gate records both. Unknown -> ENTRY until Phase 2 calibrates the
-     * IN side of each gate.
+     * every gate records both. ROI work, Phase 2: anything else is UNKNOWN,
+     * never ENTRY.
      */
     public static function eventTypeForDirection(mixed $direction): string
     {
-        return strtoupper(trim((string) $direction)) === 'OUT' ? 'EXIT' : 'ENTRY';
+        return match (strtoupper(trim((string) $direction))) {
+            'IN', 'ENTRY' => 'ENTRY',
+            'OUT', 'EXIT' => 'EXIT',
+            default => self::TYPE_UNKNOWN,
+        };
+    }
+
+    /** "IN" / "OUT" / "UNKNOWN" for an event type (ENTRY / EXIT / anything else). */
+    public static function directionForEventType(mixed $eventType): string
+    {
+        return match (strtoupper(trim((string) $eventType))) {
+            'ENTRY' => 'IN',
+            'EXIT' => 'OUT',
+            default => 'UNKNOWN',
+        };
     }
 
     /**

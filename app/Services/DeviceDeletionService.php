@@ -48,7 +48,7 @@ class DeviceDeletionService
 
         $removes = ['The device and its place at the gate'];
         if ($camera) {
-            array_push($removes, 'The saved camera login and video settings', "The gate's detection zone and IN arrow", 'The last picture and the status of this camera');
+            array_push($removes, 'The saved camera login and video settings', "The gate's detection zone and its IN / OUT direction", 'The last picture and the status of this camera');
         }
         if ($reader) {
             array_push($removes, 'The reader connection settings and the temporary workaround address', 'The tags waiting in its memory and its diagnostics');
@@ -203,14 +203,14 @@ class DeviceDeletionService
                 'source_username' => null,
                 'source_password' => null,
                 'calibration_mask_json' => null,
-                'calibration_line_json' => null,
-                'calibration_direction_json' => null,
                 'last_connection_status' => 'unknown',
                 'last_connection_message' => null,
                 'last_connected_at' => null,
             ])->save();
             Roi::query()->where('camera_id', $camera->id)->delete();
         }
+        // ROI work: which way is IN depends on how the camera faces: set again for the next camera.
+        \App\Models\Gate::query()->where('code', $gate)->update(['away_direction' => null]);
 
         Cache::forget("live-codecs.$gate");
         foreach (['webrtc', 'hls', 'mjpeg'] as $mode) {

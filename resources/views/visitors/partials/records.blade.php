@@ -72,7 +72,12 @@
                 @endif
             </td>
             <td class="nowrap">{{ \App\Models\Gate::labelFor($record->gate) }}</td>
-            <td><x-badge :tone="$record->direction === 'UNKNOWN' ? 'warning' : 'info'" :label="$record->direction === 'UNKNOWN' ? 'Direction unknown' : $record->direction" /></td>
+            <td>
+                <x-badge :tone="$record->direction === 'UNKNOWN' ? 'warning' : 'info'" :label="$record->direction === 'UNKNOWN' ? 'Direction unknown' : $record->direction" />
+                @if ($record->direction === 'UNKNOWN' && $record->status === 'active')
+                    <x-set-direction :url="route('visitors.records.direction', $record)" />
+                @endif
+            </td>
             <td><x-datetime :value="$record->seen_at" /></td>
             <td class="row-actions">
                 <details class="menu row-menu">

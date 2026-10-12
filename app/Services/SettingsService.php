@@ -383,12 +383,12 @@ class SettingsService
         ];
     }
 
-    /** ROI work: the gate's minimum movement along the IN arrow (0-1), or the default. */
+    /** ROI work: the gate's minimum movement up / down (share of the zone's height, 0-1), or the default. */
     public function passMinMove(string $gate): float
     {
         $percent = Gate::query()->where('code', $gate)->value('pass_min_move');
 
-        return $percent ? round($percent / 100, 3) : (float) config('monitoring.detection.pass_min_move', 0.2);
+        return $percent ? round($percent / 100, 3) : (float) config('monitoring.detection.pass_min_move', 0.15);
     }
 
     protected function runtimeCameraPayload(array $cameraConfiguration): array
@@ -421,9 +421,11 @@ class SettingsService
             // full-resolution main stream, which needs FFmpeg's threading to keep up.
             'decoder_threads' => $streams['source'] === CameraStreams::SOURCE_DEVICE && $streams['stream'] === 'main' ? 0 : 1,
             'calibration_mask' => $cameraConfiguration['calibration_mask'],
-            // ROI work: the zone's IN arrow, and how far a vehicle must move
-            // along it (share of the zone) for a sure IN / OUT at this gate.
-            'calibration_direction' => $cameraConfiguration['calibration_direction'],
+            // ROI work: a vehicle moving away from the camera is IN or OUT at
+            // this gate (null: not set, every pass is Direction unknown), and
+            // how far it must move up / down (share of the zone's height) for
+            // a sure IN / OUT.
+            'away_direction' => Gate::query()->where('code', (string) $cameraConfiguration['camera_role'])->first()?->awayDirection(),
             'pass_min_move' => $this->passMinMove((string) $cameraConfiguration['camera_role']),
             // Phase 3: how long the detector waits for a tag read after a
             // crossing, and how far back a read still counts.

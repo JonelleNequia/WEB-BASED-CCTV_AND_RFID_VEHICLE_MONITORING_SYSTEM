@@ -26,12 +26,9 @@ class SaveCalibrationRequest extends FormRequest
             'calibration_mask' => ['nullable', 'array', 'min:3'],
             'calibration_mask.*.x' => ['required_with:calibration_mask', 'numeric', 'between:0,1'],
             'calibration_mask.*.y' => ['required_with:calibration_mask', 'numeric', 'between:0,1'],
-            // ROI work: the IN arrow (tail -> head), no trigger line.
-            'calibration_direction' => ['nullable', 'array'],
-            'calibration_direction.x1' => ['required_with:calibration_direction', 'numeric', 'between:0,1'],
-            'calibration_direction.y1' => ['required_with:calibration_direction', 'numeric', 'between:0,1'],
-            'calibration_direction.x2' => ['required_with:calibration_direction', 'numeric', 'between:0,1'],
-            'calibration_direction.y2' => ['required_with:calibration_direction', 'numeric', 'between:0,1'],
+            // ROI work: only the zone is drawn; the gate says whether a vehicle
+            // moving away from the camera is IN or OUT (empty = not set).
+            'away_direction' => ['sometimes', 'nullable', 'in:IN,OUT'],
         ];
     }
 }
