@@ -6,7 +6,7 @@
 (function () {
     const dataNode = document.getElementById('gate-monitor-data');
     const config = dataNode ? JSON.parse(dataNode.textContent || '{}') : {};
-    const POLL_MS = 3000;
+    const POLL_MS = 2000;  // ROI work, Phase 3: "checking RFID…" shows within about 2 s
     const TONE_LOOK = { info: 'verified', neutral: 'unregistered', warning: 'unknown', critical: 'alert' };
 
     function el(tag, className, text) {
@@ -28,9 +28,20 @@
         return window.ui && value ? window.ui.formatTime(value) : '';
     }
 
-    function renderLatest(card, log) {
+    function renderLatest(card, log, checking) {
         const box = card.querySelector('[data-gate-latest]');
         if (!box) {
+            return;
+        }
+
+        // ROI work, Phase 3: a vehicle Detected and not Recorded yet (its RFID check runs).
+        const recorded = new Set((card.lastLogs || []).map((row) => row.pass_key).filter(Boolean));
+        const open = (Array.isArray(checking) ? checking : []).find((pass) => !recorded.has(pass.event_key));
+        if (open) {
+            box.className = 'gate-latest result-checking';
+            const text = el('div', 'gate-latest-text');
+            text.append(el('strong', null, 'Vehicle detected'), el('span', null, 'Checking RFID…'));
+            box.replaceChildren(el('span', 'gate-latest-direction', '…'), text, el('time', null, time(open.detected_at)));
             return;
         }
 
@@ -40,8 +51,9 @@
             return;
         }
 
+        // "Registered: plate" (owner) or "Unregistered Visitor" (plate).
         const text = el('div', 'gate-latest-text');
-        text.append(el('strong', null, log.plate_number || '—'), el('span', null, log.category_label || ''));
+        text.append(el('strong', null, log.result_title || log.plate_number || '—'), el('span', null, log.result_detail ?? (log.category_label || '')));
         box.replaceChildren(el('span', 'gate-latest-direction', log.direction_label || '—'), text, el('time', null, time(log.event_time)));
     }
 
@@ -148,7 +160,8 @@
                 }
                 card.dataset.wasLive = live ? '1' : '0';
 
-                renderLatest(card, (gate.logs || [])[0] || null);
+                card.lastLogs = gate.logs || [];
+                renderLatest(card, (gate.logs || [])[0] || null, gate.checking);
                 renderLogs(card, gate.logs);
             });
         } catch (error) {

@@ -86,7 +86,7 @@ class UiPhase4LayoutTest extends TestCase
         // Gate 1: IN, plate, category. Gate 2: nothing there yet (the list still shows every gate).
         $this->actingAs($this->admin)->get(route('gates.kiosk', 'gate-1'))->assertOk()
             ->assertSee('<strong class="scan-result-word" data-scan-word>IN</strong>', false)
-            ->assertSee('<span class="scan-result-title" data-scan-title>BIG 202</span>', false)
+            ->assertSee('<span class="scan-result-title" data-scan-title>Registered: BIG 202</span>', false)
             ->assertSee('class="scan-result is-verified"', false);
         $this->actingAs($this->admin)->get(route('gates.kiosk', 'gate-2'))->assertOk()
             ->assertSee('class="scan-result is-idle"', false)

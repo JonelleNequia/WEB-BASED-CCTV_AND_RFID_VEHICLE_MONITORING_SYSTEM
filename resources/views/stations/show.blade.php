@@ -57,8 +57,8 @@
             <section class="scan-result is-{{ $look }}" data-scan-result aria-live="assertive" aria-atomic="true">
                 <strong class="scan-result-word" data-scan-word>{{ $latest ? $latest['direction_label'] : 'READY' }}</strong>
                 <div class="scan-result-body">
-                    <span class="scan-result-title" data-scan-title>{{ $latest ? $latest['plate_number'] : 'Waiting for the next vehicle' }}</span>
-                    <span class="scan-result-detail" data-scan-detail>{{ $latest['category_label'] ?? '' }}</span>
+                    <span class="scan-result-title" data-scan-title>{{ $latest ? ($latest['result_title'] ?? $latest['plate_number']) : 'Waiting for the next vehicle' }}</span>
+                    <span class="scan-result-detail" data-scan-detail>{{ $latest['result_detail'] ?? ($latest['category_label'] ?? '') }}</span>
                 </div>
                 <time class="scan-result-time" data-scan-time>{{ $latest ? \App\Support\DisplayTime::time($latest['event_time'] ?? null) : '' }}</time>
             </section>

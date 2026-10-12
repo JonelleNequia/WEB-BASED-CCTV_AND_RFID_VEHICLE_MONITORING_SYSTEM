@@ -175,10 +175,11 @@ class LaravelEventClient:
             "requires_capture": bool(body.get("requires_capture", False)),
         }
 
-    def check_rfid_match(self, camera_role, event_time, window_seconds=4, lookback_seconds=10, event_key=None):
+    def check_rfid_match(self, camera_role, event_time, window_seconds=4, lookback_seconds=10, event_key=None, until=None):
         """
         Poll Laravel for a registered tag read at one gate, from
-        lookback_seconds before the crossing until the detector window ends.
+        lookback_seconds before the vehicle was Detected (event_time) until
+        `until` (ROI work, Phase 3: the pass so far; default: the window).
         """
         if not self.rfid_match_url:
             return {
@@ -196,6 +197,8 @@ class LaravelEventClient:
         # Lets Laravel give one RFID read to one vehicle only.
         if event_key:
             params["event_key"] = event_key
+        if until:
+            params["until"] = until
 
         try:
             response = requests.get(

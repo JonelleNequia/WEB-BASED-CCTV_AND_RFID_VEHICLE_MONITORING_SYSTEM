@@ -111,7 +111,7 @@ class UiPhase4PagesTest extends TestCase
             ->assertSee('data-scan-result', false)
             // UI Phase 4 (layout): the big result is the latest vehicle at this gate.
             ->assertSee('<strong class="scan-result-word" data-scan-word>IN</strong>', false)
-            ->assertSee('<span class="scan-result-title" data-scan-title>KSK 101</span>', false)
+            ->assertSee('<span class="scan-result-title" data-scan-title>Registered: KSK 101</span>', false)
             ->assertSee('Faculty &amp; Staff', false)
             ->assertDontSee('READY')
             ->assertSee('station-log-compact', false)

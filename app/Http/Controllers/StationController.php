@@ -67,6 +67,8 @@ class StationController extends Controller
             'camera' => $runtime['cameras'][$location] ?? null,
             'stream_url' => $runtime['cameras'][$location]['stream_url'] ?? $detectorRuntimeService->defaultStreamUrl($location),
             'logs' => $this->recentLogs(),
+            // ROI work, Phase 3: "Vehicle detected · checking RFID…" until the pass is Recorded.
+            'checking' => \App\Support\OpenPasses::at($runtime, $location),
             'generated_at' => now()->toIso8601String(),
         ]);
     }

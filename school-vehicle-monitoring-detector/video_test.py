@@ -42,7 +42,7 @@ class DryRunClient:
         self.crossings = []
         self.visitor_plates = []
 
-    def check_rfid_match(self, camera_role, event_time, window_seconds=4, lookback_seconds=10, event_key=None):
+    def check_rfid_match(self, camera_role, event_time, window_seconds=4, lookback_seconds=10, event_key=None, until=None):
         with self.lock:
             self.rfid_checks += 1
         return {"matched": False, "message": "Dry run: no RFID read."}

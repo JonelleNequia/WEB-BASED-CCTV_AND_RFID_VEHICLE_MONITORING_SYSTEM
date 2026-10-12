@@ -64,8 +64,32 @@ final class MovementRow
             'UNKNOWN' => 'IN/OUT?',
             default => '—',
         };
+        // ROI work, Phase 3: the kiosk / Gate Monitor result once a pass is Recorded.
+        [$log['result_title'], $log['result_detail']] = self::result($log);
 
         return $log;
+    }
+
+    /**
+     * "Registered: ABC 1234" with the owner, or "Unregistered Visitor" with
+     * the plate read so far; other rows (tag reads) keep plate and category.
+     *
+     * @param  array<string, mixed>  $log
+     * @return array{0: string, 1: string}
+     */
+    public static function result(array $log): array
+    {
+        $plate = (string) ($log['plate_number'] ?? '');
+        $hasPlate = $plate !== '' && $plate !== 'No plate';
+        $owner = ($log['owner_name'] ?? 'N/A') !== 'N/A' ? (string) $log['owner_name'] : null;
+        $unregistered = ($log['category_label'] ?? null) === VehicleCategory::label(VehicleCategory::UNREGISTERED_VISITOR)
+            || strtoupper((string) ($log['event_type'] ?? '')) === 'UNREGISTERED';
+
+        return match (true) {
+            (bool) ($log['registered'] ?? false) => ['Registered: '.($hasPlate ? $plate : 'no plate'), implode(' · ', array_filter([$owner, $log['category_label'] ?? null]))],
+            $unregistered => ['Unregistered Visitor', $hasPlate ? 'Plate '.$plate : 'Plate not read yet'],
+            default => [$hasPlate ? $plate : '—', (string) ($log['category_label'] ?? '')],
+        };
     }
 
     /**

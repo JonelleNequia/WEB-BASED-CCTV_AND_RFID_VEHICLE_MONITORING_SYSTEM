@@ -72,11 +72,13 @@ class Phase5DetectorAlertTest extends TestCase
         $this->pollMatch('gate-1', $this->start->copy()->addSecond(), 'entrance-track-1')
             ->assertJsonPath('matched', true);
 
-        // Same car, YOLO gave it a new track id a moment later.
-        $this->pollMatch('gate-1', $this->start->copy()->addSeconds(2), 'entrance-track-2')
+        // ROI work, Phase 3: the same pass asks again (a new track ID on the same car keeps its pass key).
+        $this->pollMatch('gate-1', $this->start->copy()->addSecond(), 'entrance-track-1')
             ->assertJsonPath('matched', true);
 
-        // A second car without a tag, right behind the first one.
+        // Another pass, even a moment later: one tag = one pass.
+        $this->pollMatch('gate-1', $this->start->copy()->addSeconds(2), 'entrance-track-2')
+            ->assertJsonPath('matched', false);
         $this->pollMatch('gate-1', $this->start->copy()->addSeconds(7), 'entrance-track-3')
             ->assertJsonPath('matched', false);
     }

@@ -71,7 +71,7 @@ class RealtimeLogController extends Controller
     {
         $eventLogs = VehicleEvent::query()
             ->withoutHiddenGuestCopies()
-            ->with(['camera', 'vehicle', 'rfidScanLog', 'guestVisit.rfidTag'])
+            ->with(['camera', 'vehicle', 'rfidScanLog.vehicleCrossing', 'guestVisit.rfidTag'])
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->latest('created_at')
             ->latest('event_time')
@@ -111,7 +111,7 @@ class RealtimeLogController extends Controller
 
         $eventLogs = VehicleEvent::query()
             ->withoutHiddenGuestCopies()
-            ->with(['camera', 'vehicle', 'rfidScanLog', 'guestVisit.rfidTag'])
+            ->with(['camera', 'vehicle', 'rfidScanLog.vehicleCrossing', 'guestVisit.rfidTag'])
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->where(fn ($query) => $query->where('camera_id', $cameraId)
                 ->orWhereHas('rfidScanLog', fn ($scan) => $scan->where('scan_location', $location)))
@@ -281,6 +281,10 @@ class RealtimeLogController extends Controller
             'id' => $event->id,
             'record_type' => 'vehicle_event',
             'event_type' => $event->event_type,
+            // ROI work, Phase 3: the kiosk's "Registered: plate" result, and
+            // the detector pass this record finished ("checking RFID" ends).
+            'registered' => $event->vehicle_id !== null && ! in_array($event->event_origin, ['guest_cctv', 'guest_manual'], true),
+            'pass_key' => $scanLog?->vehicleCrossing?->external_event_key ?? $event->external_event_key,
             'plate_number' => $event->plate_text ?: $vehicle?->plate_number ?: 'No plate',
             'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',
             'vehicle_type' => $event->display_vehicle_type,
@@ -315,6 +319,7 @@ class RealtimeLogController extends Controller
             'id' => 'guest-'.$observation->id,
             'record_type' => 'guest_observation',
             'event_type' => 'UNREGISTERED',
+            'pass_key' => $observation->external_event_key,
             'plate_number' => $observation->plate_number ?: $observation->plate_text ?: 'No plate',
             'owner_name' => 'N/A',
             'vehicle_type' => $observation->vehicle_type ?: 'Vehicle',

@@ -6645,6 +6645,27 @@ img.thumb-plate {
     background: #dc2626;
 }
 
+/* ROI work, Phase 3: a vehicle Detected, its RFID check still running (blue, pulsing). */
+.scan-result.is-checking,
+.gate-latest.result-checking {
+    background: #1d4ed8;
+    color: #ffffff;
+    animation: checking-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes checking-pulse {
+    50% {
+        opacity: 0.82;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .scan-result.is-checking,
+    .gate-latest.result-checking {
+        animation: none;
+    }
+}
+
 .gate-logs li {
     grid-template-columns: 4.2rem minmax(0, 1fr) auto auto;
     align-items: center;

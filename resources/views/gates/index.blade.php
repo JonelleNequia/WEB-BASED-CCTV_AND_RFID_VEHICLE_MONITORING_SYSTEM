@@ -41,8 +41,8 @@
                     @if ($latest)
                         <span class="gate-latest-direction">{{ $latest['direction_label'] }}</span>
                         <div class="gate-latest-text">
-                            <strong>{{ $latest['plate_number'] }}</strong>
-                            <span>{{ $latest['category_label'] ?? '' }}</span>
+                            <strong>{{ $latest['result_title'] ?? $latest['plate_number'] }}</strong>
+                            <span>{{ $latest['result_detail'] ?? ($latest['category_label'] ?? '') }}</span>
                         </div>
                         <time>{{ \App\Support\DisplayTime::time($latest['event_time'] ?? null) }}</time>
                     @else

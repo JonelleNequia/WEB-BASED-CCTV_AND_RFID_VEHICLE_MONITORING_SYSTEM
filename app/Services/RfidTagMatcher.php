@@ -11,25 +11,24 @@ use Illuminate\Support\Facades\File;
 use Throwable;
 
 /**
- * RFID only with a vehicle: picks the tag that belongs to a vehicle the
- * camera saw cross the line, from the reads waiting in the buffer.
+ * RFID only with a vehicle: picks the tag that belongs to a vehicle pass
+ * the camera saw, from the reads waiting in the buffer.
  *
  * - The buffer: the device service's rfid_buffer.json (UHF readers, every
  *   read with its RSSI) plus reads that reached Laravel (kiosk USB reader; cache).
  * - A "presence" is one continuous stay of a tag at a gate (see
- *   devices/tag_buffer.py). It belongs to a crossing when it was read from
- *   `lookback` before to `lookahead` after the crossing.
+ *   devices/tag_buffer.py). ROI work, Phase 3: it belongs to a pass when it
+ *   was read from `lookback` before the vehicle was Detected until
+ *   `lookahead` after the pass was ready to be Recorded (the whole pass).
  * - The best one: its strongest read (the vehicle closest to the antenna)
- *   nearest the crossing time; then more reads; a registered tag before an
- *   unknown one.
- * - A presence is given to one crossing only (claimed). A stationary tag (a
- *   vehicle parked near the gate) is never given to a passing vehicle.
+ *   inside the pass, or nearest it; then a stronger signal and more reads;
+ *   a registered tag before an unknown one.
+ * - One tag = one pass: a presence is given to one pass only (claimed by
+ *   its event key). A stationary tag (a vehicle parked near the gate) is
+ *   never given to a passing vehicle.
  */
 class RfidTagMatcher
 {
-    /** A new track ID on the same vehicle may reuse its tag within this gap. */
-    public const SAME_VEHICLE_REUSE_SECONDS = 3;
-
     protected const CLAIM_TTL_MINUTES = 15;
 
     protected const READS_PREFIX = 'rfid-read-buffer.';
@@ -110,30 +109,38 @@ class RfidTagMatcher
     }
 
     /**
-     * The presence for a crossing at this gate (not claimed by another
-     * crossing), or null. Adds 'tag' (RfidTag|null) and 'registered'.
+     * The presence for a pass at this gate (not claimed by another pass), or
+     * null. The pass runs from $detectedAt (the vehicle entered the zone) to
+     * $until (it is ready to be Recorded; default: $detectedAt). Adds 'tag'
+     * (RfidTag|null) and 'registered'.
      *
      * @return array<string, mixed>|null
      */
-    public function pick(string $gate, CarbonInterface $crossedAt, ?string $eventKey = null, bool $registeredOnly = false): ?array
+    public function pick(string $gate, CarbonInterface $detectedAt, ?string $eventKey = null, bool $registeredOnly = false, ?CarbonInterface $until = null): ?array
     {
-        $time = $this->seconds($crossedAt);
-        $from = $time - $this->fusion->lookbackSeconds();
-        $to = $time + $this->fusion->lookaheadSeconds();
+        $start = $this->seconds($detectedAt);
+        $end = max($start, $until ? $this->seconds($until) : $start);
+        $from = $start - $this->fusion->lookbackSeconds();
+        $to = $end + $this->fusion->lookaheadSeconds();
         $candidates = [];
 
         foreach ($this->presences($gate) as $presence) {
-            if (($presence['stationary'] ?? false) || $presence['last_seen'] < $from || $presence['first_seen'] > $to) {
+            $mine = $eventKey !== null && $this->claimedBy($gate, $presence) === $eventKey;
+            // This pass's own tag stays its tag (even if it has been read long enough to look parked now).
+            if (! $mine && (($presence['stationary'] ?? false) || $presence['last_seen'] < $from || $presence['first_seen'] > $to)) {
                 continue;
             }
-            if (! $this->claimable($gate, $presence, $eventKey, $time)) {
-                continue;
+            if (! $mine && $this->isClaimed($gate, $presence)) {
+                continue; // one tag = one pass
             }
 
             $tag = $this->tag($presence['epc']);
             $registered = $tag?->vehicle !== null && $tag->status === RfidTag::STATUS_ASSIGNED && $tag->vehicle->status === 'active';
             if ($registeredOnly && ! $registered) {
                 continue;
+            }
+            if ($mine) {
+                return [...$presence, 'tag' => $tag, 'registered' => $registered, 'score' => -1.0];
             }
             $candidates[] = [...$presence, 'tag' => $tag, 'registered' => $registered];
         }
@@ -143,9 +150,10 @@ class RfidTagMatcher
         $best = null;
 
         foreach ($candidates as $candidate) {
-            // Its strongest read (closest to the antenna) nearest the
-            // crossing; then a stronger signal and more reads; registered first.
-            $score = abs((float) $candidate['peak_at'] - $time)
+            // Its strongest read (closest to the antenna) inside the pass, or
+            // nearest it; then a stronger signal and more reads; registered first.
+            $peak = (float) $candidate['peak_at'];
+            $score = ($peak < $start ? $start - $peak : ($peak > $end ? $peak - $end : 0.0))
                 + ($strongest !== null && $candidate['max_rssi'] !== null ? ($strongest - $candidate['max_rssi']) * 0.05 : 0.0)
                 - min((int) $candidate['reads'], 30) * 0.02
                 + ($candidate['registered'] ? 0.0 : 1.5);
@@ -186,16 +194,13 @@ class RfidTagMatcher
     }
 
     /**
+     * The event key of the pass this presence was given to, or null.
+     *
      * @param  array<string, mixed>  $presence
      */
-    protected function claimable(string $gate, array $presence, ?string $eventKey, float $time): bool
+    public function claimedBy(string $gate, array $presence): ?string
     {
-        $claim = Cache::get($this->claimKey($gate, $presence));
-
-        return $claim === null
-            || ($eventKey !== null && $claim['event_key'] === $eventKey)
-            // A new YOLO track ID on the same vehicle right after.
-            || abs($time - (float) $claim['at']) <= self::SAME_VEHICLE_REUSE_SECONDS;
+        return Cache::get($this->claimKey($gate, $presence))['event_key'] ?? null;
     }
 
     /**

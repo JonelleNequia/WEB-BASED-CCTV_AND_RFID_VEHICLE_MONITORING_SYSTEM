@@ -384,6 +384,8 @@ class FutureIntegrationController extends Controller
                 'window_seconds' => ['nullable', 'numeric', 'min:1', 'max:10'],
                 'lookback_seconds' => ['nullable', 'numeric', 'min:0', 'max:'.DetectorRfidMatchService::MAX_LOOKBACK_SECONDS],
                 'event_key' => ['nullable', 'string', 'max:120'],
+                // ROI work, Phase 3: the pass so far (Detected -> now / ready to be Recorded).
+                'until' => ['nullable', 'date'],
             ]);
 
             // Phase 5: registered tag reads from ~10s before the crossing are
@@ -396,7 +398,8 @@ class FutureIntegrationController extends Controller
                 $eventTime,
                 $windowSeconds,
                 $lookbackSeconds,
-                $validated['event_key'] ?? null
+                $validated['event_key'] ?? null,
+                isset($validated['until']) ? Carbon::parse($validated['until']) : null
             );
 
             return response()->json([

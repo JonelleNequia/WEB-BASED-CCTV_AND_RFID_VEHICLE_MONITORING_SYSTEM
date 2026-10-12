@@ -221,6 +221,104 @@ class RfidOnlyWithVehicleTest extends TestCase
         $this->assertSame(0, RfidScanLog::query()->count());
     }
 
+    /*
+     * ROI work, Phase 3: the RFID check covers the whole pass, from Detected
+     * until it is ready to be Recorded; one tag = one pass.
+     */
+
+    public function test_a_tag_first_read_after_the_window_but_before_recorded_still_counts(): void
+    {
+        $this->cameraOnline();
+        $this->registeredVehicle('LATE 7007', 'LATE-TAG-7');
+        // Detected 6 s ago; the car crept to the antenna: first read 3 s after Detected (past the 2 s window).
+        $this->buffer([$this->presence('LATE-TAG-7', firstAgo: 3, lastAgo: 0.2, peakAgo: 1)]);
+        $detected = now()->subSeconds(6);
+
+        $this->passMatch('k-late', $detected)->assertJsonPath('matched', false);          // the old window only
+        $this->passMatch('k-late', $detected, now())->assertJsonPath('matched', true)      // the pass so far
+            ->assertJsonPath('vehicle.plate_number', 'LATE 7007');
+
+        $this->passCrossing('k-late', $detected, now())->assertCreated()->assertJsonPath('rfid_scan.plate_number', 'LATE 7007');
+        $this->assertSame(0, VisitorRecord::query()->count());
+    }
+
+    public function test_the_record_gets_the_tag_its_pass_took_even_if_it_now_looks_parked(): void
+    {
+        $this->cameraOnline();
+        $this->registeredVehicle('WAIT 8008', 'WAIT-TAG-8');
+        $detected = now()->subSeconds(2);
+        $this->buffer([$this->presence('WAIT-TAG-8', firstAgo: 4, lastAgo: 0.1, peakAgo: 1)]);
+        $this->passMatch('k-wait', $detected, now())->assertJsonPath('matched', true);
+
+        // It waited at the barrier: its tag has been read long enough to look parked.
+        $this->travel(90)->seconds();
+        $this->cameraOnline();
+        $this->buffer([$this->presence('WAIT-TAG-8', firstAgo: 94, lastAgo: 0.1, peakAgo: 91, reads: 500, stationary: true)]);
+
+        $this->passCrossing('k-wait', $detected, now())->assertCreated()->assertJsonPath('rfid_scan.plate_number', 'WAIT 8008');
+    }
+
+    public function test_one_tag_is_one_pass_even_for_a_pass_a_moment_later(): void
+    {
+        $this->cameraOnline();
+        $this->registeredVehicle('ONE 9009', 'ONE-TAG-9');
+        $this->buffer([$this->presence('ONE-TAG-9', firstAgo: 3, lastAgo: 0.1, peakAgo: 1)]);
+
+        $this->passMatch('k-one-a', now()->subSeconds(2), now())->assertJsonPath('matched', true);
+        $this->passMatch('k-one-a', now()->subSeconds(2), now())->assertJsonPath('matched', true);   // the same pass asks again
+        $this->passMatch('k-one-b', now()->subSecond(), now())->assertJsonPath('matched', false);    // another pass, 1 s later
+        $this->passCrossing('k-one-b', now()->subSecond(), now())->assertJsonPath('rfid_scan', null);
+    }
+
+    public function test_the_strongest_read_inside_the_pass_is_picked(): void
+    {
+        $this->cameraOnline();
+        $this->registeredVehicle('NEAR 1010', 'NEAR-TAG');
+        $this->registeredVehicle('PASS 1011', 'PASS-TAG');
+        // Detected 4 s ago, ready now. NEAR-TAG peaked 8 s before Detected (the car before, in the lookback);
+        // PASS-TAG peaked inside this pass, a little weaker.
+        $this->buffer([
+            $this->presence('NEAR-TAG', firstAgo: 14, lastAgo: 9, peakAgo: 12, reads: 40, rssi: -42),
+            $this->presence('PASS-TAG', firstAgo: 5, lastAgo: 0.2, peakAgo: 2, reads: 30, rssi: -48),
+        ]);
+
+        $this->passCrossing('k-strong', now()->subSeconds(4), now())->assertJsonPath('rfid_scan.plate_number', 'PASS 1011');
+    }
+
+    public function test_the_kiosk_shows_checking_rfid_until_the_pass_is_recorded(): void
+    {
+        $this->cameraOnline();
+        $status = json_decode(File::get(CameraFiles::statusPath()), true);
+        $status['cameras']['gate-1']['open_passes'] = [['event_key' => 'k-kiosk', 'detected_at' => now()->toIso8601String(), 'rfid' => 'checking']];
+        File::put(CameraFiles::statusPath(), json_encode($status));
+
+        $this->actingAs($this->admin)->getJson(route('stations.state', 'gate-1'))->assertOk()
+            ->assertJsonPath('checking.0.event_key', 'k-kiosk');
+        $gates = $this->actingAs($this->admin)->getJson(route('gates.state'))->assertOk();
+        $gates
+            ->assertJsonPath('gates.gate-1.checking.0.event_key', 'k-kiosk')
+            ->assertJsonPath('gates.gate-2.checking', []);
+
+        // Recorded: a registered vehicle shows "Registered: plate" with its owner, and the row names its pass.
+        $this->registeredVehicle('KIO 1212', 'KIO-TAG');
+        $this->buffer([$this->presence('KIO-TAG', firstAgo: 3, lastAgo: 0.1, peakAgo: 1)]);
+        $this->passCrossing('k-kiosk', now()->subSecond(), now())->assertCreated();
+        $latest = collect($this->actingAs($this->admin)->getJson(route('stations.state', 'gate-1'))->json('logs'))->firstWhere('pass_key', 'k-kiosk');
+        $this->assertSame(['Registered: KIO 1212', 'Buffer Owner · Faculty & Staff', 'IN'], [$latest['result_title'], $latest['result_detail'], $latest['direction_label']]);
+
+        // A stale detector status shows no "checking".
+        $this->travel(2)->minutes();
+        $this->actingAs($this->admin)->getJson(route('stations.state', 'gate-1'))->assertOk()->assertJsonPath('checking', []);
+    }
+
+    public function test_an_unregistered_visitor_result_shows_the_plate_once_read(): void
+    {
+        $this->assertSame(['Unregistered Visitor', 'Plate not read yet'],
+            \App\Support\MovementRow::result(['event_type' => 'UNREGISTERED', 'plate_number' => 'No plate', 'category_label' => 'Unregistered Visitor']));
+        $this->assertSame(['Unregistered Visitor', 'Plate ABC 1234'],
+            \App\Support\MovementRow::result(['event_type' => 'ENTRY', 'plate_number' => 'ABC 1234', 'category_label' => 'Unregistered Visitor']));
+    }
+
     public function test_registration_modes_and_test_scan_accept_a_tag_without_a_record(): void
     {
         $this->cameraOnline();
@@ -402,6 +500,31 @@ class RfidOnlyWithVehicleTest extends TestCase
         return $this->withHeaders(['X-Api-Key' => 'test-detector-key'])
             ->getJson(route('api.integration.rfid-match', ['camera_role' => 'gate-1', 'event_time' => now()->toIso8601String(), 'event_key' => $eventKey]))
             ->assertOk();
+    }
+
+    /** ROI work, Phase 3: the detector's RFID poll for a pass (Detected at $detected, asked $until). */
+    protected function passMatch(string $eventKey, \Carbon\CarbonInterface $detected, ?\Carbon\CarbonInterface $until = null): TestResponse
+    {
+        return $this->withHeaders(['X-Api-Key' => 'test-detector-key'])
+            ->getJson(route('api.integration.rfid-match', array_filter([
+                'camera_role' => 'gate-1', 'event_time' => $detected->toIso8601String(), 'event_key' => $eventKey,
+                'until' => $until?->toIso8601String(),
+            ])))
+            ->assertOk();
+    }
+
+    /** ROI work, Phase 3: the record of a pass, Detected at $detected and Recorded at $recorded. */
+    protected function passCrossing(string $key, \Carbon\CarbonInterface $detected, \Carbon\CarbonInterface $recorded): TestResponse
+    {
+        return $this->withHeaders(['X-Api-Key' => 'test-detector-key'])->postJson(route('api.integration.crossings'), [
+            'external_event_key' => $key,
+            'camera_role' => 'gate-1',
+            'direction' => 'IN',
+            'event_time' => $detected->toIso8601String(),
+            'track_id' => crc32($key) % 1000,
+            'confidence' => 0.9,
+            'detection_metadata' => ['rfid_status' => 'matched', 'pass' => ['detected_at' => $detected->toIso8601String(), 'recorded_at' => $recorded->toIso8601String()]],
+        ]);
     }
 
     protected function registeredVehicle(string $plate, string $uid, string $state = Vehicle::STATE_OUTSIDE): Vehicle

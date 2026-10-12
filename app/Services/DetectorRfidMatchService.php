@@ -6,16 +6,18 @@ use App\Models\RfidScanLog;
 use Carbon\Carbon;
 
 /**
- * Phase 5: decide whether a vehicle the detector saw crossing the trigger
- * line had a registered RFID tag (guest passes were removed in Phase 0).
+ * Phase 5: decide whether a vehicle pass the detector saw had a registered
+ * RFID tag (guest passes were removed in Phase 0).
  *
  * RFID only with a vehicle: the tag comes from the read buffer
  * (RfidTagMatcher), not from saved reads.
  * - Lookback: reads from ~10 seconds BEFORE the crossing count, because a UHF
  *   reader reads the tag while the vehicle is still approaching.
- * - One tag presence confirms one vehicle: when a detector window takes it, a
- *   different vehicle crossing later cannot reuse it. A second window within
- *   a few seconds of the first (YOLO track-id swap on the same car) may.
+ * - ROI work, Phase 3: the detector asks from the moment the vehicle was
+ *   Detected until its pass is ready to be Recorded (`until`), so a tag read
+ *   anywhere in the pass counts.
+ * - One tag presence confirms one vehicle pass: once a pass takes it, no
+ *   other pass can (a new track ID on the same vehicle keeps its pass).
  * - The returned RfidScanLog is not saved: the crossing makes the record.
  */
 class DetectorRfidMatchService
@@ -23,9 +25,6 @@ class DetectorRfidMatchService
     public const DEFAULT_LOOKBACK_SECONDS = 10;
 
     public const MAX_LOOKBACK_SECONDS = 15;
-
-    /** Same car, new YOLO track id: may reuse the claim within this gap. */
-    public const SAME_VEHICLE_REUSE_SECONDS = RfidTagMatcher::SAME_VEHICLE_REUSE_SECONDS;
 
     public function __construct(protected RfidTagMatcher $tagMatcher)
     {
@@ -41,9 +40,10 @@ class DetectorRfidMatchService
         Carbon $eventTime,
         int $windowSeconds = 4,
         int $lookbackSeconds = self::DEFAULT_LOOKBACK_SECONDS,
-        ?string $eventKey = null
+        ?string $eventKey = null,
+        ?Carbon $until = null
     ): ?RfidScanLog {
-        $presence = $this->tagMatcher->pick($cameraRole, $eventTime, $eventKey, registeredOnly: true);
+        $presence = $this->tagMatcher->pick($cameraRole, $eventTime, $eventKey, registeredOnly: true, until: $until);
 
         if ($presence === null) {
             return null;

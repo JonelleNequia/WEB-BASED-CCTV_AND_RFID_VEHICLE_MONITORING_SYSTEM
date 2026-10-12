@@ -64,6 +64,8 @@ class GateMonitorController extends Controller
                 'camera_error' => ($camera['camera_running'] ?? false) ? null : ($camera['last_error'] ?? null),
                 'stream_url' => $camera['stream_url'] ?? $detectorRuntimeService->defaultStreamUrl($location),
                 'logs' => app(RealtimeLogController::class)->gateLogRows($location, 8),
+                // ROI work, Phase 3: vehicles Detected and not Recorded yet.
+                'checking' => \App\Support\OpenPasses::at($runtime, $location),
             ];
         }
 

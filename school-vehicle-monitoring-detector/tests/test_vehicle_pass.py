@@ -279,6 +279,63 @@ class PassWorkerTests(Gate):
         self.assertEqual(client.crossings, [])
         self.assertEqual(self.state["passes_recorded"], 0)
 
+    def test_a_tag_read_after_the_window_is_still_found_until_the_pass_is_decided(self):
+        """ROI work, Phase 3: the RFID check runs from Detected until the pass is ready to be Recorded."""
+        for bottom in (300, 302, 304):                             # Detected, not decided yet
+            self.seen(bottom)
+        window = self.window()
+        window["deadline_at"] = time.monotonic()                  # the 2 s window is already over
+        client = LateTagClient(found_on_call=3)
+
+        def decide_later():
+            time.sleep(1.4)
+            with self.state["lock"]:
+                detector.set_window_direction_locked(window, {"direction": "IN", "confidence": "high", "reason": "toward the camera"})
+                window["left_zone_at"] = time.monotonic()
+
+        RealThread(target=decide_later).start()
+        self.run_worker(client)
+
+        self.assertGreaterEqual(client.calls, 3)
+        self.assertTrue(all(call["until"] for call in client.seen))   # the pass so far, not the old window
+        self.assertEqual(client.crossings[0][0]["detection_metadata"]["rfid_status"], "matched")
+
+    def test_every_detected_pass_gets_an_rfid_check_even_when_it_is_ready_at_once(self):
+        window = self.drive([200, 230, 260, 290, 320])            # decided, window over
+        client = LateTagClient(found_on_call=99)
+        for _ in range(6):
+            self.seen(None)
+        self.run_worker(client)
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(client.crossings[0][0]["detection_metadata"]["rfid_status"], "no_pass")
+        self.assertIsNotNone(window.get("decided_at"))
+
+    def test_open_passes_are_reported_until_recorded(self):
+        for bottom in (300, 302, 304):
+            self.seen(bottom)
+        passes = detector.open_passes(self.state)
+        self.assertEqual([(p["event_key"], p["rfid"]) for p in passes], [(self.window()["event_key"], "checking")])
+        self.window()["rfid_status"] = "matched"
+        self.assertEqual(detector.open_passes(self.state)[0]["rfid"], "matched")
+        self.window()["recorded_at"] = "2026-10-12T10:00:00+08:00"
+        self.assertEqual(detector.open_passes(self.state), [])
+
+
+class LateTagClient(RecordingClient):
+    """The vehicle's tag is found only on the Nth RFID check."""
+
+    def __init__(self, found_on_call):
+        super().__init__(matched=False)
+        self.found_on_call = found_on_call
+        self.calls = 0
+        self.seen = []
+
+    def check_rfid_match(self, camera_role, event_time, window_seconds=4, lookback_seconds=10, event_key=None, until=None):
+        self.calls += 1
+        self.seen.append({"event_key": event_key, "until": until})
+        matched = self.calls >= self.found_on_call
+        return {"matched": matched, "body": {"vehicle": {"plate_number": "LAT 1234"}} if matched else {}}
+
 
 if __name__ == "__main__":
     unittest.main()

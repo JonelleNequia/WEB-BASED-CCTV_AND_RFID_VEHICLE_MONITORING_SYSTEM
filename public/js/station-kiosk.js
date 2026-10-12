@@ -81,6 +81,7 @@
     // UI Phase 3 colors: green registered, gray unregistered, yellow needs a
     // look (unknown tag), red real problem (anomaly, lost tag, inactive vehicle).
     const RESULT_WORD = {
+        checking: 'CHECKING',
         verified: 'VERIFIED',
         unregistered: 'UNREGISTERED',
         unknown: 'UNKNOWN TAG',
@@ -108,15 +109,56 @@
         setResult(kind, RESULT_WORD[kind] || RESULT_WORD.alert, title, detail, window.ui ? window.ui.formatTime(new Date(), '') : '');
     }
 
-    // Plate, category, IN / OUT and time of the newest row.
+    // IN / OUT, "Registered: plate" (owner) or "Unregistered Visitor" (plate), and the time of the newest row.
     function showLatest(log) {
         setResult(
             TONE_LOOK[log.tone] || 'unregistered',
             log.direction_label || '—',
-            log.plate_number || '—',
-            log.category_label || '',
+            log.result_title || log.plate_number || '—',
+            log.result_detail ?? (log.category_label || ''),
             window.ui && log.event_time ? window.ui.formatTime(log.event_time) : ''
         );
+    }
+
+    /*
+     * ROI work, Phase 3: a vehicle Detected at this gate and not Recorded
+     * yet shows "Vehicle detected · checking RFID…" at once; its record
+     * (Registered / Unregistered Visitor) replaces it when it is Recorded.
+     */
+    let checkingKey = null;
+
+    function updateChecking(passes, logs) {
+        const recorded = new Set((Array.isArray(logs) ? logs : []).map((log) => log.pass_key).filter(Boolean));
+        const open = (Array.isArray(passes) ? passes : []).find((pass) => !recorded.has(pass.event_key));
+
+        if (open) {
+            if (open.event_key !== checkingKey) {
+                checkingKey = open.event_key;
+                setResult('checking', RESULT_WORD.checking, 'Vehicle detected', 'Checking RFID…',
+                    window.ui && open.detected_at ? window.ui.formatTime(open.detected_at) : '');
+            }
+            return true;
+        }
+
+        if (checkingKey) {
+            // Recorded (or it left without moving): back to the newest record.
+            checkingKey = null;
+            const latest = latestHere(logs);
+            if (latest) {
+                showLatest(latest);
+            } else if (resultBox) {
+                resultBox.className = 'scan-result is-idle';
+                setResultText('READY', 'Waiting for the next vehicle', '', '');
+            }
+        }
+        return false;
+    }
+
+    function setResultText(word, title, detail, time) {
+        resultBox.querySelector('[data-scan-word]').textContent = word;
+        resultBox.querySelector('[data-scan-title]').textContent = title;
+        resultBox.querySelector('[data-scan-detail]').textContent = detail;
+        resultBox.querySelector('[data-scan-time]').textContent = time;
     }
 
     function scanResultFor(body) {
@@ -240,13 +282,21 @@
 
     let latestKey = latestHere(payload.logs) ? stationLogKey(latestHere(payload.logs)) : null;
 
+    let latestText = null;
+
     function updateLatest(logs) {
         const latest = latestHere(logs);
         const key = latest ? stationLogKey(latest) : null;
+        const text = latest ? [latest.direction_label, latest.result_title, latest.result_detail].join('|') : null;
         if (key && key !== latestKey) {
             showLatest(latest);
+        } else if (key && resultBox && text !== latestText && !checkingKey) {
+            // Same record, more known now (the plate was read): update it quietly.
+            setResultText(latest.direction_label || '—', latest.result_title || latest.plate_number || '—',
+                latest.result_detail || '', resultBox.querySelector('[data-scan-time]').textContent);
         }
         latestKey = key;
+        latestText = text;
     }
 
     function renderLogs(logs) {
@@ -369,9 +419,17 @@
             updateStatus(body);
 
             renderLogs(body.logs || []);
+            return updateChecking(body.checking, body.logs);
         } catch (error) {
             setStatusChip(detectorChip, false, 'Detector', 'Detector offline');
         }
+        return false;
+    }
+
+    // Faster while a vehicle is being checked, so its result shows right away.
+    async function pollState() {
+        const checking = await refreshState();
+        window.setTimeout(pollState, checking ? 1000 : 2000);
     }
 
     async function submitRfidScan(rawUid) {
@@ -480,7 +538,6 @@
     updateStatus({ runtime: payload.detectorStatus, camera: payload.cameraStatus });
     renderLogs(payload.logs || []);
     bindRfidScanner();
-    refreshState();
+    pollState();
     window.setInterval(updateClock, 1000);
-    window.setInterval(refreshState, 2000);
 })();

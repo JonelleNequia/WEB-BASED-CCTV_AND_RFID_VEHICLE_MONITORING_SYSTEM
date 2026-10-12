@@ -146,7 +146,14 @@ class RfidIngestService
      */
     public function forCrossing(VehicleCrossing $crossing): array
     {
-        $presence = $this->tagMatcher->pick($crossing->gate, $crossing->crossed_at, $crossing->external_event_key);
+        // ROI work, Phase 3: the whole pass, from Detected (crossed_at) until it was Recorded.
+        $recordedAt = data_get($crossing->detection_metadata_json, 'pass.recorded_at');
+        $presence = $this->tagMatcher->pick(
+            $crossing->gate,
+            $crossing->crossed_at,
+            $crossing->external_event_key,
+            until: $recordedAt ? Carbon::parse($recordedAt) : null
+        );
 
         if ($presence === null) {
             return ['scan' => null, 'unknown_tag' => null];

@@ -1212,6 +1212,9 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
             "crossings_logged": state["crossings_logged"],
             # Debug counters (also drawn on the live view in debug mode).
             "detection": detection_counters(state),
+            # ROI work, Phase 3: vehicles Detected and not Recorded yet (the
+            # kiosk and Gate Monitor show "Vehicle detected · checking RFID…").
+            "open_passes": open_passes(state),
             # A1: one line: what the gate is doing, why, and what to do.
             "detection_status": status,
             "offline_since": datetime.fromtimestamp(state["backoff"].offline_since).astimezone().isoformat()
@@ -1284,6 +1287,28 @@ def detection_status(role, state, camera_config, model_info):
 def log_status_change(role, status):
     """A1: one log line when a gate's detection status changes (not every retry)."""
     return f"{role}: {status['label']}: {status['message']}" + (f" Next: {status['next_step']}" if status["next_step"] else "")
+
+
+# A pass open longer than this (a vehicle waiting in the zone) no longer shows "checking RFID".
+OPEN_PASS_SHOWN_SECONDS = 60.0
+
+
+def open_passes(state, now=None):
+    """
+    ROI work, Phase 3: passes Detected and not Recorded yet, newest first:
+    their event key, when they were Detected, and the RFID check so far
+    ("checking", or "matched" once the tag was found).
+    """
+    now = time.monotonic() if now is None else now
+    with state["lock"]:
+        windows = [window for window in state.get("pending_windows", {}).values()
+                   if not window.get("recorded_at") and now - float(window.get("started_at", now)) <= OPEN_PASS_SHOWN_SECONDS]
+        passes = [{
+            "event_key": window.get("event_key"),
+            "detected_at": window.get("event_time"),
+            "rfid": "matched" if window.get("rfid_status") == "matched" else "checking",
+        } for window in sorted(windows, key=lambda w: float(w.get("started_at", 0.0)), reverse=True)]
+    return passes
 
 
 def detection_counters(state):
@@ -2090,13 +2115,14 @@ def pass_worker(role, state, track_id, laravel_client):
     """
     One vehicle pass, outside the frame loop:
 
-    1. RFID window: poll Laravel for this vehicle's tag (matched / no pass).
-    2. Recorded: once the direction is sure (it moved far enough along the IN
-       is away from the camera or toward it) AND the RFID window is over,
-       even while it is still in the zone;
-       or when it left the zone / was lost before that (IN / OUT if the data
-       allows, else "Direction unknown"). A vehicle that never moved is not
-       recorded.
+    1. RFID check (ROI work, Phase 3): from the moment the vehicle was
+       Detected until the pass is ready to be Recorded, Laravel is asked for
+       this vehicle's tag (any read from `lookback` before Detected on).
+    2. Recorded: once the direction is sure (it clearly moved away from the
+       camera or toward it) AND the RFID window (`window_seconds` after
+       Detected) is over, even while it is still in the zone; or when it left
+       the zone / was lost before that (IN / OUT if the data allows, else
+       "Direction unknown"). A vehicle that never moved is not recorded.
     3. Until Left zone the SAME record is updated: a clearer picture (and the
        plate, type) replaces the first one. Never a second record.
     """
@@ -2107,23 +2133,18 @@ def pass_worker(role, state, track_id, laravel_client):
         return
 
     try:
-        matched = wait_for_rfid_match(role, state, track_id, laravel_client)
+        outcome, matched = check_rfid_until_ready(role, state, track_id, window, laravel_client)
+        if outcome == "gone":
+            return
         with state["lock"]:
             window["rfid_status"] = "matched" if matched else "no_pass"
-
-        waited = wait_for_window(state, track_id, window, lambda w: w.get("direction") is not None or w.get("left_zone_at"), PASS_MAX_OPEN_SECONDS)
-        if waited == "gone":
-            return
-        if waited == "timeout":
-            with state["lock"]:
+            if outcome == "timeout":
                 # Still in the zone after all this time and never sure: a parked vehicle.
                 measure = window.get("measure") or {}
                 if measure.get("moved", 0.0) < STILL_SHARE:
                     window.update(direction="STILL", direction_reason="did not move")
                 else:
                     window.update(direction="UNKNOWN", direction_reason=measure.get("reason") or "Direction unknown")
-
-        with state["lock"]:
             direction = window.get("direction")
 
         if direction == "STILL":
@@ -2148,58 +2169,61 @@ def pass_worker(role, state, track_id, laravel_client):
                 tracked["status"] = "processed"
 
 
-def wait_for_rfid_match(role, state, track_id, laravel_client):
+# A pass that stays open long (a vehicle waiting at the gate) is asked about less often.
+RFID_SLOW_POLL_AFTER_SECONDS = 30.0
+RFID_SLOW_POLL_INTERVAL_SECONDS = 2.0
+
+
+def check_rfid_until_ready(role, state, track_id, window, laravel_client):
     """
-    True when a pass read resolved the window (or it was resolved elsewhere),
-    False when the window ran out without one.
+    ROI work, Phase 3: the RFID check of one pass. Every Detected vehicle is
+    checked: Laravel is polled from Detected until the pass is ready to be
+    Recorded (direction decided or Left zone, and the tag found or the RFID
+    window after Detected over), with `until` = now, so a tag read anywhere
+    in the pass (and `lookback` before it) counts. Once a tag matched, no
+    more polls.
+
+    Returns (outcome, matched): outcome "ready", "timeout" (open for
+    PASS_MAX_OPEN_SECONDS and never sure) or "gone" (the pass was dropped).
     """
+    opened = time.monotonic()
+    matched = False
+    last_poll = None
+
     while True:
+        now = time.monotonic()
         with state["lock"]:
-            window = state["pending_windows"].get(track_id)
-
-            if not window:
-                return True
-
-            event_time = window["event_time"]
-            event_key = window["event_key"]
-            deadline_at = window["deadline_at"]
+            if state["pending_windows"].get(track_id) is not window:
+                return "gone", matched
+            matched = matched or window.get("rfid_status") == "matched"
+            # Decided, and the RFID check is over: the tag was found, or its window ran out.
+            ready = window.get("decided_at") is not None and (matched or now >= window["deadline_at"])
+            event_time, event_key = window["event_time"], window["event_key"]
             window_seconds = window.get("window_seconds", RFID_DETECTION_WINDOW_SECONDS)
             lookback_seconds = window.get("lookback_seconds", RFID_LOOKBACK_SECONDS)
 
-        remaining = deadline_at - time.monotonic()
-        if remaining <= 0:
-            break
+        interval = RFID_SLOW_POLL_INTERVAL_SECONDS if now - opened > RFID_SLOW_POLL_AFTER_SECONDS else RFID_POLL_INTERVAL_SECONDS
+        # A last check at the moment it is ready, so the latest reads count too.
+        if not matched and (last_poll is None or ready or now - last_poll >= interval):
+            last_poll = now
+            match = laravel_client.check_rfid_match(
+                role, event_time, window_seconds, lookback_seconds, event_key,
+                until=datetime.now().astimezone().isoformat(),
+            )
+            matched = apply_rfid_match_result(state, track_id, match) and bool(match.get("matched"))
 
-        if remaining < RFID_MATCH_TIMEOUT_SECONDS:
-            time.sleep(remaining)
-            break
-
-        match = laravel_client.check_rfid_match(
-            role,
-            event_time,
-            window_seconds,
-            lookback_seconds,
-            event_key,
-        )
-
-        if apply_rfid_match_result(state, track_id, match):
-            return True
-
-        sleep_for = min(
-            RFID_POLL_INTERVAL_SECONDS,
-            max(0.0, deadline_at - time.monotonic()),
-        )
-
-        if sleep_for <= 0:
-            break
-
-        time.sleep(sleep_for)
-
-    return False
+        if ready:
+            return "ready", matched
+        if now - opened >= PASS_MAX_OPEN_SECONDS:
+            return "timeout", matched
+        time.sleep(0.1)
 
 
 def set_window_direction_locked(window, decision):
     """The pass's direction (IN / OUT / UNKNOWN / STILL), why, and how sure."""
+    if decision.get("direction") is not None:
+        # The RFID check ends once the pass is decided (and its window is over).
+        window.setdefault("decided_at", time.monotonic())
     window["direction"] = decision.get("direction")
     window["direction_reason"] = decision.get("reason")
     window["direction_confidence"] = decision.get("confidence")
