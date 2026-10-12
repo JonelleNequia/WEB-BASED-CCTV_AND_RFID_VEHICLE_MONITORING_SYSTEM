@@ -55,12 +55,14 @@ from config import (
     performance_settings,
     resolve_capture_source,
 )
+from code_version import code_stamp, code_version
 from laravel_client import LaravelEventClient
 from tracking import (
     STILL_SHARE,
     VehiclePass,
     bbox_bottom_center,
     bbox_center,
+    calibration_problem,
     calibration_ready,
     normalized_away_direction,
     normalized_polygon_to_pixels,
@@ -1167,6 +1169,9 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
         "service_message": service_message,
         "updated_at": datetime.now().astimezone().isoformat(),
         "detector_model_path": MODEL_PATH,
+        # The code this detector loaded (Laravel compares it with the files on disk).
+        "code_version": RUNNING_CODE["version"],
+        "started_at": RUNNING_CODE["started_at"],
         "station_activity": station_activity,
         "camera_power_mode": "active" if station_activity["active"] else "standby",
         "pid": os.getpid(),
@@ -1262,9 +1267,11 @@ def detection_status(role, state, camera_config, model_info):
             NEXT_STEP_BY_ERROR.get(state.get("error_code"), "Check the camera's LAN cable and power."),
             backoff.seconds_left(now),
         )
-    if not calibration_ready(camera_config):
-        return result("no_zone", "Zone not set", "No detection zone yet.",
-                      "Draw it in Settings › Calibration.")
+    zone_problem = calibration_problem(camera_config)
+    if zone_problem and not camera_config.get("calibration_mask"):
+        return result("no_zone", "Zone not set", zone_problem, "Draw it in Settings › Calibration.")
+    if zone_problem:
+        return result("zone_invalid", "Zone invalid", zone_problem, "Draw the zone again in Settings › Calibration.")
     if model_info.get("model") is None:
         if "could not be loaded" in str(state.get("last_error")):
             return result("model_error", "Model error", short_reason(state.get("last_error")),
@@ -1281,6 +1288,10 @@ def detection_status(role, state, camera_config, model_info):
                       "Restart the detector if it stays.")
     if not debug.get("at"):
         return result("model_loading", "Starting", "First check starts in a moment…")
+    if normalized_away_direction(camera_config.get("away_direction")) is None:
+        # Still Detected and Recorded, only without IN / OUT.
+        return result("running", "Running", f"Watching for vehicles ({debug.get('detection_fps') or 0:.1f} checks per second). "
+                      "IN / OUT is not set: every vehicle is Direction unknown.", "Choose IN / OUT in Settings › Calibration.")
     return result("running", "Running", f"Watching for vehicles ({debug.get('detection_fps') or 0:.1f} checks per second).")
 
 
@@ -2169,7 +2180,7 @@ def pass_worker(role, state, track_id, laravel_client):
                 tracked["status"] = "processed"
 
 
-# A pass that stays open long (a vehicle waiting at the gate) is asked about less often.
+# A pass that stays open long (a vehicle stopped in the zone: traffic, a drop-off; there is no barrier) is asked about less often.
 RFID_SLOW_POLL_AFTER_SECONDS = 30.0
 RFID_SLOW_POLL_INTERVAL_SECONDS = 2.0
 
@@ -3664,9 +3675,31 @@ class _CombinedStop:
             event.set()
 
 
+# The code this process loaded, and when it started.
+RUNNING_CODE = {"version": code_version(), "stamp": code_stamp(), "started_at": datetime.now().astimezone().isoformat()}
+CODE_CHECK_INTERVAL_SECONDS = 5.0
+
+
+def code_changed_on_disk():
+    """
+    The detector's files were updated after it started (a new version was
+    installed or pulled): True when their content really differs.
+    """
+    try:
+        stamp = code_stamp()
+        if stamp == RUNNING_CODE["stamp"]:
+            return False
+        RUNNING_CODE["stamp"] = stamp
+        return code_version() != RUNNING_CODE["version"]
+    except OSError:
+        return False
+
+
 def run_detector_loop():
     """
-    Start the dual-camera vehicle detector until the user stops it.
+    Start the dual-camera vehicle detector until the user stops it, or
+    until its code is updated on disk: then it stops so that the new code
+    starts (Laravel starts it again; on Windows the service does).
     """
     ensure_output_directories()
     stream_server = start_stream_server()
@@ -3727,7 +3760,15 @@ def run_detector_loop():
                 print(f"Camera worker stopped for {role} (gate removed)", flush=True)
 
         last_metrics_log = time.monotonic()
+        last_code_check = time.monotonic()
+        print(f"Detector code {RUNNING_CODE['version']} started.", flush=True)
         while True:
+            if time.monotonic() - last_code_check >= CODE_CHECK_INTERVAL_SECONDS:
+                last_code_check = time.monotonic()
+                if code_changed_on_disk():
+                    print(f"Detector code changed on disk (running {RUNNING_CODE['version']}, now {code_version()}): restarting to load it.", flush=True)
+                    RUNNING_CODE["restarting"] = True
+                    raise KeyboardInterrupt("code updated")
             runtime_config = load_runtime_config()
             sync_camera_workers(runtime_config)
             write_status(
@@ -3756,7 +3797,7 @@ def run_detector_loop():
             camera_states,
             detector_models,
             service_running=False,
-            service_message="Detector service stopped by user.",
+            service_message="Detector code updated: restarting." if RUNNING_CODE.get("restarting") else "Detector service stopped by user.",
         )
         print("Detector service stopped.")
     except Exception as error:

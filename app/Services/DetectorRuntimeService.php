@@ -7,7 +7,9 @@ use App\Support\CameraFiles;
 use App\Support\CameraSource;
 use App\Support\PythonLauncher;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 
 class DetectorRuntimeService
 {
@@ -32,7 +34,16 @@ class DetectorRuntimeService
 
         $status = $this->withStationActivity($this->readStatus());
 
-        if (($status['service_running'] ?? false) && $this->isFresh($status['updated_at'] ?? null)) {
+        $running = ($status['service_running'] ?? false) && $this->isFresh($status['updated_at'] ?? null);
+
+        // Startup check: an older detector still runs after the code was
+        // updated (it never loads the new code by itself if it predates the
+        // self-restart). Stop it, then start the current code below.
+        if ($running && $this->codeCheck($status)['state'] === 'old' && $this->stopOldDetector($status)) {
+            $running = false;
+        }
+
+        if ($running) {
             $this->registerLaunchSuccess();
             // Plug-and-detect: keep the detector log from growing without limit.
             PythonLauncher::rotateLog($this->runtimeLogPath());
@@ -147,6 +158,87 @@ class DetectorRuntimeService
         }
 
         return array_replace_recursive($fallback, $decoded);
+    }
+
+    /**
+     * The detector code on disk, worked out like the detector does
+     * (school-vehicle-monitoring-detector/code_version.py): the first 12 hex
+     * digits of a SHA-1 over every top-level .py file except the programs
+     * that are not the detector.
+     */
+    public function codeVersion(): ?string
+    {
+        $files = collect(File::glob(PythonLauncher::directory().DIRECTORY_SEPARATOR.'*.py'))
+            ->reject(fn (string $path): bool => in_array(basename($path), ['device_service.py', 'camera_service.py', 'video_test.py'], true))
+            ->sortBy(fn (string $path): string => basename($path), SORT_STRING)
+            ->values();
+
+        if ($files->isEmpty()) {
+            return null;
+        }
+
+        return substr(sha1($files->map(fn (string $path): string => basename($path)."\0".sha1_file($path)."\n")->implode('')), 0, 12);
+    }
+
+    /**
+     * Is the running detector the code on disk? state: "current", "old"
+     * (an older version, or one from before versions were reported) or
+     * "unknown" (no detector running).
+     *
+     * @param  array<string, mixed>  $status
+     * @return array{state: string, running: ?string, on_disk: ?string, started_at: ?string}
+     */
+    public function codeCheck(array $status): array
+    {
+        $onDisk = $this->codeVersion();
+        $running = filled($status['code_version'] ?? null) ? (string) $status['code_version'] : null;
+        $alive = ($status['service_running'] ?? false) && $this->isFresh($status['updated_at'] ?? null);
+
+        return [
+            'state' => ! $alive ? 'unknown' : ($running !== null && $running === $onDisk ? 'current' : 'old'),
+            'running' => $running,
+            'on_disk' => $onDisk,
+            'started_at' => $status['started_at'] ?? null,
+        ];
+    }
+
+    /**
+     * Stop a detector running old code, so the current code starts. Only
+     * this project's detector process (its pid from the status), at most
+     * once every two minutes; never on a Windows service install (the
+     * service restarts it) or in tests.
+     *
+     * @param  array<string, mixed>  $status
+     */
+    protected function stopOldDetector(array $status): bool
+    {
+        $pid = (int) ($status['pid'] ?? 0);
+        if ($pid <= 1 || config('monitoring.services.managed') || app()->runningUnitTests() || ! function_exists('posix_kill')) {
+            return false;
+        }
+        if (! Cache::add('detector-old-code-restart', true, now()->addMinutes(2))) {
+            return false;
+        }
+
+        $command = (string) @shell_exec('ps -ww -o command= -p '.$pid);
+        if (! str_contains($command, PythonLauncher::directory()) || ! preg_match('/(camera|detector)_service\.py/', $command)) {
+            return false;
+        }
+
+        Log::warning('Stopping a detector that runs old code.', ['pid' => $pid, 'running' => $status['code_version'] ?? 'unknown (before versions)', 'on_disk' => $this->codeVersion()]);
+        posix_kill($pid, 15);
+        for ($i = 0; $i < 25 && posix_kill($pid, 0); $i++) {
+            usleep(200000);
+        }
+        if (posix_kill($pid, 0)) {
+            posix_kill($pid, 9);
+        }
+        // Start the new one right away (no cool-down from earlier attempts).
+        $this->writeLaunchState(['last_attempt_at' => null, 'failed_attempts' => 0, 'lock_until' => null]);
+        // The stream port is free now: the new detector may take it at once.
+        File::put($this->statusPath(), json_encode([...$status, 'service_running' => false, 'service_message' => 'Restarting with the updated detector code.'], JSON_PRETTY_PRINT));
+
+        return true;
     }
 
     public function statusPath(): string

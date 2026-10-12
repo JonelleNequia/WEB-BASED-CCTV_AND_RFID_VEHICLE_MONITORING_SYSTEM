@@ -1,5 +1,17 @@
 
 
+    {{-- Startup checks: the detector runs the current code; every gate's calibration can be used. --}}
+    @if (! empty($startupChecks ?? []))
+        <ul class="startup-checks" data-startup-checks>
+            @foreach ($startupChecks as $check)
+                <li class="startup-check tone-{{ $check['tone'] }}">
+                    <strong>{{ $check['title'] }}</strong>
+                    <span>{{ $check['detail'] }}</span>
+                </li>
+            @endforeach
+        </ul>
+    @endif
+
     <x-stat-row>
         <x-stat label="Detector Service" :value="($runtime['service_running'] ?? false) ? 'Running' : 'Not running'"
                 :tone="($runtime['service_running'] ?? false) ? 'success' : 'warning'"

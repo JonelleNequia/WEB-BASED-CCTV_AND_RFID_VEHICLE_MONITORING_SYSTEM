@@ -7852,3 +7852,35 @@ img.thumb-plate {
     }
 }
 
+/* Startup checks on System status: current detector code, usable calibration. */
+.startup-checks {
+    list-style: none;
+    margin: 0 0 1rem;
+    padding: 0;
+    display: grid;
+    gap: 0.4rem;
+}
+
+.startup-check {
+    display: grid;
+    gap: 0.15rem;
+    padding: 0.55rem 0.8rem;
+    border-radius: 8px;
+    border-left: 4px solid var(--border);
+    background: #fafafb;
+    font-size: 0.9rem;
+}
+
+.startup-check.tone-success {
+    border-left-color: #15803d;
+}
+
+.startup-check.tone-warning {
+    border-left-color: #f59e0b;
+}
+
+.startup-check.tone-critical {
+    border-left-color: #dc2626;
+    background: #fef2f2;
+}
+

@@ -277,9 +277,51 @@ class VehiclePass:
         return result
 
 
+def _segments_cross(a, b, c, d):
+    def side(p, q, r):
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+    d1, d2, d3, d4 = side(c, d, a), side(c, d, b), side(a, b, c), side(a, b, d)
+    return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0)) and 0 not in (d1, d2, d3, d4)
+
+
+def calibration_problem(camera_config):
+    """
+    Why the saved zone cannot be used, or None when it is fine. The zone is
+    saved as points 0-1 of the picture, so it fits any stream size (the
+    detector scales it to the frame it reads).
+    """
+    mask = camera_config.get("calibration_mask")
+    if not mask:
+        return "No detection zone yet."
+    if isinstance(mask, dict) and {"x", "y", "width", "height"} <= set(mask):
+        mask = [{"x": mask["x"], "y": mask["y"]}, {"x": mask["x"] + mask["width"], "y": mask["y"]},
+                {"x": mask["x"] + mask["width"], "y": mask["y"] + mask["height"]}, {"x": mask["x"], "y": mask["y"] + mask["height"]}]
+    try:
+        points = [(float(point["x"]), float(point["y"])) for point in mask]
+    except (KeyError, TypeError, ValueError):
+        return "The saved zone is not a list of points."
+    if len(points) < 3:
+        return "The saved zone has fewer than 3 points."
+    outside = [point for point in points if not (-0.001 <= point[0] <= 1.001 and -0.001 <= point[1] <= 1.001)]
+    if outside:
+        return f"The saved zone has points outside the picture (x={outside[0][0]:g}, y={outside[0][1]:g}; points must be 0-1)."
+    count = len(points)
+    for i in range(count):
+        for j in range(i + 1, count):
+            if j == i + 1 or (i == 0 and j == count - 1):
+                continue
+            if _segments_cross(points[i], points[(i + 1) % count], points[j], points[(j + 1) % count]):
+                return "The saved zone's edges cross each other."
+    area = abs(sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(points, points[1:] + points[:1]))) / 2
+    if area < 0.01:
+        return f"The saved zone covers only {area * 100:.1f}% of the picture."
+    return None
+
+
 def calibration_ready(camera_config):
     """
-    Automatic records need the zone. (IN / OUT also needs the gate's "away
-    from the camera" setting; without it every pass is Direction unknown.)
+    Automatic records need a usable zone. (IN / OUT also needs the gate's
+    "away from the camera" setting; without it every pass is Direction
+    unknown, but it is still Detected and Recorded.)
     """
-    return bool(camera_config.get("calibration_mask"))
+    return calibration_problem(camera_config) is None

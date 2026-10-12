@@ -250,7 +250,7 @@ class RfidOnlyWithVehicleTest extends TestCase
         $this->buffer([$this->presence('WAIT-TAG-8', firstAgo: 4, lastAgo: 0.1, peakAgo: 1)]);
         $this->passMatch('k-wait', $detected, now())->assertJsonPath('matched', true);
 
-        // It waited at the barrier: its tag has been read long enough to look parked.
+        // It stopped in the zone (traffic, a drop-off): its tag has been read long enough to look parked.
         $this->travel(90)->seconds();
         $this->cameraOnline();
         $this->buffer([$this->presence('WAIT-TAG-8', firstAgo: 94, lastAgo: 0.1, peakAgo: 91, reads: 500, stationary: true)]);
