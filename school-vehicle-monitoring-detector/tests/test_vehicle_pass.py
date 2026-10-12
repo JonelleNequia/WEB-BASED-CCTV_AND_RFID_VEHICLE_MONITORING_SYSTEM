@@ -32,6 +32,8 @@ ZONE = [{"x": 0.0, "y": 0.3}, {"x": 1.0, "y": 0.3}, {"x": 1.0, "y": 1.0}, {"x": 
 CAMERA = {"calibration_mask": ZONE, "away_direction": "OUT", "camera_id": 1}
 ZONE_PX = [(0, int(0.3 * H)), (W, int(0.3 * H)), (W, H), (0, H)]   # 291 px high
 FIRST_PASS = detector.PASS_KEY_START + 1                      # the key of a fresh state's first pass
+# Phase 4: missed detection frames before Left zone (0.75 s at the busy rate, 15 per second).
+LOST = detector.pass_settings({}, CAMERA)[1]
 
 
 def box(bottom, height=60, x=340, width=80):
@@ -115,11 +117,10 @@ class Gate(unittest.TestCase):
 
 
 class PassLifecycleTests(Gate):
-    def test_detected_after_three_frames_in_the_zone_and_the_rfid_check_starts(self):
+    def test_detected_after_two_frames_in_the_zone_and_the_rfid_check_starts(self):
         self.seen(200)
-        self.seen(205)
         self.assertIsNone(self.window())
-        self.seen(210)
+        self.seen(205)                                             # Phase 4: 2 frames at 15 per second
         self.assertEqual(self.state["passes_detected"], 1)
         self.assertEqual(self.state["track_overlays"][7], detector.waiting_overlay())
         self.assertEqual(self.thread.call_count, 1)                # the pass worker (RFID, record)
@@ -129,7 +130,7 @@ class PassLifecycleTests(Gate):
             self.seen(bottom)
         self.assertEqual((self.window()["direction"], self.window()["direction_confidence"]), ("IN", "medium"))  # same box size
         self.assertIsNone(self.window()["left_zone_at"])
-        for _ in range(6):                                         # out of view: Left zone after 6 frames
+        for _ in range(LOST):                                      # out of view: Left zone after 0.75 s
             self.seen(None)
         self.assertIsNotNone(self.window()["left_zone_at"])
         self.assertEqual((self.state["passes_detected"], self.thread.call_count), (1, 1))
@@ -157,7 +158,7 @@ class PassLifecycleTests(Gate):
     def test_the_tracker_reusing_an_id_later_is_a_new_pass_with_its_own_key(self):
         for bottom in range(200, 400, 25):
             self.seen(bottom)
-        for _ in range(6):
+        for _ in range(LOST):
             self.seen(None)
         for bottom in range(400, 200, -25):                        # another vehicle, same tracker ID
             self.seen(bottom)
@@ -169,16 +170,22 @@ class PassLifecycleTests(Gate):
         for step in range(40):
             self.seen(300 + (3 if step % 2 else -3))
         self.assertIsNone(self.window()["direction"])
-        for _ in range(6):
+        for _ in range(LOST):
             self.seen(None)
         self.assertEqual(self.window()["direction"], "STILL")
 
-    def test_a_flicker_of_two_frames_is_not_a_pass(self):
+    def test_a_flicker_of_one_frame_is_not_a_pass_and_two_still_frames_are_not_recorded(self):
         self.seen(300)
-        self.seen(310)
-        for _ in range(6):
+        for _ in range(LOST):
             self.seen(None)
         self.assertEqual((self.state["passes_detected"], self.thread.call_count), (0, 0))
+        # Phase 4: two frames are Detected (the RFID check starts at once), but it never moved.
+        self.seen(300, track_id=8)
+        self.seen(301, track_id=8)
+        self.assertEqual(self.state["passes_detected"], 1)
+        for _ in range(LOST):
+            self.seen(None)
+        self.assertEqual(self.window(FIRST_PASS + 1)["direction"], "STILL")
 
     def test_outside_the_zone_is_ignored(self):
         for bottom in (40, 60, 80, 100):                           # centre above the zone (y < 0.3)
@@ -250,8 +257,8 @@ class PassWorkerTests(Gate):
         self.assertEqual(len(client.crossings), 2)                 # Recorded + the update at Left zone
         first, second = client.crossings[0][0], client.crossings[1][0]
         self.assertEqual(first["external_event_key"], second["external_event_key"])
-        # Decided as soon as it was sure (4th frame), while still in the zone.
-        self.assertEqual((first["direction"], first["direction_reason"]), ("IN", "toward the camera: went down 31% of the zone; box size changed only 0%"))
+        # Decided as soon as it was sure (3rd frame), while still in the zone.
+        self.assertEqual((first["direction"], first["direction_reason"]), ("IN", "toward the camera: went down 21% of the zone; box size changed only 0%"))
         self.assertEqual(first["detection_metadata"]["direction_confidence"], "medium")
         self.assertEqual(first["detection_metadata"]["movement"]["movement"], "toward")
         self.assertEqual(first["detection_metadata"]["rfid_status"], "matched")
@@ -261,7 +268,7 @@ class PassWorkerTests(Gate):
 
     def test_lost_before_sure_is_recorded_as_direction_unknown(self):
         window = self.drive([300, 310, 320, 330])                  # 10% only
-        for _ in range(6):
+        for _ in range(LOST):
             self.seen(None)
         client = RecordingClient(matched=True)
         self.run_worker(client)
@@ -272,7 +279,7 @@ class PassWorkerTests(Gate):
 
     def test_a_vehicle_that_never_moved_is_not_recorded(self):
         self.drive([300, 302, 299, 301, 300])
-        for _ in range(6):
+        for _ in range(LOST):
             self.seen(None)
         client = RecordingClient()
         self.run_worker(client)
@@ -303,7 +310,7 @@ class PassWorkerTests(Gate):
     def test_every_detected_pass_gets_an_rfid_check_even_when_it_is_ready_at_once(self):
         window = self.drive([200, 230, 260, 290, 320])            # decided, window over
         client = LateTagClient(found_on_call=99)
-        for _ in range(6):
+        for _ in range(LOST):
             self.seen(None)
         self.run_worker(client)
         self.assertEqual(client.calls, 1)

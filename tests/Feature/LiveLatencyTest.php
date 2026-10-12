@@ -115,10 +115,11 @@ class LiveLatencyTest extends TestCase
         $this->assertSame(0, $entrance['decoder_threads']);
         $this->assertSame('main', DeviceAssignment::query()->where('station', 'gate-1')->value('options')['stream']);
         $performance = $runtime()['system_settings']['performance'];
-        // Live view work: proven defaults from config/monitoring.php (detection).
-        $this->assertSame([15.0, 960, 75, 8.0, 480, 'auto', 1], [
+        // Live view work: proven defaults from config/monitoring.php (detection);
+        // Phase 4: 15 checks per second when busy, 5 when quiet, input size by device.
+        $this->assertSame([15.0, 960, 75, 15.0, 5.0, 'auto', 'auto', 1], [
             (float) $performance['stream_fps'], $performance['stream_width'], $performance['jpeg_quality'],
-            (float) $performance['detection_fps'], $performance['yolo_imgsz'], $performance['yolo_device'], $performance['roi_crop'],
+            (float) $performance['detection_fps'], (float) $performance['detection_idle_fps'], $performance['yolo_imgsz'], $performance['yolo_device'], $performance['roi_crop'],
         ]);
 
         // Live view work: the Detection page is gone; camera settings stay in Advanced › Manual setup.

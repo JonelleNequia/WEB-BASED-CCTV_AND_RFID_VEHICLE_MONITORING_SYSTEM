@@ -170,9 +170,15 @@ return [
         'stream_fps' => 15.0,
         'stream_width' => 960,
         'jpeg_quality' => 75,
-        // Detection on each camera's sub stream.
-        'detection_fps' => 8.0,
-        'yolo_imgsz' => 480,
+        // Detection on each camera's sub stream. Phase 4: YOLO runs 15 times
+        // per second while something moves in the zone or a vehicle is in it,
+        // 5 while the zone is quiet; its input is 640 px on a GPU (CUDA,
+        // Apple) and 480 on a CPU only ("auto"). Measured on a harder test
+        // video (fast cars, convoys, both ways, a post in front): vehicles
+        // with a record 66.7% -> 98.1%, Detected 0.88 -> 0.32 s (median).
+        'detection_fps' => 15.0,
+        'detection_idle_fps' => 5.0,
+        'yolo_imgsz' => 'auto',
         'yolo_device' => env('DETECTOR_YOLO_DEVICE', 'auto'),
         'roi_crop' => 1,
         'hires_on_trigger' => 1,
@@ -186,8 +192,8 @@ return [
         // for a sure IN / OUT. 15% was best on the test videos (Phase 2:
         // 100% direction accuracy, nothing missed; 20% 96-100%, 25-30%
         // 76-92%). A gate can override it in Settings > Advanced > Timing.
-        'pass_min_frames' => 3,
-        'pass_lost_frames' => 6,
+        'pass_min_frames' => 2,
+        'pass_lost_seconds' => 0.75,
         'pass_min_move' => 0.15,
     ],
 

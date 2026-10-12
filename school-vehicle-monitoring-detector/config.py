@@ -69,8 +69,11 @@ PERFORMANCE_DEFAULTS = {
     "stream_fps": 15.0,        # JPEGs per second sent to the live views
     "stream_width": 960,       # live view width in pixels (resized before encoding)
     "jpeg_quality": 70,
-    "detection_fps": 8.0,      # YOLO runs per second per camera
-    "yolo_imgsz": 480,         # YOLO input size
+    # Phase 4: YOLO runs per second per camera while something moves in the
+    # zone or a vehicle is in it (busy), and while the zone is quiet (idle).
+    "detection_fps": 15.0,
+    "detection_idle_fps": 5.0,
+    "yolo_imgsz": "auto",      # YOLO input size: "auto" = 640 on a GPU (cuda / mps), 480 on a CPU; or a number
     "yolo_device": "auto",     # auto = cuda, then Apple mps, then cpu
     "roi_crop": 1,             # run YOLO only on the calibrated zone when it is smaller than the frame
     "hires_on_trigger": 1,     # fetch a full-resolution frame from the snapshot stream on each trigger
@@ -82,8 +85,8 @@ PERFORMANCE_DEFAULTS = {
     "type_truck_min_height": 0.35,  # Truck/Bus needs a back at least this share of the zone's height...
     "type_car_min_aspect": 1.05,    # ...and narrower (width / height) than this; otherwise it is a Car
     # ROI work: one vehicle = one pass through the zone (tracking.VehiclePass).
-    "pass_min_frames": 3,           # frames in the zone before it is Detected
-    "pass_lost_frames": 6,          # detection frames out of the zone / not seen before it Left zone
+    "pass_min_frames": 2,           # detection frames in the zone before it is Detected (Phase 4: 2 at 15/s)
+    "pass_lost_seconds": 0.75,      # not seen in the zone this long (at the busy rate) before it Left zone
     "pass_min_move": 0.15,          # share of the zone's height a vehicle moves up / down for a sure IN / OUT (per gate)
 }
 # The full-resolution stream is decoded with more threads, which delays it by

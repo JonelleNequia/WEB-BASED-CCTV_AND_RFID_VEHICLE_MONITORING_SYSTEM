@@ -56,6 +56,7 @@ from config import (
     resolve_capture_source,
 )
 from code_version import code_stamp, code_version
+from motion import MotionGate
 from laravel_client import LaravelEventClient
 from tracking import (
     STILL_SHARE,
@@ -67,6 +68,7 @@ from tracking import (
     normalized_away_direction,
     normalized_polygon_to_pixels,
     point_in_polygon,
+    zone_height,
 )
 from anpr import detect_vehicle_color, ocr_runtime_status, read_license_plate_details
 from plate_voting import frames_agree, vote_plate
@@ -2886,6 +2888,10 @@ def pass_settings(perf, camera_config):
     before it Left zone, and the share of the zone's height it must move up
     or down before IN / OUT is sure (per gate: Settings > Advanced; default
     in config/monitoring.php).
+
+    Phase 4: Left zone is a time (pass_lost_seconds) turned into detection
+    frames at the busy rate, the rate YOLO runs at while a vehicle is in the
+    zone (an older export may still give pass_lost_frames).
     """
     settings = {**PERFORMANCE_DEFAULTS, **(perf or {})}
     min_move = (camera_config or {}).get("pass_min_move")
@@ -2895,24 +2901,130 @@ def pass_settings(perf, camera_config):
         min_move = float(min_move)
     except (TypeError, ValueError):
         min_move = float(PERFORMANCE_DEFAULTS["pass_min_move"])
+    if settings.get("pass_lost_seconds") not in (None, ""):
+        lost_frames = round(float(settings["pass_lost_seconds"]) * busy_detection_fps(settings))
+    else:
+        lost_frames = int(settings.get("pass_lost_frames") or 6)
     return (
         max(1, int(settings["pass_min_frames"])),
-        max(1, int(settings["pass_lost_frames"])),
+        max(2, lost_frames),
         min(0.9, max(0.02, min_move)),
     )
+
+
+def busy_detection_fps(perf):
+    """Phase 4: YOLO runs per second while something moves in the zone or a vehicle is in it."""
+    return max(0.5, float((perf or {}).get("detection_fps") or PERFORMANCE_DEFAULTS["detection_fps"]))
+
+
+def idle_detection_fps(perf):
+    """Phase 4: YOLO runs per second while the zone is quiet (never more than the busy rate)."""
+    idle = (perf or {}).get("detection_idle_fps")
+    idle = float(PERFORMANCE_DEFAULTS["detection_idle_fps"] if idle in (None, "") else idle)
+    return max(0.5, min(idle, busy_detection_fps(perf)))
+
+
+# Busy for this long after the last movement in the zone.
+MOTION_HOLD_SECONDS = 1.0
+
+
+def note_motion(state, frame, camera_config, now):
+    """Phase 4: called for every captured frame; remembers when something last moved in the zone."""
+    gate = state.setdefault("motion_gate", MotionGate())
+    if gate.moved(frame, camera_config.get("calibration_mask"), now):
+        state["motion_at"] = now
+
+
+def detection_busy(state, now):
+    """Something moved in the zone just now, or a vehicle is in it (an open pass)."""
+    return now - float(state.get("motion_at") or -1e9) <= MOTION_HOLD_SECONDS or bool(state.get("passes"))
+
+
+def detection_interval(state, perf, now):
+    """Phase 4: seconds between YOLO runs: busy rate, or idle rate while the zone is quiet."""
+    return 1.0 / (busy_detection_fps(perf) if detection_busy(state, now) else idle_detection_fps(perf))
 
 
 # Pass keys never collide with the tracker's IDs.
 PASS_KEY_START = 1_000_000
 
 
-def boxes_overlap_mostly(left, right, share=0.7):
-    """One box mostly inside the other: YOLO's second box on the same vehicle."""
+def box_area(xyxy):
+    return max(0.0, xyxy[2] - xyxy[0]) * max(0.0, xyxy[3] - xyxy[1])
+
+
+def similar_size(left, right, ratio=0.5):
+    """Phase 4: the same vehicle has about the same box (a car behind it is smaller)."""
+    small, large = sorted((box_area(left), box_area(right)))
+    return large > 0 and small / large >= ratio
+
+
+def boxes_overlap_mostly(left, right):
+    """
+    YOLO's second box on the same vehicle: the boxes nearly coincide (IoU
+    >= 0.5), or one is mostly inside the other. (A car close behind another
+    may be swallowed this way while both are in view; when the front car
+    leaves and the tracker hands its ID to the one behind,
+    another_vehicle_took_the_id starts that car's own pass.)
+    """
     x1, y1 = max(left[0], right[0]), max(left[1], right[1])
     x2, y2 = min(left[2], right[2]), min(left[3], right[3])
     inside = max(0.0, x2 - x1) * max(0.0, y2 - y1)
-    smaller = min((left[2] - left[0]) * (left[3] - left[1]), (right[2] - right[0]) * (right[3] - right[1]))
-    return smaller > 0 and inside / smaller >= share
+    union = box_area(left) + box_area(right) - inside
+    smaller = min(box_area(left), box_area(right))
+    if union <= 0 or smaller <= 0:
+        return False
+    return inside / union >= 0.5 or inside / smaller >= 0.7
+
+
+def a_slice_of(part, whole):
+    """
+    Phase 4: a post or a person in front of a vehicle splits it in two: the
+    tracker follows one part and YOLO boxes the other part on its own. That
+    part is beside (or on) the vehicle's box, at the same height, with its
+    bottom level with the vehicle's, and at most half as wide. Two vehicles
+    side by side are about as wide as each other, so they are never joined.
+    """
+    part_w, whole_w = part[2] - part[0], whole[2] - whole[0]
+    part_h, whole_h = part[3] - part[1], whole[3] - whole[1]
+    if part_w <= 0 or whole_w <= 0 or part_w > 0.5 * whole_w:
+        return False
+    gap = max(part[0] - whole[2], whole[0] - part[2], 0.0)
+    level = abs(part[3] - whole[3]) <= 0.15 * max(part_h, whole_h)
+    rows = max(0.0, min(part[3], whole[3]) - max(part[1], whole[1])) >= 0.7 * part_h
+    # The gap is what hides the rest of the vehicle: up to about a third of its width.
+    return gap <= max(0.5 * part_w, 0.3 * whole_w) and level and rows
+
+
+def reappears_on_its_path(vehicle_pass, xyxy):
+    """
+    Phase 4: a vehicle hidden for a moment (a person or a post in front of
+    it) shows up again with a new track ID where it would be by now: its
+    ground point near the one predicted from its speed, and about as big.
+    """
+    points = vehicle_pass.points
+    last = getattr(vehicle_pass, "last_xyxy", None)
+    if last is None or len(points) < 2:
+        return False
+    recent = points[-4:]
+    step_x = (recent[-1][0] - recent[0][0]) / (len(recent) - 1)
+    step_y = (recent[-1][1] - recent[0][1]) / (len(recent) - 1)
+    frames = vehicle_pass.missed + 1
+    predicted = (recent[-1][0] + step_x * frames, recent[-1][1] + step_y * frames)
+    reach = max(30.0, 0.6 * (last[3] - last[1]), 0.5 * float(np.hypot(step_x, step_y)) * frames)
+    if similar_size(xyxy, last, 0.4):
+        here = bbox_bottom_center(xyxy)
+        return float(np.hypot(here[0] - predicted[0], here[1] - predicted[1])) <= reach
+    # Still partly hidden: only the visible part has a box. Its bottom is
+    # where the vehicle's would be, and it lies within the vehicle's width.
+    width = last[2] - last[0]
+    left = last[0] + step_x * frames
+    overlap = max(0.0, min(xyxy[2], left + width) - max(xyxy[0], left))
+    return (
+        box_area(xyxy) < box_area(last) * 1.5
+        and abs(xyxy[3] - predicted[1]) <= reach
+        and overlap >= 0.5 * max(1.0, xyxy[2] - xyxy[0])
+    )
 
 
 def adopt_pass_locked(state, track_id, xyxy, seen_keys=()):
@@ -2929,11 +3041,72 @@ def adopt_pass_locked(state, track_id, xyxy, seen_keys=()):
         if last is None:
             continue
         if key in seen_keys:
-            if boxes_overlap_mostly(xyxy, last):
+            if boxes_overlap_mostly(xyxy, last) or a_slice_of(xyxy, last):
                 return key
-        elif vehicle_pass.missed > 0 and bboxes_look_like_same_vehicle(xyxy, last):
+        elif vehicle_pass.missed > 0 and (bboxes_look_like_same_vehicle(xyxy, last) or reappears_on_its_path(vehicle_pass, xyxy)):
             return key
     return None
+
+
+def another_vehicle_took_the_id(vehicle_pass, xyxy, mask_polygon):
+    """
+    Phase 4: the same track ID, but clearly another vehicle: the box jumped
+    back against the way the vehicle was moving and got much smaller (the
+    car in front left the picture; the tracker moved its ID to the car
+    behind).
+    """
+    points = vehicle_pass.points
+    last = getattr(vehicle_pass, "last_xyxy", None)
+    if last is None or len(points) < 2:
+        return False
+    # The way it was moving over its last frames (its bottom may have stopped
+    # at the edge of the picture for the last few).
+    recent = points[-10:]
+    step = (recent[-1][1] - recent[0][1]) / (len(recent) - 1)
+    jump = bbox_bottom_center(xyxy)[1] - recent[-1][1]
+    zone = zone_height(mask_polygon) or 1.0
+    moving = abs(step) >= 0.005 * zone
+    went_back = moving and jump * step < 0 and abs(jump) >= max(30.0, 0.08 * zone)
+    if went_back and box_area(xyxy) <= 0.85 * box_area(last):
+        return True
+    # A jump no vehicle makes between two checks (over a quarter of the zone
+    # per check) to a box of another size: another object took the ID.
+    return abs(jump) >= 0.25 * zone * (vehicle_pass.missed + 1) and not similar_size(xyxy, last, 0.5)
+
+
+def merge_duplicate_passes_locked(state, seen_keys):
+    """
+    Phase 4: two open passes on the SAME vehicle in this frame (the tracker
+    gave a briefly hidden vehicle a new ID, then found the old one again):
+    keep one. The other is dropped only while it is not Recorded yet (a
+    record already sent stays); the one whose RFID check found the tag is
+    kept.
+    """
+    keys = sorted(key for key in seen_keys if key in state["passes"])
+    for index, older in enumerate(keys):
+        for younger in keys[index + 1:]:
+            if older not in state["passes"] or younger not in state["passes"]:
+                continue
+            a, b = state["passes"][older], state["passes"][younger]
+            if not boxes_overlap_mostly(a.last_xyxy, b.last_xyxy):
+                continue
+            windows = state["pending_windows"]
+            recorded = {key: bool((windows.get(key) or {}).get("recorded_at")) for key in (older, younger)}
+            matched = {key: (windows.get(key) or {}).get("rfid_status") == "matched" for key in (older, younger)}
+            if recorded[older] and recorded[younger]:
+                continue
+            drop, keep = (younger, older)
+            if recorded[younger] or (matched[younger] and not matched[older]):
+                drop, keep = (older, younger)
+            if recorded[drop]:
+                continue
+            for alias, target in list(state["pass_alias"].items()):
+                if target == drop:
+                    state["pass_alias"][alias] = keep
+            state["passes"].pop(drop, None)
+            if windows.pop(drop, None) is not None:
+                state["passes_detected"] = max(0, int(state.get("passes_detected", 0)) - 1)
+            print(f"pass {drop}: same vehicle as pass {keep}, merged", flush=True)
 
 
 def leave_zone_locked(state, key, vehicle_pass, mask_polygon, min_move, away_direction=None):
@@ -2993,6 +3166,13 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
             with state["lock"]:
                 key = state["pass_alias"].get(track_id)
                 fresh = False
+                if key in state["passes"] and key not in seen_keys and another_vehicle_took_the_id(state["passes"][key], xyxy, mask_polygon):
+                    # Phase 4: the vehicle in front left and the tracker gave its
+                    # ID to the one behind it: that vehicle is a new pass.
+                    print(f"{role} pass track {key}: its track ID now follows another vehicle; Left zone", flush=True)
+                    leave_zone_locked(state, key, state["passes"][key], mask_polygon, min_move, away_direction)
+                    state["pass_alias"].pop(track_id, None)
+                    key = None
                 if key not in state["passes"]:
                     # A new pass (or this track's earlier pass ended): a fresh key,
                     # unless this is the vehicle of an open pass (new ID, second box).
@@ -3048,6 +3228,7 @@ def process_results(role, frame, results, camera_config, state, laravel_client, 
                 detect_pass(role, frame, state, key, class_id, confidence, xyxy, camera_config, vehicle_labels, laravel_client, yolo_track_id=track_id)
 
     with state["lock"]:
+        merge_duplicate_passes_locked(state, seen_keys)
         for key, vehicle_pass in list(state["passes"].items()):
             if key in seen_keys:
                 continue
@@ -3283,6 +3464,8 @@ def camera_stream_worker(role, state, model_info, stop_event):
                         state["latest_frame_version"] += 1
                         with metrics.timed(role, "save"):
                             maybe_save_latest_frame(role, frame, state, now_monotonic)
+                    # Phase 4: cheap motion check in the zone (at most 10 times per second).
+                    note_motion(state, frame, camera_config, now_monotonic)
 
                     vehicle_labels = model_info.get("vehicle_labels", {})
 
@@ -3340,6 +3523,24 @@ def camera_stream_worker(role, state, model_info, stop_event):
     release_capture(state)
 
 
+def detection_due(state, now, interval):
+    """
+    Phase 4: is a YOLO run due? The schedule adds up (next = last due +
+    interval), so a 25 or 30 fps camera gets the set rate on average; before,
+    "interval since the last run" rounded it down to whole frames (15 per
+    second ran 12.5 times on a 25 fps camera, 8 ran 7.5 times on 30 fps).
+    Busy again after a quiet spell: due at once, not after the idle wait.
+    """
+    due = state.get("detection_due_at")
+    if due is None or now - due > interval or due - now > interval:
+        due = now
+    if now + 1e-6 < due:
+        return False
+    state["detection_due_at"] = due + interval
+    state["last_detection_at"] = now
+    return True
+
+
 def next_detection_frame(state, min_interval=None):
     """
     Return the newest frame when detection is due (its own rate, detection_fps),
@@ -3358,7 +3559,7 @@ def next_detection_frame(state, min_interval=None):
             if latest_frame_version - last_detected_frame_version < DETECTION_FRAME_INTERVAL:
                 return None, None
         elif latest_frame_version == last_detected_frame_version or \
-                time.monotonic() - state.get("last_detection_at", 0.0) < min_interval:
+                not detection_due(state, time.monotonic(), min_interval):
             return None, None
 
         state["last_detected_frame_version"] = latest_frame_version
@@ -3502,6 +3703,19 @@ def reset_tracker(model_info):
                 pass
 
 
+def yolo_input_size(perf, device):
+    """
+    Phase 4: YOLO input size. "auto": 640 on a GPU (small, far vehicles are
+    found in more frames; about 15 ms per run on an Apple M2), 480 on a CPU
+    (640 takes about 40 ms there: two busy gates could not run 15 times a
+    second). A number is used as it is.
+    """
+    value = str((perf or {}).get("yolo_imgsz", "auto")).strip().lower()
+    if value.isdigit():
+        return int(value)
+    return 640 if device in ("cuda", "mps") or str(device).startswith("cuda") else 480
+
+
 def run_yolo(role, model_info, frame, camera_config, perf, state):
     """
     YOLO + ByteTrack on the frame (or on the calibrated zone). Raises only
@@ -3526,11 +3740,11 @@ def run_yolo(role, model_info, frame, camera_config, perf, state):
             tracker=TRACKER_CONFIG,
             conf=RAW_CONFIDENCE_FLOOR,
             iou=DETECTION_IOU_THRESHOLD,
-            imgsz=int(perf["yolo_imgsz"]),
+            imgsz=yolo_input_size(perf, device),
             device=device,
         )[0]
     metrics.value(role, "yolo_device", device)
-    metrics.value(role, "yolo_input", f"{detect_input.shape[1]}x{detect_input.shape[0]}@{int(perf['yolo_imgsz'])}")
+    metrics.value(role, "yolo_input", f"{detect_input.shape[1]}x{detect_input.shape[0]}@{yolo_input_size(perf, device)}")
     return results, crop, detect_input.shape, device
 
 
@@ -3565,7 +3779,7 @@ def handle_detection(role, frame, results, crop, camera_config, perf, state, lar
             "passes_recorded": int(state["passes_recorded"]),
             "detection_fps": round(fps, 1),
             "device": device,
-            "imgsz": int(perf["yolo_imgsz"]),
+            "imgsz": yolo_input_size(perf, device),
             "tracks": {
                 str(track_id): [list(point) for point in entry["points"]]
                 for track_id, entry in state["track_points"].items()
@@ -3594,7 +3808,8 @@ def camera_detection_worker(role, state, model_info, stop_event):
         # whenever the detector is on.
         perf = performance_settings(load_runtime_config())
         state["debug_enabled"] = bool(perf.get("debug_overlay"))
-        frame, camera_config = next_detection_frame(state, 1.0 / max(0.5, perf["detection_fps"]))
+        # Phase 4: busy rate while something moves in the zone or a vehicle is in it, idle rate otherwise.
+        frame, camera_config = next_detection_frame(state, detection_interval(state, perf, time.monotonic()))
 
         if frame is None:
             stop_event.wait(0.01)

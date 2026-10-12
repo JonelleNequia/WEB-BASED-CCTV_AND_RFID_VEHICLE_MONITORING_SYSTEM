@@ -116,8 +116,8 @@ class PipelineTests(unittest.TestCase):
     def test_the_crossing_gets_the_voted_type_not_the_trigger_frame(self):
         with mock.patch("detector_service.threading.Thread"):
             self.step(150, 230, 2)                           # Car
-            self.step(170, 250, 2)                           # Car
-            self.step(190, 280, 7, 0.55)                     # "truck" (the frame it was Detected on)
+            self.step(170, 250, 7, 0.55)                     # "truck" (the frame it was Detected on: the 2nd, Phase 4)
+            self.step(190, 280, 2)                           # Car
             self.step(230, 330, 2)                           # Car
         window = self.state["pending_windows"][detector.PASS_KEY_START + 1]
         self.assertEqual(window["detected_vehicle_type"], vtype.TRUCK_BUS)  # the Detected frame alone said truck

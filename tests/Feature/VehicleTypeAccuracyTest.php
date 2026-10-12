@@ -115,7 +115,8 @@ class VehicleTypeAccuracyTest extends TestCase
         $performance = app(SettingsService::class)->performanceSettings(['perf_type_truck_min_height' => '60', 'perf_type_car_min_aspect' => '1.4']);
         $this->assertSame([0.35, 1.05, 'yolov8s.pt', 1], [$performance['type_truck_min_height'], $performance['type_car_min_aspect'], $performance['type_model'], $performance['type_second_pass']]);
         // ROI work: frames before Detected, missed frames before Left zone, default minimum movement (share of the zone's height).
-        $this->assertSame([3, 6, 0.15], [$performance['pass_min_frames'], $performance['pass_lost_frames'], $performance['pass_min_move']]);
+        // Phase 4: Detected after 2 checks; Left zone after 0.75 s unseen.
+        $this->assertSame([2, 0.75, 0.15], [$performance['pass_min_frames'], $performance['pass_lost_seconds'], $performance['pass_min_move']]);
         $this->assertArrayNotHasKey('cross_margin', $performance);
 
         app(SettingsService::class)->exportCameraRuntimeConfig();
