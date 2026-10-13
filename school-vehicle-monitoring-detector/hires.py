@@ -2,10 +2,15 @@
 Full-resolution frames on demand (live-latency work).
 
 The live view and YOLO use the camera's sub stream. The main stream is
-opened only while a vehicle is in the calibrated zone, so the snapshot and
-plate reading of a no-pass alert can use a sharp 2560x1440 frame instead of
-the small live frame. The connection closes a few seconds after the last
-vehicle, so the main stream is not decoded all the time.
+opened only while something moves in the calibrated zone or a vehicle is in
+it, so the record's picture and plate reading can use a sharp 2560x1440
+frame instead of the small live frame. The connection closes a few seconds
+after the last movement, so the main stream is not decoded all the time.
+
+Phase 5: a ring buffer of the last second (a frame every 0.1 s). The
+detector takes the frame of the moment its best picture was seen right
+away, and only a frame of that same moment (within 0.25 s): before, a frame
+up to 0.8 s away could show the vehicle somewhere else, or gone.
 """
 
 import threading
@@ -17,9 +22,9 @@ import cv2
 import metrics
 from config import HIRES_DECODE_DELAY_SECONDS
 
-KEEP_FRAMES = 8
-KEEP_EVERY_SECONDS = 0.2
-MATCH_WITHIN_SECONDS = 0.8
+KEEP_FRAMES = 10
+KEEP_EVERY_SECONDS = 0.1
+MATCH_WITHIN_SECONDS = 0.25
 
 
 class HiResGrabber:
@@ -82,6 +87,11 @@ class HiResGrabber:
                 capture.release()
             with self.lock:
                 self.busy = False
+
+    def frames_near(self, moment, within=0.15):
+        """Phase 5: (time, frame) of the kept full-resolution frames within `within` seconds of `moment` (not copied)."""
+        with self.lock:
+            return [(at, frame) for at, frame in self.frames if abs(at - moment) <= within]
 
     def frame_near(self, moment):
         """The kept full-resolution frame closest in time to `moment` (monotonic), or None."""

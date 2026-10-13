@@ -249,7 +249,8 @@ class PassWorkerTests(Gate):
         def leave_later():
             time.sleep(0.5)
             with self.state["lock"]:
-                window.update(best_area=window["best_area"] * 2, left_zone_at=time.monotonic())
+                # Phase 5: a clearly better picture (its score), seen before it left.
+                window.update(best_score=float(window.get("best_score") or 0.1) * 2, left_zone_at=time.monotonic())
 
         RealThread(target=leave_later).start()
         self.run_worker(client)

@@ -84,6 +84,8 @@ class VisitorController extends Controller
                 'plate' => $record->plateLabel(),
                 'who' => 'Unregistered Visitor',
                 'snapshot_url' => $record->snapshot_url,
+                // Phase 5: the plate's crop, read from the sharpest full-resolution frame.
+                'plate_image_url' => $record->plate_image_url,
                 'reason' => $record->crossing?->direction_reason,
                 'url' => route('visitors.records.direction', $record),
             ]);
@@ -97,6 +99,7 @@ class VisitorController extends Controller
                 'plate' => $event->plate_text ?: $event->vehicle?->plate_number ?: 'No plate',
                 'who' => 'Registered · '.($event->vehicle?->vehicle_owner_name ?: $event->vehicle?->owner_name ?: 'owner not set'),
                 'snapshot_url' => $event->rfidScanLog?->vehicleCrossing?->snapshot_url,
+                'plate_image_url' => null,
                 'reason' => $event->rfidScanLog?->vehicleCrossing?->direction_reason,
                 'url' => route('vehicle-events.direction', $event),
             ]);

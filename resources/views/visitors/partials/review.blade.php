@@ -30,7 +30,14 @@
                     @endif
                 </td>
                 <td>
-                    <strong>{{ $item['plate'] }}</strong>
+                    <div class="plate-cell">
+                        <strong>{{ $item['plate'] }}</strong>
+                        @if ($item['plate_image_url'])
+                            <button type="button" class="thumb-button" data-zoom="{{ $item['plate_image_url'] }}" data-zoom-label="Plate image">
+                                <img src="{{ $item['plate_image_url'] }}" alt="Plate image" class="thumb thumb-plate" loading="lazy">
+                            </button>
+                        @endif
+                    </div>
                     <div class="table-subtext">{{ $item['who'] }}</div>
                 </td>
                 <td class="nowrap">{{ \App\Models\Gate::labelFor($item['gate']) }}</td>

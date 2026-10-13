@@ -2285,10 +2285,14 @@ def second_pass_type(crop, settings):
 
 
 def best_vehicle_crop(window, hires_frame):
-    """The vehicle at its largest: from the full-resolution frame when there is one."""
-    snapshot = window.get("snapshot_frame")
+    """The vehicle in its best picture: from the full-resolution frame of that moment when there is one."""
+    best_hires = window.get("best_hires")
+    if hires_frame is not None and best_hires and best_hires[0] is hires_frame:
+        x1, y1, x2, y2 = scale_box(best_hires[1], hires_frame.shape, hires_frame.shape, pad=0.1)
+        return hires_frame[y1:y2, x1:x2]
+    snapshot = window.get("best_frame")
     if hires_frame is not None and snapshot is not None:
-        x1, y1, x2, y2 = scale_box(window["xyxy"], snapshot.shape, hires_frame.shape, pad=0.1)
+        x1, y1, x2, y2 = scale_box(window.get("best_xyxy") or window["xyxy"], snapshot.shape, hires_frame.shape, pad=0.1)
         return hires_frame[y1:y2, x1:x2]
     frames = [(frame, xyxy) for frame, xyxy in window.get("analysis_frames", []) if frame is not None]
     if not frames:
@@ -2311,13 +2315,108 @@ def final_vehicle_type(window, hires_frame):
     return vtype.decide(vote, second, float(window.get("zone_height") or 0.0), settings, fallback=window.get("detected_vehicle_type"))
 
 
-def best_picture_locked(window):
-    """The clearest picture of the pass so far (the vehicle at its largest) and its box."""
+def best_picture_locked(window, full_resolution=False):
+    """
+    The best picture of the pass so far and the vehicle's box in it.
+    full_resolution: the main stream's frame of that moment when there is
+    one (Phase 5), else the live frame.
+    """
+    if full_resolution and window.get("best_hires"):
+        frame, box = window["best_hires"]
+        return frame.copy(), tuple(box)
     frame = window.get("best_frame")
     if frame is None:
         frame = window.get("snapshot_frame")
         return (frame.copy() if frame is not None else None), tuple(window.get("xyxy", ()))
     return frame.copy(), tuple(window.get("best_xyxy") or window.get("xyxy", ()))
+
+
+def vehicle_sharpness(frame, xyxy):
+    """Laplacian variance of the vehicle's part of the frame, 160 px wide (blur from speed or a bad frame is low)."""
+    x1, y1, x2, y2 = [int(value) for value in xyxy]
+    crop = frame[max(0, y1):max(0, y2), max(0, x1):max(0, x2)]
+    if not crop.size:
+        return 0.0
+    small = cv2.resize(crop, (160, max(1, int(160 * crop.shape[0] / crop.shape[1]))), interpolation=cv2.INTER_AREA)
+    return float(cv2.Laplacian(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var())
+
+
+def sharpest_hires_frame(role, moment, live_xyxy, live_shape, velocity=(0.0, 0.0)):
+    """
+    Phase 5: of the main stream's frames of this moment (within 0.15 s),
+    the one where the vehicle is sharpest, with the vehicle's box in it;
+    None without a main stream. A frame or two apart can differ a lot (a
+    compressed or blurred frame now and then). The vehicle moves between
+    them: its box is moved by its speed (live-frame pixels per second).
+    """
+    grabber = HIRES.get(role)
+    frames = grabber.frames_near(moment, 0.1) if grabber is not None and hasattr(grabber, "frames_near") else []
+    if not frames:
+        frame = grabber.frame_near(moment) if grabber is not None else None
+        frames = [(moment, frame)] if frame is not None else []
+    if not frames:
+        return None
+
+    def box_at(at):
+        dx, dy = velocity[0] * (at - moment), velocity[1] * (at - moment)
+        x1, y1, x2, y2 = live_xyxy
+        return scale_box((x1 + dx, y1 + dy, x2 + dx, y2 + dy), live_shape, frames[0][1].shape, pad=0.0)
+
+    def inside(box, shape):
+        x1, y1, x2, y2 = box
+        visible = max(0, min(x2, shape[1]) - max(x1, 0)) * max(0, min(y2, shape[0]) - max(y1, 0))
+        return visible >= 0.8 * max(1, (x2 - x1) * (y2 - y1))
+
+    # The frame nearest the moment, unless another is clearly sharper (a
+    # sharper-looking frame further away may show the road, not the vehicle).
+    frames.sort(key=lambda item: abs(item[0] - moment))
+    at, best = frames[0]
+    best_sharpness = vehicle_sharpness(best, box_at(at))
+    for other_at, other in frames[1:]:
+        box = box_at(other_at)
+        sharpness = vehicle_sharpness(other, box)
+        if inside(box, other.shape) and sharpness >= 1.3 * best_sharpness:
+            at, best, best_sharpness = other_at, other, sharpness
+    return best.copy(), box_at(at)
+
+
+def picture_details(window, frame, box):
+    """Phase 5: what the record's picture is (kept with the record): main or live stream, size, sharpness, whole vehicle."""
+    if frame is None or not box:
+        return None
+    height, width = frame.shape[:2]
+    mx, my = EDGE_MARGIN * width, EDGE_MARGIN * height
+    return {
+        "source": "main" if window.get("best_hires") else "live",
+        "size": [int(width), int(height)],
+        "sharpness": round(vehicle_sharpness(frame, box), 1),
+        "whole": bool(box[0] > mx and box[1] > my and box[2] < width - mx and box[3] < height - my),
+        "score": round(float(window.get("best_score") or 0.0), 4),
+    }
+
+
+# Phase 5: a box closer than this share of the picture to its edge is cut off.
+EDGE_MARGIN = 0.02
+
+
+def picture_score(frame, xyxy):
+    """
+    Phase 5: how good a picture of the vehicle this frame is (higher is
+    better): bigger is better (square root: a little bigger does not beat a
+    lot sharper), a vehicle cut off by the picture's edge counts much less,
+    and a blurred one (speed, a bad frame) less (Laplacian variance of the
+    vehicle, 160 px wide).
+    """
+    height, width = frame.shape[:2]
+    x1, y1, x2, y2 = [float(value) for value in xyxy]
+    area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    if area <= 0:
+        return 0.0
+    mx, my = EDGE_MARGIN * width, EDGE_MARGIN * height
+    whole = x1 > mx and y1 > my and x2 < width - mx and y2 < height - my
+    sharp = vehicle_sharpness(frame, xyxy)
+    sharpness = sharp / (sharp + 100.0)
+    return float(np.sqrt(area / (width * height))) * (1.0 if whole else 0.4) * (0.3 + 0.7 * sharpness)
 
 
 def crossing_payload_locked(role, track_id, window, rfid_status, type_decision, picture_xyxy):
@@ -2355,15 +2454,21 @@ def record_pass(role, state, track_id, window, rfid_status, laravel_client):
     it was detected, track, type, the clearest picture so far) to Laravel.
     """
     # A2: the final type from every frame, a second check and the size rule.
-    hires_frame = HIRES[role].frame_near(window.get("best_at", window["started_at"])) if role in HIRES else None
+    # Phase 5: the main stream's frame of the best moment (taken then), for the type's second check.
+    hires_frame = (window.get("best_hires") or (None, None))[0]
     type_decision = final_vehicle_type(window, hires_frame)
 
     with state["lock"]:
         window["detected_vehicle_type"] = type_decision["type"] or window.get("detected_vehicle_type")
         window["recorded_at"] = datetime.now().astimezone().isoformat()
         window["recorded_area"] = float(window.get("best_area") or 0.0)
+        window["recorded_score"] = float(window.get("best_score") or 0.0)
         picture, picture_xyxy = best_picture_locked(window)
         payload = crossing_payload_locked(role, track_id, window, rfid_status, type_decision, picture_xyxy)
+        # Phase 5: the picture sent is the main stream's frame of the best moment when there is one.
+        snapshot_frame, snapshot_box = best_picture_locked(window, full_resolution=True)
+        payload["detection_metadata"]["snapshot_box"] = [round(float(value), 1) for value in snapshot_box]
+        payload["detection_metadata"]["picture"] = picture_details(window, snapshot_frame, snapshot_box)
         direction = payload["direction"]
         state["direction_counts"][direction] = state["direction_counts"].get(direction, 0) + 1
         state["recent_records"].append({"track_id": window.get("track_id", track_id), "direction": direction, "at": time.monotonic()})
@@ -2374,8 +2479,7 @@ def record_pass(role, state, track_id, window, rfid_status, laravel_client):
     print(f"{role} pass track {window.get('track_id', track_id)}: Recorded {direction} ({payload['direction_reason']}), "
           f"{payload['detected_vehicle_type']} ({type_decision['rule']}), RFID {rfid_status}", flush=True)
 
-    frame = hires_frame if hires_frame is not None else picture
-    snapshot = encode_frame_snapshot(role, frame, f"crossing-{window['event_key']}") if frame is not None else None
+    snapshot = encode_frame_snapshot(role, snapshot_frame, f"crossing-{window['event_key']}") if snapshot_frame is not None else None
     submit = getattr(laravel_client, "submit_crossing", None)
     if submit is None:
         return
@@ -2393,21 +2497,29 @@ def update_record_after_left_zone(role, state, track_id, window, matched, larave
     clearly better than the one sent when it was Recorded.
     """
     with state["lock"]:
-        better = float(window.get("best_area") or 0.0) >= float(window.get("recorded_area") or 0.0) * BETTER_PICTURE_RATIO
+        # Phase 5: a clearly better picture (bigger, whole, sharper), not only a bigger box.
+        better = float(window.get("best_score") or 0.0) >= float(window.get("recorded_score") or 0.0) * BETTER_PICTURE_RATIO
         if not better:
             return
         picture, picture_xyxy = best_picture_locked(window)
+        snapshot_frame, snapshot_box = best_picture_locked(window, full_resolution=True)
 
-    hires_frame = HIRES[role].frame_near(window.get("best_at", window["started_at"])) if role in HIRES else None
+    # Phase 5: the main stream's frame of the best moment (taken then), for the type's second check.
+    hires_frame = (window.get("best_hires") or (None, None))[0]
     type_decision = final_vehicle_type(window, hires_frame)
     with state["lock"]:
         window["detected_vehicle_type"] = type_decision["type"] or window.get("detected_vehicle_type")
         payload = crossing_payload_locked(role, track_id, window, "matched" if matched else "no_pass", type_decision, picture_xyxy)
+        payload["detection_metadata"]["snapshot_box"] = [round(float(value), 1) for value in snapshot_box]
+        payload["detection_metadata"]["picture"] = picture_details(window, snapshot_frame, snapshot_box)
         analysis_frames = [(frame.copy(), tuple(xyxy)) for frame, xyxy in window.get("analysis_frames", []) if frame is not None]
         hires_frames = list(window.get("hires_frames", []))
+        best_hires = window.get("best_hires")
 
-    frame = hires_frame if hires_frame is not None else picture
-    snapshot = encode_frame_snapshot(role, frame, f"crossing-{window['event_key']}-left") if frame is not None else None
+    if best_hires:
+        # The sharpest full-resolution frame first for the plate as well.
+        hires_frames = [(best_hires[0], best_hires[1])] + hires_frames
+    snapshot = encode_frame_snapshot(role, snapshot_frame, f"crossing-{window['event_key']}-left") if snapshot_frame is not None else None
     submit = getattr(laravel_client, "submit_crossing", None)
     if submit is not None:
         submit(payload, snapshot["bytes"] if snapshot else None, snapshot["filename"] if snapshot else None)
@@ -2621,6 +2733,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
         ]
         window_started_at = window.get("started_at", now_monotonic)
         hires_analysis_frames = list(window.get("hires_frames", []))
+        best_hires = window.get("best_hires")
         window_payload = {
             "event_key": window["event_key"],
             "camera_id": window.get("camera_id"),
@@ -2655,9 +2768,10 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             state["last_error"] = f"{role.capitalize()} unregistered vehicle: no snapshot frame was available."
         return
 
-    # A full-resolution frame from the moment of the crossing, when available:
-    # sharper snapshot and plate reading than the small live-stream frame.
-    hires_frame = HIRES[role].frame_near(window.get("best_at", window_started_at)) if role in HIRES else None
+    # A full-resolution frame of the best moment (Phase 5: taken when it was
+    # seen; the ring buffer only keeps the last second): sharper snapshot
+    # and plate reading than the small live-stream frame.
+    hires_frame = best_hires[0] if best_hires else None
     if hires_frame is not None:
         hires_box = scale_box(window_payload["xyxy"], snapshot_frame.shape, hires_frame.shape)
         analysis_frames = [(hires_frame, hires_box)] + analysis_frames
@@ -2833,8 +2947,22 @@ def update_detection_windows(role, frame, results, state, laravel_client):
             window["confidence"] = visible_box["confidence"]
             window["snapshot_frame"] = frame.copy()
             area = float((x2 - x1) * (y2 - y1))
-            if area > float(window.get("best_area") or 0.0):
-                window.update(best_frame=frame.copy(), best_xyxy=tuple(visible_box["xyxy"]), best_area=area, best_at=now_monotonic)
+            # Phase 5: the best picture of the pass: big, the whole vehicle in
+            # the picture, and sharp (not the biggest box, often cut off at the
+            # edge or blurred by speed).
+            score = picture_score(frame, visible_box["xyxy"])
+            # Its speed in the live frame (pixels per second), to find it in the main stream's frames.
+            previous = window.get("last_box_at")
+            if previous and now_monotonic > previous[1]:
+                elapsed = now_monotonic - previous[1]
+                window["velocity"] = ((x1 - previous[0][0]) / elapsed, (y2 - previous[0][3]) / elapsed)
+            window["last_box_at"] = (tuple(visible_box["xyxy"]), now_monotonic)
+            if score > float(window.get("best_score") or 0.0):
+                window.update(best_frame=frame.copy(), best_xyxy=tuple(visible_box["xyxy"]), best_area=area,
+                              best_score=score, best_at=now_monotonic)
+                # The full-resolution frame of this very moment, taken now (the
+                # ring buffer only keeps the last second).
+                window["best_hires"] = sharpest_hires_frame(role, now_monotonic, visible_box["xyxy"], frame.shape, window.get("velocity", (0.0, 0.0)))
 
             if now_monotonic - float(window.get("last_analysis_frame_at", 0.0)) >= GUEST_ANALYSIS_FRAME_INTERVAL_SECONDS:
                 analysis_frames = window.setdefault("analysis_frames", [])
@@ -3716,6 +3844,16 @@ def yolo_input_size(perf, device):
     return 640 if device in ("cuda", "mps") or str(device).startswith("cuda") else 480
 
 
+def hires_wanted(state, results, camera_config, frame, vehicle_labels, now=None):
+    """
+    Phase 5: keep the main stream open while something moves in the zone or
+    a vehicle is in it, so its frames are there from the first moment (it
+    takes about a second to open).
+    """
+    now = time.monotonic() if now is None else now
+    return detection_busy(state, now) or vehicle_in_zone(results, camera_config, frame, vehicle_labels)
+
+
 def run_yolo(role, model_info, frame, camera_config, perf, state):
     """
     YOLO + ByteTrack on the frame (or on the calibrated zone). Raises only
@@ -3861,7 +3999,7 @@ def camera_detection_worker(role, state, model_info, stop_event):
         state["retry_count"] = 0
         state["last_error"] = ""
         # A vehicle in the zone: have full-resolution frames ready for its snapshot.
-        if perf["hires_on_trigger"] and camera_config.get("snapshot_source_value") and vehicle_in_zone(results, camera_config, frame, vehicle_labels):
+        if perf["hires_on_trigger"] and camera_config.get("snapshot_source_value") and hires_wanted(state, results, camera_config, frame, vehicle_labels):
             hires_grabber(role).trigger(camera_config)
         metrics.rate(role, "detection")
         metrics.timing(role, "detection_age", (time.monotonic() - frame_time) * 1000.0)
