@@ -116,8 +116,12 @@ class PlugAndDetectDevicesTest extends TestCase
         $this->assertSame('secret', Crypt::decryptString($raw));
 
         // The exit station reuses the saved login: no question this time.
+        // Phase 6: the same camera on a second gate only when asked for (testing).
         $this->actingAs($this->admin)
             ->postJson(route('settings.devices.assign', $camera), ['station' => 'gate-2', 'role' => 'camera', 'stream' => 'sub'])
+            ->assertStatus(409);
+        $this->actingAs($this->admin)
+            ->postJson(route('settings.devices.assign', $camera), ['station' => 'gate-2', 'role' => 'camera', 'stream' => 'sub', 'share' => true])
             ->assertOk();
         $this->assertSame('rtsp://198.51.100.20:554/stream2', app(\App\Services\CameraStreams::class)->forGate('gate-2')['live']);
 
@@ -265,7 +269,7 @@ class PlugAndDetectDevicesTest extends TestCase
         $registry->ingestScan($this->scan());
         $camera = NetworkDevice::query()->where('mac', '34:F7:16:00:00:01')->firstOrFail();
         $registry->assign($camera, 'gate-1', 'camera', ['username' => 'admin', 'password' => 'secret', 'stream' => 'main']);
-        $registry->assign($camera, 'gate-2', 'camera', ['stream' => 'sub']);
+        $registry->assign($camera, 'gate-2', 'camera', ['stream' => 'sub', 'share' => true]);
 
         // What the detector reports: Entrance live, Exit rejected the login.
         File::ensureDirectoryExists(\App\Support\CameraFiles::directory());

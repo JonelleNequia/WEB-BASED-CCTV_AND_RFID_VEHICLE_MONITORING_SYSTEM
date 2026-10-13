@@ -71,10 +71,11 @@
         } catch (error) {
             json = {};
         }
-        if (!response.ok && response.status !== 422) {
-            throw new Error(json.message || 'The request failed.');
+        // 409: already on another gate (Phase 6): the form asks "Move it here?".
+        if (!response.ok && response.status !== 422 && response.status !== 409) {
+            throw new Error(json.message || `The request failed (error ${response.status}).`);
         }
-        return { ok: response.ok, json: json };
+        return { ok: response.ok, status: response.status, json: json };
     }
 
     function deviceById(id) {
@@ -734,7 +735,7 @@
         submit.type = 'submit';
         const rowButtons = el('div', 'button-row');
         rowButtons.append(submit);
-        form.append(message, rowButtons);
+        form.append(message, conflictRow, rowButtons);
 
         function syncRole() {
             const role = form.querySelector('input[name="role"]:checked')?.value;
@@ -746,12 +747,26 @@
         form.addEventListener('change', syncRole);
         syncRole();
 
+        // Phase 6: the answer to "Already on Gate 1. Move it here?" (move / share).
+        let choice = {};
+        const conflictRow = el('div', 'button-row');
+        conflictRow.hidden = true;
+        function ask(result) {
+            conflictRow.replaceChildren(...[
+                result.json.conflict?.can_share ? button('Use it for both gates', 'button button-secondary button-sm', () => { choice = { share: true }; form.requestSubmit(); }) : null,
+                button('Move it here', 'button button-primary button-sm', () => { choice = { move: true }; form.requestSubmit(); }),
+            ].filter(Boolean));
+            conflictRow.hidden = false;
+        }
+        form.addEventListener('change', () => { choice = {}; conflictRow.hidden = true; });
+
         form.addEventListener('submit', async function (event) {
             event.preventDefault();
             const body = {
                 role: form.querySelector('input[name="role"]:checked')?.value,
                 station: form.querySelector('input[name="station"]:checked')?.value,
                 stream: select.value,
+                ...choice,
             };
             if (!login.hidden) {
                 body.username = form.querySelector('[name="username"]').value.trim();
@@ -776,11 +791,18 @@
                     form.querySelector('[name="username"]').focus();
                     return;
                 }
+                if (result.status === 409 && result.json.conflict) {
+                    message.textContent = result.json.message;
+                    message.dataset.state = 'error';
+                    ask(result);
+                    return;
+                }
                 if (!result.ok) {
-                    message.textContent = result.json.message || 'Could not assign this device.';
+                    message.textContent = result.json.message || Object.values(result.json.errors || {}).flat()[0] || 'Could not assign this device.';
                     message.dataset.state = 'error';
                     return;
                 }
+                choice = {};
                 window.ui.toast(result.json.message, 'success');
                 if (result.json.warning) {
                     window.ui.toast(result.json.warning, 'warning', { timeout: 8000 });

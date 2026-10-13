@@ -181,9 +181,52 @@ class DeviceRegistryService
         $station = Gate::resolveCode($station) ?? abort(422);
         abort_unless(in_array($role, [DeviceAssignment::ROLE_CAMERA, DeviceAssignment::ROLE_READER], true), 422);
 
+        // Phase 6: already this role at another gate: asked first, never
+        // silently on two gates (a camera may be shared for testing when asked).
+        $elsewhere = DeviceAssignment::query()
+            ->where('network_device_id', $device->id)
+            ->where('role', $role)
+            ->where('station', '!=', $station)
+            ->orderBy('id')
+            ->first();
+        $move = (bool) ($input['move'] ?? false);
+        $share = $role === DeviceAssignment::ROLE_CAMERA && (bool) ($input['share'] ?? false);
+
+        // Already this gate's device too (a login change, a shared camera): nothing to ask.
+        $here = DeviceAssignment::query()->where('network_device_id', $device->id)->where('role', $role)->where('station', $station)->exists();
+
+        if ($elsewhere && ! $here && ! $move && ! $share) {
+            $thing = $role === DeviceAssignment::ROLE_CAMERA ? 'camera' : 'reader';
+
+            return [
+                'ok' => false,
+                'status' => 409,
+                'message' => "This {$thing} is already the {$thing} of ".Gate::labelFor($elsewhere->station).'. Move it to '.Gate::labelFor($station).'?',
+                'conflict' => [
+                    'station' => $elsewhere->station,
+                    'label' => Gate::labelFor($elsewhere->station),
+                    'role' => $role,
+                    'can_share' => $role === DeviceAssignment::ROLE_CAMERA,
+                ],
+            ];
+        }
+
         $result = $role === DeviceAssignment::ROLE_CAMERA
             ? $this->assignCamera($device, $station, $input)
             : $this->assignReader($device, $station, $input);
+
+        if ($result['ok'] && $elsewhere && $move) {
+            // Moved: the other gate has no camera / reader now.
+            DeviceAssignment::query()->where('network_device_id', $device->id)->where('role', $role)->where('station', '!=', $station)
+                ->get()
+                ->each(function (DeviceAssignment $old) use ($role): void {
+                    $this->unassign($old->station, $role, sync: false);
+                    if ($role === DeviceAssignment::ROLE_CAMERA) {
+                        Camera::query()->forRole($old->station)->update(['source_type' => Camera::SOURCE_NONE, 'source_value' => '', 'snapshot_source_value' => null]);
+                    }
+                });
+            $result['message'] = preg_replace('/ assigned\b/', ' assigned (moved from '.Gate::labelFor($elsewhere->station).')', $result['message'], 1);
+        }
 
         if ($result['ok']) {
             $device->forceFill(['is_new' => false])->save();
@@ -199,7 +242,14 @@ class DeviceRegistryService
      */
     protected function assignCamera(NetworkDevice $device, string $station, array $input): array
     {
-        $camera = Camera::query()->forRole($station)->firstOrFail();
+        // A gate's camera row may not exist yet (a gate just added): made here.
+        $camera = Camera::query()->firstOrCreate(['camera_role' => $station], [
+            'camera_name' => Gate::labelFor($station).' Camera',
+            'source_type' => Camera::SOURCE_NONE,
+            'source_value' => '',
+            'status' => 'active',
+            'last_connection_status' => 'unknown',
+        ]);
         // Live-latency work: the sub stream is the default live/detection stream;
         // the main stream is used for full-resolution snapshots on a trigger.
         $stream = ($input['stream'] ?? 'sub') === 'main' ? 'main' : 'sub';
@@ -463,7 +513,7 @@ class DeviceRegistryService
         $this->syncAssignments(force: true);
     }
 
-    public function unassign(string $station, string $role): void
+    public function unassign(string $station, string $role, bool $sync = true): void
     {
         $station = Gate::normalizeCode($station);
         $last = $role === DeviceAssignment::ROLE_CAMERA ? app(CameraStreams::class)->forGate($station) : null;
@@ -484,7 +534,9 @@ class DeviceRegistryService
             $gate->forceFill(['reader_type' => 'uhf_ethernet', 'reader_name' => $gate->name.' UHF Reader'])->save();
         }
 
-        $this->syncAssignments(force: true);
+        if ($sync) {
+            $this->syncAssignments(force: true);
+        }
     }
 
     /**
@@ -902,6 +954,24 @@ class DeviceRegistryService
         return $name !== '' ? $name : ($device->name ?: 'Network device');
     }
 
+    /** Phase 6: an unidentified device with a camera's ports (RTSP, ONVIF). */
+    protected function looksLikeCamera(array $details): bool
+    {
+        $open = array_map('intval', (array) data_get($details, 'open_ports.tcp', []));
+        $ports = array_map('intval', (array) data_get(DeviceFiles::profiles(), 'camera.rtsp_ports', [554])) ?: [554];
+
+        return array_intersect($open, [...$ports, 2020, 8000, 8899]) !== [];
+    }
+
+    /** Phase 6: an unidentified device with a UHF reader's port (it confirms itself with the first tag). */
+    protected function looksLikeReader(array $details): bool
+    {
+        $open = array_map('intval', (array) data_get($details, 'open_ports.tcp', []));
+        $ports = array_map('intval', (array) data_get(DeviceFiles::profiles(), 'uhf_reader.tcp_ports', [49152])) ?: [49152];
+
+        return array_intersect($open, $ports) !== [];
+    }
+
     protected function devicePayload(NetworkDevice $device, Collection $suggestions, array $interfaces): array
     {
         $details = (array) $device->details;
@@ -940,6 +1010,10 @@ class DeviceRegistryService
             ] : null,
             'reader' => $reader ? Arr::only($reader, ['transport', 'port', 'protocol', 'work_mode', 'confirmed', 'confirmed_by', 'signature', 'sample_tags']) : null,
             'open_ports' => (array) data_get($details, 'open_ports.tcp', []),
+            // Phase 6: not identified yet, but it may be one (offered under
+            // "Not identified yet" when adding a camera / reader to a gate).
+            'maybe_camera' => $device->kind === NetworkDevice::KIND_UNKNOWN && $this->looksLikeCamera($details),
+            'maybe_reader' => $device->kind === NetworkDevice::KIND_UNKNOWN && $this->looksLikeReader($details),
             'network_warning' => $this->networkWarning($device),
             'guidance' => $device->status === NetworkDevice::STATUS_UNREACHABLE
                 ? $this->unreachableGuidance($device, $suggestions->get($device->ip), $interfaces)

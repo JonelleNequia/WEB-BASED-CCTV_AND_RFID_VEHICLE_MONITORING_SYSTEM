@@ -203,6 +203,8 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         Route::post('/settings/devices/acknowledge', [DeviceController::class, 'acknowledge'])->name('settings.devices.acknowledge');
         Route::post('/settings/devices/{networkDevice}/assign', [DeviceController::class, 'assign'])
             ->whereNumber('networkDevice')
+            // Phase 6: the list was old (the device was merged or deleted after a scan): say so in JSON.
+            ->missing(fn () => response()->json(['ok' => false, 'message' => 'This device is not in the list any more. Scan again and pick it from the new list.'], 404))
             ->name('settings.devices.assign');
         // Delete device work: delete (records kept), hide, show again.
         Route::get('/settings/devices/{networkDevice}/delete', [\App\Http\Controllers\DeviceDeletionController::class, 'summary'])

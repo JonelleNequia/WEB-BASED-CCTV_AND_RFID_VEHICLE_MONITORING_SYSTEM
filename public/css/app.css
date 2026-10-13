@@ -7884,3 +7884,13 @@ img.thumb-plate {
     background: #fef2f2;
 }
 
+/* Phase 6: devices not identified yet, in the add-device list. */
+.add-device-subheading {
+    margin: 0.75rem 0 0;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+

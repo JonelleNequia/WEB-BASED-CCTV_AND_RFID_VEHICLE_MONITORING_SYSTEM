@@ -6,6 +6,11 @@
  *    Reader: "hold a tag near the reader" and shows the tag it reads.
  * 4. Done: back to the gate card.
  * Nothing found: a short checklist, "Scan again" and "Enter manually".
+ *
+ * Phase 6: the list is redrawn only when it changed (a redraw every poll
+ * could swallow the click on Add); devices not identified yet but with a
+ * camera's or reader's ports are offered too; a device already on another
+ * gate asks "Move it here?"; every failure says why.
  */
 (function () {
     const dataNode = document.getElementById('add-device-data');
@@ -18,6 +23,7 @@
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
     const title = document.getElementById('add-device-modal-title');
     const KIND = { camera: 'camera', reader: 'rfid_reader' };
+    const MAYBE = { camera: 'maybe_camera', reader: 'maybe_reader' };
     let flow = null;   // {gate, role, devices, chosen, scanStartedAt, sawScan, timers}
 
     function el(tag, className, text) {
@@ -91,7 +97,12 @@
             if (flow.step && flow.step !== 'list') {
                 return;
             }
-            renderList(payload);
+            // Redrawn only when something changed: a redraw under the pointer lost the click on Add.
+            const signature = listSignature(payload);
+            if (signature !== flow.signature) {
+                flow.signature = signature;
+                renderList(payload);
+            }
         } catch (error) {
             // Try again on the next poll.
         }
@@ -107,9 +118,18 @@
         return running || (!flow.sawScan && Date.now() - flow.scanStartedAt < 25000);
     }
 
+    function listSignature(payload) {
+        const devices = (payload?.devices || []).filter((device) => device.kind === KIND[flow.role] || device[MAYBE[flow.role]]);
+        return JSON.stringify([scanning(payload), payload?.service?.state, devices.map((device) => [
+            device.id, device.status, device.kind, device.friendly_name || device.name, (device.assigned || []).map((item) => item.label), !!device.network_warning,
+        ])]);
+    }
+
     function renderList(payload) {
         flow.step = 'list';
         const devices = (payload?.devices || []).filter((device) => device.kind === KIND[flow.role]);
+        // Phase 6: not identified yet, but with this kind of device's ports.
+        const maybe = (payload?.devices || []).filter((device) => device.kind !== KIND[flow.role] && device[MAYBE[flow.role]]);
         const looking = scanning(payload);
         const nodes = [];
 
@@ -122,13 +142,20 @@
             nodes.push(el('p', 'add-device-note', 'Only Wi-Fi is connected on this PC. Plug in the LAN cable from the cameras and readers.'));
         }
 
-        if (devices.length) {
+        if (devices.length || maybe.length) {
             const list = el('div', 'add-device-list');
             list.setAttribute('role', 'radiogroup');
             devices.forEach((device) => list.append(deviceOption(device)));
+            if (maybe.length) {
+                list.append(el('p', 'add-device-subheading', 'Not identified yet'));
+                list.append(el('p', 'field-help', flow.role === 'camera'
+                    ? 'These have a camera\'s ports but did not say what they are. Pick one if it is your camera.'
+                    : 'These have a reader\'s port. A reader is identified by the first tag it reads; pick it, then hold a tag near it.'));
+                maybe.forEach((device) => list.append(deviceOption(device)));
+            }
             nodes.push(list);
             const addButton = button('Add', 'button button-primary button-lg', () => add(false));
-            addButton.disabled = !flow.chosen || !devices.some((device) => device.id === flow.chosen.id);
+            addButton.disabled = !flow.chosen || ![...devices, ...maybe].some((device) => device.id === flow.chosen.id);
             nodes.push(actions(button('Scan again', 'button button-secondary', () => start(flow.gate, flow.role)), addButton));
         } else if (!looking) {
             nodes.push(nothingFound());
@@ -205,11 +232,13 @@
 
     /* ---------- 2. add ---------- */
 
-    async function add(withLogin) {
+    async function add(withLogin, choice) {
         stopTimers();
         flow.step = 'adding';
         const device = flow.chosen;
-        const body = { station: flow.gate, role: flow.role === 'camera' ? 'camera' : 'reader' };
+        // A "move" / "share" answer is kept for the login step that may follow.
+        flow.choice = choice || flow.choice || {};
+        const body = { station: flow.gate, role: flow.role === 'camera' ? 'camera' : 'reader', ...flow.choice };
         if (flow.role === 'camera') {
             body.stream = 'sub';
         }
@@ -220,25 +249,57 @@
         render(el('p', 'add-device-scanning', `Adding ${device.friendly_name || device.name}…`));
 
         let result = {};
+        let status = 0;
         try {
             const response = await fetch(device.assign_url, {
                 method: 'POST',
                 headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
                 body: JSON.stringify(body),
             });
-            result = await response.json();
+            status = response.status;
+            result = await response.json().catch(() => ({}));
+            // A validation error: its first reason.
+            if (!result.message && result.errors) {
+                result.message = Object.values(result.errors).flat()[0];
+            }
+            if (status === 419) {
+                result.message = 'This page was open too long. Reload the page and add the device again.';
+            }
         } catch (error) {
-            result = { ok: false, message: 'The device could not be added. Try again.' };
+            result = { ok: false, message: 'This PC could not reach the system. Check the connection and try again.' };
         }
 
         if (result.needs_credentials) {
             return loginStep(result.message);
+        }
+        if (status === 409 && result.conflict) {
+            return conflictStep(result);
+        }
+        if (!result.ok && !result.message && status) {
+            result.message = `The device could not be added (error ${status}). Try again; if it keeps failing, see Settings › Advanced › System status.`;
         }
         if (!result.ok) {
             return render(el('p', 'add-device-error', result.message || 'The device could not be added.'),
                 actions(button('Back', 'button button-secondary', () => start(flow.gate, flow.role))));
         }
         return flow.role === 'camera' ? cameraCheck() : readerCheck();
+    }
+
+    /*
+     * Phase 6: already on another gate: "Already the reader of Gate 1. Move
+     * it to Gate 2?" (a camera may also be used for both while testing).
+     */
+    function conflictStep(result) {
+        flow.step = 'conflict';
+        const conflict = result.conflict || {};
+        render(
+            el('p', 'add-device-note', result.message),
+            actions(
+                button('Back', 'button button-secondary', () => start(flow.gate, flow.role)),
+                conflict.can_share ? button(`Use it for both gates`, 'button button-secondary', () => add(false, { share: true })) : null,
+                button(`Move it to ${gateName()}`, 'button button-primary button-lg', () => add(false, { move: true })),
+            ),
+        );
     }
 
     /* ---------- 3a. camera: login once, then the live view ---------- */

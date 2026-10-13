@@ -65,11 +65,15 @@ class DeviceController extends Controller
             'password' => ['nullable', 'string', 'max:255'],
             'port' => ['nullable', 'integer', 'between:1,65535'],
             'transport' => ['nullable', 'in:tcp,udp'],
+            // Phase 6: already on another gate: move it here, or (a camera) use it for both.
+            'move' => ['nullable', 'boolean'],
+            'share' => ['nullable', 'boolean'],
         ]);
 
         $result = $registry->assign($networkDevice, Gate::normalizeCode($validated['station']), $validated['role'], $validated);
+        $status = $result['ok'] ? 200 : ($result['status'] ?? 422);
 
-        return response()->json($result + ['devices' => $registry->panelPayload()], $result['ok'] ? 200 : 422);
+        return response()->json(\Illuminate\Support\Arr::except($result, ['status']) + ['devices' => $registry->panelPayload()], $status);
     }
 
     public function unassign(Request $request, DeviceRegistryService $registry): JsonResponse
