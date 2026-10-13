@@ -66,7 +66,6 @@ class VehicleEventController extends Controller
             'periodOptions' => $this->periodOptions(),
             'categoryOptions' => $this->categoryOptions(),
             'gateOptions' => \App\Models\Gate::options(),
-            'printReports' => $this->printReportPayload($request),
         ]);
     }
 
@@ -292,37 +291,152 @@ class VehicleEventController extends Controller
     }
 
     /**
-     * Build compact report datasets for browser print.
-     *
-     * @return array<string, array{label:string, rows:\Illuminate\Support\Collection<int, array<string, string>>}>
+     * ROI work, Phase 7: the reports of Activity Logs › Print.
      */
-    protected function printReportPayload(Request $request): array
+    public const PRINT_REPORTS = [
+        'current' => 'Current List',
+        'today' => 'Today',
+        'week' => 'This Week',
+        'month' => 'This Month',
+        'year' => 'This Year',
+        'all' => 'All Records',
+    ];
+
+    /**
+     * ROI work, Phase 7: the printable Vehicle Activity Report (A4
+     * landscape). Print and Save as PDF use this same page (Save as PDF is a
+     * destination of the print window), so both give the same layout.
+     *
+     * It takes the Activity Logs filters, plus `report` (the current list or
+     * a timeframe), `snapshots` (thumbnail column) and `autoprint`.
+     */
+    public function printReport(Request $request): View
     {
-        $reports = [
-            // UI Phase 4: "Current list" prints exactly what the filters show.
-            'current' => ['label' => 'Current List', 'period' => false],
-            'all' => ['label' => 'All Records', 'period' => null],
-            'today' => ['label' => 'Today', 'period' => 'today'],
-            'week' => ['label' => 'This Week', 'period' => 'week'],
-            'year' => ['label' => 'This Year', 'period' => 'year'],
+        $reportKey = array_key_exists((string) $request->query('report'), self::PRINT_REPORTS) ? (string) $request->query('report') : 'current';
+        $filterQuery = $request->except(['page', 'tab', 'report', 'snapshots', 'autoprint', 'all']);
+        $reportRequest = $reportKey === 'current'
+            ? Request::create($request->url(), 'GET', $filterQuery)
+            : $this->reportRequest(Request::create($request->url(), 'GET', $filterQuery), $reportKey === 'all' ? null : $reportKey);
+
+        // A report reads from the first record to the last.
+        $rows = $this->filteredUnifiedLogs($reportRequest)
+            ->sortBy(fn (array $log): string => sprintf('%s|%020.6f', $log['event_time_export'] ?? '', $log['sort_time'] ?? 0))
+            ->map(fn (array $log): array => $this->printRow($log))
+            ->values();
+        $dateRange = $this->printDateRange($reportRequest, $rows);
+        $printedAt = DisplayTime::datetime(now());
+
+        return view('logs.print', [
+            'reportKey' => $reportKey,
+            'reportLabel' => self::PRINT_REPORTS[$reportKey],
+            'schoolName' => (string) config('monitoring.report.school_name'),
+            'systemName' => (string) config('monitoring.report.system_name'),
+            'dateRange' => $dateRange,
+            'filtersLabel' => $this->filtersLabel($reportRequest),
+            'printedAt' => $printedAt,
+            'preparedBy' => (string) ($request->user()?->name ?? ''),
+            'rows' => $rows,
+            'byCategory' => $this->printSummary($rows, 'category', array_values(VehicleCategory::LABELS)),
+            'byGate' => $this->printSummary($rows, 'gate', array_values(\App\Models\Gate::options())),
+            'snapshots' => $request->boolean('snapshots'),
+            'autoprint' => $request->boolean('autoprint'),
+            // The report page's own form keeps the report and its filters.
+            'optionsQuery' => array_filter($filterQuery + ['report' => $reportKey], fn ($value) => is_string($value) && filled($value)),
+            'backUrl' => route('logs.index', array_filter(['tab' => 'events'] + $filterQuery, fn ($value) => is_string($value) && filled($value))),
+            // Chrome names the saved PDF after the page title.
+            'documentTitle' => 'Vehicle Activity Report - '.str_replace(['·', ','], ['-', ''], $dateRange),
+        ]);
+    }
+
+    /**
+     * One row of the printed table.
+     *
+     * @param  array<string, mixed>  $log
+     * @return array<string, string|null>
+     */
+    protected function printRow(array $log): array
+    {
+        $known = fn ($value): string => filled($value) && $value !== 'N/A' ? (string) $value : '—';
+        // An older camera guest record keeps its direction in the detection details.
+        $eventType = ($log['event_type'] ?? null) === 'GUEST' ? VehicleEvent::eventTypeForDirection($log['direction'] ?? null) : ($log['event_type'] ?? null);
+        [$direction, $directionKey] = match ($eventType) {
+            'ENTRY' => ['IN', 'in'],
+            'EXIT' => ['OUT', 'out'],
+            'RFID' => ['RFID scan only', 'unknown'],
+            default => ['Direction unknown', 'unknown'],
+        };
+
+        return [
+            'at' => $log['event_time_export'] ?? null,
+            'time' => (string) ($log['display_time'] ?? '—'),
+            'plate' => (string) ($log['plate_number'] ?: 'No plate'),
+            'owner' => $known($log['owner_name'] ?? null),
+            'category' => $known($log['category_label'] ?? null),
+            'type' => $known($log['vehicle_type'] ?? null),
+            'direction' => $direction,
+            'direction_key' => $directionKey,
+            'gate' => $known($log['station_label'] ?? null),
+            'image_url' => $log['image_url'] ?? null,
         ];
+    }
 
-        return collect($reports)
-            ->map(function (array $report) use ($request): array {
-                $reportRequest = $report['period'] === false
-                    ? Request::create($request->url(), 'GET', $request->except('page'))
-                    : $this->reportRequest($request, $report['period']);
+    /**
+     * IN / OUT / unknown per category or per gate, in the given order (then
+     * any other value), with a total row.
+     *
+     * @param  Collection<int, array<string, string|null>>  $rows
+     * @param  list<string>  $order
+     * @return array{rows: list<array{label: string, in: int, out: int, unknown: int, total: int}>, total: array{label: string, in: int, out: int, unknown: int, total: int}}
+     */
+    protected function printSummary(Collection $rows, string $key, array $order): array
+    {
+        $count = fn (string $label, Collection $group): array => [
+            'label' => $label,
+            'in' => $group->where('direction_key', 'in')->count(),
+            'out' => $group->where('direction_key', 'out')->count(),
+            'unknown' => $group->where('direction_key', 'unknown')->count(),
+            'total' => $group->count(),
+        ];
+        $groups = $rows->groupBy($key);
+        $labels = collect($order)->filter(fn (string $label) => $groups->has($label))
+            ->concat($groups->keys()->diff($order)->sort()->values());
 
-                return [
-                    'label' => $report['label'],
-                    // Phase 7: the printed report says which filters made it.
-                    'filters_label' => $this->filtersLabel($reportRequest),
-                    'rows' => $this->filteredUnifiedLogs($reportRequest)
-                        ->map(fn (array $log): array => $this->compactPrintRow($log))
-                        ->values(),
-                ];
-            })
-            ->all();
+        return [
+            'rows' => $labels->map(fn (string $label): array => $count($label, $groups->get($label)))->values()->all(),
+            'total' => $count('Total', $rows),
+        ];
+    }
+
+    /**
+     * "This Week (Oct 12, 2026 – Oct 18, 2026)", "Oct 1, 2026 – Oct 13, 2026",
+     * or for all records the span of the records printed.
+     *
+     * @param  Collection<int, array<string, string|null>>  $rows
+     */
+    protected function printDateRange(Request $request, Collection $rows): string
+    {
+        $span = function ($from, $to): string {
+            $first = DisplayTime::date($from, '…');
+            $last = DisplayTime::date($to, '…');
+
+            return $first === $last ? $first : "{$first} – {$last}";
+        };
+        $period = $this->selectedPeriod($request);
+
+        if ($period !== null) {
+            $window = PhilippineTime::periodWindow($period);
+
+            return $this->periodOptions()[$period].' ('.$span($window['local_start'], $window['local_end']->copy()->subSecond()).')';
+        }
+
+        [$from, $until] = $this->dateWindowForRequest($request);
+        if ($from !== null || $until !== null) {
+            return $span($from, $until?->copy()->subSecond());
+        }
+
+        $times = $rows->pluck('at')->filter()->values();
+
+        return $times->isEmpty() ? 'All records' : 'All records ('.$span($times->first(), $times->last()).')';
     }
 
     protected function reportRequest(Request $request, ?string $period): Request
@@ -334,27 +448,6 @@ class VehicleEventController extends Controller
         }
 
         return Request::create($request->url(), 'GET', $query);
-    }
-
-    /**
-     * @param  array<string, mixed>  $log
-     * @return array<string, string>
-     */
-    protected function compactPrintRow(array $log): array
-    {
-        return [
-            'timestamp' => (string) ($log['event_time_export'] ?: $log['display_time'] ?: 'N/A'),
-            'log_type' => (string) ($log['log_type_label'] ?? ''),
-            'source' => (string) ($log['source_label'] ?? ''),
-            'plate_number' => (string) ($log['plate_number'] ?: 'No plate'),
-            'owner_name' => (string) ($log['owner_name'] ?: 'N/A'),
-            'movement' => (string) ($log['movement_label'] ?? $log['event_type'] ?? ''),
-            'category' => (string) ($log['category_label'] ?? ''),
-            'gate' => (string) ($log['station_label'] ?? ''),
-            'state' => (string) ($log['state_label'] ?: 'N/A'),
-            'status' => (string) ($log['status_label'] ?: 'N/A'),
-            'rfid_tag' => (string) ($log['rfid_tag_uid'] ?: 'N/A'),
-        ];
     }
 
     /**
@@ -776,6 +869,8 @@ class VehicleEventController extends Controller
             ]),
             'event_type' => 'GUEST',
             'movement_label' => 'Unregistered',
+            // ROI work, Phase 7: the direction the camera saw (the printed report counts it like the Dashboard).
+            'direction' => VehicleEvent::directionForEventType(VehicleEvent::eventTypeForDirection(data_get($observation->detection_metadata_json, 'direction'))),
             'plate_number' => $observation->plate_number ?: $observation->plate_text ?: 'No plate',
             'owner_name' => 'N/A',
             'vehicle_type' => $observation->vehicle_type ?: 'Vehicle',
@@ -995,7 +1090,8 @@ class VehicleEventController extends Controller
     }
 
     /**
-     * Phase 7: "Gate 1 · IN · Faculty & Staff · Today" for printed reports.
+     * Phase 7: "Gate 1 · IN · Faculty & Staff" for printed reports (ROI
+     * work, Phase 7: the date range has its own line on the report).
      */
     protected function filtersLabel(Request $request): string
     {
@@ -1006,10 +1102,6 @@ class VehicleEventController extends Controller
             $request->filled('log_type') ? (self::LOG_FILTER_CHIPS[$request->string('log_type')->value()] ?? null) : null,
             $request->filled('plate_text') ? 'Plate "'.$request->string('plate_text')->trim().'"' : null,
             $request->filled('vehicle_owner_name') ? 'Owner "'.$request->string('vehicle_owner_name')->trim().'"' : null,
-            $this->selectedPeriodLabel($request) !== 'All Records' ? $this->selectedPeriodLabel($request) : null,
-            $request->filled('date_from') || $request->filled('date_to')
-                ? trim(($request->string('date_from')->value() ?: '…').' to '.($request->string('date_to')->value() ?: '…'))
-                : null,
         ]);
 
         return $parts === [] ? 'No filters' : implode(' · ', $parts);

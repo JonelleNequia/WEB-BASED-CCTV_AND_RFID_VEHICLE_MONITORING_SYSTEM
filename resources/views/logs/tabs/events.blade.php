@@ -9,6 +9,8 @@
     $activePeriod = (string) ($filters['period'] ?? '');
     $csvQuery = array_merge($baseQuery, ['all' => 1]);
     unset($csvQuery['tab']);
+    // ROI work, Phase 7: the printed report takes the same filters.
+    $printQuery = array_diff_key($baseQuery, ['tab' => true, 'page' => true]);
     // Clicking the active timeframe again clears it.
     $periodLinks = collect(['today' => 'Today', 'week' => 'This Week', 'month' => 'This Month'])
         ->map(fn (string $label, string $period) => [
@@ -48,11 +50,17 @@
 
         <details class="menu">
             <summary class="button button-secondary button-sm">Print</summary>
-            <div class="menu-panel" role="menu" aria-label="Print Reports">
-                <span class="menu-title">Print Reports</span>
-                @foreach ($printReports as $reportKey => $report)
-                    <button type="button" role="menuitem" data-event-log-report-print="{{ $reportKey }}">Print {{ $report['label'] }}</button>
+            {{-- ROI work, Phase 7: the Vehicle Activity Report opens in a new tab (A4 landscape; Print or Save as PDF). --}}
+            <div class="menu-panel" role="menu" aria-label="Print Vehicle Activity Report">
+                <span class="menu-title">Vehicle Activity Report</span>
+                @foreach (\App\Http\Controllers\VehicleEventController::PRINT_REPORTS as $reportKey => $reportLabel)
+                    <a href="{{ route('logs.print', $printQuery + ['report' => $reportKey, 'autoprint' => 1]) }}" class="menu-link" role="menuitem"
+                       target="_blank" rel="noopener" data-event-log-report-print="{{ $reportKey }}">{{ $reportLabel }}</a>
                 @endforeach
+                <label class="menu-check">
+                    <input type="checkbox" data-event-log-print-snapshots>
+                    Include snapshots
+                </label>
             </div>
         </details>
         <a href="{{ route('vehicle-events.export.csv', $csvQuery) }}" class="button button-secondary button-sm">CSV</a>
@@ -180,7 +188,6 @@
 <section class="event-log-print-sheet" data-event-log-print-sheet hidden></section>
 
 <script id="event-log-modal-data" type="application/json">{!! json_encode($logs->getCollection()->values(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
-<script id="event-log-report-data" type="application/json" data-payload="{{ base64_encode(json_encode($printReports, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)) }}"></script>
 <script id="event-log-realtime-data" type="application/json">{!! json_encode([
     // UI Phase 4: page 1 refreshes itself with the same filters.
     'refreshUrl' => (int) request('page', 1) === 1 ? route('logs.index', $baseQuery) : null,

@@ -65,6 +65,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Printed Reports (ROI work, Phase 7)
+    |--------------------------------------------------------------------------
+    |
+    | The header of the Vehicle Activity Report (Activity Logs › Print).
+    |
+    */
+
+    'report' => [
+        'school_name' => env('REPORT_SCHOOL_NAME', 'Philippine College of Science and Technology'),
+        'system_name' => env('REPORT_SYSTEM_NAME', 'Web-Based CCTV and RFID Vehicle Monitoring System'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Detector Live Stream
     |--------------------------------------------------------------------------
     |

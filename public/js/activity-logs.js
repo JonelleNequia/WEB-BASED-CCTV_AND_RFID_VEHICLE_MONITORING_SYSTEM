@@ -1,16 +1,16 @@
 /*
  * UI Phase 4: Activity Logs › All Events.
  * Details modal, snapshot viewer, toolbar print reports and a live refresh
- * of page 1 that keeps the current filters.
+ * of page 1 that keeps the current filters. (ROI work, Phase 7: the print
+ * reports are their own page, logs/print; this file only adds the
+ * "Include snapshots" choice to their links.)
  */
 (function () {
     const dataNode = document.getElementById('event-log-modal-data');
-    const reportNode = document.getElementById('event-log-report-data');
     const realtimeNode = document.getElementById('event-log-realtime-data');
     const list = document.querySelector('[data-event-log-list]');
     const printSheet = document.querySelector('[data-event-log-print-sheet]');
     const realtime = realtimeNode ? JSON.parse(realtimeNode.textContent || '{}') : {};
-    const reports = reportNode ? JSON.parse(atob(reportNode.dataset.payload || 'e30=')) : {};
     let logs = dataNode ? JSON.parse(dataNode.textContent || '[]') : [];
     let activeLog = null;
 
@@ -226,7 +226,7 @@
         printSheet.replaceChildren(printHeader(`${log.event_type} - ${log.plate_number || '—'}`, `${log.record_type_label} #${log.id}`));
 
         const grid = el('div', 'event-log-print-grid');
-        [['Log type', 'log_type_label'], ['Plate', 'plate_number'], ...detailFields].forEach(function ([label, key]) {
+        [['Plate', 'plate_number'], ...detailFields].forEach(function ([label, key]) {
             const item = el('div');
             item.append(el('span', null, label), el('strong', null, log[key] || 'N/A'));
             grid.append(item);
@@ -245,51 +245,20 @@
         startPrint();
     }
 
-    function printReport(report) {
-        if (!report) {
-            return;
-        }
-
-        const rows = Array.isArray(report.rows) ? report.rows : [];
-        // Phase 7: the header says which filters made the report.
-        printSheet.replaceChildren(printHeader(
-            `Activity Logs - ${report.label}`,
-            `${rows.length} record${rows.length === 1 ? '' : 's'} · ${report.filters_label || 'No filters'}`
-        ));
-
-        if (rows.length === 0) {
-            printSheet.append(el('p', 'event-log-print-empty', 'No records found for this report.'));
-        } else {
-            const columns = [
-                ['timestamp', 'Timestamp'], ['movement', 'IN/OUT'], ['gate', 'Gate'], ['category', 'Category'],
-                ['log_type', 'Log Type'], ['source', 'Source'], ['plate_number', 'Plate Number'],
-                ['owner_name', 'Owner Name'], ['state', 'State'], ['status', 'Status'], ['rfid_tag', 'RFID Tag'],
-            ];
-            const table = el('table', 'event-log-print-table');
-            const headRow = el('tr');
-            columns.forEach(([, label]) => headRow.append(el('th', null, label)));
-            const thead = el('thead');
-            thead.append(headRow);
-            const tbody = el('tbody');
-            rows.forEach(function (row) {
-                const tr = el('tr');
-                columns.forEach(([key]) => tr.append(el('td', null, row[key] || 'N/A')));
-                tbody.append(tr);
-            });
-            table.append(thead, tbody);
-            printSheet.append(table);
-        }
-
-        startPrint();
-    }
-
     /* ---------- Events ---------- */
 
     document.addEventListener('click', function (event) {
         const report = event.target.closest('[data-event-log-report-print]');
         if (report) {
+            // The report opens in a new tab, with the snapshot column when asked for.
+            const url = new URL(report.href, window.location.href);
+            if (document.querySelector('[data-event-log-print-snapshots]')?.checked) {
+                url.searchParams.set('snapshots', '1');
+            } else {
+                url.searchParams.delete('snapshots');
+            }
+            report.href = url.toString();
             report.closest('details')?.removeAttribute('open');
-            printReport(reports[report.dataset.eventLogReportPrint]);
             return;
         }
 

@@ -118,6 +118,8 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         // UI Phase 2: the six sidebar pages.
         Route::get('/registry', [RegistryController::class, 'index'])->name('registry.index');
         Route::get('/logs', [ActivityLogController::class, 'index'])->name('logs.index');
+        // ROI work, Phase 7: the printable Vehicle Activity Report (Print and Save as PDF).
+        Route::get('/logs/print', [VehicleEventController::class, 'printReport'])->name('logs.print');
 
         // UI Phase 2: old page URLs (names kept so old links keep working).
         Route::get('/vehicle-registry', $legacyRedirect('registry.index', ['tab' => 'vehicles']))->name('vehicle-registry.index');

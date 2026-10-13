@@ -1,0 +1,430 @@
+/*
+ * ROI work, Phase 7: Vehicle Activity Report (logs/print.blade.php).
+ * A4 landscape on paper and in the PDF; on screen the same sheet on a gray
+ * background with a toolbar that is never printed.
+ */
+
+:root {
+    --ink: #111827;
+    --muted: #4b5563;
+    --line: #c7cbd1;
+    --head: #eef0f3;
+    --brand: #4c1d95;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+
+body {
+    margin: 0;
+    background: #e5e7eb;
+    color: var(--ink);
+    font-family: "Segoe UI", Roboto, Arial, Helvetica, sans-serif;
+    font-size: 9pt;
+    line-height: 1.35;
+}
+
+@page {
+    size: A4 landscape;
+    margin: 13mm 10mm 13mm 10mm;
+
+    @top-left {
+        font-family: "Segoe UI", Roboto, Arial, Helvetica, sans-serif;
+        font-size: 7.5pt;
+        color: #4b5563;
+    }
+
+    @top-right {
+        font-family: "Segoe UI", Roboto, Arial, Helvetica, sans-serif;
+        font-size: 7.5pt;
+        color: #4b5563;
+    }
+
+    @bottom-left {
+        font-family: "Segoe UI", Roboto, Arial, Helvetica, sans-serif;
+        font-size: 7.5pt;
+        color: #4b5563;
+    }
+
+    @bottom-right {
+        font-family: "Segoe UI", Roboto, Arial, Helvetica, sans-serif;
+        content: "Pahina " counter(page) " ng " counter(pages);
+        font-size: 8pt;
+        color: #111827;
+    }
+}
+
+/* ---------- Screen toolbar (never printed) ---------- */
+
+.report-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    padding: 10px 16px;
+    background: #ffffff;
+    border-bottom: 1px solid var(--line);
+    font-size: 14px;
+}
+
+.report-back {
+    color: var(--brand);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.report-options label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.report-toolbar-spacer {
+    flex: 1;
+}
+
+.report-button {
+    padding: 7px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #ffffff;
+    color: var(--ink);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.report-button-primary {
+    border-color: var(--brand);
+    background: var(--brand);
+    color: #ffffff;
+}
+
+.report-hint {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--muted);
+}
+
+/* ---------- Sheet ---------- */
+
+.report-sheet {
+    width: 297mm;
+    max-width: calc(100% - 32px);
+    margin: 16px auto 32px;
+    padding: 12mm 10mm;
+    background: #ffffff;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+    overflow-x: auto;
+}
+
+.report-header {
+    margin-bottom: 4mm;
+    padding-bottom: 3mm;
+    border-bottom: 1.5pt solid var(--ink);
+    text-align: center;
+}
+
+.report-school {
+    margin: 0;
+    font-size: 13pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.report-system {
+    margin: 0.5mm 0 0;
+    color: var(--muted);
+    font-size: 9pt;
+}
+
+.report-header h1 {
+    margin: 2.5mm 0 2mm;
+    font-size: 16pt;
+}
+
+.report-meta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 1mm 8mm;
+    margin: 0;
+}
+
+.report-meta div {
+    display: flex;
+    gap: 1.5mm;
+}
+
+.report-meta dt {
+    color: var(--muted);
+}
+
+.report-meta dt::after {
+    content: ":";
+}
+
+.report-meta dd {
+    margin: 0;
+    font-weight: 600;
+}
+
+h2 {
+    margin: 0 0 2mm;
+    font-size: 10.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+/* ---------- Summary ---------- */
+
+.report-summary {
+    margin-bottom: 5mm;
+    break-inside: avoid;
+}
+
+.report-summary-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6mm;
+    align-items: start;
+}
+
+.summary-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.summary-table th:first-child {
+    width: 36%;
+}
+
+.summary-table caption {
+    margin-bottom: 1mm;
+    font-weight: 700;
+    text-align: left;
+}
+
+.summary-table th,
+.summary-table td {
+    padding: 1mm 2mm;
+    border: 0.5pt solid var(--line);
+    text-align: right;
+}
+
+.summary-table th:first-child {
+    text-align: left;
+}
+
+.summary-table thead th,
+.summary-table tfoot th,
+.summary-table tfoot td {
+    background: var(--head);
+    font-weight: 700;
+}
+
+.summary-table tbody th {
+    font-weight: 400;
+}
+
+.summary-empty {
+    color: var(--muted);
+    text-align: center !important;
+}
+
+.report-note {
+    margin: 1.5mm 0 0;
+    color: var(--muted);
+    font-size: 7.5pt;
+}
+
+/* ---------- Records ---------- */
+
+.records-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+/* The header repeats on every page; a row is never split. */
+.records-table thead {
+    display: table-header-group;
+}
+
+.records-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
+.records-table th,
+.records-table td {
+    padding: 1.2mm 1.8mm;
+    border: 0.5pt solid var(--line);
+    text-align: left;
+    vertical-align: middle;
+    overflow-wrap: anywhere;
+}
+
+.records-table thead th {
+    background: var(--head);
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.records-table tbody tr:nth-child(even) td {
+    background: #fafafb;
+}
+
+.records-table .col-no {
+    width: 12mm;
+    white-space: nowrap;
+    color: var(--muted);
+    text-align: right;
+}
+
+.records-table .col-snapshot {
+    width: 27mm;
+}
+
+.records-table .col-time {
+    width: 40mm;
+}
+
+.records-table .col-plate {
+    width: 27mm;
+}
+
+.records-table .col-category {
+    width: 36mm;
+}
+
+.records-table .col-type {
+    width: 24mm;
+}
+
+.records-table .col-direction {
+    width: 33mm;
+}
+
+.records-table .col-gate {
+    width: 22mm;
+}
+
+.records-table td.col-snapshot {
+    padding: 0.8mm;
+}
+
+.col-snapshot img {
+    display: block;
+    width: 25mm;
+    height: 15mm;
+    object-fit: cover;
+    border-radius: 1mm;
+}
+
+.no-snapshot {
+    color: var(--muted);
+    font-size: 7.5pt;
+}
+
+.direction-in,
+.direction-out {
+    font-weight: 700;
+}
+
+.direction-unknown {
+    color: var(--muted);
+}
+
+.report-empty {
+    padding: 6mm;
+    border: 0.5pt dashed var(--line);
+    color: var(--muted);
+    text-align: center;
+}
+
+/* ---------- Signatures ---------- */
+
+.report-signatures {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 25mm;
+    margin-top: 10mm;
+    padding: 0 10mm;
+    break-inside: avoid;
+}
+
+.signature {
+    display: grid;
+    gap: 1mm;
+}
+
+.signature-label {
+    font-weight: 600;
+}
+
+.signature-line {
+    display: block;
+    min-height: 12mm;
+    padding-top: 6mm;
+    border-bottom: 0.75pt solid var(--ink);
+    font-weight: 700;
+    text-align: center;
+    text-transform: uppercase;
+}
+
+.signature-caption {
+    color: var(--muted);
+    font-size: 7.5pt;
+    text-align: center;
+}
+
+/* ---------- Paper / PDF ---------- */
+
+@media print {
+    body {
+        background: #ffffff;
+    }
+
+    .report-toolbar {
+        display: none !important;
+    }
+
+    .report-sheet {
+        width: auto;
+        max-width: none;
+        margin: 0;
+        padding: 0;
+        box-shadow: none;
+        overflow: visible;
+    }
+}
+
+@media screen and (max-width: 640px) {
+    .report-sheet {
+        padding: 16px;
+    }
+
+    /* The table scrolls inside the sheet instead of squeezing its columns. */
+    .records-table {
+        min-width: 250mm;
+    }
+
+    .report-summary-grid,
+    .report-signatures {
+        grid-template-columns: 1fr;
+    }
+}

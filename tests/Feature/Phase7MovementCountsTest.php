@@ -114,11 +114,87 @@ class Phase7MovementCountsTest extends TestCase
         $this->assertStringContainsString('"Registered Visitor","Gate 2"', $csv);
         $this->assertStringNotContainsString('LEG 777', $csv);
 
-        $print = $this->actingAs($this->admin)->get(route('logs.index', ['tab' => 'events', 'gate' => 'gate-2', 'event_type' => 'ENTRY']))
-            ->assertOk()->viewData('printReports');
-        $this->assertSame('Gate 2 · IN', $print['current']['filters_label']);
-        $this->assertSame(['IN'], array_values(array_unique(array_column($print['current']['rows']->all(), 'movement'))));
-        $this->assertSame(['Gate 2'], array_values(array_unique(array_column($print['current']['rows']->all(), 'gate'))));
+        // ROI work, Phase 7: the printed report is its own page with the same filters.
+        $print = $this->actingAs($this->admin)->get(route('logs.print', ['gate' => 'gate-2', 'event_type' => 'ENTRY']))->assertOk();
+        $this->assertSame('Gate 2 · IN', $print->viewData('filtersLabel'));
+        $this->assertSame(['IN'], $print->viewData('rows')->pluck('direction')->unique()->values()->all());
+        $this->assertSame(['Gate 2'], $print->viewData('rows')->pluck('gate')->unique()->values()->all());
+    }
+
+    /**
+     * ROI work, Phase 7: Vehicle Activity Report, A4 landscape, the same
+     * page for Print and Save as PDF.
+     */
+    public function test_vehicle_activity_report_has_header_summary_table_and_signatures(): void
+    {
+        $response = $this->actingAs($this->admin)->get(route('logs.print', ['report' => 'today']))->assertOk();
+
+        // Header: school, title, date range, filters, print time; no sidebar, buttons or filters on paper.
+        $response->assertSee('Philippine College of Science and Technology')
+            ->assertSee('Vehicle Activity Report')
+            ->assertSee('Today (Oct 14, 2026)')
+            ->assertSee('No filters')
+            ->assertSee('Printed '.\App\Support\DisplayTime::datetime(now()), false)
+            ->assertSee('activity-report.css', false)
+            ->assertDontSee('app-shell', false)
+            ->assertDontSee('sidebar', false)
+            ->assertSee('Prepared by:')
+            ->assertSee('Noted by:')
+            ->assertSee($this->admin->name);
+        $this->assertSame('Today (Oct 14, 2026)', $response->viewData('dateRange'));
+
+        // Summary: IN / OUT by category and by gate, the same counts as the Dashboard.
+        $counts = app(MovementCountService::class)->counts('today');
+        $byCategory = $response->viewData('byCategory');
+        $byGate = $response->viewData('byGate');
+        $this->assertSame([$counts['in'], $counts['out']], [$byCategory['total']['in'], $byCategory['total']['out']]);
+        $this->assertSame($byCategory['total'], ['label' => 'Total'] + $byGate['total']);
+        $this->assertSame(
+            ['Faculty & Staff' => [2, 1], 'Registered Visitor' => [1, 0], 'Unregistered Visitor' => [1, 2]],
+            collect($byCategory['rows'])->mapWithKeys(fn (array $row) => [$row['label'] => [$row['in'], $row['out']]])->all()
+        );
+        $this->assertSame(
+            ['Gate 1' => [2, 2], 'Gate 2' => [2, 1]],
+            collect($byGate['rows'])->mapWithKeys(fn (array $row) => [$row['label'] => [$row['in'], $row['out']]])->all()
+        );
+
+        // Table: time, plate, name / owner, category, type, direction, gate; oldest first.
+        $response->assertSeeInOrder(['Time', 'Plate', 'Name / Owner', 'Category', 'Type', 'Direction', 'Gate'])
+            ->assertDontSee('col-snapshot', false);
+        $times = $response->viewData('rows')->pluck('at')->all();
+        $sorted = $times;
+        sort($sorted);
+        $this->assertSame($sorted, $times);
+        $this->assertSame(['Today', 'This Week'], [$response->viewData('reportLabel'), \App\Http\Controllers\VehicleEventController::PRINT_REPORTS['week']]);
+
+        // Thumbnails only when asked for.
+        $this->actingAs($this->admin)->get(route('logs.print', ['report' => 'today', 'snapshots' => 1]))
+            ->assertOk()->assertSee('<th class="col-snapshot">Snapshot</th>', false);
+
+        // A timeframe report ignores the list's own dates; "All Records" shows the span printed.
+        $week = $this->actingAs($this->admin)->get(route('logs.print', ['report' => 'week', 'date_from' => '2020-01-01']))->assertOk();
+        $this->assertSame('This Week (Oct 12, 2026 – Oct 18, 2026)', $week->viewData('dateRange'));
+        $this->assertStringStartsWith('All records (Oct 13, 2026 – Oct 14, 2026)', $this->actingAs($this->admin)->get(route('logs.print', ['report' => 'all']))->viewData('dateRange'));
+
+        // A4 landscape, header on every page, rows never split, "Pahina X ng Y".
+        $css = file_get_contents(public_path('css/activity-report.css'));
+        $this->assertStringContainsString('size: A4 landscape', $css);
+        $this->assertStringContainsString('content: "Pahina " counter(page) " ng " counter(pages)', $css);
+        $this->assertMatchesRegularExpression('/\.records-table thead \{\s*display: table-header-group;/', $css);
+        $this->assertMatchesRegularExpression('/\.records-table tr \{\s*break-inside: avoid;/', $css);
+    }
+
+    public function test_print_menu_opens_the_report_with_the_list_filters_and_needs_a_sign_in(): void
+    {
+        $this->actingAs($this->admin)->get(route('logs.index', ['tab' => 'events', 'gate' => 'gate-2', 'page' => 2]))
+            ->assertOk()
+            ->assertDontSee('event-log-report-data', false)
+            ->assertSee(e(route('logs.print', ['gate' => 'gate-2', 'report' => 'current', 'autoprint' => 1])), false)
+            ->assertSee(e(route('logs.print', ['gate' => 'gate-2', 'report' => 'all', 'autoprint' => 1])), false)
+            ->assertSee('data-event-log-print-snapshots', false);
+
+        auth()->logout();
+        $this->get(route('logs.print'))->assertRedirect(route('login'));
     }
 
     protected function scenario(): void

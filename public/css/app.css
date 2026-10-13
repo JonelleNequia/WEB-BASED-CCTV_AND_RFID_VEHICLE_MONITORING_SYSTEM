@@ -7894,3 +7894,35 @@ img.thumb-plate {
     letter-spacing: 0.04em;
 }
 
+
+/* ROI work, Phase 7: "Include snapshots" in the Print menu. */
+.menu-panel .menu-check {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-top: 0.25rem;
+    padding: 0.5rem 0.6rem 0.35rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.menu-panel .menu-check input {
+    flex: none;
+    width: auto;
+    margin: 0;
+}
+
+/*
+ * ROI work, Phase 7: on paper the page is one column. The app shell stayed a
+ * grid when printing, so with the sidebar hidden the content fell into the
+ * sidebar's narrow column (a printed record was about 2 cm wide).
+ */
+@media print {
+    .app-body .app-shell,
+    html.sidebar-collapsed .app-body .app-shell,
+    .app-body .page-content {
+        display: block;
+    }
+}
