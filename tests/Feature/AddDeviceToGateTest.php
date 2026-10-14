@@ -151,6 +151,40 @@ class AddDeviceToGateTest extends TestCase
     }
 
     /**
+     * The reader takes one connection at a time: a scan right after another
+     * found its port busy (it still answered the module search). Measured
+     * 2026-10-14 on the gate reader: "No reader port was found" on Add.
+     */
+    public function test_a_reader_whose_port_was_busy_during_the_scan_can_still_be_added(): void
+    {
+        $busy = fn (string $mac, string $ip): array => [
+            'key' => $mac, 'mac' => $mac, 'ip' => $ip, 'reachable' => true, 'online' => true, 'kind' => 'rfid_reader', 'confidence' => 'possible',
+            'name' => 'Reader module', 'reader' => [], 'open_ports' => ['tcp' => []],
+            'module' => ['module' => 'USR IOT module search', 'raw_hex' => 'FF 24 01 00'],
+        ];
+        app(DeviceRegistryService::class)->ingestScan(['scan' => ['complete' => false], 'devices' => [
+            $busy(self::READER_A, '198.51.100.30'),           // port found before, busy now
+            $busy('70:19:88:00:00:0D', '198.51.100.32'),      // a known reader model, port never seen open
+            $busy('02:00:00:00:00:0E', '198.51.100.33'),      // not a known reader model
+        ]]);
+
+        // The port found before is kept.
+        $this->assertSame(49152, data_get(NetworkDevice::query()->where('mac', self::READER_A)->first()->details, 'reader.port'));
+        $this->assign(self::READER_A, 'gate-1', 'reader')->assertOk()->assertJsonMissingPath('warning');
+
+        // A known reader model gets its model's port, with a note to confirm it with a tag.
+        $this->assign('70:19:88:00:00:0D', 'gate-2', 'reader')->assertOk()
+            ->assertJsonPath('warning', "The reader's port (TCP 49152) was busy during the scan, so it was taken from the reader's model. Hold a tag near the reader: the first tag confirms it.");
+        $options = DeviceAssignment::query()->where('station', 'gate-2')->where('role', 'reader')->firstOrFail()->options;
+        $this->assertSame([49152, 'tcp', 'cc', 'active'], [$options['port'], $options['transport'], $options['protocol'], $options['work_mode']]);
+
+        // Anything else: the real reason and what to do.
+        $this->assign('02:00:00:00:00:0E', 'gate-1', 'reader')->assertUnprocessable()
+            ->assertJsonPath('message', 'No reader port was found on this device. A reader takes one connection at a time, so its port can look closed for a few seconds after a scan. Wait about 10 seconds and press Scan again.');
+        $this->assertSame(self::READER_A, $this->assignments(['gate-1'])['gate-1']['reader']);
+    }
+
+    /**
      * @param  array<string, mixed>  $extra
      */
     protected function assign(string $mac, string $station, string $role, array $extra = []): TestResponse

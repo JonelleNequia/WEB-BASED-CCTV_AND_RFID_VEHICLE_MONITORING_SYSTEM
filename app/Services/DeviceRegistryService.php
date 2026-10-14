@@ -107,10 +107,15 @@ class DeviceRegistryService
             $confidence = $device->confidence;
         }
 
-        $details = array_replace(
-            (array) ($device->details ?? []),
-            Arr::only($data, ['camera', 'reader', 'http', 'module', 'open_ports', 'discovered_by', 'via_temporary_ip', 'randomized_mac', 'is_gateway', 'network_warning'])
-        );
+        $incoming = Arr::only($data, ['camera', 'reader', 'http', 'module', 'open_ports', 'discovered_by', 'via_temporary_ip', 'randomized_mac', 'is_gateway', 'network_warning']);
+        // The reader takes one connection at a time, so a scan right after
+        // another can find its port busy: it still answers the module search,
+        // but with no port. That never wipes the port found before.
+        $knownReader = (array) data_get($device->details, 'reader', []);
+        if (array_key_exists('reader', $incoming) && blank(data_get($incoming, 'reader.port')) && filled($knownReader['port'] ?? null)) {
+            $incoming['reader'] = $knownReader + (array) $incoming['reader'];
+        }
+        $details = array_replace((array) ($device->details ?? []), $incoming);
 
         $newIp = (string) $data['ip'];
         if (! $isNew && $device->ip && $device->ip !== $newIp && $reachable) {
@@ -452,8 +457,18 @@ class DeviceRegistryService
 
         $clientMode = ($reader['work_mode'] ?? null) === 'client';
 
+        // Its port was busy at every scan (one connection at a time): a known
+        // reader model (by its MAC, from the discovery profile) has a known port.
+        $portFromModel = null;
+        if ($port <= 0 && ! $clientMode && ($signature = $this->readerSignature($device->mac)) !== []) {
+            $reader = array_filter($reader, fn ($value) => filled($value)) + $signature;
+            $port = (int) $signature['port'];
+            $transport = in_array($input['transport'] ?? null, ['tcp', 'udp'], true) ? $input['transport'] : $signature['transport'];
+            $portFromModel = $port;
+        }
+
         if ($port <= 0 && ! $clientMode) {
-            return ['ok' => false, 'message' => 'No reader port was found on this device yet. Hold a tag near the reader and press Scan again.'];
+            return ['ok' => false, 'message' => 'No reader port was found on this device. A reader takes one connection at a time, so its port can look closed for a few seconds after a scan. Wait about 10 seconds and press Scan again.'];
         }
 
         DeviceAssignment::query()->updateOrCreate(
@@ -475,11 +490,39 @@ class DeviceRegistryService
 
         $result = ['ok' => true, 'message' => $gate->name.' reader assigned. Tags read at this reader are logged at '.$gate->name.'.'];
 
-        if (($reader['confirmed'] ?? false) !== true) {
+        if ($portFromModel !== null) {
+            $result['warning'] = "The reader's port (".strtoupper($transport)." {$portFromModel}) was busy during the scan, so it was taken from the reader's model. Hold a tag near the reader: the first tag confirms it.";
+        } elseif (($reader['confirmed'] ?? false) !== true) {
             $result['warning'] = 'This reader is not confirmed yet. Hold a tag near it: the first tag confirms the data format.';
         }
 
         return $result;
+    }
+
+    /**
+     * The settings of a known reader model (a signature in the discovery
+     * profile) for this MAC, or [] when none matches.
+     *
+     * @return array<string, mixed>
+     */
+    protected function readerSignature(?string $mac): array
+    {
+        $prefix = strtoupper(substr((string) $mac, 0, 8));
+
+        foreach ((array) data_get(DeviceFiles::profiles(), 'uhf_reader.signatures', []) as $signature) {
+            $ouis = array_map(fn ($oui) => strtoupper((string) $oui), (array) ($signature['oui'] ?? []));
+            if ($prefix !== '' && in_array($prefix, $ouis, true) && (int) ($signature['tcp_port'] ?? 0) > 0) {
+                return [
+                    'transport' => $signature['transport'] ?? 'tcp',
+                    'port' => (int) $signature['tcp_port'],
+                    'protocol' => $signature['protocol'] ?? null,
+                    'work_mode' => $signature['work_mode'] ?? null,
+                    'signature' => $signature['name'] ?? null,
+                ];
+            }
+        }
+
+        return [];
     }
 
     /**
