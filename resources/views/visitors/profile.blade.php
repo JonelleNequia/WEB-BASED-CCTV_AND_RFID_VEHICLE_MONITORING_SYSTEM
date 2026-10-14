@@ -20,6 +20,37 @@
         </div>
     </section>
 
+    {{-- Gate direction work, Phase C: every pass of this plate as trips, at any gate. --}}
+    <section class="panel">
+        <h3 class="panel-title">Movements</h3>
+        @if ($trips->isEmpty())
+            <p class="field-help">No IN or OUT with this plate yet.</p>
+        @else
+            @php($last = $trips->first()['out'] ?? $trips->first()['in'])
+            <p class="field-help">Last movement: <strong>{{ $last->direction }} · {{ \App\Models\Gate::labelFor($last->gate) }} · <x-datetime :value="$last->seen_at" /></strong></p>
+            <ol class="trip-list">
+                @foreach ($trips as $trip)
+                    <li data-trip>
+                        @if ($trip['in'])
+                            <span class="trip-step">IN · {{ \App\Models\Gate::labelFor($trip['in']->gate) }} · {{ \App\Support\DisplayTime::datetime($trip['in']->seen_at) }}</span>
+                        @else
+                            <span class="trip-step trip-missing">IN not seen</span>
+                        @endif
+                        <span aria-hidden="true">→</span>
+                        @if ($trip['out'])
+                            <span class="trip-step">OUT · {{ \App\Models\Gate::labelFor($trip['out']->gate) }} · {{ \App\Support\DisplayTime::time($trip['out']->seen_at) }}</span>
+                        @else
+                            <span class="trip-step trip-missing">{{ $trip['in'] && \App\Support\PhilippineTime::localDateString($trip['in']->seen_at) === \App\Support\PhilippineTime::todayDateString() ? 'no OUT yet' : 'OUT not seen' }}</span>
+                        @endif
+                        @if ($trip['minutes'] !== null)
+                            <span class="table-subtext">{{ $trip['minutes'] >= 60 ? intdiv($trip['minutes'], 60).' h '.($trip['minutes'] % 60).' min' : $trip['minutes'].' min' }} inside</span>
+                        @endif
+                    </li>
+                @endforeach
+            </ol>
+        @endif
+    </section>
+
     <section class="panel">
         <form method="POST" action="{{ route('visitors.profiles.note', $profile) }}" class="stack-form">
             @csrf

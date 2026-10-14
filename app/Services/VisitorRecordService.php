@@ -113,15 +113,22 @@ class VisitorRecordService
             ]);
 
             if ($record->plate_status !== VisitorRecord::PLATE_CORRECTED) {
+                // Gate direction work, Phase C: the plate's profile, also when
+                // the read is one character off a plate already seen.
+                $match = $read ? $this->tieToProfile($record, $plate) : ['plate' => null, 'profile' => null, 'confidence' => null, 'reason' => null, 'suggested' => null];
+                $plate = $match['plate'];
                 $record->fill([
                     'plate_status' => $read ? VisitorRecord::PLATE_READ : VisitorRecord::PLATE_UNREADABLE,
                     'plate_number' => $read ? $plate : null,
                     'plate_key' => $read ? PlateNumber::key($plate) : null,
                     'plate_confidence' => isset($data['plate_confidence']) ? (float) $data['plate_confidence'] : null,
+                    'match_confidence' => $match['confidence'],
+                    'match_reason' => $match['reason'],
                 ]);
-                $profile = $read ? $this->profileFor($plate, $record->seen_at) : null;
+                $profile = $match['profile'];
                 $record->plate_profile_id = $profile?->id;
                 $record->vehicle_id = $profile?->vehicle_id;
+                $record->suggested_profile_id = $match['suggested'];
             }
 
             $record->save();
@@ -248,7 +255,15 @@ class VisitorRecordService
             $plate = PlateNumber::display($plate);
             $profile = $plate ? $this->profileFor($plate, $record->seen_at) : null;
 
+            // Gate direction work, Phase C: remember the correction for later reads.
+            if ($plate) {
+                app(PlateMatchService::class)->learn($record->ocr_plate_number ?? $record->plate_number, $plate, $user);
+            }
+
             $record->fill([
+                'match_confidence' => $plate ? PlateMatchService::MANUAL : null,
+                'match_reason' => null,
+                'suggested_profile_id' => null,
                 // What OCR said stays in ocr_plate_number.
                 'ocr_plate_number' => $record->ocr_plate_number ?? $record->plate_number,
                 'plate_status' => $plate ? VisitorRecord::PLATE_CORRECTED : VisitorRecord::PLATE_UNREADABLE,
@@ -374,6 +389,42 @@ class VisitorRecordService
 
             return $target->fresh();
         });
+    }
+
+    /**
+     * Gate direction work, Phase C: which plate profile a camera read belongs
+     * to. A read a guard corrected before becomes the right plate; the same
+     * plate is tied at once; one character off a known plate is tied when
+     * PlateMatchService is sure enough (high / medium), else it waits in
+     * Review with the suggestion (low, no profile); a new plate gets its own.
+     *
+     * @return array{plate: string, profile: ?PlateProfile, confidence: ?string, reason: ?string, suggested: ?int}
+     */
+    protected function tieToProfile(VisitorRecord $record, string $plate): array
+    {
+        $matcher = app(PlateMatchService::class);
+        $key = (string) PlateNumber::key($plate);
+
+        if ($learned = $matcher->learnedPlateKey($key)) {
+            $right = (string) PlateNumber::display($learned);
+
+            return ['plate' => $right, 'profile' => $this->profileFor($right, $record->seen_at), 'confidence' => PlateMatchService::LEARNED,
+                'reason' => "Read {$plate}; a guard corrected this read to {$right} before", 'suggested' => null];
+        }
+
+        if (PlateProfile::query()->where('plate_key', $key)->exists()) {
+            return ['plate' => $plate, 'profile' => $this->profileFor($plate, $record->seen_at), 'confidence' => PlateMatchService::EXACT, 'reason' => null, 'suggested' => null];
+        }
+
+        $near = $matcher->nearMatch($record, $key);
+        if ($near && $near['confidence'] !== PlateMatchService::LOW) {
+            return ['plate' => $plate, 'profile' => $this->resolve($near['profile']), 'confidence' => $near['confidence'], 'reason' => $near['reason'], 'suggested' => null];
+        }
+        if ($near) {
+            return ['plate' => $plate, 'profile' => null, 'confidence' => PlateMatchService::LOW, 'reason' => $near['reason'], 'suggested' => $near['profile']->id];
+        }
+
+        return ['plate' => $plate, 'profile' => $this->profileFor($plate, $record->seen_at), 'confidence' => null, 'reason' => null, 'suggested' => null];
     }
 
     /**

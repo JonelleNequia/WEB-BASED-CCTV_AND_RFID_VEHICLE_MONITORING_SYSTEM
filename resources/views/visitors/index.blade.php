@@ -17,6 +17,27 @@
     @elseif ($tab === 'review')
         @include('visitors.partials.review')
     @else
+        {{-- Gate direction work, Phase C: IN today, no OUT yet (an estimate, not the official inside count). --}}
+        @if ($possiblyInside && ($possiblyInside['vehicles']->isNotEmpty() || $possiblyInside['without_plate'] > 0))
+            <section class="panel possibly-inside" data-possibly-inside>
+                <h3 class="panel-title">Posibleng nasa loob pa <span class="badge badge-secondary">tantya lang</span></h3>
+                <p class="field-help">Unregistered vehicles that came IN today and have no OUT yet. An estimate: a missed or unread OUT keeps a vehicle here. The official inside count is for registered vehicles only.</p>
+                @if ($possiblyInside['vehicles']->isNotEmpty())
+                    <ul class="possibly-inside-list">
+                        @foreach ($possiblyInside['vehicles'] as $item)
+                            <li>
+                                <a href="{{ route('visitors.profiles.show', $item['profile']) }}"><strong>{{ $item['profile']->plate_number }}</strong></a>
+                                <span class="table-subtext">IN · {{ \App\Models\Gate::labelFor($item['record']->gate) }} · {{ \App\Support\DisplayTime::time($item['record']->seen_at) }}{{ $item['record']->vehicle_type ? ' · '.$item['record']->vehicle_type : '' }}</span>
+                            </li>
+                        @endforeach
+                    </ul>
+                @endif
+                @if ($possiblyInside['without_plate'] > 0)
+                    <p class="table-subtext">Also {{ $possiblyInside['without_plate'] }} IN today without a readable plate (cannot be paired with an OUT).</p>
+                @endif
+            </section>
+        @endif
+
         <x-table title="Unregistered Visitors" :paginator="$records" :empty="$records->isEmpty()" empty-title="No unregistered visitors yet" empty-text="Vehicles that cross a gate without a registered tag appear here.">
             <x-slot:filters>
                 <form method="GET" action="{{ route('visitors.index') }}" class="log-filter-form">

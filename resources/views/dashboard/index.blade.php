@@ -22,6 +22,10 @@
                 @foreach ($insideByCategory as $category => $row)
                     <span data-dashboard-inside="{{ $category }}">{{ $row['inside'] }}</span> {{ $row['label'] }}@if (! $loop->last) · @endif
                 @endforeach
+                @if ($possiblyInsideCount > 0)
+                    {{-- Gate direction work, Phase C: not part of the official count. --}}
+                    <br><a href="{{ route('visitors.index') }}" data-dashboard-possibly-inside>+{{ $possiblyInsideCount }} posibleng nasa loob pa (unregistered, tantya lang)</a>
+                @endif
             </x-slot:detail>
         </x-stat>
         <x-stat label="IN Today" :value="$totalVehiclesEnteredToday" metric="total_vehicles_entered_today" hint="All vehicles, all gates" :href="route('logs.index', ['period' => 'today', 'event_type' => 'ENTRY'])" />

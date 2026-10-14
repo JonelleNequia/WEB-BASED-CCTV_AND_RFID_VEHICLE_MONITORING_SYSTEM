@@ -51,6 +51,10 @@
                         @case('unreadable') {{ $record->ocr_plate_number ? 'Best guess: '.$record->ocr_plate_number : 'No plate found' }} @break
                         @default OCR running
                     @endswitch
+                    @if (in_array($record->match_confidence, ['high', 'medium', 'learned', 'low'], true))
+                        {{-- Gate direction work, Phase C: tied to a plate already seen, one character off. --}}
+                        · <span data-match="{{ $record->match_confidence }}" title="{{ $record->match_reason }}">{{ \App\Services\PlateMatchService::LABELS[$record->match_confidence] }}</span>
+                    @endif
                     @if ($record->plateProfile && $record->plateProfile->visit_count > 1)
                         · {{ $record->plateProfile->visit_count }} visits
                     @endif

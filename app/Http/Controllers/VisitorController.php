@@ -40,6 +40,8 @@ class VisitorController extends Controller
             'tab' => $tab,
             'filters' => $filters,
             'records' => $tab === 'records' ? $this->records($filters)->paginate(20)->withQueryString() : null,
+            // Gate direction work, Phase C: unregistered vehicles IN today without an OUT yet (an estimate).
+            'possiblyInside' => $tab === 'records' ? app(\App\Services\VisitorPresenceService::class)->possiblyInside() : null,
             'profiles' => $tab === 'plates'
                 ? PlateProfile::query()->current()
                     ->with('vehicle')
@@ -62,7 +64,7 @@ class VisitorController extends Controller
             'review' => $tab === 'review' ? $this->directionUnknown() : null,
             // Gate direction work, Phase B: plates to check (unreadable or a low confidence).
             'plateReview' => $tab === 'review'
-                ? VisitorRecord::query()->plateToCheck()->latest('seen_at')->limit(200)->get()
+                ? VisitorRecord::query()->plateToCheck()->with('suggestedProfile')->latest('seen_at')->limit(200)->get()
                 : null,
             // ROI work: how many wait for Set IN / Set OUT (shown on the Review tab); Phase B: plus plates to check.
             'reviewCount' => VisitorRecord::query()->active()->where('direction', 'UNKNOWN')->count()
@@ -132,6 +134,8 @@ class VisitorController extends Controller
 
         return view('visitors.profile', [
             'profile' => $plateProfile->load(['aliases', 'noteAuthor', 'vehicle']),
+            // Gate direction work, Phase C: IN -> OUT trips, across gates.
+            'trips' => app(\App\Services\VisitorPresenceService::class)->trips($plateProfile),
             'records' => VisitorRecord::query()
                 ->where('plate_profile_id', $plateProfile->id)
                 ->latest('seen_at')

@@ -72,7 +72,7 @@
         </thead>
         <tbody>
             @foreach ($plateReview as $record)
-                @php($guess = $record->plate_number ?: $record->ocr_plate_number)
+                @php($guess = $record->suggestedProfile?->plate_number ?: ($record->plate_number ?: $record->ocr_plate_number))
                 <tr id="review-plate-{{ $record->id }}">
                     <td>
                         @if ($record->snapshot_url)
@@ -95,9 +95,13 @@
                     <td>
                         <strong>{{ $guess ?: '—' }}</strong>
                         <div class="table-subtext">
-                            {{ $record->plate_status === \App\Models\VisitorRecord::PLATE_UNREADABLE ? 'Plate unreadable' : 'Not sure' }}@if ((float) $record->plate_confidence > 0) · {{ round((float) $record->plate_confidence * 100) }}%@endif
+                            {{ $record->plate_status === \App\Models\VisitorRecord::PLATE_UNREADABLE ? 'Plate unreadable' : ($record->match_confidence === 'low' ? 'Possible match' : 'Not sure') }}@if ((float) $record->plate_confidence > 0) · {{ round((float) $record->plate_confidence * 100) }}%@endif
                         </div>
                         <div class="table-subtext">{{ $record->vehicle_type ?: 'Vehicle' }}@if ($record->vehicle_color) · {{ $record->vehicle_color }}@endif</div>
+                        @if ($record->suggestedProfile)
+                            {{-- Phase C: one character off a plate already seen, not sure enough to tie. --}}
+                            <div class="table-subtext" data-suggested-match>Read {{ $record->plate_number }} · possibly <a href="{{ route('visitors.profiles.show', $record->suggestedProfile) }}">{{ $record->suggestedProfile->plate_number }}</a> ({{ $record->suggestedProfile->visit_count }} {{ \Illuminate\Support\Str::plural('visit', $record->suggestedProfile->visit_count) }}): {{ $record->match_reason }}</div>
+                        @endif
                     </td>
                     <td class="nowrap">{{ \App\Models\Gate::labelFor($record->gate) }} · {{ $record->direction === 'UNKNOWN' ? 'Direction unknown' : $record->direction }}</td>
                     <td><x-datetime :value="$record->seen_at" /></td>

@@ -55,6 +55,9 @@ class VisitorRecord extends Model
     protected $fillable = [
         'direction_source',
         'direction_confidence',
+        'match_confidence',
+        'match_reason',
+        'suggested_profile_id',
         'external_event_key',
         'source',
         'vehicle_crossing_id',
@@ -92,7 +95,15 @@ class VisitorRecord extends Model
         return $query->where('status', self::STATUS_ACTIVE)
             ->whereNull('corrected_by')
             ->where(fn ($inner) => $inner->where('plate_status', self::PLATE_UNREADABLE)
-                ->orWhere(fn ($low) => $low->where('plate_status', self::PLATE_READ)->where('plate_confidence', '<', self::LOW_PLATE_CONFIDENCE)));
+                ->orWhere(fn ($low) => $low->where('plate_status', self::PLATE_READ)->where('plate_confidence', '<', self::LOW_PLATE_CONFIDENCE))
+                // Phase C: one character off a known plate, not sure enough to tie.
+                ->orWhere('match_confidence', \App\Services\PlateMatchService::LOW));
+    }
+
+    /** Phase C: the known plate this record probably is (a low match, waiting in Review). */
+    public function suggestedProfile(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(PlateProfile::class, 'suggested_profile_id');
     }
 
     protected static function booted(): void

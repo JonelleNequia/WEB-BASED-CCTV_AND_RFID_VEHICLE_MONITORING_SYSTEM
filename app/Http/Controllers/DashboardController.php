@@ -144,6 +144,8 @@ class DashboardController extends Controller
             'movementCounts' => $movementCounts,
             // Registered vehicles only (unregistered visitors are never "inside").
             'insideByCategory' => app(VehicleOccupancyService::class)->insideByCategory(),
+            // Gate direction work, Phase C: unregistered vehicles IN today without an OUT (an estimate only).
+            'possiblyInsideCount' => app(\App\Services\VisitorPresenceService::class)->possiblyInside()['vehicles']->count(),
             'latestEvents' => $this->recentEventActivities(),
             'frequentEntryVehicles' => $this->frequentEntryVehicles(),
             // Phase 6 (visitor model): Visitor Ranking, separate from the registered one.

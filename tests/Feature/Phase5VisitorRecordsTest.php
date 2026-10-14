@@ -102,10 +102,10 @@ class Phase5VisitorRecordsTest extends TestCase
         $this->plate('k-a', 'read', 'ABC-1234', 0.9);
         $this->travel(10)->minutes();
         $this->crossing('k-b', 'OUT');
-        $this->plate('k-b', 'read', 'ABC-1284', 0.8); // misread 3 -> 8
+        $this->plate('k-b', 'read', 'ABD-1284', 0.8); // misread twice (C -> D, 3 -> 8): too far for Phase C matching
 
         $right = PlateProfile::query()->where('plate_key', 'ABC1234')->sole();
-        $wrong = PlateProfile::query()->where('plate_key', 'ABC1284')->sole();
+        $wrong = PlateProfile::query()->where('plate_key', 'ABD1284')->sole();
 
         // Guards cannot merge.
         $this->actingAs($this->guard)->post(route('visitors.profiles.merge', $wrong), ['target_id' => $right->id])->assertForbidden();
@@ -119,10 +119,10 @@ class Phase5VisitorRecordsTest extends TestCase
         // The camera misreads it the same way again: the visit goes to the right plate.
         $this->travel(1)->days();
         $this->crossing('k-c', 'IN');
-        $this->plate('k-c', 'read', 'ABC-1284', 0.8);
+        $this->plate('k-c', 'read', 'ABD-1284', 0.8);
         $this->assertSame(3, $right->fresh()->visit_count);
         $this->actingAs($this->admin)->get(route('visitors.profiles.show', $wrong))->assertRedirect(route('visitors.profiles.show', $right));
-        $this->actingAs($this->admin)->get(route('visitors.profiles.show', $right))->assertOk()->assertSee('ABC 1284');
+        $this->actingAs($this->admin)->get(route('visitors.profiles.show', $right))->assertOk()->assertSee('ABD 1284');
     }
 
     public function test_registered_vehicles_never_become_visitor_records(): void

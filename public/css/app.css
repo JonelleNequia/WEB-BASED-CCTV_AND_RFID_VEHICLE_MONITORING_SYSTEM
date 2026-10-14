@@ -8082,3 +8082,41 @@ img.thumb-plate {
         gap: 0.1rem;
     }
 }
+
+/* Gate direction work, Phase C: plate trips and "posibleng nasa loob pa". */
+.trip-list {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0.5rem 0 0;
+    padding-left: 1.2rem;
+}
+
+.trip-list li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.6rem;
+    align-items: baseline;
+}
+
+.trip-step {
+    font-weight: 600;
+}
+
+.trip-missing {
+    color: var(--text-muted);
+    font-weight: 400;
+    font-style: italic;
+}
+
+.possibly-inside-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.possibly-inside-list li {
+    display: grid;
+}
