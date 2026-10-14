@@ -51,6 +51,9 @@ class PlateMatchService
 
     public const LEARNED = 'learned';
 
+    /** Phase D: a guard confirmed the plate as the camera read it. */
+    public const CONFIRMED = 'confirmed';
+
     public const LABELS = [
         self::EXACT => 'Same plate',
         self::HIGH => 'Matched (high)',
@@ -58,6 +61,7 @@ class PlateMatchService
         self::LOW => 'Possible match (check)',
         self::MANUAL => 'Typed by a guard',
         self::LEARNED => 'Corrected as before',
+        self::CONFIRMED => 'Confirmed by a guard',
     ];
 
     /**

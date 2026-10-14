@@ -58,6 +58,8 @@ class VisitorRecord extends Model
         'match_confidence',
         'match_reason',
         'suggested_profile_id',
+        'reviewed_at',
+        'reviewed_by',
         'external_event_key',
         'source',
         'vehicle_crossing_id',
@@ -93,11 +95,35 @@ class VisitorRecord extends Model
     public function scopePlateToCheck(Builder $query): Builder
     {
         return $query->where('status', self::STATUS_ACTIVE)
-            ->whereNull('corrected_by')
-            ->where(fn ($inner) => $inner->where('plate_status', self::PLATE_UNREADABLE)
-                ->orWhere(fn ($low) => $low->where('plate_status', self::PLATE_READ)->where('plate_confidence', '<', self::LOW_PLATE_CONFIDENCE))
-                // Phase C: one character off a known plate, not sure enough to tie.
-                ->orWhere('match_confidence', \App\Services\PlateMatchService::LOW));
+            ->whereNull('reviewed_at')
+            ->where(fn ($inner) => self::plateNeedsLook($inner));
+    }
+
+    /**
+     * Gate direction work, Phase D: what waits in Visitors › Review: a plate
+     * to check (not looked at yet) or an unknown direction.
+     */
+    public function scopeNeedsReview(Builder $query): Builder
+    {
+        return $query->where('status', self::STATUS_ACTIVE)
+            ->where(fn ($inner) => $inner->where('direction', 'UNKNOWN')
+                ->orWhere(fn ($plate) => $plate->whereNull('reviewed_at')->where(fn ($look) => self::plateNeedsLook($look))));
+    }
+
+    /** Unreadable, read with a low confidence, or only a low match to a known plate (Phase C). */
+    protected static function plateNeedsLook($query)
+    {
+        return $query->where('plate_status', self::PLATE_UNREADABLE)
+            ->orWhere(fn ($low) => $low->where('plate_status', self::PLATE_READ)->where('plate_confidence', '<', self::LOW_PLATE_CONFIDENCE))
+            ->orWhere('match_confidence', \App\Services\PlateMatchService::LOW);
+    }
+
+    public function plateNeedsReview(): bool
+    {
+        return $this->status === self::STATUS_ACTIVE && $this->reviewed_at === null
+            && ($this->plate_status === self::PLATE_UNREADABLE
+                || ($this->plate_status === self::PLATE_READ && $this->plate_confidence !== null && (float) $this->plate_confidence < self::LOW_PLATE_CONFIDENCE)
+                || $this->match_confidence === \App\Services\PlateMatchService::LOW);
     }
 
     /** Phase C: the known plate this record probably is (a low match, waiting in Review). */
@@ -132,6 +158,7 @@ class VisitorRecord extends Model
         return [
             'seen_at' => 'datetime',
             'corrected_at' => 'datetime',
+            'reviewed_at' => 'datetime',
             'plate_confidence' => 'float',
             'ocr_details_json' => 'array',
         ];
@@ -161,6 +188,11 @@ class VisitorRecord extends Model
     public function duplicateOf(): BelongsTo
     {
         return $this->belongsTo(self::class, 'duplicate_of_id');
+    }
+
+    public function reviewer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reviewed_by');
     }
 
     public function scopeActive(Builder $query): Builder

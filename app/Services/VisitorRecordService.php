@@ -273,6 +273,9 @@ class VisitorRecordService
                 'vehicle_id' => $profile?->vehicle_id,
                 'corrected_by' => $user->id,
                 'corrected_at' => now(),
+                // Gate direction work, Phase D: a guard looked at the plate.
+                'reviewed_by' => $user->id,
+                'reviewed_at' => now(),
             ])->save();
 
             $this->refreshProfiles([$oldProfileId, $record->plate_profile_id]);

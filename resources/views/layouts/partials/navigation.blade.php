@@ -27,6 +27,9 @@
             'route' => route('visitors.index'),
             'active' => request()->routeIs('visitors.*'),
             'icon' => 'guest',
+            // Gate direction work, Phase D: Review cards waiting.
+            'badge' => $navReviewCount ?? 0,
+            'badge_label' => 'to review',
         ],
         $isAdmin ? [
             'label' => 'Activity Logs',
@@ -66,11 +69,11 @@
     <div class="sidebar-nav-sections">
         <div class="nav-section">
             @foreach ($mainItems as $item)
-                <a href="{{ $item['route'] }}" class="nav-link {{ $item['active'] ? 'is-active' : '' }}" title="{{ $item['label'] }}{{ ($item['badge'] ?? 0) > 0 ? ' · '.$item['badge'].' alert(s)' : '' }}" @if ($item['active']) aria-current="page" @endif>
+                <a href="{{ $item['route'] }}" class="nav-link {{ $item['active'] ? 'is-active' : '' }}" title="{{ $item['label'] }}{{ ($item['badge'] ?? 0) > 0 ? ' · '.$item['badge'].' '.($item['badge_label'] ?? 'alert(s)') : '' }}" @if ($item['active']) aria-current="page" @endif>
                     <span class="nav-icon">{!! $navIcon($item['icon']) !!}</span>
                     <span class="nav-label">{{ $item['label'] }}</span>
                     @if (($item['badge'] ?? 0) > 0)
-                        <span class="nav-badge" title="{{ $item['badge'] }} alert(s) need attention">{{ $item['badge'] > 99 ? '99+' : $item['badge'] }}</span>
+                        <span class="nav-badge" title="{{ $item['badge'] }} {{ $item['badge_label'] ?? 'alert(s) need attention' }}">{{ $item['badge'] > 99 ? '99+' : $item['badge'] }}</span>
                     @endif
                 </a>
             @endforeach

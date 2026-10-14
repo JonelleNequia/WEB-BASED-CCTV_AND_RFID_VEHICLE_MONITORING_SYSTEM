@@ -112,7 +112,8 @@ class PlateMatchingTest extends TestCase
 
         $this->actingAs($this->admin)->get(route('visitors.index', ['tab' => 'review']))->assertOk()
             ->assertSee('Possible match')
-            ->assertSee('Read ABC 1284 · possibly', false)
+            ->assertSee('Possible match: ABC 1234 with', false)
+            ->assertSee('value="pick_match:'.$abc->id.'"', false)
             ->assertSee('value="ABC 1234"', false);
 
         // The guard confirms the suggested plate: tied, and the correction is remembered.

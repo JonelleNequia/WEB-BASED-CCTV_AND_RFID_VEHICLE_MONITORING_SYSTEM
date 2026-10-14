@@ -31,7 +31,7 @@
         <x-stat label="IN Today" :value="$totalVehiclesEnteredToday" metric="total_vehicles_entered_today" hint="All vehicles, all gates" :href="route('logs.index', ['period' => 'today', 'event_type' => 'ENTRY'])" />
         <x-stat label="OUT Today" :value="$totalVehiclesExitedToday" metric="total_vehicles_exited_today" hint="All vehicles, all gates" :href="route('logs.index', ['period' => 'today', 'event_type' => 'EXIT'])" />
         <x-stat label="Needs Attention" :value="$alertCounts['total']" metric="alerts_total" :tone="$alertCounts['total'] > 0 ? 'danger' : null" :href="route('logs.index', ['tab' => 'alerts'])">
-            <x-slot:detail><span data-dashboard-metric="alert_anomalies">{{ $alertCounts['anomalies'] }}</span> anomalies · <span data-dashboard-metric="alert_unknown_tags">{{ $alertCounts['unknown_tags'] }}</span> unknown tags</x-slot:detail>
+            <x-slot:detail><span data-dashboard-metric="alert_anomalies">{{ $alertCounts['anomalies'] }}</span> anomalies · <span data-dashboard-metric="alert_unknown_tags">{{ $alertCounts['unknown_tags'] }}</span> unknown tags · <a href="{{ route('visitors.index', ['tab' => 'review']) }}" data-dashboard-review><span>{{ $reviewCount }}</span> to review</a></x-slot:detail>
         </x-stat>
     </x-stat-row>
 

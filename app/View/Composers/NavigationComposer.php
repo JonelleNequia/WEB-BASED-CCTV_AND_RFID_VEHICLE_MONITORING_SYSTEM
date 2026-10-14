@@ -29,6 +29,8 @@ class NavigationComposer
 
         return $view->with([
             'navAlertCount' => $isAdmin ? $this->alertSummaryService->counts()['total'] : 0,
+            // Gate direction work, Phase D: cards waiting in Visitors › Review (guards too).
+            'navReviewCount' => auth()->check() ? app(\App\Services\VisitorReviewService::class)->count() : 0,
             'navHealth' => $this->health(),
         ]);
     }

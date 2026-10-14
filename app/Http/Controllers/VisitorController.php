@@ -11,6 +11,7 @@ use App\Services\DirectionCorrectionService;
 use App\Services\VisitorRecordService;
 use App\Support\PlateNumber;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -31,7 +32,7 @@ class VisitorController extends Controller
         'review' => 'Review',
     ];
 
-    public function index(Request $request): View
+    public function index(Request $request, \App\Services\VisitorReviewService $reviewService): View
     {
         $tab = $this->resolveTab($request, self::TABS);
         $filters = $request->only(['q', 'gate', 'plate_status', 'status', 'sort']);
@@ -61,42 +62,31 @@ class VisitorController extends Controller
                 ? PlateProfile::query()->current()->orderBy('plate_number')->get(['id', 'plate_number', 'visit_count'])
                 : collect(),
             'gates' => Gate::options(),
+            // ROI work: registered records the camera could not tell (saved before Phase A's state fallback).
             'review' => $tab === 'review' ? $this->directionUnknown() : null,
-            // Gate direction work, Phase B: plates to check (unreadable or a low confidence).
-            'plateReview' => $tab === 'review'
-                ? VisitorRecord::query()->plateToCheck()->with('suggestedProfile')->latest('seen_at')->limit(200)->get()
-                : null,
-            // ROI work: how many wait for Set IN / Set OUT (shown on the Review tab); Phase B: plus plates to check.
-            'reviewCount' => VisitorRecord::query()->active()->where('direction', 'UNKNOWN')->count()
-                + VehicleEvent::query()->where('event_type', VehicleEvent::TYPE_UNKNOWN)->whereNotNull('vehicle_id')->count()
-                + VisitorRecord::query()->plateToCheck()->count(),
+            // Gate direction work, Phase D: the Review cards (plate to check, unknown direction).
+            'reviewQueue' => $tab === 'review' ? $reviewService->queue() : null,
+            'reviewService' => $reviewService,
+            'plateOptions' => $tab === 'review'
+                ? PlateProfile::query()->current()->orderByDesc('visit_count')->limit(500)->pluck('plate_number')
+                : collect(),
+            'reviewLog' => $tab === 'review' ? $reviewService->recent() : collect(),
+            'reviewCount' => $reviewService->count()
+                + VehicleEvent::query()->where('event_type', VehicleEvent::TYPE_UNKNOWN)->whereNotNull('vehicle_id')->count(),
         ]);
     }
 
     /**
-     * ROI work, Phase 2: every counted record whose direction the camera
-     * could not tell (registered and unregistered), newest first, to set
-     * IN or OUT in one click.
+     * ROI work, Phase 2: registered records whose direction the camera
+     * could not tell (saved before Gate direction work Phase A used the
+     * vehicle's state), newest first, to set IN or OUT in one click.
+     * Unregistered ones are Review cards (VisitorReviewService).
      *
      * @return \Illuminate\Support\Collection<int, array<string, mixed>>
      */
     protected function directionUnknown(): \Illuminate\Support\Collection
     {
-        $visitors = VisitorRecord::query()->active()->where('direction', 'UNKNOWN')
-            ->with(['crossing', 'plateProfile'])->latest('seen_at')->limit(200)->get()
-            ->map(fn (VisitorRecord $record): array => [
-                'key' => 'visitor-'.$record->id,
-                'time' => $record->seen_at,
-                'gate' => $record->gate,
-                'plate' => $record->plateLabel(),
-                'who' => 'Unregistered Visitor',
-                'snapshot_url' => $record->snapshot_url,
-                // Phase 5: the plate's crop, read from the sharpest full-resolution frame.
-                'plate_image_url' => $record->plate_image_url,
-                'reason' => $record->crossing?->direction_reason,
-                'url' => route('visitors.records.direction', $record),
-            ]);
-
+        // Gate direction work, Phase D: unregistered records are Review cards now.
         $registered = VehicleEvent::query()->where('event_type', VehicleEvent::TYPE_UNKNOWN)->whereNotNull('vehicle_id')
             ->with(['vehicle', 'rfidScanLog.vehicleCrossing'])->latest('event_time')->limit(200)->get()
             ->map(fn (VehicleEvent $event): array => [
@@ -111,7 +101,7 @@ class VisitorController extends Controller
                 'url' => route('vehicle-events.direction', $event),
             ]);
 
-        return $visitors->concat($registered)->sortByDesc(fn (array $item) => $item['time']?->getTimestamp() ?? 0)->values();
+        return $registered->sortByDesc(fn (array $item) => $item['time']?->getTimestamp() ?? 0)->values();
     }
 
     /**
@@ -121,6 +111,7 @@ class VisitorController extends Controller
     {
         $validated = $request->validate(['direction' => ['required', 'in:IN,OUT']]);
         $record = $service->setForVisitorRecord($visitorRecord, $validated['direction'], $request->user());
+        app(\App\Services\VisitorReviewService::class)->log($record, 'set_direction', 'UNKNOWN', $record->direction, $request->user());
 
         return back()->with('status', "Record #{$record->id} set to {$record->direction}.");
     }
@@ -175,7 +166,10 @@ class VisitorController extends Controller
         ], ['plate_number.regex' => 'Use letters, digits, spaces or a dash.']);
 
         $plate = ($validated['unreadable'] ?? '0') === '1' ? null : $validated['plate_number'];
+        $before = $visitorRecord->plate_number ?: $visitorRecord->plate_status.($visitorRecord->ocr_plate_number ? ' (guess '.$visitorRecord->ocr_plate_number.')' : '');
         $record = $service->correctPlate($visitorRecord, $plate, $request->user());
+        // Gate direction work, Phase D: in the Review audit log too.
+        app(\App\Services\VisitorReviewService::class)->log($record, $plate === null ? 'no_plate' : 'correct_plate', $before, $record->plate_number, $request->user());
 
         $message = $plate === null
             ? "Record #{$record->id} marked as plate unreadable."
@@ -186,6 +180,38 @@ class VisitorController extends Controller
         }
 
         return back()->with('status', $message);
+    }
+
+    /**
+     * Gate direction work, Phase D: one Visitors › Review action on a card
+     * (JSON for the keyboard-driven page; a redirect without JavaScript).
+     * The plain form's buttons say "pick_match:12", "set_direction:IN",
+     * "dismiss:duplicate".
+     */
+    public function review(Request $request, VisitorRecord $visitorRecord, \App\Services\VisitorReviewService $service): JsonResponse|RedirectResponse
+    {
+        $validated = $request->validate([
+            'action' => ['required', 'string', 'max:40'],
+            'plate' => ['nullable', 'string', 'max:30'],
+            'profile_id' => ['nullable', 'integer'],
+            'direction' => ['nullable', 'in:IN,OUT'],
+            'name' => ['nullable', 'string', 'max:120'],
+            'reason' => ['nullable', 'string', 'max:40'],
+        ]);
+        [$action, $argument] = array_pad(explode(':', $validated['action'], 2), 2, null);
+        if ($argument !== null) {
+            $validated[match ($action) {
+                'pick_match' => 'profile_id',
+                'set_direction' => 'direction',
+                default => 'reason',
+            }] = $argument;
+        }
+
+        $result = $service->act($visitorRecord, $action, $validated, $request->user());
+
+        return $request->expectsJson()
+            ? response()->json(['ok' => true] + $result)
+            : back()->with('status', $result['message']);
     }
 
     /**
@@ -202,7 +228,9 @@ class VisitorController extends Controller
     public function dismiss(Request $request, VisitorRecord $visitorRecord, VisitorRecordService $service): RedirectResponse
     {
         $validated = $request->validate(['reason' => ['required', 'string', 'max:150']]);
+        $before = $visitorRecord->status;
         $service->dismiss($visitorRecord, $validated['reason'].' ('.$request->user()->name.')');
+        app(\App\Services\VisitorReviewService::class)->log($visitorRecord, 'dismiss', $before, $validated['reason'], $request->user());
 
         return back()->with('status', "Record #{$visitorRecord->id} dismissed.");
     }

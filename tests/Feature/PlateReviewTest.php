@@ -46,9 +46,9 @@ class PlateReviewTest extends TestCase
         $this->actingAs($this->admin)->get(route('visitors.index', ['tab' => 'review']))
             ->assertOk()
             ->assertSee('Review (2)')
-            ->assertSee('Plate to check')
-            ->assertSee('review-plate-'.$unreadable->id, false)
-            ->assertSee('review-plate-'.$unsure->id, false)
+            ->assertSee('To review')
+            ->assertSee('review-card-'.$unreadable->id, false)
+            ->assertSee('review-card-'.$unsure->id, false)
             ->assertSee('Plate unreadable')
             ->assertSee('Not sure')
             ->assertSee('45%')
@@ -65,7 +65,7 @@ class PlateReviewTest extends TestCase
         $this->assertSame(['unreadable', null], [$unsure->fresh()->plate_status, $unsure->fresh()->plate_number]);
         $this->assertSame(0, VisitorRecord::query()->plateToCheck()->count());
         $this->assertSame(2, app(MovementCountService::class)->counts('today')['out']);
-        $this->actingAs($this->admin)->get(route('visitors.index', ['tab' => 'review']))->assertOk()->assertSee('No plate to check');
+        $this->actingAs($this->admin)->get(route('visitors.index', ['tab' => 'review']))->assertOk()->assertSee('Nothing to review');
     }
 
     public function test_plate_readability_report_per_gate(): void

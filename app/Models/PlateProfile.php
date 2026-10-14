@@ -24,6 +24,8 @@ class PlateProfile extends Model
         'vehicle_type',
         'vehicle_color',
         'note',
+        // Gate direction work, Phase D: a name a guard gave this plate.
+        'owner_name',
         'note_updated_by',
         'first_seen_at',
         'last_seen_at',
