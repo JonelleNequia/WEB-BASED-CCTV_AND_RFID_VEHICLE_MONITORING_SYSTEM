@@ -72,6 +72,7 @@ from tracking import (
 )
 from anpr import detect_vehicle_color, ocr_runtime_status, read_license_plate_details
 from plate_voting import frames_agree, vote_plate
+import plate_reader
 from camera_health import ReconnectBackoff, RtspDiagnosis, short_reason, strip_credentials, take_over_stale_detector
 import metrics
 from hires import HiResGrabber, scale_box
@@ -113,6 +114,11 @@ MAX_GUEST_OCR_ANALYSIS_FRAMES = 4
 PLATE_OCR_BUDGET_SECONDS = 12.0
 MAX_GUEST_COLOR_ANALYSIS_FRAMES = 3
 GUEST_ANALYSIS_FRAME_INTERVAL_SECONDS = 0.45
+# Gate direction work, Phase B: a burst for the plate, a frame every 0.15 s
+# while the vehicle is in the zone (the main stream's when it is open); the
+# biggest views of the vehicle are kept (plate_reader picks the sharpest plate).
+PLATE_FRAME_INTERVAL_SECONDS = 0.15
+MAX_PLATE_FRAMES = 8
 LATEST_FRAME_SAVE_INTERVAL_SECONDS = 0.20
 
 
@@ -2515,6 +2521,7 @@ def update_record_after_left_zone(role, state, track_id, window, matched, larave
         analysis_frames = [(frame.copy(), tuple(xyxy)) for frame, xyxy in window.get("analysis_frames", []) if frame is not None]
         hires_frames = list(window.get("hires_frames", []))
         best_hires = window.get("best_hires")
+        plate_frames = plate_frames_locked(window)
 
     if best_hires:
         # The sharpest full-resolution frame first for the plate as well.
@@ -2529,7 +2536,7 @@ def update_record_after_left_zone(role, state, track_id, window, matched, larave
     if matched or submit_visitor_plate is None:
         return
     # Phase 5: the plate again, from every sharp frame of the whole pass.
-    vote, vehicle_color, _, analysis_details, plate_crop = analyze_guest_vehicle_details(hires_frames + analysis_frames, payload["detected_vehicle_type"])
+    vote, vehicle_color, _, analysis_details, plate_crop = analyze_guest_vehicle_details(hires_frames + analysis_frames, payload["detected_vehicle_type"], plate_frames)
     plate_image = encode_frame_snapshot(role, plate_crop, f"plate-{window['event_key']}") if plate_crop is not None else None
     submit_visitor_plate(
         {
@@ -2636,13 +2643,34 @@ def analyze_guest_vehicle_color(analysis_frames):
     }
 
 
-def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None):
+def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None, plate_frames=None):
     """
     Phase 5 (visitor model): read the plate on up to MAX_GUEST_OCR_ANALYSIS_FRAMES
     frames (full-resolution first) and vote (plate_voting.vote_plate); stop
     early once two frames agree. Returns (vote, color, ocr runtime, details,
     plate crop image or None).
+
+    Gate direction work, Phase B: with the plate detector (plate_reader), the
+    plate is found in every frame of the pass's burst, the sharpest plate
+    crops are read and voted on, and the sharpest crop is kept.
     """
+    if plate_reader.available():
+        try:
+            result = plate_reader.read_pass(list(plate_frames or []) + list(analysis_frames), vehicle_type)
+        except Exception as error:
+            print(f"Plate reader failed, using the older reader: {error}", flush=True)
+            result = None
+        if result is not None:
+            vote, crop, details = result
+            colors = []
+            for frame, xyxy in analysis_frames[:MAX_GUEST_COLOR_ANALYSIS_FRAMES]:
+                try:
+                    colors.append(detect_vehicle_color(frame, xyxy))
+                except Exception:
+                    pass
+            details.update(vote={key: value for key, value in vote.items() if key != "candidates"}, candidates=vote["candidates"])
+            return vote, most_common_color([color for color in colors if color]), ocr_runtime_status(), details, crop
+
     vehicle_colors = []
     frame_reads = []
     crops = {}
@@ -2734,6 +2762,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
         window_started_at = window.get("started_at", now_monotonic)
         hires_analysis_frames = list(window.get("hires_frames", []))
         best_hires = window.get("best_hires")
+        plate_frames = plate_frames_locked(window)
         window_payload = {
             "event_key": window["event_key"],
             "camera_id": window.get("camera_id"),
@@ -2857,7 +2886,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             if not color_result.get("accepted"):
                 state["last_error"] = color_result.get("message", "Guest vehicle color could not be saved.")
 
-    vote, detailed_vehicle_color, ocr_status, analysis_details, plate_crop = analyze_guest_vehicle_details(analysis_frames, window_payload["detected_vehicle_type"])
+    vote, detailed_vehicle_color, ocr_status, analysis_details, plate_crop = analyze_guest_vehicle_details(analysis_frames, window_payload["detected_vehicle_type"], plate_frames)
     plate_number = vote["plate"]
     vehicle_color = reconcile_guest_vehicle_color(vehicle_color, detailed_vehicle_color)
 
@@ -2977,6 +3006,38 @@ def update_detection_windows(role, frame, results, state, laravel_client):
                     hires_frames = window.setdefault("hires_frames", [])
                     hires_frames.append((hires_frame, scale_box(visible_box["xyxy"], frame.shape, hires_frame.shape)))
                     del hires_frames[:-MAX_GUEST_ANALYSIS_FRAMES]
+
+            if now_monotonic - float(window.get("last_plate_frame_at", 0.0)) >= PLATE_FRAME_INTERVAL_SECONDS:
+                window["last_plate_frame_at"] = now_monotonic
+                keep_plate_frame_locked(role, window, frame, visible_box["xyxy"], now_monotonic)
+
+
+def keep_plate_frame_locked(role, window, frame, xyxy, now_monotonic):
+    """
+    Gate direction work, Phase B: one more frame of the plate burst (the main
+    stream's frame of this moment when it is open, else the live frame). The
+    MAX_PLATE_FRAMES biggest views of the vehicle are kept.
+    """
+    source = HIRES[role].frame_near(now_monotonic) if role in HIRES else None
+    if source is not None:
+        entry = (source, scale_box(xyxy, frame.shape, source.shape))
+    else:
+        entry = (frame.copy(), tuple(xyxy))
+    box = entry[1]
+    area = float((box[2] - box[0]) * (box[3] - box[1])) / float(entry[0].shape[0] * entry[0].shape[1])
+    frames = window.setdefault("plate_frames", [])
+    frames.append((area, now_monotonic, entry))
+    frames.sort(key=lambda item: item[0], reverse=True)
+    del frames[MAX_PLATE_FRAMES:]
+
+
+def plate_frames_locked(window):
+    """The plate burst of a pass, biggest view first, with the best moment's full-resolution frame first of all."""
+    frames = [entry for _, _, entry in window.get("plate_frames", [])]
+    best_hires = window.get("best_hires")
+    if best_hires and all(frame is not best_hires[0] for frame, _ in frames):
+        frames.insert(0, (best_hires[0], best_hires[1]))
+    return frames
 
 
 def remember_track_point(state, track_id, point):

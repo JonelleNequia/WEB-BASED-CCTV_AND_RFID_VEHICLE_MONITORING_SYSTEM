@@ -60,9 +60,14 @@ class VisitorController extends Controller
                 : collect(),
             'gates' => Gate::options(),
             'review' => $tab === 'review' ? $this->directionUnknown() : null,
-            // ROI work: how many wait for Set IN / Set OUT (shown on the Review tab).
+            // Gate direction work, Phase B: plates to check (unreadable or a low confidence).
+            'plateReview' => $tab === 'review'
+                ? VisitorRecord::query()->plateToCheck()->latest('seen_at')->limit(200)->get()
+                : null,
+            // ROI work: how many wait for Set IN / Set OUT (shown on the Review tab); Phase B: plus plates to check.
             'reviewCount' => VisitorRecord::query()->active()->where('direction', 'UNKNOWN')->count()
-                + VehicleEvent::query()->where('event_type', VehicleEvent::TYPE_UNKNOWN)->whereNotNull('vehicle_id')->count(),
+                + VehicleEvent::query()->where('event_type', VehicleEvent::TYPE_UNKNOWN)->whereNotNull('vehicle_id')->count()
+                + VisitorRecord::query()->plateToCheck()->count(),
         ]);
     }
 

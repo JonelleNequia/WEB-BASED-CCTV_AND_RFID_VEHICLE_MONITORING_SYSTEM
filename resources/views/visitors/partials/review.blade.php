@@ -48,3 +48,71 @@
         @endforeach
     </tbody>
 </x-table>
+
+{{--
+    Gate direction work, Phase B: plates a guard should check. The pass is
+    already counted (IN / OUT does not wait for the plate); this is only for
+    the plate. Type the plate as seen in the plate picture, or say no plate
+    is visible.
+--}}
+@if ($plateReview !== null)
+    <x-table title="Plate to check" :empty="$plateReview->isEmpty()" empty-title="No plate to check" empty-text="Every unregistered visitor's plate was read clearly.">
+        <x-slot:filters>
+            <p class="field-help">The camera could not read these plates, or is not sure. The pass is already counted. Look at the plate picture, then save the plate, or press "No plate visible".</p>
+        </x-slot:filters>
+        <thead>
+            <tr>
+                <th>Snapshot</th>
+                <th>Plate picture</th>
+                <th>Camera read</th>
+                <th>Gate · Direction</th>
+                <th>Time</th>
+                <th><span class="sr-only">Plate</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach ($plateReview as $record)
+                @php($guess = $record->plate_number ?: $record->ocr_plate_number)
+                <tr id="review-plate-{{ $record->id }}">
+                    <td>
+                        @if ($record->snapshot_url)
+                            <button type="button" class="thumb-button" data-zoom="{{ $record->snapshot_url }}" data-zoom-label="Snapshot of record #{{ $record->id }}">
+                                <img src="{{ $record->snapshot_url }}" alt="Snapshot of record #{{ $record->id }}" class="thumb thumb-sm" loading="lazy">
+                            </button>
+                        @else
+                            <span class="table-subtext">No snapshot</span>
+                        @endif
+                    </td>
+                    <td>
+                        @if ($record->plate_image_url)
+                            <button type="button" class="thumb-button" data-zoom="{{ $record->plate_image_url }}" data-zoom-label="Plate picture of record #{{ $record->id }}">
+                                <img src="{{ $record->plate_image_url }}" alt="Plate picture" class="thumb review-plate-crop" loading="lazy">
+                            </button>
+                        @else
+                            <span class="table-subtext">No plate picture</span>
+                        @endif
+                    </td>
+                    <td>
+                        <strong>{{ $guess ?: '—' }}</strong>
+                        <div class="table-subtext">
+                            {{ $record->plate_status === \App\Models\VisitorRecord::PLATE_UNREADABLE ? 'Plate unreadable' : 'Not sure' }}@if ((float) $record->plate_confidence > 0) · {{ round((float) $record->plate_confidence * 100) }}%@endif
+                        </div>
+                        <div class="table-subtext">{{ $record->vehicle_type ?: 'Vehicle' }}@if ($record->vehicle_color) · {{ $record->vehicle_color }}@endif</div>
+                    </td>
+                    <td class="nowrap">{{ \App\Models\Gate::labelFor($record->gate) }} · {{ $record->direction === 'UNKNOWN' ? 'Direction unknown' : $record->direction }}</td>
+                    <td><x-datetime :value="$record->seen_at" /></td>
+                    <td class="row-actions">
+                        <form method="POST" action="{{ route('visitors.records.plate', $record) }}" class="review-plate-form">
+                            @csrf
+                            @method('PATCH')
+                            <label class="sr-only" for="review-plate-{{ $record->id }}-input">Plate of record #{{ $record->id }}</label>
+                            <input id="review-plate-{{ $record->id }}-input" type="text" name="plate_number" value="{{ $guess }}" placeholder="ABC 1234" maxlength="30" autocomplete="off">
+                            <button type="submit" class="button button-primary button-sm">Save plate</button>
+                            <button type="submit" name="unreadable" value="1" class="button button-secondary button-sm" formnovalidate>No plate visible</button>
+                        </form>
+                    </td>
+                </tr>
+            @endforeach
+        </tbody>
+    </x-table>
+@endif

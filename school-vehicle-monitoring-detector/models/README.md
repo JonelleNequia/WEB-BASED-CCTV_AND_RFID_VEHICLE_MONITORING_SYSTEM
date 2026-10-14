@@ -6,7 +6,9 @@ The detector loads its models from this folder, offline:
 |---|---|
 | `yolov8n.pt` | Vehicle detection (every frame) |
 | `yolov8s.pt` | Second check of the vehicle type (once per vehicle) |
-| `easyocr/craft_mlt_25k.pth`, `easyocr/english_g2.pth` | Plate reading (EasyOCR) |
+| `easyocr/craft_mlt_25k.pth`, `easyocr/english_g2.pth` | Plate reading when the plate OCR model is missing (EasyOCR) |
+| `license_plate_detector.pt` | Finds the plate on the vehicle (YOLOv8n, MIT) |
+| `plate_ocr/cct_s_v2_global.onnx`, `plate_ocr/cct_s_v2_global_plate_config.yaml` | Reads the cropped plate (fast-plate-ocr, MIT) |
 
 The Windows install kit puts them here. For development, `php artisan runtime:fetch`
 downloads them (checked by SHA-256). Files in this folder's parent (the old place)

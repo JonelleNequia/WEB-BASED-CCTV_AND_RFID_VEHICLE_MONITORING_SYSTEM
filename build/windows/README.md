@@ -7,7 +7,8 @@ the system runs offline.
 ```text
 PHILCST-VMS/
   app/                         Laravel app (git HEAD) + vendor (composer --no-dev)
-    school-vehicle-monitoring-detector/models/   yolov8n.pt, yolov8s.pt, easyocr/*.pth
+    school-vehicle-monitoring-detector/models/   yolov8n.pt, yolov8s.pt, easyocr/*.pth,
+                                                license_plate_detector.pt, plate_ocr/*
   runtime/php/                 PHP 8.4 NTS x64 (php-cgi.exe for FastCGI)
   runtime/python/              embeddable Python 3.12 + all packages (requirements-windows.txt)
   runtime/caddy/caddy.exe      web server

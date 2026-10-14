@@ -38,6 +38,8 @@ class SettingsController extends Controller
         // Phase 2: move the RFID reader into this PC's network (guide, workaround).
         'reader-network' => 'RFID reader network',
         'test-scan' => 'Test Scan',
+        // Gate direction work, Phase B: plate size and sharpness per gate, and the camera settings to use.
+        'plate-camera' => 'Plate readability',
     ];
 
     /** Older tab names (bookmarks, links in messages). */
@@ -131,6 +133,7 @@ class SettingsController extends Controller
                 ->where('role', DeviceAssignment::ROLE_CAMERA)->get()->keyBy('station'),
             // Live previews (Gates, Manual setup) also count as viewers.
             'cameraLive' => $cameraLive,
+            'plateReport' => $tab === 'plate-camera' ? app(\App\Services\PlateReadabilityService::class)->report() : null,
         ]);
     }
 

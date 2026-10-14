@@ -37,6 +37,12 @@ class VisitorRecord extends Model
 
     public const PLATE_CORRECTED = 'corrected';
 
+    /**
+     * Gate direction work, Phase B: a plate read below this confidence (0-1)
+     * goes to Visitors › Review for a guard to check, like an unreadable one.
+     */
+    public const LOW_PLATE_CONFIDENCE = 0.6;
+
     public const CATEGORY = VehicleCategory::UNREGISTERED_VISITOR;
 
     /** Phase 8: where the record came from. */
@@ -76,6 +82,18 @@ class VisitorRecord extends Model
         'corrected_by',
         'corrected_at',
     ];
+
+    /**
+     * Gate direction work, Phase B: plates a guard should check (unreadable,
+     * or read with a low confidence), until a guard has looked at them.
+     */
+    public function scopePlateToCheck(Builder $query): Builder
+    {
+        return $query->where('status', self::STATUS_ACTIVE)
+            ->whereNull('corrected_by')
+            ->where(fn ($inner) => $inner->where('plate_status', self::PLATE_UNREADABLE)
+                ->orWhere(fn ($low) => $low->where('plate_status', self::PLATE_READ)->where('plate_confidence', '<', self::LOW_PLATE_CONFIDENCE)));
+    }
 
     protected static function booted(): void
     {
