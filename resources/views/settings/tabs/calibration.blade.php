@@ -4,7 +4,7 @@
     <ol class="calibration-steps">
         <li><strong>Zone:</strong> with <em>Zone (ROI)</em>, click around the road where vehicles pass; click point 1 or press Done to close it.</li>
         <li><strong>Adjust:</strong> drag a point to move it, the "+" on an edge to add one, the inside to move the whole zone; right-click a point (or select it and press Delete) to remove it.</li>
-        <li><strong>IN / OUT:</strong> choose whether a vehicle moving <strong>away from the camera</strong> (getting smaller, going up the picture) is going IN or OUT of campus.</li>
+        <li><strong>IN / OUT:</strong> choose where a vehicle moving <strong>away from the camera</strong> (getting smaller, going up the picture) is going: into campus or out of campus. Both IN and OUT are recorded at every gate.</li>
         <li><strong>How it counts:</strong> a vehicle is <em>Detected</em> when it enters the zone (the RFID check starts), <em>Recorded</em> once it clearly moves away from the camera or toward it (IN or OUT), and the record is finished when it has <em>Left zone</em>. There is no line to cross.</li>
         <li><strong>Save</strong>, then drive through once and check "Recent records" below the video. Undo: Ctrl/⌘+Z · Redo: Ctrl/⌘+Shift+Z.</li>
     </ol>
@@ -50,16 +50,39 @@
                             <button type="button" class="button button-secondary button-sm" data-clear>Clear</button>
                             <button type="button" class="button button-primary button-sm" data-save>Save Calibration</button>
                         </div>
-                        {{-- ROI work: which way is IN at this gate (no arrow to draw). --}}
-                        <div class="calibration-away">
-                            <label for="away_direction_{{ $role }}">A vehicle moving away from the camera is going</label>
-                            <select id="away_direction_{{ $role }}" data-away-direction>
-                                <option value="" @selected($camera['away_direction'] === null)>Not set</option>
-                                @foreach (\App\Models\Gate::AWAY_DIRECTIONS as $value => $label)
-                                    <option value="{{ $value }}" @selected($camera['away_direction'] === $value)>{{ $label }}</option>
-                                @endforeach
-                            </select>
-                        </div>
+                        {{-- Gate direction work, Phase A: which way is IN at this gate (both IN and OUT are recorded here). --}}
+                        @php($away = $camera['away_direction'])
+                        <fieldset class="calibration-away" data-away-direction>
+                            <legend>Kapag papalayo ang sasakyan sa camera, ito ay:</legend>
+                            <div class="calibration-away-body">
+                                <div class="calibration-away-options">
+                                    @foreach (\App\Models\Gate::AWAY_DIRECTIONS as $value => $label)
+                                        <label>
+                                            <input type="radio" name="away_direction_{{ $role }}" value="{{ $value }}" @checked($away === $value)>
+                                            {{ $label }}
+                                        </label>
+                                    @endforeach
+                                    <p class="field-help">Parehong IN at OUT ay naitatala sa gate na ito.</p>
+                                </div>
+                                <svg class="calibration-away-diagram" viewBox="0 0 240 132" role="img" aria-label="Camera sa ibaba; ang papalayo ay paakyat sa larawan, ang papalapit ay pababa">
+                                    <defs>
+                                        <marker id="away-arrow-{{ $role }}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                                            <path d="M0 0 10 5 0 10z" fill="currentColor"/>
+                                        </marker>
+                                    </defs>
+                                    <polygon points="96,8 144,8 196,104 44,104" class="diagram-road"/>
+                                    <line x1="100" y1="92" x2="112" y2="26" class="diagram-arrow" marker-end="url(#away-arrow-{{ $role }})"/>
+                                    <line x1="128" y1="26" x2="140" y2="92" class="diagram-arrow" marker-end="url(#away-arrow-{{ $role }})"/>
+                                    <text x="4" y="46" class="diagram-label">Papalayo</text>
+                                    <text x="4" y="62" class="diagram-value" data-away-label="away">= {{ $away ?? '?' }}</text>
+                                    <text x="236" y="80" text-anchor="end" class="diagram-label">Papalapit</text>
+                                    <text x="236" y="96" text-anchor="end" class="diagram-value" data-away-label="toward">= {{ $away ? ($away === 'IN' ? 'OUT' : 'IN') : '?' }}</text>
+                                    <rect x="106" y="110" width="28" height="16" rx="3" class="diagram-camera"/>
+                                    <circle cx="120" cy="118" r="4" class="diagram-lens"/>
+                                    <text x="120" y="108" text-anchor="middle" class="diagram-caption">camera</text>
+                                </svg>
+                            </div>
+                        </fieldset>
                         <div class="calibration-unsaved" data-unsaved hidden>
                             <span>Unsaved changes: the detector still uses the saved zone and direction.</span>
                             <button type="button" class="link-button" data-discard>Discard changes</button>
@@ -136,7 +159,7 @@
                     </div>
                     <div>
                         <span>IN / OUT</span>
-                        <strong data-direction-value @class(['text-warning' => $camera['away_direction'] === null])>{{ $camera['away_direction'] ? 'Away from the camera = '.$camera['away_direction'].' · toward it = '.($camera['away_direction'] === 'IN' ? 'OUT' : 'IN') : 'Not set: every vehicle is "Direction unknown"' }}</strong>
+                        <strong data-direction-value @class(['text-warning' => $camera['away_direction'] === null])>{{ \App\Models\Gate::directionMapping($camera['away_direction']) ?? 'Not set: vehicles are recorded as "Direction unknown"' }}</strong>
                     </div>
                     <div>
                         <span>Message</span>

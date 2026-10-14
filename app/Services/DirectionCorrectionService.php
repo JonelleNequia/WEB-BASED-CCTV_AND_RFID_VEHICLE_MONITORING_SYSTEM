@@ -9,6 +9,7 @@ use App\Models\Vehicle;
 use App\Models\VehicleCrossing;
 use App\Models\VehicleEvent;
 use App\Models\VisitorRecord;
+use App\Support\DirectionSource;
 use App\Support\RfidIngestResult;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -66,6 +67,7 @@ class DirectionCorrectionService
             $event->forceFill([
                 'event_type' => $eventType,
                 'direction' => $direction,
+                'direction_source' => DirectionSource::MANUAL,
                 'match_status' => $eventType === 'ENTRY' ? 'open' : 'closed',
                 'resulting_state' => $transition['resulting_state'] ?? $event->resulting_state,
                 'daily_entries_count' => $transition['daily_entries_count'] ?? $event->daily_entries_count,
@@ -103,14 +105,14 @@ class DirectionCorrectionService
             $crossing = $record->vehicle_crossing_id ? VehicleCrossing::query()->find($record->vehicle_crossing_id) : null;
             $this->remember(null, $record->id, $crossing, $record->gate, $direction, $user);
 
-            $record->forceFill(['direction' => $direction])->save();
+            $record->forceFill(['direction' => $direction, 'direction_source' => DirectionSource::MANUAL])->save();
             $this->setCrossing($crossing, $direction, $user);
             // The hidden guest copy of the same pass (Dashboard, older lists) follows.
             VehicleEvent::query()
                 ->where('external_event_key', $record->external_event_key)
                 ->whereIn('event_origin', ['guest_cctv', 'guest_manual'])
                 ->where('event_type', VehicleEvent::TYPE_UNKNOWN)
-                ->update(['event_type' => $direction === 'IN' ? 'ENTRY' : 'EXIT', 'direction' => $direction]);
+                ->update(['event_type' => $direction === 'IN' ? 'ENTRY' : 'EXIT', 'direction' => $direction, 'direction_source' => DirectionSource::MANUAL]);
             $this->visitorRecordService->refreshProfiles([$record->plate_profile_id]);
 
             return $record->fresh();

@@ -7,6 +7,7 @@ use App\Models\RfidScanLog;
 use App\Models\Vehicle;
 use App\Models\VehicleCrossing;
 use App\Models\VehicleEvent;
+use App\Support\DirectionSource;
 use App\Support\PhilippineTime;
 use App\Support\RfidIngestResult;
 use Carbon\Carbon;
@@ -21,11 +22,15 @@ use Illuminate\Support\Facades\DB;
  *   `rfid_lookahead_seconds` (2) after it, belongs to that crossing.
  * - Camera IN / OUT sets the vehicle's state. A direction that does not fit
  *   the state (IN while already inside) is still recorded, and flagged.
- * - ROI work, Phase 2: the camera saw the vehicle but could not tell IN
- *   from OUT: the record is "Direction unknown", the vehicle's state is not
- *   changed, and staff set it (DirectionCorrectionService).
+ * - Gate direction work, Phase A: the camera saw the vehicle but could not
+ *   tell IN from OUT (or the gate's direction is not set): the vehicle's
+ *   state decides (OUTSIDE -> IN, INSIDE -> OUT), saved as direction source
+ *   "state" ("batay sa state"). (ROI Phase 2 left these "Direction unknown"
+ *   for staff; older such records keep Set IN / Set OUT.)
  * - No camera at the gate, or camera offline: the vehicle's state decides
- *   (OUTSIDE -> IN, INSIDE -> OUT).
+ *   too (OUTSIDE -> IN, INSIDE -> OUT).
+ * - Every record keeps direction_source (camera / state / manual) and, for
+ *   the camera, its confidence (high / medium).
  * - The camera was watching but no crossing came: "scan only", no movement.
  *
  * RFID only with a vehicle: reads are no longer saved while the camera is
@@ -258,9 +263,9 @@ class RfidCameraFusionService
 
     /**
      * Record the movement of a registered read: camera direction when there
-     * is one; "Direction unknown" when the camera saw it but could not tell;
-     * the vehicle's state when there was no crossing (camera offline).
-     * Returns RECORDED or ANOMALY.
+     * is one (a direction that does not fit the state still wins, updates
+     * the state and is flagged); otherwise the vehicle's state (the camera
+     * could not tell, or there was no crossing). Returns RECORDED or ANOMALY.
      */
     public function applyMovement(RfidScanLog $scan, ?VehicleCrossing $crossing, ?string $toggleNote = null): string
     {
@@ -272,11 +277,7 @@ class RfidCameraFusionService
                 ? $crossing->direction
                 : null;
             $anomalyReason = null;
-
-            if ($crossing && $cameraDirection === null) {
-                // ROI work: never a guess. Not counted, state unchanged, until staff set it.
-                return $this->recordUnknownDirection($scan, $crossing, $vehicle, $currentState, $eventTime);
-            }
+            $source = $cameraDirection !== null ? DirectionSource::CAMERA : DirectionSource::STATE;
 
             if ($cameraDirection !== null) {
                 $eventType = $cameraDirection === VehicleCrossing::DIRECTION_OUT ? 'EXIT' : 'ENTRY';
@@ -291,12 +292,19 @@ class RfidCameraFusionService
             } else {
                 $eventType = $currentState === Vehicle::STATE_INSIDE ? 'EXIT' : 'ENTRY';
                 $fusionStatus = RfidScanLog::FUSION_TOGGLE;
-                $note = $toggleNote ?? 'Vehicle state used.';
+                $note = $crossing
+                    ? 'Camera could not tell IN from OUT ('.($crossing->direction_reason ?: 'unclear').'); vehicle state used ('
+                        .ucfirst(strtolower($currentState)).' -> '.VehicleEvent::directionForEventType($eventType).').'
+                    : ($toggleNote ?? 'Vehicle state used.');
             }
 
             $transition = $this->moveVehicle($vehicle, $eventType, $eventTime) + [
                 'anomaly_reason' => $anomalyReason,
                 'event_time' => $eventTime,
+                'direction_source' => $source,
+                'direction_confidence' => $source === DirectionSource::CAMERA
+                    ? DirectionSource::confidence(data_get($crossing?->detection_metadata_json, 'direction_confidence'))
+                    : null,
             ];
             $outcome = $anomalyReason ? RfidIngestResult::ANOMALY : RfidIngestResult::RECORDED;
 
@@ -325,41 +333,6 @@ class RfidCameraFusionService
 
             return $outcome;
         });
-    }
-
-    /**
-     * The camera saw this registered vehicle pass but could not tell IN from
-     * OUT: one "Direction unknown" record, linked to the read and the
-     * crossing; the vehicle's state and counters stay as they are.
-     */
-    protected function recordUnknownDirection(RfidScanLog $scan, VehicleCrossing $crossing, Vehicle $vehicle, string $currentState, Carbon $eventTime): string
-    {
-        $scan->forceFill([
-            'resolved_event_type' => VehicleEvent::TYPE_UNKNOWN,
-            'scan_direction' => null,
-            'resulting_state' => $currentState,
-            'vehicle_crossing_id' => $crossing->id,
-            'fusion_status' => RfidScanLog::FUSION_DIRECTION_UNKNOWN,
-            'fusion_note' => 'Camera could not tell IN from OUT ('.($crossing->direction_reason ?: 'unclear').'); set it in Review.',
-            'is_anomaly' => false,
-            'anomaly_reason' => null,
-            'outcome' => RfidIngestResult::RECORDED,
-        ])->save();
-
-        $crossing->forceFill(['rfid_scan_log_id' => $scan->id])->save();
-        $this->visitorRecordService->dismissForCrossing($crossing, 'Registered tag read for '.$vehicle->plate_number.'.');
-
-        $event = $this->eventService->createFromRfidScan($scan, [
-            'event_type' => VehicleEvent::TYPE_UNKNOWN,
-            'resulting_state' => $currentState,
-            'daily_entries_count' => (int) $vehicle->entries_today_count,
-            'daily_exits_count' => (int) $vehicle->exits_today_count,
-            'anomaly_reason' => null,
-            'event_time' => $eventTime,
-        ]);
-        $scan->forceFill(['correlated_vehicle_event_id' => $event?->id])->save();
-
-        return RfidIngestResult::RECORDED;
     }
 
     /**

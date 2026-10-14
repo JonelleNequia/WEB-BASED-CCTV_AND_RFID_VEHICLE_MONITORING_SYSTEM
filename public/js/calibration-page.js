@@ -24,6 +24,11 @@
     const cards = {};
     let activeCard = null;
 
+    // Gate direction work, Phase A: "Papalayo = IN · Papalapit = OUT".
+    function mappingText(away) {
+        return away ? `Papalayo = ${away} · Papalapit = ${away === 'IN' ? 'OUT' : 'IN'}` : 'Not set: vehicles are recorded as "Direction unknown"';
+    }
+
     function csrfToken() {
         return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
     }
@@ -68,7 +73,9 @@
             this.problemsList = element.querySelector('[data-problems]');
             this.maskValue = element.querySelector('[data-mask-value]');
             // ROI work: a vehicle moving away from the camera is IN or OUT at this gate.
-            this.awaySelect = element.querySelector('[data-away-direction]');
+            // Gate direction work, Phase A: two choices (into / out of campus) and a small diagram.
+            this.awayInputs = Array.from(element.querySelectorAll('[data-away-direction] input[type="radio"]'));
+            this.awayLabels = Array.from(element.querySelectorAll('[data-away-label]'));
             this.directionValue = element.querySelector('[data-direction-value]');
             this.crossingList = element.querySelector('[data-crossings]');
             this.saveButton = element.querySelector('[data-save]');
@@ -115,12 +122,10 @@
                 this.edited(this.editor.clear(), 'Cleared. Draw the zone again.');
                 this.setActiveTool('mask');
             });
-            this.awaySelect?.addEventListener('change', () => {
-                this.message(this.awaySelect.value
-                    ? `A vehicle moving away from the camera will be ${this.awaySelect.value}, toward it ${this.awaySelect.value === 'IN' ? 'OUT' : 'IN'}. Save to apply it.`
-                    : 'Not set: every vehicle at this gate will be "Direction unknown". Save to apply it.');
+            this.awayInputs.forEach((input) => input.addEventListener('change', () => {
+                this.message(`${mappingText(this.awayValue())}. Save to apply it.`);
                 this.updateSummary();
-            });
+            }));
             this.saveButton.addEventListener('click', () => this.saveCalibration());
             this.undoButton.addEventListener('click', () => this.undo());
             this.redoButton.addEventListener('click', () => this.redo());
@@ -341,7 +346,7 @@
             const messages = {
                 close: this.awayValue()
                     ? 'Zone closed. Drag its points to adjust it, then Save.'
-                    : 'Zone closed. Now choose whether a vehicle moving away from the camera is IN or OUT, then Save.',
+                    : 'Zone closed. Now choose where a vehicle moving away from the camera is going (into or out of campus), then Save.',
                 'add-point': this.editor.mask.length >= 3 ? 'Click point 1 or press Done to close the zone.' : 'Click the next point of the zone.',
             };
             this.edited(true, messages[result.action]);
@@ -433,13 +438,13 @@
         }
 
         awayValue() {
-            return this.awaySelect?.value || null;
+            return this.awayInputs.find((input) => input.checked)?.value || null;
         }
 
         setAway(value) {
-            if (this.awaySelect) {
-                this.awaySelect.value = value || '';
-            }
+            this.awayInputs.forEach((input) => {
+                input.checked = input.value === value;
+            });
         }
 
         isDirty() {
@@ -477,9 +482,11 @@
                 ? `${count}-point zone`
                 : (count ? `Drawing: ${count} point${count === 1 ? '' : 's'}` : 'No zone yet');
             const away = this.awayValue();
-            this.directionValue.textContent = away
-                ? `Away from the camera = ${away} · toward it = ${away === 'IN' ? 'OUT' : 'IN'}`
-                : 'Not set: every vehicle is "Direction unknown"';
+            this.directionValue.textContent = away ? mappingText(away) : 'Not set: vehicles are recorded as "Direction unknown"';
+            this.awayLabels.forEach((label) => {
+                const toward = away === 'IN' ? 'OUT' : 'IN';
+                label.textContent = `= ${away ? (label.dataset.awayLabel === 'away' ? away : toward) : '?'}`;
+            });
             this.directionValue.classList.toggle('text-warning', !away);
             this.doneButton.disabled = editor.closed || count < 3;
             this.undoButton.disabled = !editor.canUndo();

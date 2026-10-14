@@ -198,6 +198,9 @@ class EventService
                 'match_status' => $eventType === 'ENTRY' ? 'open' : 'closed',
                 // ROI work: IN / OUT, or UNKNOWN until staff set it.
                 'direction' => VehicleEvent::directionForEventType($eventType),
+                // Gate direction work, Phase A: from the camera or the vehicle's state.
+                'direction_source' => $transition['direction_source'] ?? null,
+                'direction_confidence' => $transition['direction_confidence'] ?? null,
                 'resulting_state' => $resultingState,
                 'daily_entries_count' => $transition['daily_entries_count'] ?? null,
                 'daily_exits_count' => $transition['daily_exits_count'] ?? null,

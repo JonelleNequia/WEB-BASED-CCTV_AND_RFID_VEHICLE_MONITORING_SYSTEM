@@ -42,6 +42,8 @@ class VehicleEvent extends Model
      * @var list<string>
      */
     protected $fillable = [
+        'direction_source',
+        'direction_confidence',
         'event_type',
         'event_status',
         'event_origin',
@@ -74,6 +76,27 @@ class VehicleEvent extends Model
         // Phase 3: why this event needs review.
         'anomaly_reason',
     ];
+
+    protected static function booted(): void
+    {
+        // Gate direction work, Phase A: where IN / OUT came from (camera, state,
+        // manual) when the code that saved it did not say; none while unknown.
+        static::saving(function (VehicleEvent $event): void {
+            if (! in_array($event->event_type, ['ENTRY', 'EXIT'], true)) {
+                $event->direction_source = null;
+                $event->direction_confidence = null;
+
+                return;
+            }
+
+            $event->direction_source ??= in_array($event->event_origin, ['manual', 'guest_manual'], true)
+                ? \App\Support\DirectionSource::MANUAL
+                : \App\Support\DirectionSource::CAMERA;
+            if ($event->direction_source !== \App\Support\DirectionSource::CAMERA) {
+                $event->direction_confidence = null;
+            }
+        });
+    }
 
     /**
      * Get the attribute casts for the model.

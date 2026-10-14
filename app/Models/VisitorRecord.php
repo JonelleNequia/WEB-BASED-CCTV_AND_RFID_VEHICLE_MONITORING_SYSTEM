@@ -47,6 +47,8 @@ class VisitorRecord extends Model
     public const SOURCE_LEGACY = 'legacy';
 
     protected $fillable = [
+        'direction_source',
+        'direction_confidence',
         'external_event_key',
         'source',
         'vehicle_crossing_id',
@@ -74,6 +76,27 @@ class VisitorRecord extends Model
         'corrected_by',
         'corrected_at',
     ];
+
+    protected static function booted(): void
+    {
+        // Gate direction work, Phase A: where IN / OUT came from (camera, state,
+        // manual) when the code that saved it did not say; none while unknown.
+        static::saving(function (VisitorRecord $record): void {
+            if (! in_array($record->direction, ['IN', 'OUT'], true)) {
+                $record->direction_source = null;
+                $record->direction_confidence = null;
+
+                return;
+            }
+
+            $record->direction_source ??= $record->source === self::SOURCE_MANUAL
+                ? \App\Support\DirectionSource::MANUAL
+                : \App\Support\DirectionSource::CAMERA;
+            if ($record->direction_source !== \App\Support\DirectionSource::CAMERA) {
+                $record->direction_confidence = null;
+            }
+        });
+    }
 
     protected function casts(): array
     {

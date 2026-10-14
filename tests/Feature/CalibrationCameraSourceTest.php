@@ -122,8 +122,8 @@ class CalibrationCameraSourceTest extends TestCase
         $this->assertArrayNotHasKey('calibration_direction', $camera);
         $this->assertArrayNotHasKey('browser_device_id', $camera);
         $this->assertStringContainsString('3-point zone saved', $html);
-        $this->assertStringContainsString('Away from the camera = IN · toward it = OUT', $html);
-        $this->assertMatchesRegularExpression('#<option value="IN"\s+selected#', $html);
+        $this->assertStringContainsString('Papalayo = IN · Papalapit = OUT', $html);
+        $this->assertMatchesRegularExpression('#<input type="radio" name="away_direction_gate-1" value="IN"\s+checked#', $html);
     }
 
     public function test_an_offline_camera_shows_its_last_picture_and_why(): void

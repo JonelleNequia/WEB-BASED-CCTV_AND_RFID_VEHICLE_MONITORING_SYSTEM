@@ -58,6 +58,8 @@ class VisitorRecordService
                 'gate' => $crossing->gate,
                 'camera_id' => $crossing->camera_id,
                 'direction' => $crossing->direction,
+                // Gate direction work, Phase A: how sure the camera was (source: camera).
+                'direction_confidence' => \App\Support\DirectionSource::confidence(data_get($crossing->detection_metadata_json, 'direction_confidence')),
                 'seen_at' => $crossing->crossed_at,
                 'snapshot_path' => $crossing->snapshot_path,
                 'vehicle_type' => $record->vehicle_type ?: $crossing->vehicle_type,

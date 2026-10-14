@@ -22,6 +22,7 @@
         ['Log type', 'log_type_label'],
         ['Source', 'source_label'],
         ['Gate', 'station_label'],
+        ['Direction from', 'direction_source_label'],
         ['RFID Tag', 'rfid_tag_uid'],
         ['State', 'state_label'],
         ['Status', 'status_label'],
@@ -81,6 +82,11 @@
 
         const movement = el('td');
         movement.append(el('span', `badge badge-tone-${tone[String(log.event_type).toLowerCase()] || 'neutral'}`, log.movement_label || log.event_type));
+        if (log.direction_source === 'state') {
+            const note = el('div', 'table-subtext direction-source-state', 'batay sa state');
+            note.title = "The camera could not tell; the vehicle's Inside / Outside state was used";
+            movement.append(note);
+        }
         if (log.set_direction_url) {
             movement.append(setDirectionForm(log.set_direction_url));
         }

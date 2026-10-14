@@ -176,16 +176,16 @@
                     {{-- ROI work: the zone, and which way is IN (a vehicle moving away from the camera is IN or OUT). --}}
                     @php($awaySet = $gate['zone']['away_direction'] !== null)
                     <div class="setup-device-text">
-                        <strong>{{ $gate['zone']['ready'] ? ($awaySet ? 'Zone set · moving away from the camera = '.$gate['zone']['away_direction'] : 'Zone set · IN / OUT not set') : 'Not set up yet' }}</strong>
+                        <strong>{{ $gate['zone']['ready'] ? ($awaySet ? 'Zone set · '.\App\Models\Gate::directionMapping($gate['zone']['away_direction']) : 'Zone set · IN / OUT not set') : 'Not set up yet' }}</strong>
                         <span class="status-line"><span @class(['status-dot', 'is-online' => $gate['zone']['ready'] && $awaySet, 'is-warning' => ! ($gate['zone']['ready'] && $awaySet)]) aria-hidden="true"></span>{{ match (true) {
                             ! $gate['zone']['ready'] => 'Vehicles are not counted yet.',
-                            ! $awaySet => 'Every vehicle is recorded as "Direction unknown" until IN / OUT is set.',
+                            ! $awaySet => 'Vehicles are still Detected and Recorded, but as "Direction unknown" (registered ones use their state) until IN / OUT is set.',
                             default => 'Every vehicle passing through the zone is recorded.',
                         } }}</span>
                         @if (! $gate['zone']['ready'])
                             <span class="next-step">→ Draw where vehicles pass.</span>
                         @elseif (! $awaySet)
-                            <span class="next-step" data-away-warning>→ In Calibration, choose whether a vehicle moving away from the camera is IN or OUT.</span>
+                            <span class="next-step" data-away-warning>→ In Calibration, choose: "Kapag papalayo ang sasakyan sa camera, ito ay: Papasok / Palabas ng campus".</span>
                         @endif
                     </div>
                     <a href="{{ $gate['zone']['setup_url'] }}" class="button {{ $gate['zone']['ready'] && $awaySet ? 'button-secondary' : 'button-primary' }}">{{ $gate['zone']['ready'] && $awaySet ? 'Edit' : 'Set up' }}</a>

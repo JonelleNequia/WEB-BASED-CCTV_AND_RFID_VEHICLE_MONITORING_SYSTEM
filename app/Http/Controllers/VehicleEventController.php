@@ -101,6 +101,7 @@ class VehicleEventController extends Controller
                 'Time',
                 'Status',
                 'RFID Tag',
+                'Direction From',
             ]);
 
             $rows->each(function (array $log) use ($handle): void {
@@ -118,6 +119,7 @@ class VehicleEventController extends Controller
                     $log['event_time_export'],
                     $log['status_label'],
                     $log['rfid_tag_uid'],
+                    $log['direction_source_label'] ?? '',
                 ]);
             });
 
@@ -373,7 +375,7 @@ class VehicleEventController extends Controller
             'owner' => $known($log['owner_name'] ?? null),
             'category' => $known($log['category_label'] ?? null),
             'type' => $known($log['vehicle_type'] ?? null),
-            'direction' => $direction,
+            'direction' => $direction.(($log['direction_source'] ?? null) === \App\Support\DirectionSource::STATE ? ' (batay sa state)' : ''),
             'direction_key' => $directionKey,
             'gate' => $known($log['station_label'] ?? null),
             'image_url' => $log['image_url'] ?? null,
@@ -829,6 +831,9 @@ class VehicleEventController extends Controller
             },
             // ROI work: a "Direction unknown" record can be set to IN / OUT in one click.
             'set_direction_url' => $event->event_type === VehicleEvent::TYPE_UNKNOWN ? route('vehicle-events.direction', $event) : null,
+            // Gate direction work, Phase A: camera, state ("batay sa state") or manual.
+            'direction_source' => $event->direction_source,
+            'direction_source_label' => $this->directionSourceLabel($event->direction_source, $event->direction_confidence),
             'state_label' => $event->resulting_state_label,
             'display_time' => DisplayTime::datetime($time, 'No time'),
             'summary_label' => 'Vehicle Event #'.$event->id.' • '.(DisplayTime::datetime($time, 'No time')),
@@ -1016,6 +1021,8 @@ class VehicleEventController extends Controller
             'movement_label' => $record->direction === 'UNKNOWN' ? 'Direction unknown' : $record->direction,
             'set_direction_url' => $record->direction === 'UNKNOWN' && $record->status === VisitorRecord::STATUS_ACTIVE
                 ? route('visitors.records.direction', $record) : null,
+            'direction_source' => $record->direction_source,
+            'direction_source_label' => $this->directionSourceLabel($record->direction_source, $record->direction_confidence),
             'plate_number' => $record->plateLabel(),
             'owner_name' => $vehicle?->vehicle_owner_name ?: 'N/A',
             'vehicle_type' => $record->vehicle_type ?: 'Vehicle',
@@ -1105,6 +1112,14 @@ class VehicleEventController extends Controller
         ]);
 
         return $parts === [] ? 'No filters' : implode(' · ', $parts);
+    }
+
+    /** "From the camera (high)", "batay sa state", "Set by staff", or null. */
+    protected function directionSourceLabel(?string $source, ?string $confidence): ?string
+    {
+        $label = \App\Support\DirectionSource::label($source);
+
+        return $label && $source === \App\Support\DirectionSource::CAMERA && $confidence ? "{$label} ({$confidence})" : $label;
     }
 
     /**

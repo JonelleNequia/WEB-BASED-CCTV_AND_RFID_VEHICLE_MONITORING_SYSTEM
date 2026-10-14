@@ -117,7 +117,7 @@ class Phase7MovementCountsTest extends TestCase
         // ROI work, Phase 7: the printed report is its own page with the same filters.
         $print = $this->actingAs($this->admin)->get(route('logs.print', ['gate' => 'gate-2', 'event_type' => 'ENTRY']))->assertOk();
         $this->assertSame('Gate 2 · IN', $print->viewData('filtersLabel'));
-        $this->assertSame(['IN'], $print->viewData('rows')->pluck('direction')->unique()->values()->all());
+        $this->assertSame(['in'], $print->viewData('rows')->pluck('direction_key')->unique()->values()->all());
         $this->assertSame(['Gate 2'], $print->viewData('rows')->pluck('gate')->unique()->values()->all());
     }
 

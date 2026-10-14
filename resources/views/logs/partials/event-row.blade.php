@@ -20,6 +20,10 @@
     {{-- Phase 7: IN / OUT (the tone still follows ENTRY / EXIT). --}}
     <td>
         <x-badge :status="$log['event_type'] === 'UNKNOWN' ? 'direction_unknown' : strtolower($log['event_type'])" :label="$log['movement_label'] ?? $log['event_type']" />
+        {{-- Gate direction work, Phase A: a registered vehicle's direction taken from its Inside / Outside state. --}}
+        @if (($log['direction_source'] ?? null) === 'state')
+            <div class="table-subtext direction-source-state" title="The camera could not tell; the vehicle's Inside / Outside state was used">batay sa state</div>
+        @endif
         @if ($log['set_direction_url'] ?? null)
             <x-set-direction :url="$log['set_direction_url']" />
         @endif

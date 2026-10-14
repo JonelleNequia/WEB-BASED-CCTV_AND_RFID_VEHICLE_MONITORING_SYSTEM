@@ -126,9 +126,10 @@ class Phase3RfidCameraFusionTest extends TestCase
         $this->assertNotNull(VehicleEvent::query()->sole()->anomaly_reason);
     }
 
-    public function test_unknown_camera_direction_is_recorded_as_unknown_and_the_state_is_kept(): void
+    public function test_unknown_camera_direction_of_a_registered_vehicle_uses_its_state(): void
     {
-        // ROI work, Phase 2: the camera saw it but could not tell: no guess from the vehicle's state.
+        // Gate direction work, Phase A: the camera saw it but could not tell:
+        // the vehicle's state decides (Inside -> OUT), "batay sa state".
         $this->cameraOnline();
         $vehicle = $this->registeredVehicle('UNK 5005', 'UNK-TAG-5', Vehicle::STATE_INSIDE);
 
@@ -136,16 +137,41 @@ class Phase3RfidCameraFusionTest extends TestCase
         $this->crossing('UNKNOWN', 'k-unknown', 'track too short');
 
         $scan = RfidScanLog::query()->sole();
-        $this->assertSame([VehicleEvent::TYPE_UNKNOWN, RfidScanLog::FUSION_DIRECTION_UNKNOWN, RfidIngestResult::RECORDED],
-            [$scan->resolved_event_type, $scan->fusion_status, $scan->outcome]);
-        $this->assertStringContainsString('could not tell IN from OUT (track too short)', $scan->fusion_note);
-        $this->assertSame([Vehicle::STATE_INSIDE, 0, 0], [$vehicle->fresh()->current_state, (int) $vehicle->fresh()->entries_today_count, (int) $vehicle->fresh()->exits_today_count]);
+        $this->assertSame(['EXIT', RfidScanLog::FUSION_TOGGLE, RfidIngestResult::RECORDED, false],
+            [$scan->resolved_event_type, $scan->fusion_status, $scan->outcome, $scan->is_anomaly]);
+        $this->assertStringContainsString('could not tell IN from OUT (track too short); vehicle state used (Inside -> OUT)', $scan->fusion_note);
+        $this->assertSame([Vehicle::STATE_OUTSIDE, 0, 1], [$vehicle->fresh()->current_state, (int) $vehicle->fresh()->entries_today_count, (int) $vehicle->fresh()->exits_today_count]);
         $event = VehicleEvent::query()->sole();
-        $this->assertSame([VehicleEvent::TYPE_UNKNOWN, 'UNKNOWN'], [$event->event_type, $event->direction]);
-        $this->assertSame(0, \App\Models\ActiveSession::query()->count());
-        // Not counted as IN or OUT.
+        $this->assertSame(['EXIT', 'OUT', 'state', null], [$event->event_type, $event->direction, $event->direction_source, $event->direction_confidence]);
+        // Counted, and not waiting in Review.
         $counts = app(\App\Services\MovementCountService::class)->counts('today');
-        $this->assertSame([0, 0, 1], [$counts['in'], $counts['out'], $counts['unknown']]);
+        $this->assertSame([0, 1, 0], [$counts['in'], $counts['out'], $counts['unknown']]);
+        $this->actingAs($this->admin)->get(route('visitors.index', ['tab' => 'review']))->assertOk()->assertSee('Nothing to review');
+
+        // Outside -> IN.
+        $other = $this->registeredVehicle('UNK 5006', 'UNK-TAG-6', Vehicle::STATE_OUTSIDE);
+        $this->travel(1)->minutes();
+        $this->scan('UNK-TAG-6');
+        $this->crossing('UNKNOWN', 'k-unknown-2', 'gate direction not set');
+        $this->assertSame(['ENTRY', 'state'], [VehicleEvent::query()->where('vehicle_id', $other->id)->sole()->event_type, VehicleEvent::query()->where('vehicle_id', $other->id)->sole()->direction_source]);
+        $this->assertSame(Vehicle::STATE_INSIDE, $other->fresh()->current_state);
+    }
+
+    /**
+     * A registered "Direction unknown" record saved before Phase A (the
+     * state was not used then): Set IN / Set OUT still works on it.
+     */
+    protected function olderUnknownRecord(Vehicle $vehicle): VehicleEvent
+    {
+        $event = VehicleEvent::query()->sole();
+        $event->forceFill(['event_type' => VehicleEvent::TYPE_UNKNOWN, 'direction' => 'UNKNOWN', 'resulting_state' => Vehicle::STATE_INSIDE, 'anomaly_reason' => null])->save();
+        RfidScanLog::query()->sole()->forceFill([
+            'resolved_event_type' => VehicleEvent::TYPE_UNKNOWN, 'scan_direction' => null, 'resulting_state' => Vehicle::STATE_INSIDE,
+            'fusion_status' => RfidScanLog::FUSION_DIRECTION_UNKNOWN, 'is_anomaly' => false, 'anomaly_reason' => null,
+        ])->save();
+        Vehicle::query()->whereKey($vehicle->id)->update(['current_state' => Vehicle::STATE_INSIDE, 'entries_today_count' => 0, 'exits_today_count' => 0]);
+
+        return $event->fresh();
     }
 
     public function test_set_out_on_a_registered_unknown_record_moves_the_vehicle_and_is_logged(): void
@@ -154,7 +180,7 @@ class Phase3RfidCameraFusionTest extends TestCase
         $vehicle = $this->registeredVehicle('SET 7007', 'SET-TAG-7', Vehicle::STATE_INSIDE);
         $this->scan('SET-TAG-7');
         $this->crossing('UNKNOWN', 'k-set', 'went up 9% of the zone');
-        $event = VehicleEvent::query()->sole();
+        $event = $this->olderUnknownRecord($vehicle);
 
         // In Visitors › Review (guards too) and Activity Logs.
         $this->actingAs($this->admin)->get(route('visitors.index', ['tab' => 'review']))
@@ -165,7 +191,7 @@ class Phase3RfidCameraFusionTest extends TestCase
             ->assertSessionHas('status', 'SET 7007 set to OUT.');
 
         $event->refresh();
-        $this->assertSame(['EXIT', 'OUT'], [$event->event_type, $event->direction]);
+        $this->assertSame(['EXIT', 'OUT', 'manual'], [$event->event_type, $event->direction, $event->direction_source]);
         $this->assertSame([Vehicle::STATE_OUTSIDE, 1], [$vehicle->fresh()->current_state, (int) $vehicle->fresh()->exits_today_count]);
         $scan = RfidScanLog::query()->sole();
         $this->assertSame(['EXIT', RfidScanLog::FUSION_SET_BY_STAFF, false], [$scan->resolved_event_type, $scan->fusion_status, $scan->is_anomaly]);
@@ -185,6 +211,7 @@ class Phase3RfidCameraFusionTest extends TestCase
         $vehicle = $this->registeredVehicle('ANO 8008', 'ANO-TAG-8', Vehicle::STATE_INSIDE);
         $this->scan('ANO-TAG-8');
         $this->crossing('UNKNOWN', 'k-ano');
+        $this->olderUnknownRecord($vehicle);
 
         $this->actingAs($this->admin)->patch(route('vehicle-events.direction', VehicleEvent::query()->sole()), ['direction' => 'IN']);
 
