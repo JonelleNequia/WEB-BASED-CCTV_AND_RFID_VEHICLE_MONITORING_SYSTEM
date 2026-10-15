@@ -735,6 +735,11 @@
         submit.type = 'submit';
         const rowButtons = el('div', 'button-row');
         rowButtons.append(submit);
+        // Phase 6: "Move it here" / "Use it for both gates", shown when the device is on another gate.
+        // (Declared before it is used: a const used earlier stops the whole panel.)
+        let choice = {};
+        const conflictRow = el('div', 'button-row');
+        conflictRow.hidden = true;
         form.append(message, conflictRow, rowButtons);
 
         function syncRole() {
@@ -748,9 +753,6 @@
         syncRole();
 
         // Phase 6: the answer to "Already on Gate 1. Move it here?" (move / share).
-        let choice = {};
-        const conflictRow = el('div', 'button-row');
-        conflictRow.hidden = true;
         function ask(result) {
             conflictRow.replaceChildren(...[
                 result.json.conflict?.can_share ? button('Use it for both gates', 'button button-secondary button-sm', () => { choice = { share: true }; form.requestSubmit(); }) : null,
