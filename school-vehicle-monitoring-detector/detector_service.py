@@ -73,9 +73,10 @@ from tracking import (
 from anpr import detect_vehicle_color, ocr_runtime_status, read_license_plate_details
 from plate_voting import frames_agree, vote_plate
 import plate_reader
-from camera_health import ReconnectBackoff, RtspDiagnosis, short_reason, strip_credentials, take_over_stale_detector
+from camera_health import ReconnectBackoff, RtspDiagnosis, rtsp_play_check, short_reason, strip_credentials, take_over_stale_detector
 import metrics
 from hires import HiResGrabber, scale_box
+from capture_hub import HUB as CAPTURE_HUB
 import vehicle_type as vtype
 
 # Phase 1: one camera per gate; the gate codes come from Laravel's runtime
@@ -92,17 +93,41 @@ STREAM_CLIENTS_LOCK = threading.Lock()
 # the browser draws over the WebRTC video.
 OVERLAY_STATES = {}
 RTSP_DIAGNOSIS = RtspDiagnosis()
+# Shared camera work: "does it still play?" when DESCRIBE is fine but OpenCV could not open (too many connections).
+RTSP_PLAY_CHECK = RtspDiagnosis(check=rtsp_play_check)
 # Full-resolution frames from the snapshot (main) stream, only around triggers.
 HIRES = {}
+# Shared camera work: one full-resolution grabber per main stream (its address
+# with the login); HIRES maps each gate to the grabber of its camera.
+SHARED_HIRES = {}
 
 
-def hires_grabber(role):
-    if role not in HIRES:
-        HIRES[role] = HiResGrabber(
+def hires_grabber(role, camera_config):
+    url = build_connection_source(camera_config, camera_config.get("snapshot_source_value") or "")
+    key = capture_key("rtsp", url)
+    grabber = SHARED_HIRES.get(key)
+    if grabber is None:
+        grabber = SHARED_HIRES[key] = HiResGrabber(
             role,
-            lambda camera_config: build_connection_source(camera_config, camera_config["snapshot_source_value"]),
+            lambda config: build_connection_source(config, config["snapshot_source_value"]),
+            opener=open_hires_capture,
         )
-    return HIRES[role]
+    previous = HIRES.get(role)
+    if previous is not None and previous is not grabber:
+        previous.roles.discard(role)  # this gate's camera changed
+    grabber.roles.add(role)
+    HIRES[role] = grabber
+    return grabber
+
+
+def open_hires_capture(url, role):
+    """The main stream through the shared connections (FFmpeg's own decoder threads)."""
+    def connect():
+        configure_network_capture_options("rtsp")
+        capture = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+        return LatestFrameReader(capture, role, 0) if capture.isOpened() else capture
+
+    return CAPTURE_HUB.acquire(capture_key("rtsp", url), role, connect, 0)
 RESOLVED_OVERLAY_HOLD_SECONDS = 1.25
 RESOLVED_DETECTION_COOLDOWN_SECONDS = 1.5
 GUEST_TRACK_COOLDOWN_SECONDS = 10.0
@@ -729,6 +754,16 @@ def camera_open_error(camera_config, capture_source, state):
         if diagnosis["code"] != "ok":
             state["error_code"] = diagnosis["code"]
             return diagnosis["message"]
+        # It answers, yet OpenCV could not open it: a full camera refuses at PLAY.
+        playing = RTSP_PLAY_CHECK.get(
+            camera_config["camera_role"],
+            str(capture_source),
+            camera_config["source_username"],
+            camera_config["source_password"],
+        )
+        if playing["code"] != "ok":
+            state["error_code"] = playing["code"]
+            return playing["message"]
 
     if camera_config["source_type"] == "webcam":
         state["error_code"] = "no_frames"
@@ -777,6 +812,8 @@ class LatestFrameReader:
     def __init__(self, capture, role=None, decoder_threads=0):
         self.capture = capture
         self.role = role
+        # Shared camera work: every gate reading this connection (metrics per gate).
+        self.roles = {role} if role else set()
         self.decoder_threads = decoder_threads
         # Set when one decoder thread cannot keep up (e.g. a manual 4K source):
         # the stream worker then reconnects with FFmpeg's own threading.
@@ -803,7 +840,7 @@ class LatestFrameReader:
                     has_frame, frame = self.capture.read()
                 except Exception:
                     has_frame, frame = False, None
-                if has_frame and frame is not None and self.role:
+                if has_frame and frame is not None and self.roles:
                     self._measure(started, frame)
 
                 if not has_frame or frame is None:
@@ -826,8 +863,10 @@ class LatestFrameReader:
     def _measure(self, started, frame):
         """Read time, capture FPS and decoder backlog against the stream clock."""
         now = time.monotonic()
-        metrics.timing(self.role, "read", (time.perf_counter() - started) * 1000.0)
-        metrics.rate(self.role, "capture")
+        roles = list(self.roles)
+        for role in roles:
+            metrics.timing(role, "read", (time.perf_counter() - started) * 1000.0)
+            metrics.rate(role, "capture")
         try:
             position = float(self.capture.get(cv2.CAP_PROP_POS_MSEC))
         except Exception:
@@ -836,11 +875,13 @@ class LatestFrameReader:
             if self._clock_start is None or position < self._clock_start[1]:
                 self._clock_start = (now, position)
             backlog = (now - self._clock_start[0]) * 1000.0 - (position - self._clock_start[1])
-            metrics.value(self.role, "decode_backlog_ms", round(backlog))
+            for role in roles:
+                metrics.value(role, "decode_backlog_ms", round(backlog))
             if backlog > 1500 and self.decoder_threads == 1 and now - self._clock_start[0] > 3:
                 self.too_slow = True
-        metrics.value(self.role, "resolution", f"{frame.shape[1]}x{frame.shape[0]}")
-        metrics.value(self.role, "decoder_threads", self.decoder_threads or "auto")
+        for role in roles:
+            metrics.value(role, "resolution", f"{frame.shape[1]}x{frame.shape[0]}")
+            metrics.value(role, "decoder_threads", self.decoder_threads or "auto")
         self.frame_time = now
 
     def isOpened(self):
@@ -851,25 +892,34 @@ class LatestFrameReader:
         Wait for a frame newer than the last one handed out, then return it.
         Frames that arrived in between are skipped on purpose.
         """
+        sequence, frame = self.wait_newer(self.consumed_sequence, timeout)
+        if frame is None:
+            return False, None
+        self.consumed_sequence = sequence
+        return True, frame
+
+    def wait_newer(self, after, timeout=None):
+        """
+        Shared camera work: (sequence, frame) newer than `after`, or (after,
+        None) on a stall or a failure. Each gate's view keeps its own `after`.
+        """
         if timeout is None:
             timeout = CAPTURE_FIRST_FRAME_SECONDS if self.sequence == 0 else CAPTURE_STALL_SECONDS
         deadline = time.monotonic() + timeout
 
         with self.condition:
-            while self.sequence == self.consumed_sequence and not self.failed:
+            while self.sequence == after and not self.failed:
                 remaining = deadline - time.monotonic()
 
                 if remaining <= 0:
-                    return False, None
+                    return after, None
 
                 self.condition.wait(remaining)
 
-            if self.sequence == self.consumed_sequence:
-                return False, None
+            if self.sequence == after:
+                return after, None
 
-            self.consumed_sequence = self.sequence
-
-            return True, self.frame
+            return self.sequence, self.frame
 
     def read(self):
         return self.read_latest()
@@ -905,19 +955,32 @@ def open_capture(camera_config, decoder_threads=None):
     capture_source = resolve_capture_source(camera_config)
     connection_source = build_connection_source(camera_config, capture_source)
     threads = camera_config.get("decoder_threads", 1) if decoder_threads is None else decoder_threads
-    capture = build_capture(camera_config["source_type"], connection_source, threads)
+    role = camera_config.get("camera_role")
 
-    try:
-        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    except Exception:
-        pass
+    def connect():
+        capture = build_capture(camera_config["source_type"], connection_source, threads)
 
-    # Low latency: wrap the opened capture so a background thread always holds
-    # the newest frame.
-    if capture.isOpened():
-        capture = LatestFrameReader(capture, camera_config.get("camera_role"), threads)
+        try:
+            capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
 
+        # Low latency: wrap the opened capture so a background thread always holds
+        # the newest frame.
+        if capture.isOpened():
+            capture = LatestFrameReader(capture, role, threads)
+
+        return capture
+
+    # Shared camera work: a stream several gates use is opened once (the
+    # VIGI-C240 refuses a 4th session per stream); each gate gets its own view.
+    capture = CAPTURE_HUB.acquire(capture_key(camera_config["source_type"], connection_source), role, connect, threads)
     return capture, capture_source
+
+
+def capture_key(source_type, connection_source):
+    """What makes two gates' streams the same connection: type and full address (with its login)."""
+    return f"{source_type}|{connection_source}"
 
 
 # A1: the longest a camera connection may take before the worker gives up on
@@ -1066,6 +1129,7 @@ def ensure_capture(camera_config, state):
         backoff.reset()
         state["open_problem"] = None
         RTSP_DIAGNOSIS.forget(camera_config["camera_role"])
+        RTSP_PLAY_CHECK.forget(camera_config["camera_role"])
     state["wanted_signature"] = signature
 
     if camera_config["source_type"] == "none":
@@ -1144,7 +1208,7 @@ def read_fresh_frame(capture):
     Drop queued camera frames before retrieving, reducing visible stream latency.
     """
     # Low latency: the background reader already discards old frames.
-    if isinstance(capture, LatestFrameReader):
+    if isinstance(capture, LatestFrameReader) or getattr(capture, "waits_for_frames", False):
         return capture.read_latest()
 
     if CAPTURE_DRAIN_FRAMES <= 0:
@@ -1247,6 +1311,8 @@ NEXT_STEP_BY_ERROR = {
     "unreachable": "Check the camera's LAN cable and power.",
     "timeout": "Check the camera's LAN cable and network.",
     "no_frames": "Wait a moment; if it stays, restart the camera.",
+    # Shared camera work: the camera has no room for one more connection.
+    "busy": "Close other viewers of this camera (VIGI app, recorder, another PC), or use one camera per gate.",
 }
 
 
@@ -3700,7 +3766,7 @@ def camera_stream_worker(role, state, model_info, stop_event):
 
         # Low latency: read_latest() already waits for the next camera frame, so
         # the old fixed 0.04s sleep would only add delay after every frame.
-        if success and isinstance(state.get("capture"), LatestFrameReader):
+        if success and (isinstance(state.get("capture"), LatestFrameReader) or getattr(state.get("capture"), "waits_for_frames", False)):
             delay = 0
         elif success:
             delay = CAPTURE_INTERVAL_SECONDS
@@ -4061,7 +4127,7 @@ def camera_detection_worker(role, state, model_info, stop_event):
         state["last_error"] = ""
         # A vehicle in the zone: have full-resolution frames ready for its snapshot.
         if perf["hires_on_trigger"] and camera_config.get("snapshot_source_value") and hires_wanted(state, results, camera_config, frame, vehicle_labels):
-            hires_grabber(role).trigger(camera_config)
+            hires_grabber(role, camera_config).trigger(camera_config)
         metrics.rate(role, "detection")
         metrics.timing(role, "detection_age", (time.monotonic() - frame_time) * 1000.0)
 

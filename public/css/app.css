@@ -8328,3 +8328,13 @@ img.thumb-plate {
         grid-template-columns: 1fr;
     }
 }
+
+/* Shared camera work: the same camera on several gates. */
+.shared-camera {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}

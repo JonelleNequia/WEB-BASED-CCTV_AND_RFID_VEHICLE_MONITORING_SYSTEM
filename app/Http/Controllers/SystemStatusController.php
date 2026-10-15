@@ -46,6 +46,12 @@ class SystemStatusController extends Controller
             default => ['tone' => 'warning', 'title' => 'Detector not running', 'detail' => 'The code version is checked once it runs (code on this PC: '.($code['on_disk'] ?? 'not found').').'],
         };
 
+        // Shared camera work: a LAN that keeps dropping takes every camera and reader with it.
+        $lan = \App\Support\LanHealth::problem((array) data_get(app(\App\Services\DeviceServiceRuntime::class)->readStatus(), 'network', []));
+        if ($lan) {
+            $checks[] = ['tone' => 'critical', 'title' => 'The LAN connection is not steady', 'detail' => $lan['line'].' '.$lan['next_step']];
+        }
+
         foreach (\App\Models\Gate::ordered() as $gate) {
             $status = $runtime['cameras'][$gate->code]['detection_status'] ?? null;
             if (in_array($status['code'] ?? null, ['zone_invalid', 'no_zone'], true)) {

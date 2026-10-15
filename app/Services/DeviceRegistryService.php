@@ -821,6 +821,9 @@ class DeviceRegistryService
                     'name', 'label', 'kind', 'ip', 'prefix', 'network', 'gateway', 'link_local',
                 ]))->values()->all(),
                 'wired_connected' => (bool) data_get($status, 'network.wired_connected', false),
+                // Shared camera work: LAN drops and the DHCP lease (an unsteady LAN on the gate cards).
+                'lan_drops_10min' => (int) data_get($status, 'network.lan_drops_10min', 0),
+                'dhcp_lease_seconds' => data_get($status, 'network.dhcp_lease_seconds'),
             ],
             'scan' => [
                 'running' => (bool) data_get($status, 'scan.running', false),

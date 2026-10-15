@@ -246,6 +246,24 @@ def snapshot(profiles):
     }
 
 
+def wired_address(network):
+    """The LAN (ethernet) interface with a real address (not 169.254.x.x), or None."""
+    return next((item for item in (network or {}).get("interfaces", []) if item.get("kind") == "ethernet" and not item.get("link_local")), None)
+
+
+def dhcp_lease_seconds(name):
+    """
+    How long the router lends this PC its address on `name` (DHCP lease), in
+    seconds, or None when unknown. Measured 2026-10-15: a router gave 60 s,
+    and the LAN dropped every one to two minutes. macOS only for now
+    (`ipconfig getpacket`).
+    """
+    if SYSTEM != "darwin" or not name:
+        return None
+    match = re.search(r"lease_time \(uint32\): (0x[0-9a-fA-F]+|\d+)", run(["ipconfig", "getpacket", name], timeout=3))
+    return int(match.group(1), 0) if match else None
+
+
 def is_admin():
     try:
         if SYSTEM == "windows":

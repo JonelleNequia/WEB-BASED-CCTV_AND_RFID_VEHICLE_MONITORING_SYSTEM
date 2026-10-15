@@ -5,6 +5,10 @@ Camera connection health for the detector.
   open". This asks the camera directly (RTSP DESCRIBE, with the saved login)
   so the status can say *why*: wrong password, wrong stream path, camera not
   reachable, or timeout.
+- rtsp_play_check(): the camera answers DESCRIBE but still refuses to play
+  when it has too many connections (shared camera work: the VIGI-C240 says
+  "RTSP 429" at the 4th PLAY of one stream). This sets the stream up and
+  plays it for a moment (then ends it) to tell "busy" apart.
 - take_over_stale_detector(): a detector left running from older code (or a
   hung one) keeps the stream port but no longer writes the status Laravel
   reads. Laravel then keeps starting new detectors that exit as duplicates.
@@ -27,7 +31,11 @@ ERROR_MESSAGES = {
     "unreachable": "The camera is not reachable from this PC ({reason}). Check its cable and power, or scan again in Settings › Devices.",
     "timeout": "The camera did not answer in time. Check its cable and network.",
     "error": "The camera answered with an error ({reason}).",
+    "busy": "The camera refused the connection: too many connections to this stream ({reason}). It allows only a few at once: close other viewers (VIGI app, recorder, another PC), or use one camera per gate.",
 }
+
+# A camera answers these when it has no room for one more viewer.
+BUSY_STATUSES = (429, 453, 503)
 
 
 def rtsp_check(url, username="", password="", timeout=3.0):
@@ -75,8 +83,9 @@ def _result(code, reason=""):
     return {"code": code, "message": ERROR_MESSAGES[code].format(reason=reason)}
 
 
-def _request(sock, url, sequence, authorization=None):
-    request = f"DESCRIBE {url} RTSP/1.0\r\nCSeq: {sequence}\r\nAccept: application/sdp\r\nUser-Agent: philcst-detector\r\n"
+def _request(sock, url, sequence, authorization=None, method="DESCRIBE", extra=""):
+    request = f"{method} {url} RTSP/1.0\r\nCSeq: {sequence}\r\nUser-Agent: philcst-detector\r\n"
+    request += "Accept: application/sdp\r\n" if method == "DESCRIBE" else extra
     if authorization:
         request += f"Authorization: {authorization}\r\n"
     sock.sendall((request + "\r\n").encode())
@@ -102,16 +111,18 @@ def _request(sock, url, sequence, authorization=None):
         if not chunk:
             break
         remaining -= len(chunk)
+    if method == "DESCRIBE":
+        headers["_body"] = body.decode("latin-1", "ignore")
     return (int(match.group(1)) if match else None), headers
 
 
-def _authorization(challenge, url, username, password):
+def _authorization(challenge, url, username, password, method="DESCRIBE"):
     if challenge.lower().startswith("digest"):
         values = {key.lower(): value for key, value in re.findall(r'(\w+)="?([^",]+)"?', challenge)}
         if "realm" not in values or "nonce" not in values:
             return None
         ha1 = hashlib.md5(f"{username}:{values['realm']}:{password}".encode()).hexdigest()
-        ha2 = hashlib.md5(f"DESCRIBE:{url}".encode()).hexdigest()
+        ha2 = hashlib.md5(f"{method}:{url}".encode()).hexdigest()
         response = hashlib.md5(f"{ha1}:{values['nonce']}:{ha2}".encode()).hexdigest()
         return (f'Digest username="{username}", realm="{values["realm"]}", nonce="{values["nonce"]}", '
                 f'uri="{url}", response="{response}"')
@@ -120,11 +131,75 @@ def _authorization(challenge, url, username, password):
     return None
 
 
+def rtsp_play_check(url, username="", password="", timeout=3.0):
+    """
+    Shared camera work: DESCRIBE, SETUP and PLAY the stream, then TEARDOWN.
+    {"code": ok|busy|unauthorized|not_found|unreachable|timeout|error, ...}:
+    "busy" when the camera has no room for one more connection.
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if not host:
+        return _result("error", reason="no camera address")
+    clean_url = url if "@" not in parsed.netloc else parsed._replace(netloc=parsed.netloc.split("@", 1)[1]).geturl()
+
+    try:
+        sock = socket.create_connection((host, parsed.port or 554), timeout=timeout)
+    except socket.timeout:
+        return _result("timeout")
+    except OSError as error:
+        return _result("unreachable", reason=error.strerror or str(error))
+
+    try:
+        sock.settimeout(timeout)
+        status, headers = _request(sock, clean_url, 1)
+        challenge = headers.get("www-authenticate", "")
+        login = (lambda method, uri: _authorization(challenge, uri, username, password, method)) if status == 401 and username else (lambda method, uri: None)
+        if status == 401 and username:
+            status, headers = _request(sock, clean_url, 2, login("DESCRIBE", clean_url))
+        if status != 200:
+            return _describe_result(status)
+        control = re.search(r"a=control:(\S+)", headers.get("_body", "").split("m=video", 1)[-1])
+        track = control.group(1) if control else ""
+        track_url = track if track.startswith("rtsp") else clean_url.rstrip("/") + "/" + (track or "trackID=1")
+        status, headers = _request(sock, track_url, 3, login("SETUP", track_url), "SETUP", "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n")
+        if status in BUSY_STATUSES:
+            return _result("busy", reason=f"RTSP {status}")
+        if status != 200:
+            return _describe_result(status)
+        session = headers.get("session", "").split(";")[0]
+        status, _ = _request(sock, clean_url, 4, login("PLAY", clean_url), "PLAY", f"Session: {session}\r\nRange: npt=0.000-\r\n")
+        try:
+            sock.sendall(f"TEARDOWN {clean_url} RTSP/1.0\r\nCSeq: 5\r\nSession: {session}\r\n\r\n".encode())
+        except OSError:
+            pass
+        if status in BUSY_STATUSES:
+            return _result("busy", reason=f"RTSP {status}")
+        return {"code": "ok", "message": "The camera plays this stream."} if status == 200 else _describe_result(status)
+    except socket.timeout:
+        return _result("timeout")
+    except OSError as error:
+        return _result("unreachable", reason=error.strerror or str(error))
+    finally:
+        sock.close()
+
+
+def _describe_result(status):
+    if status in (401, 403):
+        return _result("unauthorized")
+    if status == 404:
+        return _result("not_found")
+    if status in BUSY_STATUSES:
+        return _result("busy", reason=f"RTSP {status}")
+    return _result("error", reason=f"RTSP {status}")
+
+
 class RtspDiagnosis:
     """Cache one check per camera so a failing camera is not probed every frame."""
 
-    def __init__(self, every_seconds=20.0):
+    def __init__(self, every_seconds=20.0, check=None):
         self.every = every_seconds
+        self.check = check or rtsp_check
         self.cache = {}
 
     def get(self, role, url, username, password):
@@ -133,7 +208,7 @@ class RtspDiagnosis:
         now = time.monotonic()
         if cached and cached[0] == key and now - cached[1] < self.every:
             return cached[2]
-        result = rtsp_check(url, username, password)
+        result = self.check(url, username, password)
         self.cache[role] = (key, now, result)
         return result
 

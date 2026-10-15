@@ -42,12 +42,15 @@ class LiveViewController extends Controller
     public function hls(Request $request, string $file): Response
     {
         abort_unless(in_array($file, self::HLS_FILES, true), 404);
+        $query = $request->query();
         if ($request->has('src')) {
-            abort_unless(Gate::resolveCode((string) $request->query('src')) !== null, 404);
+            $gate = Gate::resolveCode((string) $request->query('src')) ?? abort(404);
+            // Shared camera work: the gate plays its camera's one stream.
+            $query['src'] = app(Go2rtcService::class)->streamFor($gate) ?? $gate;
         }
 
         try {
-            $upstream = Http::timeout(15)->get(app(Go2rtcService::class)->apiUrl('/'.$file), $request->query());
+            $upstream = Http::timeout(15)->get(app(Go2rtcService::class)->apiUrl('/'.$file), $query);
         } catch (Throwable) {
             return response('The live view is not available right now.', 503);
         }

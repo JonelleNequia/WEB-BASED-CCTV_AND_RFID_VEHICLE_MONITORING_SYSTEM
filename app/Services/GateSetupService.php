@@ -70,6 +70,11 @@ class GateSetupService
             ];
         }
 
+        // Shared camera work: an address lent for a minute drops the LAN again and again.
+        if ($unstable = \App\Support\LanHealth::problem((array) data_get($devices, 'network', []))) {
+            return $unstable;
+        }
+
         $warnings = collect((array) data_get($devices, 'diagnostics.warnings', []))->pluck('code');
         $router = $wired->contains(fn (array $interface): bool => filled($interface['gateway'] ?? null));
         if (! $router && $warnings->intersect(['link_local', 'lan_empty'])->isNotEmpty()) {
@@ -99,7 +104,7 @@ class GateSetupService
         if ($webcam && ! $live) {
             [$state, $line, $nextStep] = $state === 'starting' ? [$state, $line, $nextStep]
                 : ['offline', 'Offline · The webcam sends no picture.', 'Allow camera access for this app in the computer\'s privacy settings, or close other apps that use the webcam.'];
-        } elseif (! $live && $lan) {
+        } elseif (! $live && $lan && data_get($runtime, "cameras.{$gate->code}.error_code") !== 'busy') {
             // The LAN itself is the problem; "set the camera to DHCP" would mislead.
             [$state, $line, $nextStep] = ['offline', 'Offline · '.$lan['line'], $lan['next_step']];
         } elseif (! $live && $device && $this->onOtherNetwork($device)) {
@@ -127,6 +132,8 @@ class GateSetupService
                 default => 'Added by hand (Advanced)',
             },
             'webcam' => $webcam,
+            // Shared camera work: the same camera on other gates (one connection, each gate its own zone and records).
+            'shared_with' => $webcam ? [] : $this->sharedWith($gate->code),
             'managed' => (bool) $assigned,
             'device_id' => $assigned['device_id'] ?? null,
             'detected' => $detected ? ['id' => $detected->id, 'name' => app(DeviceRegistryService::class)->friendlyName($detected)] : null,
@@ -140,6 +147,26 @@ class GateSetupService
             'username' => (string) ($config['source_username'] ?? ''),
             'can_test' => in_array($config['source_type'] ?? '', ['rtsp'], true) || (bool) $assigned,
         ];
+    }
+
+    /**
+     * Shared camera work: names of the other gates that use the same camera
+     * stream (same address), e.g. ["Gate 2"].
+     *
+     * @return list<string>
+     */
+    protected function sharedWith(string $gate): array
+    {
+        $streams = app(CameraStreams::class);
+        $key = fn (?string $url): ?string => filled($url) ? strtolower((string) preg_replace('#//[^@/]*@#', '//', (string) $url)) : null;
+        $mine = $key($streams->forGate($gate)['live']);
+        if ($mine === null) {
+            return [];
+        }
+
+        return Gate::ordered()
+            ->filter(fn (Gate $other) => $other->code !== $gate && $key($streams->forGate($other->code)['live']) === $mine)
+            ->pluck('name')->values()->all();
     }
 
     /**
@@ -221,6 +248,8 @@ class GateSetupService
             'unauthorized' => ['offline', 'Offline · The camera rejected the login.', 'Open ⋯ › Change login and enter the camera\'s username and password.'],
             'not_found' => ['offline', 'Offline · The camera answers, but sends no video there.', 'Remove the camera and add it again.'],
             'no_frames' => ['offline', 'Offline · The camera sends no picture.', 'Wait a moment; if it stays, switch the camera off and on.'],
+            // Shared camera work: the camera answered, but has no room for one more connection.
+            'busy' => ['offline', 'Offline · The camera refused the connection: too many connections to it.', 'Close other viewers of this camera (VIGI app, recorder, another PC), or use one camera per gate.'],
             'invalid_source' => ['offline', 'Offline · The camera is not set up correctly.', 'Remove the camera and add it again.'],
             default => ['offline', 'Offline · The camera does not answer.', "Check the camera's LAN cable and power."],
         };

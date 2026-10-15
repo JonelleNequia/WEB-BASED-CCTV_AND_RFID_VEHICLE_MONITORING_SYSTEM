@@ -56,6 +56,10 @@
                                 <span class="next-step">→ {{ $camera['codec_warning']['next_step'] }}</span>
                             @endif
                             <small class="text-muted">{{ $camera['source'] }}</small>
+                            @if ($camera['shared_with'] !== [])
+                                {{-- Shared camera work: one camera, one connection; each gate keeps its own zone and records. --}}
+                                <span class="shared-camera" data-shared-camera><span class="badge badge-secondary">Shared camera</span> also on {{ implode(', ', $camera['shared_with']) }} · one connection, each gate has its own zone and records</span>
+                            @endif
                             @if ($camera['detected'])
                                 {{-- Camera source work: added by hand, but the scan found it. --}}
                                 <form method="POST" action="{{ route('settings.gate.camera.automatic', $gate['code']) }}" class="setup-detected" data-camera-detected>

@@ -126,6 +126,61 @@ class Go2rtcService
         return $streams;
     }
 
+    /**
+     * Shared camera work: the go2rtc streams, one per camera (its main
+     * stream), named after the first gate that uses it. A camera on two
+     * gates is one RTSP connection: the VIGI-C240 refuses a 4th session per
+     * stream (measured), and each gate opened its own before.
+     *
+     * @return array<string, string> stream name => main stream URL with login
+     */
+    public function cameraStreams(): array
+    {
+        $byCamera = [];
+        foreach ($this->streams() as $gate => $url) {
+            $byCamera[$this->cameraKey($url)] ??= [$gate, $url];
+        }
+
+        return collect($byCamera)->mapWithKeys(fn (array $stream) => [$stream[0] => $stream[1]])->all();
+    }
+
+    /** The go2rtc stream a gate plays (its camera's), or null when it has none. */
+    public function streamFor(string $gate): ?string
+    {
+        $url = $this->streams()[$gate] ?? null;
+        if ($url === null) {
+            return null;
+        }
+        foreach ($this->streams() as $other => $otherUrl) {
+            if ($this->cameraKey($otherUrl) === $this->cameraKey($url)) {
+                return $other;
+            }
+        }
+
+        return $gate;
+    }
+
+    /**
+     * Gates that play the same camera as this one (Shared camera).
+     *
+     * @return list<string>
+     */
+    public function sharedWith(string $gate): array
+    {
+        $stream = $this->streamFor($gate);
+
+        return $stream === null ? [] : array_values(array_filter(
+            array_keys($this->streams()),
+            fn (string $other) => $other !== $gate && $this->streamFor($other) === $stream
+        ));
+    }
+
+    /** One camera stream whatever the login: its address without the login, lowercase. */
+    protected function cameraKey(string $url): string
+    {
+        return strtolower((string) preg_replace('#//[^@/]*@#', '//', $url));
+    }
+
     protected function withLogin(string $url, string $username, string $password): string
     {
         $parts = parse_url($url);
@@ -156,8 +211,8 @@ class Go2rtcService
             '  level: warn',
             'streams:',
         ];
-        foreach ($this->streams() as $gate => $url) {
-            $lines[] = '  '.$gate.': '.json_encode($url, JSON_UNESCAPED_SLASHES);
+        foreach ($this->cameraStreams() as $name => $url) {
+            $lines[] = '  '.$name.': '.json_encode($url, JSON_UNESCAPED_SLASHES);
         }
         $config = implode("\n", $lines)."\n";
 
@@ -262,7 +317,7 @@ class Go2rtcService
     public function webrtcAnswer(string $gate, string $offer): ?string
     {
         $response = Http::timeout(10)->withBody($offer, 'application/sdp')
-            ->post($this->apiUrl('/webrtc').'?src='.rawurlencode($gate));
+            ->post($this->apiUrl('/webrtc').'?src='.rawurlencode($this->streamFor($gate) ?? $gate));
 
         return $response->successful() ? $response->body() : null;
     }
@@ -291,8 +346,9 @@ class Go2rtcService
                 'code' => $gate->code,
                 'label' => $gate->name,
                 'webrtc' => array_key_exists($gate->code, $streams),
-                'camera_connected' => (bool) data_get($status, "streams.{$gate->code}.online", false),
-                'viewers' => (int) data_get($status, "streams.{$gate->code}.viewers", 0),
+                'camera_connected' => (bool) data_get($status, 'streams.'.($this->streamFor($gate->code) ?? $gate->code).'.online', false),
+                'viewers' => (int) data_get($status, 'streams.'.($this->streamFor($gate->code) ?? $gate->code).'.viewers', 0),
+                'shared_with' => $this->sharedWith($gate->code),
                 'codecs' => array_key_exists($gate->code, $streams) ? Cache::get("live-codecs.{$gate->code}") : null,
                 'measured' => $measured,
             ];

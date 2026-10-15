@@ -11,6 +11,10 @@ Phase 5: a ring buffer of the last second (a frame every 0.1 s). The
 detector takes the frame of the moment its best picture was seen right
 away, and only a frame of that same moment (within 0.25 s): before, a frame
 up to 0.8 s away could show the vehicle somewhere else, or gone.
+
+Shared camera work: one grabber per main stream, used by every gate on that
+camera (`roles`), and opened through the detector's shared connections
+(`opener`), so two gates never open the main stream twice.
 """
 
 import threading
@@ -28,9 +32,12 @@ MATCH_WITHIN_SECONDS = 0.25
 
 
 class HiResGrabber:
-    def __init__(self, role, connection_source):
+    def __init__(self, role, connection_source, opener=None):
         self.role = role
+        self.roles = {role}
         self.connection_source = connection_source  # callable(camera_config) -> url with login
+        # callable(url, role) -> a capture with read() / isOpened() / release(); default: its own OpenCV connection.
+        self.opener = opener or (lambda url, role: cv2.VideoCapture(url, cv2.CAP_FFMPEG))
         self.lock = threading.Lock()
         self.frames = deque(maxlen=KEEP_FRAMES)
         self.until = 0.0
@@ -55,9 +62,10 @@ class HiResGrabber:
         started = time.monotonic()
         capture = None
         try:
-            capture = cv2.VideoCapture(self.connection_source(camera_config), cv2.CAP_FFMPEG)
+            capture = self.opener(self.connection_source(camera_config), self.role)
             if not capture.isOpened():
-                metrics.value(self.role, "hires_error", "could not open the snapshot stream")
+                for role in list(self.roles):
+                    metrics.value(role, "hires_error", "could not open the snapshot stream")
                 return
             first = True
             last_kept = 0.0
@@ -70,17 +78,20 @@ class HiResGrabber:
                     break
                 now = time.monotonic()
                 if first:
-                    metrics.timing(self.role, "hires_open", (now - started) * 1000.0)
-                    metrics.value(self.role, "hires_resolution", f"{frame.shape[1]}x{frame.shape[0]}")
+                    for role in list(self.roles):
+                        metrics.timing(role, "hires_open", (now - started) * 1000.0)
+                        metrics.value(role, "hires_resolution", f"{frame.shape[1]}x{frame.shape[0]}")
                     first = False
                 if now - last_kept >= KEEP_EVERY_SECONDS:
                     last_kept = now
                     with self.lock:
                         # When the camera actually saw this frame (decoder delay removed).
                         self.frames.append((now - HIRES_DECODE_DELAY_SECONDS, frame))
-                    metrics.rate(self.role, "hires")
+                    for role in list(self.roles):
+                        metrics.rate(role, "hires")
         except Exception as error:
-            metrics.value(self.role, "hires_error", str(error))
+            for role in list(self.roles):
+                metrics.value(role, "hires_error", str(error))
         finally:
             # Released on the reading thread itself: never under a running read().
             if capture is not None:

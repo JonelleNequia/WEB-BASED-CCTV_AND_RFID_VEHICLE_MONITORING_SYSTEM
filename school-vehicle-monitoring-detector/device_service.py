@@ -48,6 +48,7 @@ import signal
 import socket
 import threading
 import time
+from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 
 import psutil
@@ -166,6 +167,11 @@ class DeviceService:
         self.network = netinfo.snapshot(profiles)
         self.pending_network = None
         self.pending_network_at = 0.0
+        # Shared camera work: when the LAN lost its address (it drops every
+        # minute or two with a very short DHCP lease), and that lease.
+        self.lan_drops = []
+        self.dhcp_lease = None
+        self.dhcp_lease_checked = 0.0
 
         self.capture = CaptureLog(profiles.get("reader_link", {}).get("capture_log_max_bytes", 1048576))
         self.poster = TagPoster(log)
@@ -494,7 +500,7 @@ class DeviceService:
 
     # -- status ---------------------------------------------------------
     def write_status(self):
-        network = self.network
+        network = {**self.network, **self.lan_health()}
         result = self.last_result or {}
         wired = network.get("wired_connected")
         if not network.get("interfaces"):
@@ -547,6 +553,19 @@ class DeviceService:
             "reader_workaround": dict(self.workaround.status),
         })
 
+    def lan_health(self):
+        """LAN drops in the last 10 minutes and the DHCP lease (checked once a minute)."""
+        wired = netinfo.wired_address(self.network)
+        if time.monotonic() - self.dhcp_lease_checked >= 60:
+            self.dhcp_lease_checked = time.monotonic()
+            self.dhcp_lease = netinfo.dhcp_lease_seconds(wired["name"]) if wired else None
+        recent = [at for at in self.lan_drops if time.time() - at < 600]
+        return {
+            "lan_drops_10min": len(recent),
+            "last_lan_drop_at": datetime.fromtimestamp(recent[-1], timezone.utc).isoformat() if recent else None,
+            "dhcp_lease_seconds": self.dhcp_lease if wired else None,
+        }
+
     # -- main loop ------------------------------------------------------
     def run(self):
         self.poster.start()
@@ -577,6 +596,9 @@ class DeviceService:
                         self.pending_network_at = now
                         netinfo.refresh_hardware_ports()
                         log(f"Network changed: {current['signature'] or 'no connection'}")
+                        if netinfo.wired_address(self.network) and not netinfo.wired_address(current):
+                            self.lan_drops = [at for at in self.lan_drops if time.time() - at < 3600] + [time.time()]
+                            log(f"LAN connection lost ({len([at for at in self.lan_drops if time.time() - at < 600])} time(s) in the last 10 minutes)")
                     elif now - self.pending_network_at >= settle:
                         self.network = current
                         self.pending_network = None
