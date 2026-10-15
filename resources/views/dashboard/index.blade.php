@@ -24,7 +24,7 @@
                 @endforeach
                 @if ($possiblyInsideCount > 0)
                     {{-- Gate direction work, Phase C: not part of the official count. --}}
-                    <br><a href="{{ route('visitors.index') }}" data-dashboard-possibly-inside>+{{ $possiblyInsideCount }} posibleng nasa loob pa (unregistered, tantya lang)</a>
+                    <br><a href="{{ route('visitors.index') }}" data-dashboard-possibly-inside>+{{ $possiblyInsideCount }} possibly still inside (unregistered, estimate only)</a>
                 @endif
             </x-slot:detail>
         </x-stat>

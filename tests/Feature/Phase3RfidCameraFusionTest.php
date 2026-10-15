@@ -129,7 +129,7 @@ class Phase3RfidCameraFusionTest extends TestCase
     public function test_unknown_camera_direction_of_a_registered_vehicle_uses_its_state(): void
     {
         // Gate direction work, Phase A: the camera saw it but could not tell:
-        // the vehicle's state decides (Inside -> OUT), "batay sa state".
+        // the vehicle's state decides (Inside -> OUT), "From vehicle state".
         $this->cameraOnline();
         $vehicle = $this->registeredVehicle('UNK 5005', 'UNK-TAG-5', Vehicle::STATE_INSIDE);
 

@@ -54,7 +54,7 @@ body {
 
     @bottom-right {
         font-family: "Segoe UI", Roboto, Arial, Helvetica, sans-serif;
-        content: "Pahina " counter(page) " ng " counter(pages);
+        content: "Page " counter(page) " of " counter(pages);
         font-size: 8pt;
         color: #111827;
     }

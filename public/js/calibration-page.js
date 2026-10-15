@@ -24,9 +24,9 @@
     const cards = {};
     let activeCard = null;
 
-    // Gate direction work, Phase A: "Papalayo = IN · Papalapit = OUT".
+    // Gate direction work, Phase A: "Moving away = IN · Coming closer = OUT".
     function mappingText(away) {
-        return away ? `Papalayo = ${away} · Papalapit = ${away === 'IN' ? 'OUT' : 'IN'}` : 'Not set: vehicles are recorded as "Direction unknown"';
+        return away ? `Moving away = ${away} · Coming closer = ${away === 'IN' ? 'OUT' : 'IN'}` : 'Not set: vehicles are recorded as "Direction unknown"';
     }
 
     function csrfToken() {

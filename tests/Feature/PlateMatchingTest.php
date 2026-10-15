@@ -51,8 +51,8 @@ class PlateMatchingTest extends TestCase
         // Without the OUT's plate the vehicle may still be inside (an estimate).
         $inside = app(VisitorPresenceService::class)->possiblyInside();
         $this->assertSame(['ABC 1234'], $inside['vehicles']->map(fn ($item) => $item['profile']->plate_number)->all());
-        $this->actingAs($this->admin)->get(route('visitors.index'))->assertOk()->assertSee('Posibleng nasa loob pa')->assertSee('tantya lang');
-        $this->actingAs($this->admin)->get(route('dashboard.index'))->assertOk()->assertSee('+1 posibleng nasa loob pa (unregistered, tantya lang)');
+        $this->actingAs($this->admin)->get(route('visitors.index'))->assertOk()->assertSee('Possibly still inside')->assertSee('estimate only');
+        $this->actingAs($this->admin)->get(route('dashboard.index'))->assertOk()->assertSee('+1 possibly still inside (unregistered, estimate only)');
 
         // A guard types the OUT's plate: one trip, Gate 1 -> Gate 2, 25 minutes inside.
         $out = VisitorRecord::query()->where('external_event_key', 'out-1')->sole();

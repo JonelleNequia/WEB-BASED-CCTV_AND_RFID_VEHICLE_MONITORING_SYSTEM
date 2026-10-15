@@ -122,7 +122,7 @@ class CalibrationCameraSourceTest extends TestCase
         $this->assertArrayNotHasKey('calibration_direction', $camera);
         $this->assertArrayNotHasKey('browser_device_id', $camera);
         $this->assertStringContainsString('3-point zone saved', $html);
-        $this->assertStringContainsString('Papalayo = IN · Papalapit = OUT', $html);
+        $this->assertStringContainsString('Moving away = IN · Coming closer = OUT', $html);
         $this->assertMatchesRegularExpression('#<input type="radio" name="away_direction_gate-1" value="IN"\s+checked#', $html);
     }
 

@@ -25,7 +25,7 @@ use Illuminate\Support\Facades\DB;
  * - Gate direction work, Phase A: the camera saw the vehicle but could not
  *   tell IN from OUT (or the gate's direction is not set): the vehicle's
  *   state decides (OUTSIDE -> IN, INSIDE -> OUT), saved as direction source
- *   "state" ("batay sa state"). (ROI Phase 2 left these "Direction unknown"
+ *   "state" (shown as "From vehicle state"). (ROI Phase 2 left these "Direction unknown"
  *   for staff; older such records keep Set IN / Set OUT.)
  * - No camera at the gate, or camera offline: the vehicle's state decides
  *   too (OUTSIDE -> IN, INSIDE -> OUT).

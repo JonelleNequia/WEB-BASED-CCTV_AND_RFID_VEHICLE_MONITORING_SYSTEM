@@ -3,7 +3,7 @@
     A4 landscape, no sidebar, buttons or filters on paper. Print and Save as
     PDF both use the browser's print window on this page, so the PDF has the
     same layout as the printout. The table header repeats on every page, a
-    row is never split, and every page says "Pahina X ng Y".
+    row is never split, and every page says "Page X of Y".
 --}}
 @php
     // Text for the page margins (CSS strings).

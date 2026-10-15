@@ -83,7 +83,7 @@
         const movement = el('td');
         movement.append(el('span', `badge badge-tone-${tone[String(log.event_type).toLowerCase()] || 'neutral'}`, log.movement_label || log.event_type));
         if (log.direction_source === 'state') {
-            const note = el('div', 'table-subtext direction-source-state', 'batay sa state');
+            const note = el('div', 'table-subtext direction-source-state', 'from vehicle state');
             note.title = "The camera could not tell; the vehicle's Inside / Outside state was used";
             movement.append(note);
         }

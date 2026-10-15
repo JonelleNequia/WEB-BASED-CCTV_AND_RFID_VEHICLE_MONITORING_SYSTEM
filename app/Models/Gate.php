@@ -45,7 +45,7 @@ class Gate extends Model
      * goes up the picture) is going IN or OUT of campus at this gate. Not set
      * (null): every pass at this gate is Direction unknown.
      */
-    public const AWAY_DIRECTIONS = ['IN' => 'Papasok sa campus', 'OUT' => 'Palabas ng campus'];
+    public const AWAY_DIRECTIONS = ['IN' => 'Into campus (IN)', 'OUT' => 'Out of campus (OUT)'];
 
     protected function casts(): array
     {
@@ -156,7 +156,7 @@ class Gate extends Model
     }
 
     /**
-     * Gate direction work, Phase A: "Papalayo = IN · Papalapit = OUT" for a
+     * Gate direction work, Phase A: "Moving away = IN · Coming closer = OUT" for a
      * gate's setting, or null when it is not set.
      */
     public static function directionMapping(?string $away): ?string
@@ -164,7 +164,7 @@ class Gate extends Model
         $away = strtoupper((string) $away);
 
         return array_key_exists($away, self::AWAY_DIRECTIONS)
-            ? 'Papalayo = '.$away.' · Papalapit = '.($away === 'IN' ? 'OUT' : 'IN')
+            ? 'Moving away = '.$away.' · Coming closer = '.($away === 'IN' ? 'OUT' : 'IN')
             : null;
     }
 

@@ -176,10 +176,10 @@ class Phase7MovementCountsTest extends TestCase
         $this->assertSame('This Week (Oct 12, 2026 – Oct 18, 2026)', $week->viewData('dateRange'));
         $this->assertStringStartsWith('All records (Oct 13, 2026 – Oct 14, 2026)', $this->actingAs($this->admin)->get(route('logs.print', ['report' => 'all']))->viewData('dateRange'));
 
-        // A4 landscape, header on every page, rows never split, "Pahina X ng Y".
+        // A4 landscape, header on every page, rows never split, "Page X of Y".
         $css = file_get_contents(public_path('css/activity-report.css'));
         $this->assertStringContainsString('size: A4 landscape', $css);
-        $this->assertStringContainsString('content: "Pahina " counter(page) " ng " counter(pages)', $css);
+        $this->assertStringContainsString('content: "Page " counter(page) " of " counter(pages)', $css);
         $this->assertMatchesRegularExpression('/\.records-table thead \{\s*display: table-header-group;/', $css);
         $this->assertMatchesRegularExpression('/\.records-table tr \{\s*break-inside: avoid;/', $css);
     }

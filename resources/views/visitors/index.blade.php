@@ -20,7 +20,7 @@
         {{-- Gate direction work, Phase C: IN today, no OUT yet (an estimate, not the official inside count). --}}
         @if ($possiblyInside && ($possiblyInside['vehicles']->isNotEmpty() || $possiblyInside['without_plate'] > 0))
             <section class="panel possibly-inside" data-possibly-inside>
-                <h3 class="panel-title">Posibleng nasa loob pa <span class="badge badge-secondary">tantya lang</span></h3>
+                <h3 class="panel-title">Possibly still inside <span class="badge badge-secondary">estimate only</span></h3>
                 <p class="field-help">Unregistered vehicles that came IN today and have no OUT yet. An estimate: a missed or unread OUT keeps a vehicle here. The official inside count is for registered vehicles only.</p>
                 @if ($possiblyInside['vehicles']->isNotEmpty())
                     <ul class="possibly-inside-list">

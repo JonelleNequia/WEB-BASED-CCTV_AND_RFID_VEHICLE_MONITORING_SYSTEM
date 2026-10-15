@@ -102,7 +102,7 @@ class GateDirectionMatrixTest extends TestCase
     public function test_an_unclear_direction_uses_the_state_when_registered_and_goes_to_review_when_not(): void
     {
         foreach (['gate-1', 'gate-2'] as $gate) {
-            // Registered, inside: OUT "batay sa state".
+            // Registered, inside: OUT "from vehicle state".
             $vehicle = $this->registeredVehicle(Vehicle::STATE_INSIDE);
             $this->scan($vehicle->rfid_tag_uid, $gate);
             $this->crossing($gate, 'UNKNOWN', null, 'went up 4% of the zone')->assertCreated();
@@ -122,8 +122,8 @@ class GateDirectionMatrixTest extends TestCase
         $this->actingAs($this->admin)->get(route('visitors.index', ['tab' => 'review']))
             ->assertOk()->assertSee('Review (2)')->assertSee('Unregistered Visitor');
         // Activity Logs marks the state-based direction.
-        $this->actingAs($this->admin)->get(route('logs.index'))->assertOk()->assertSee('batay sa state');
-        $this->actingAs($this->admin)->get(route('logs.print', ['report' => 'today']))->assertOk()->assertSee('OUT (batay sa state)');
+        $this->actingAs($this->admin)->get(route('logs.index'))->assertOk()->assertSee('from vehicle state');
+        $this->actingAs($this->admin)->get(route('logs.print', ['report' => 'today']))->assertOk()->assertSee('OUT (from vehicle state)');
     }
 
     public function test_the_camera_wins_over_a_state_that_does_not_fit_and_the_state_follows(): void

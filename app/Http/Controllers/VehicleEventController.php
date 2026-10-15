@@ -375,7 +375,7 @@ class VehicleEventController extends Controller
             'owner' => $known($log['owner_name'] ?? null),
             'category' => $known($log['category_label'] ?? null),
             'type' => $known($log['vehicle_type'] ?? null),
-            'direction' => $direction.(($log['direction_source'] ?? null) === \App\Support\DirectionSource::STATE ? ' (batay sa state)' : ''),
+            'direction' => $direction.(($log['direction_source'] ?? null) === \App\Support\DirectionSource::STATE ? ' (from vehicle state)' : ''),
             'direction_key' => $directionKey,
             'gate' => $known($log['station_label'] ?? null),
             'image_url' => $log['image_url'] ?? null,
@@ -831,7 +831,7 @@ class VehicleEventController extends Controller
             },
             // ROI work: a "Direction unknown" record can be set to IN / OUT in one click.
             'set_direction_url' => $event->event_type === VehicleEvent::TYPE_UNKNOWN ? route('vehicle-events.direction', $event) : null,
-            // Gate direction work, Phase A: camera, state ("batay sa state") or manual.
+            // Gate direction work, Phase A: camera, vehicle state or manual.
             'direction_source' => $event->direction_source,
             'direction_source_label' => $this->directionSourceLabel($event->direction_source, $event->direction_confidence),
             'state_label' => $event->resulting_state_label,
@@ -1114,7 +1114,7 @@ class VehicleEventController extends Controller
         return $parts === [] ? 'No filters' : implode(' · ', $parts);
     }
 
-    /** "From the camera (high)", "batay sa state", "Set by staff", or null. */
+    /** "From the camera (high)", "From vehicle state", "Set by staff", or null. */
     protected function directionSourceLabel(?string $source, ?string $confidence): ?string
     {
         $label = \App\Support\DirectionSource::label($source);

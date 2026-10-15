@@ -1950,7 +1950,7 @@ th {
 }
 
 /* ROI work: which way is IN at this gate (a vehicle moving away from the camera). */
-/* Gate direction work, Phase A: "Kapag papalayo ang sasakyan sa camera…" with a small diagram. */
+/* Gate direction work, Phase A: "A vehicle moving away from the camera is going…" with a small diagram. */
 .calibration-away {
     margin: 0.75rem 0 0;
     padding: 0.6rem 0.8rem;
@@ -1992,7 +1992,7 @@ th {
 }
 
 .calibration-away-diagram {
-    width: 240px;
+    width: 300px;
     max-width: 100%;
     height: auto;
     color: var(--purple, #6d28d9);
@@ -8083,7 +8083,7 @@ img.thumb-plate {
     }
 }
 
-/* Gate direction work, Phase C: plate trips and "posibleng nasa loob pa". */
+/* Gate direction work, Phase C: plate trips and "possibly still inside". */
 .trip-list {
     display: grid;
     gap: 0.35rem;

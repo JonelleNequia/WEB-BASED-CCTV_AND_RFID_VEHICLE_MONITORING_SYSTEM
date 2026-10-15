@@ -53,7 +53,7 @@
                         {{-- Gate direction work, Phase A: which way is IN at this gate (both IN and OUT are recorded here). --}}
                         @php($away = $camera['away_direction'])
                         <fieldset class="calibration-away" data-away-direction>
-                            <legend>Kapag papalayo ang sasakyan sa camera, ito ay:</legend>
+                            <legend>A vehicle moving away from the camera is going:</legend>
                             <div class="calibration-away-body">
                                 <div class="calibration-away-options">
                                     @foreach (\App\Models\Gate::AWAY_DIRECTIONS as $value => $label)
@@ -62,24 +62,24 @@
                                             {{ $label }}
                                         </label>
                                     @endforeach
-                                    <p class="field-help">Parehong IN at OUT ay naitatala sa gate na ito.</p>
+                                    <p class="field-help">Both IN and OUT are recorded at this gate.</p>
                                 </div>
-                                <svg class="calibration-away-diagram" viewBox="0 0 240 132" role="img" aria-label="Camera sa ibaba; ang papalayo ay paakyat sa larawan, ang papalapit ay pababa">
+                                <svg class="calibration-away-diagram" viewBox="0 0 300 132" role="img" aria-label="Camera at the bottom: moving away goes up the picture, coming closer goes down">
                                     <defs>
                                         <marker id="away-arrow-{{ $role }}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
                                             <path d="M0 0 10 5 0 10z" fill="currentColor"/>
                                         </marker>
                                     </defs>
-                                    <polygon points="96,8 144,8 196,104 44,104" class="diagram-road"/>
-                                    <line x1="100" y1="92" x2="112" y2="26" class="diagram-arrow" marker-end="url(#away-arrow-{{ $role }})"/>
-                                    <line x1="128" y1="26" x2="140" y2="92" class="diagram-arrow" marker-end="url(#away-arrow-{{ $role }})"/>
-                                    <text x="4" y="46" class="diagram-label">Papalayo</text>
+                                    <polygon points="126,8 174,8 226,104 74,104" class="diagram-road"/>
+                                    <line x1="130" y1="92" x2="142" y2="26" class="diagram-arrow" marker-end="url(#away-arrow-{{ $role }})"/>
+                                    <line x1="158" y1="26" x2="170" y2="92" class="diagram-arrow" marker-end="url(#away-arrow-{{ $role }})"/>
+                                    <text x="4" y="46" class="diagram-label">Moving away</text>
                                     <text x="4" y="62" class="diagram-value" data-away-label="away">= {{ $away ?? '?' }}</text>
-                                    <text x="236" y="80" text-anchor="end" class="diagram-label">Papalapit</text>
-                                    <text x="236" y="96" text-anchor="end" class="diagram-value" data-away-label="toward">= {{ $away ? ($away === 'IN' ? 'OUT' : 'IN') : '?' }}</text>
-                                    <rect x="106" y="110" width="28" height="16" rx="3" class="diagram-camera"/>
-                                    <circle cx="120" cy="118" r="4" class="diagram-lens"/>
-                                    <text x="120" y="108" text-anchor="middle" class="diagram-caption">camera</text>
+                                    <text x="296" y="80" text-anchor="end" class="diagram-label">Coming closer</text>
+                                    <text x="296" y="96" text-anchor="end" class="diagram-value" data-away-label="toward">= {{ $away ? ($away === 'IN' ? 'OUT' : 'IN') : '?' }}</text>
+                                    <rect x="136" y="110" width="28" height="16" rx="3" class="diagram-camera"/>
+                                    <circle cx="150" cy="118" r="4" class="diagram-lens"/>
+                                    <text x="150" y="108" text-anchor="middle" class="diagram-caption">camera</text>
                                 </svg>
                             </div>
                         </fieldset>

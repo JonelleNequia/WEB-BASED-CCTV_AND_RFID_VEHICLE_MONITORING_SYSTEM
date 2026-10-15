@@ -121,7 +121,7 @@ class Phase2CrossingDirectionTest extends TestCase
         \App\Models\Gate::query()->where('code', 'gate-1')->update(['away_direction' => 'IN']);
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'gates']))
             // Gate direction work, Phase A: the mapping on the card.
-            ->assertOk()->assertSee('Zone set · Papalayo = IN · Papalapit = OUT');
+            ->assertOk()->assertSee('Zone set · Moving away = IN · Coming closer = OUT');
     }
 
     public function test_the_minimum_movement_is_set_per_gate_under_advanced_timing(): void
@@ -176,10 +176,10 @@ class Phase2CrossingDirectionTest extends TestCase
 
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'calibration']))
             ->assertOk()
-            ->assertSee('Kapag papalayo ang sasakyan sa camera, ito ay:')
-            ->assertSee('Papasok sa campus')
-            ->assertSee('Palabas ng campus')
-            ->assertSee('Parehong IN at OUT ay naitatala sa gate na ito.')
+            ->assertSee('A vehicle moving away from the camera is going:')
+            ->assertSee('Into campus (IN)')
+            ->assertSee('Out of campus (OUT)')
+            ->assertSee('Both IN and OUT are recorded at this gate.')
             ->assertSee('calibration-away-diagram', false)
             ->assertDontSee('Flip IN')
             ->assertSee('Recent records')

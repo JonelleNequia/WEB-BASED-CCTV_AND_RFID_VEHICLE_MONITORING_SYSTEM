@@ -21,7 +21,7 @@ final class DirectionSource
 
     public const LABELS = [
         self::CAMERA => 'From the camera',
-        self::STATE => 'batay sa state',
+        self::STATE => 'From vehicle state',
         self::MANUAL => 'Set by staff',
     ];
 

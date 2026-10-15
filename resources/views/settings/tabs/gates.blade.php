@@ -185,7 +185,7 @@
                         @if (! $gate['zone']['ready'])
                             <span class="next-step">→ Draw where vehicles pass.</span>
                         @elseif (! $awaySet)
-                            <span class="next-step" data-away-warning>→ In Calibration, choose: "Kapag papalayo ang sasakyan sa camera, ito ay: Papasok / Palabas ng campus".</span>
+                            <span class="next-step" data-away-warning>→ In Calibration, choose where a vehicle moving away from the camera is going: into or out of campus.</span>
                         @endif
                     </div>
                     <a href="{{ $gate['zone']['setup_url'] }}" class="button {{ $gate['zone']['ready'] && $awaySet ? 'button-secondary' : 'button-primary' }}">{{ $gate['zone']['ready'] && $awaySet ? 'Edit' : 'Set up' }}</a>

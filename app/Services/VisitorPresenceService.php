@@ -11,7 +11,7 @@ use Illuminate\Support\Collection;
  * Gate direction work, Phase C: one plate's passes as trips (IN at one gate
  * -> OUT at the same or another gate, and the time inside), and the
  * unregistered vehicles that came IN today and have not gone OUT yet
- * ("posibleng nasa loob pa": an estimate only; the official inside count is
+ * ("possibly still inside": an estimate only; the official inside count is
  * for registered vehicles).
  */
 class VisitorPresenceService
