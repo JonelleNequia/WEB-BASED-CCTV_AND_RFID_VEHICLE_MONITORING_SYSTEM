@@ -51,6 +51,11 @@
                             @if ($camera['next_step'] !== '')
                                 <span class="next-step">→ {{ $camera['next_step'] }}</span>
                             @endif
+                            @if ($camera['lan_note'] ?? null)
+                                {{-- Shared camera work: the likely cause when the LAN is not steady. --}}
+                                <span class="status-line lan-note" data-lan-note><span class="status-dot is-warning" aria-hidden="true"></span>Likely cause: {{ $camera['lan_note']['line'] }}</span>
+                                <span class="next-step">→ {{ $camera['lan_note']['next_step'] }}</span>
+                            @endif
                             @if ($camera['codec_warning'])
                                 <span class="status-line codec-warning"><span class="status-dot is-warning" aria-hidden="true"></span>{{ $camera['codec_warning']['line'] }}</span>
                                 <span class="next-step">→ {{ $camera['codec_warning']['next_step'] }}</span>
@@ -116,6 +121,11 @@
                             <span class="status-line"><span @class(['status-dot', 'is-online' => $reader['state'] === 'online', 'is-warning' => $reader['state'] === 'starting']) aria-hidden="true"></span>{{ $reader['line'] }}</span>
                             @if ($reader['next_step'] !== '')
                                 <span class="next-step">→ {{ $reader['next_step'] }}</span>
+                            @endif
+                            @if ($reader['lan_note'] ?? null)
+                                {{-- Shared camera work: the likely cause when the LAN is not steady. --}}
+                                <span class="status-line lan-note" data-lan-note><span class="status-dot is-warning" aria-hidden="true"></span>Likely cause: {{ $reader['lan_note']['line'] }}</span>
+                                <span class="next-step">→ {{ $reader['lan_note']['next_step'] }}</span>
                             @endif
                             @php($network = $reader['network'])
                             @php($workaround = $network['workaround'] ?? [])

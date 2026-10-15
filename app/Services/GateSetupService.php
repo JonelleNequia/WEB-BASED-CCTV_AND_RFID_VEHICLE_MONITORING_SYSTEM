@@ -72,7 +72,8 @@ class GateSetupService
 
         // Shared camera work: an address lent for a minute drops the LAN again and again.
         if ($unstable = \App\Support\LanHealth::problem((array) data_get($devices, 'network', []))) {
-            return $unstable;
+            // Not "down": the card keeps its own reason and shows this as the likely cause.
+            return $unstable + ['unsteady' => true];
         }
 
         $warnings = collect((array) data_get($devices, 'diagnostics.warnings', []))->pluck('code');
@@ -104,7 +105,7 @@ class GateSetupService
         if ($webcam && ! $live) {
             [$state, $line, $nextStep] = $state === 'starting' ? [$state, $line, $nextStep]
                 : ['offline', 'Offline · The webcam sends no picture.', 'Allow camera access for this app in the computer\'s privacy settings, or close other apps that use the webcam.'];
-        } elseif (! $live && $lan && data_get($runtime, "cameras.{$gate->code}.error_code") !== 'busy') {
+        } elseif (! $live && $lan && ! ($lan['unsteady'] ?? false) && data_get($runtime, "cameras.{$gate->code}.error_code") !== 'busy') {
             // The LAN itself is the problem; "set the camera to DHCP" would mislead.
             [$state, $line, $nextStep] = ['offline', 'Offline · '.$lan['line'], $lan['next_step']];
         } elseif (! $live && $device && $this->onOtherNetwork($device)) {
@@ -142,6 +143,8 @@ class GateSetupService
             'state' => $state,
             'line' => $line,
             'next_step' => $nextStep,
+            // An unsteady LAN (short DHCP lease, drops): the likely cause under the camera's own reason.
+            'lan_note' => ! $live && ($lan['unsteady'] ?? false) && data_get($runtime, "cameras.{$gate->code}.error_code") !== 'busy' ? $lan : null,
             'preview_url' => (string) data_get($runtime, "cameras.{$gate->code}.stream_url", ''),
             'has_login' => filled($config['source_username'] ?? null),
             'username' => (string) ($config['source_username'] ?? ''),
@@ -285,16 +288,17 @@ class GateSetupService
                 default => 'offline',
             },
             'manual' => $manual && ! $assigned,
+            'lan_note' => ! $online && $serviceRunning && ($lan['unsteady'] ?? false) ? $lan : null,
             'line' => match (true) {
                 ! $serviceRunning => 'Starting · The device program is starting.',
                 $online => 'Online',
-                $lan !== null => 'Offline · '.$lan['line'],
+                $lan !== null && ! ($lan['unsteady'] ?? false) => 'Offline · '.$lan['line'],
                 $state === 'connecting' || $state === null => 'Connecting…',
                 default => 'Offline · The reader does not answer.',
             },
             'next_step' => match (true) {
                 ! $serviceRunning => 'It starts by itself within a minute.',
-                ! $online && $lan !== null => $lan['next_step'],
+                ! $online && $lan !== null && ! ($lan['unsteady'] ?? false) => $lan['next_step'],
                 $online, $state === 'connecting', $state === null => '',
                 default => "Check the reader's LAN cable and power.",
             },

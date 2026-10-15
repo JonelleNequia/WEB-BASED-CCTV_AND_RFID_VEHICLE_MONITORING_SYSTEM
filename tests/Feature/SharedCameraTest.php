@@ -179,12 +179,14 @@ class SharedCameraTest extends TestCase
         File::ensureDirectoryExists(dirname(DeviceFiles::statusPath()));
         File::put(DeviceFiles::statusPath(), json_encode([
             'service_running' => true, 'updated_at' => now()->toIso8601String(),
-            'network' => ['interfaces' => [['name' => 'en7', 'kind' => 'ethernet', 'ip' => '192.0.2.2', 'gateway' => '192.0.2.1', 'link_local' => false, 'network' => '192.0.2.0/24']],
+            'network' => ['interfaces' => [['name' => 'en7', 'kind' => 'ethernet', 'ip' => '198.51.100.2', 'gateway' => '198.51.100.1', 'link_local' => false, 'network' => '198.51.100.0/24']],
                 'lan_drops_10min' => 4, 'dhcp_lease_seconds' => 60],
         ]));
         $this->detectorStatus(['gate-1' => ['camera_running' => false, 'error_code' => 'timeout']]);
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'gates']))->assertOk()
-            ->assertSee('The router lends this PC its LAN address for only 60 seconds (DHCP lease); the LAN dropped 4 times in the last 10 minutes.')
+            // The camera's own reason stays; the unsteady LAN is shown as the likely cause.
+            ->assertSee('Offline · The camera does not answer.')
+            ->assertSee('Likely cause: The router lends this PC its LAN address for only 60 seconds (DHCP lease); the LAN dropped 4 times in the last 10 minutes.')
             ->assertSee('set the lease time to 1 day or more');
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'status']))->assertOk()
             ->assertSee('The LAN connection is not steady');
