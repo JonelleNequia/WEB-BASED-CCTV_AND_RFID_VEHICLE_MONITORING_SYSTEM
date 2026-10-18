@@ -151,6 +151,27 @@ class AddDeviceToGateTest extends TestCase
     }
 
     /**
+     * Phones and laptops (private, randomized addresses) often have port
+     * 49152 open too: they are never offered as "Not identified yet"
+     * readers; nor is a device that is not on the network now.
+     */
+    public function test_phones_and_devices_not_here_now_are_not_offered_as_readers(): void
+    {
+        $phone = fn (string $mac, string $ip, bool $online): array => [
+            'key' => $mac, 'mac' => $mac, 'ip' => $ip, 'reachable' => true, 'online' => $online, 'kind' => 'unknown', 'name' => 'Private (randomized)',
+            'randomized_mac' => true, 'open_ports' => ['tcp' => [49152]],
+        ];
+        app(DeviceRegistryService::class)->ingestScan(['scan' => ['complete' => false], 'devices' => [
+            $phone('96:28:9D:4E:AA:89', '198.51.100.50', true),
+            ['key' => '70:19:88:00:00:0E', 'mac' => '70:19:88:00:00:0E', 'ip' => '198.51.100.51', 'reachable' => true, 'online' => false, 'kind' => 'unknown',
+                'name' => 'Old device', 'open_ports' => ['tcp' => [49152]]],
+        ]]);
+
+        $offered = collect(app(DeviceRegistryService::class)->panelPayload()['devices'])->where('maybe_reader', true)->pluck('mac')->all();
+        $this->assertSame([self::UNKNOWN], $offered, 'Only the device here now with a maker address and a reader port.');
+    }
+
+    /**
      * The reader takes one connection at a time: a scan right after another
      * found its port busy (it still answered the module search). Measured
      * 2026-10-14 on the gate reader: "No reader port was found" on Add.

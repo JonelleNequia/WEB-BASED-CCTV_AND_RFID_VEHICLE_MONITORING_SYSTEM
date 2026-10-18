@@ -1000,6 +1000,23 @@ class DeviceRegistryService
         return $name !== '' ? $name : ($device->name ?: 'Network device');
     }
 
+    /**
+     * Phase 6: a device not identified yet that is worth offering in "Add
+     * camera / reader": on the network now, with a maker's real address.
+     * Phones and laptops use a private (randomized) address and often have
+     * port 49152 open too (the first port Windows, iOS and macOS hand out),
+     * so they are never offered; nor are devices seen only on another
+     * network days ago.
+     *
+     * @param  array<string, mixed>  $details
+     */
+    protected function maybe(NetworkDevice $device, array $details): bool
+    {
+        return $device->kind === NetworkDevice::KIND_UNKNOWN
+            && $device->status === NetworkDevice::STATUS_ONLINE
+            && ! (bool) ($details['randomized_mac'] ?? false);
+    }
+
     /** Phase 6: an unidentified device with a camera's ports (RTSP, ONVIF). */
     protected function looksLikeCamera(array $details): bool
     {
@@ -1058,8 +1075,8 @@ class DeviceRegistryService
             'open_ports' => (array) data_get($details, 'open_ports.tcp', []),
             // Phase 6: not identified yet, but it may be one (offered under
             // "Not identified yet" when adding a camera / reader to a gate).
-            'maybe_camera' => $device->kind === NetworkDevice::KIND_UNKNOWN && $this->looksLikeCamera($details),
-            'maybe_reader' => $device->kind === NetworkDevice::KIND_UNKNOWN && $this->looksLikeReader($details),
+            'maybe_camera' => $this->maybe($device, $details) && $this->looksLikeCamera($details),
+            'maybe_reader' => $this->maybe($device, $details) && $this->looksLikeReader($details),
             'network_warning' => $this->networkWarning($device),
             'guidance' => $device->status === NetworkDevice::STATUS_UNREACHABLE
                 ? $this->unreachableGuidance($device, $suggestions->get($device->ip), $interfaces)
