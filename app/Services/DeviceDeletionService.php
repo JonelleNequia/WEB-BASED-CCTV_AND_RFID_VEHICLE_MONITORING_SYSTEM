@@ -51,7 +51,7 @@ class DeviceDeletionService
             array_push($removes, 'The saved camera login and video settings', "The gate's detection zone and its IN / OUT direction", 'The last picture and the status of this camera');
         }
         if ($reader) {
-            array_push($removes, 'The reader connection settings and the temporary workaround address', 'The tags waiting in its memory and its diagnostics');
+            array_push($removes, 'The reader connection settings', 'The tags waiting in its memory and its diagnostics');
         }
 
         return [

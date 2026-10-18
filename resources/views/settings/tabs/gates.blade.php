@@ -128,13 +128,9 @@
                                 <span class="next-step">→ {{ $reader['lan_note']['next_step'] }}</span>
                             @endif
                             @php($network = $reader['network'])
-                            @php($workaround = $network['workaround'] ?? [])
-                            @if ($network && ($network['outside'] || ($workaround['state'] ?? null) === 'active'))
+                            @if ($network && $network['outside'])
                                 <div class="reader-network" data-reader-network="{{ $gate['code'] }}">
                                     <span class="status-line"><span class="status-dot is-warning" aria-hidden="true"></span>The reader is set up for another network than this PC.</span>
-                                    @if (($workaround['state'] ?? null) === 'active')
-                                        <span class="text-muted" data-workaround-active>It works for now through a temporary workaround (development only).</span>
-                                    @endif
                                     <span class="next-step">→ Move it into this PC's network once; then nothing else is needed.</span>
                                     <span class="button-row">
                                         <button type="button" class="button button-primary button-sm" data-reader-move data-label="{{ $gate['name'] }}"

@@ -9,6 +9,7 @@ use App\Support\DeviceFiles;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
 /**
@@ -56,16 +57,17 @@ class ReaderNetworkTest extends TestCase
 
         $card = $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'gates']))->assertOk()->getContent();
         $this->assertStringContainsString('The reader is set up for another network than this PC.', $card);
-        $this->assertStringContainsString('It works for now through a temporary workaround (development only).', $card);
+        $this->assertStringNotContainsString('workaround', $card);
         $this->assertStringContainsString('data-read-url="'.route('settings.gate.reader.network.read', 'gate-1').'"', $card);
         $this->assertStringContainsString('js/reader-network.js', $card);
 
-        // Advanced: the details, the NetModuleConfig guide and the workaround.
+        // Advanced: the details and the NetModuleConfig guide; no temporary workaround.
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'reader-network']))->assertOk()
             ->assertSee('MAC '.self::MAC)->assertSee('198.51.100.116')->assertSee('203.0.113.0/24')
-            ->assertSee('Temporary workaround active: extra address 198.51.100.254 on USB 10/100 LAN.')
+            ->assertSee('Other network')->assertSee('Move reader to this network')
             ->assertSee('Open NetModuleConfig')->assertSee('Do not change')
-            ->assertSee('sudo tools/start/allow-reader-workaround-mac.sh');
+            ->assertDontSee('Temporary workaround')->assertDontSee('allow-reader-workaround-mac.sh')
+            ->assertDontSee('data-reader-workaround', false);
     }
 
     public function test_read_then_apply_go_to_the_device_service_and_the_login_is_not_kept(): void
@@ -113,15 +115,11 @@ class ReaderNetworkTest extends TestCase
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'reader-network']))->assertSee('In this network');
     }
 
-    public function test_the_workaround_can_be_switched_off_and_reaches_the_device_service(): void
+    public function test_the_temporary_workaround_is_off_and_has_no_switch(): void
     {
         app(DeviceRegistryService::class)->exportRuntimeConfig();
-        $this->assertTrue($this->runtime()['reader_workaround']['enabled']);
-
-        $this->actingAs($this->admin)->post(route('settings.reader-workaround'), ['enabled' => '0'])
-            ->assertSessionHas('status', 'Temporary workaround turned off.');
         $this->assertFalse($this->runtime()['reader_workaround']['enabled']);
-        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'reader-network']))->assertSee('The workaround is')->assertSee('Turn it on');
+        $this->assertFalse(Route::has('settings.reader-workaround'));
     }
 
     /**

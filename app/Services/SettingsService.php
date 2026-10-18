@@ -48,9 +48,10 @@ class SettingsService
             'rfid_stationary_seconds' => '60',
             'rfid_offline_fallback' => '1',
             'rfid_offline_grace_seconds' => '10',
-            // Phase 2 (reader without a terminal): temporary extra address for
-            // a reader still on another subnet (development workaround).
-            'reader_workaround' => '1',
+            // Phase 2 (reader without a terminal): the temporary extra address
+            // for a reader on another subnet is off; "Move reader to this
+            // network" is the way (the Settings switch was removed).
+            'reader_workaround' => '0',
             // Detector debug view (Settings › Calibration): raw detections on the live view.
             'detector_debug_overlay' => '0',
         ];

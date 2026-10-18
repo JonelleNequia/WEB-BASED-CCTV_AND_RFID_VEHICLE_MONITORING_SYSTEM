@@ -420,7 +420,7 @@ class DeviceService:
             target = (item or {}).get("reader") or {}
             if target.get("mac") and target.get("source") != "manual":
                 targets[station] = {**target, "ip": self.resolve_ip(target) or target.get("ip")}
-        enabled = bool((self.runtime.get("reader_workaround") or {}).get("enabled", True))
+        enabled = bool((self.runtime.get("reader_workaround") or {}).get("enabled", False))
         known = [device.get("ip") for device in (self.last_result or {}).get("devices", []) if device.get("ip")]
 
         def work():

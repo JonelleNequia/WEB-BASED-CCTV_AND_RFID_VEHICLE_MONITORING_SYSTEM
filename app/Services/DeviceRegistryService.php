@@ -670,7 +670,7 @@ class DeviceRegistryService
             'reader_network_request' => $readerNetworkRequest
                 ?? (isset($current['reader_network_request']) ? Arr::except((array) $current['reader_network_request'], ['username', 'password']) : null),
             // Phase 2: temporary extra address for a reader on another subnet.
-            'reader_workaround' => ['enabled' => ($settings['reader_workaround'] ?? '1') === '1'],
+            'reader_workaround' => ['enabled' => ($settings['reader_workaround'] ?? '0') === '1'],
             // RFID only with a vehicle: the read buffer (devices/tag_buffer.py).
             'rfid' => [
                 // Long enough for a read 10 s before a crossing the detector sends a few seconds late.

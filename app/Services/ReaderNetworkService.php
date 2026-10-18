@@ -15,22 +15,18 @@ use Throwable;
  *   devices/module_config.py), shows them with a free address in the PC's
  *   network, and after the user confirms writes only the address, restarts
  *   the reader and finds it again by MAC.
- * - Temporary workaround (development): while the reader is still on
- *   another subnet, the device service adds an extra address on the PC's
- *   card (devices/workaround.py), if the permission was set up once.
  */
 class ReaderNetworkService
 {
     public function __construct(
         protected DeviceRegistryService $registry,
-        protected DeviceServiceRuntime $runtime,
-        protected SettingsService $settingsService
+        protected DeviceServiceRuntime $runtime
     ) {
     }
 
     /**
-     * For the gate card: is the reader outside the PC's network, the
-     * workaround state and the last move request.
+     * For the gate card: is the reader outside the PC's network and the
+     * last move request.
      *
      * @return array<string, mixed>|null null: no reader added from the device list
      */
@@ -55,15 +51,8 @@ class ReaderNetworkService
             'ip' => $device->ip,
             'outside' => $outside,
             'pc_networks' => $routerNetworks,
-            'workaround' => (array) data_get($status, "reader_workaround.{$gate->code}", []),
-            'workaround_enabled' => $this->workaroundEnabled(),
             'move' => ($request['station'] ?? null) === $gate->code ? $request : null,
         ];
-    }
-
-    public function workaroundEnabled(): bool
-    {
-        return $this->settingsService->get('reader_workaround', '1') === '1';
     }
 
     /**

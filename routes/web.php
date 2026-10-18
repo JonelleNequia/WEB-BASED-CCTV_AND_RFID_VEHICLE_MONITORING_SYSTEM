@@ -190,7 +190,6 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
             Route::post('/reader/network/read', [\App\Http\Controllers\ReaderNetworkController::class, 'read'])->name('reader.network.read');
             Route::post('/reader/network/apply', [\App\Http\Controllers\ReaderNetworkController::class, 'apply'])->name('reader.network.apply');
         });
-        Route::post('/settings/reader-workaround', [\App\Http\Controllers\ReaderNetworkController::class, 'workaround'])->name('settings.reader-workaround');
         // Fresh start: activity data only, after a backup (same as `system:reset`).
         Route::post('/settings/system/reset-activity', [SettingsController::class, 'resetActivity'])->name('settings.system.reset-activity');
         // Plug-and-detect: Settings › Stations & Readers › Devices.

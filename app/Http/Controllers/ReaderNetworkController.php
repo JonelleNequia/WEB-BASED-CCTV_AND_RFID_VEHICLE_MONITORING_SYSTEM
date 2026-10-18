@@ -3,17 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Models\Gate;
-use App\Models\SystemSetting;
-use App\Services\DeviceRegistryService;
 use App\Services\ReaderNetworkService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
 /**
  * Live view work, Phase 2: Settings › Gates › reader card, "Move reader to
- * this network" (read, then apply after the user confirms) and the
- * temporary workaround switch.
+ * this network" (read, then apply after the user confirms).
  */
 class ReaderNetworkController extends Controller
 {
@@ -41,15 +37,6 @@ class ReaderNetworkController extends Controller
         $id = $service->requestApply($this->gate($gate), $validated['mode'], $validated['ip'] ?? null, $validated);
 
         return response()->json(['request_id' => $id, 'message' => 'Changing the reader\'s address…']);
-    }
-
-    public function workaround(Request $request, DeviceRegistryService $registry): RedirectResponse
-    {
-        $enabled = $request->boolean('enabled');
-        SystemSetting::query()->updateOrCreate(['setting_key' => 'reader_workaround'], ['setting_value' => $enabled ? '1' : '0']);
-        $registry->exportRuntimeConfig();
-
-        return back()->with('status', $enabled ? 'Temporary workaround turned on.' : 'Temporary workaround turned off.');
     }
 
     protected function gate(string $gate): Gate

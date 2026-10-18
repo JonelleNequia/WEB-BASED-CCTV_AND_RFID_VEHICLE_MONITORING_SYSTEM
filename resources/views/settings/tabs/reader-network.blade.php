@@ -1,8 +1,7 @@
 {{-- Phase 2 (Settings › Advanced › RFID reader network): the reader's
-     address against this PC's network, the move, the NetModuleConfig guide
-     and the temporary workaround. --}}
+     address against this PC's network, the move and the NetModuleConfig
+     guide. --}}
 @php($readers = collect($gateCards)->filter(fn ($gate) => $gate['reader']['network'] ?? null))
-@php($workaroundEnabled = app(\App\Services\ReaderNetworkService::class)->workaroundEnabled())
 <section class="panel">
     <div class="panel-header panel-header-modern">
         <div>
@@ -22,7 +21,6 @@
                 <tbody>
                     @foreach ($readers as $gate)
                         @php($network = $gate['reader']['network'])
-                        @php($workaround = $network['workaround'] ?? [])
                         <tr data-reader-network-row="{{ $gate['code'] }}">
                             <td>{{ $gate['name'] }}<div class="table-subtext">MAC {{ $network['mac'] }}</div></td>
                             <td>{{ $network['ip'] ?? '—' }}</td>
@@ -32,16 +30,6 @@
                                     <x-badge tone="success" label="In this network" />
                                 @else
                                     <x-badge tone="warning" label="Other network" />
-                                    <div class="table-subtext">
-                                        @switch($workaround['state'] ?? null)
-                                            @case('active') Temporary workaround active: extra address {{ $workaround['ip'] }} on {{ $workaround['interface'] }}. @break
-                                            @case('needs_permission') Temporary workaround waiting for permission (see below). @break
-                                            @case('failed') Temporary workaround failed: {{ $workaround['message'] ?? '' }} @break
-                                            @case('not_found') The reader's network module does not answer (check its LAN cable). @break
-                                            @case('off') Temporary workaround is off. @break
-                                            @default Checking…
-                                        @endswitch
-                                    </div>
                                 @endif
                             </td>
                             <td>
@@ -65,26 +53,6 @@
         <h2 class="panel-title">If the move does not work: NetModuleConfig</h2>
     </div>
     @include('settings.partials.netmodule-guide')
-</section>
-
-<section class="panel" data-reader-workaround>
-    <div class="panel-header panel-header-modern">
-        <div>
-            <h2 class="panel-title">Temporary workaround <x-badge tone="warning" label="Development only" /></h2>
-            <p class="field-help">While a reader is still on another network, the system adds an extra address in that network on this PC's network card by itself, so the reader works without a terminal. It is removed when the reader is moved.</p>
-        </div>
-    </div>
-    <p>It needs a permission, set up once:</p>
-    <ul class="guide-steps">
-        <li><strong>Windows:</strong> start the system with the startup task (<code>tools\start\install-windows-autostart.ps1</code>, run as administrator). The address lasts until Windows restarts and is added again at start.</li>
-        <li><strong>Mac:</strong> run <code>sudo tools/start/allow-reader-workaround-mac.sh</code> once in Terminal (remove it with <code>--remove</code>).</li>
-    </ul>
-    <form method="POST" action="{{ route('settings.reader-workaround') }}" class="button-row">
-        @csrf
-        <input type="hidden" name="enabled" value="{{ $workaroundEnabled ? '0' : '1' }}">
-        <span>The workaround is <strong>{{ $workaroundEnabled ? 'on' : 'off' }}</strong>.</span>
-        <button type="submit" class="button button-secondary">{{ $workaroundEnabled ? 'Turn it off' : 'Turn it on' }}</button>
-    </form>
 </section>
 
 <x-modal id="reader-move" title="Move the reader to this network" size="md">
