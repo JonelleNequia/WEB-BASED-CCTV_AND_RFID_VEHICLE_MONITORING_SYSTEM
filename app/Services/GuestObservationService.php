@@ -32,8 +32,7 @@ class GuestObservationService
             return GuestVehicleObservation::query()->create([
                 'plate_text' => $plateNumber,
                 'plate_number' => $plateNumber,
-                'vehicle_type' => $data['vehicle_type'] ?? null,
-                'vehicle_color' => $data['vehicle_color'] ?? null,
+                'vehicle_type' => \App\Support\VehicleType::validated($data['vehicle_type'] ?? null, required: false),
                 'location' => $this->normalizeLocation($data['location'] ?? ''),
                 'observation_source' => $data['observation_source'] ?? 'manual',
                 'observed_at' => isset($data['observed_at'])
@@ -59,13 +58,8 @@ class GuestObservationService
 
         return GuestVehicleObservation::query()
             ->with('camera')
-            ->when(! empty($filters['plate_text']), function ($query) use ($filters): void {
-                $plate = '%'.trim((string) $filters['plate_text']).'%';
-
-                $query->where(function ($query) use ($plate): void {
-                    $query->where('plate_number', 'like', $plate)
-                        ->orWhere('plate_text', 'like', $plate);
-                });
+            ->when(filled($filters['plate_text'] ?? null), function ($query) use ($filters): void {
+                PlateNumber::search($query, ['plate_number', 'plate_text'], (string) $filters['plate_text']);
             })
             ->when(! empty($filters['location']), function ($query) use ($filters): void {
                 $query->where('location', $this->normalizeLocation($filters['location']));

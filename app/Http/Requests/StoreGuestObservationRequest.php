@@ -34,14 +34,13 @@ class StoreGuestObservationRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'plate_number' => ['nullable', 'string', 'max:50'],
-            'plate_text' => ['nullable', 'string', 'max:50'],
-            'vehicle_type' => ['required', 'string', 'max:50'],
-            'vehicle_color' => ['nullable', 'string', 'max:50'],
+            'plate_number' => ['nullable', 'string', 'max:50', new \App\Rules\PlateIdentifier(20)],
+            'plate_text' => ['nullable', 'string', 'max:50', new \App\Rules\PlateIdentifier(20)],
+            'vehicle_type' => ['required', 'string', 'max:50', new \App\Rules\ValidVehicleType],
             'location' => ['required', new ValidGate],
             'observation_source' => ['nullable', 'in:manual,cctv'],
             'observed_at' => ['required', 'date'],
-            'camera_id' => ['nullable', 'integer', 'exists:cameras,id'],
+            'camera_id' => ['nullable', 'integer', \Illuminate\Validation\Rule::exists('cameras', 'id')->whereIn('camera_role', \App\Models\Gate::query()->retained()->pluck('code')->all()), new \App\Rules\CameraAtGate('location')],
             'snapshot_image' => ['nullable', 'image', 'max:5120'],
             'snapshot' => ['nullable', 'image', 'max:5120'],
             'notes' => ['nullable', 'string', 'max:1000'],

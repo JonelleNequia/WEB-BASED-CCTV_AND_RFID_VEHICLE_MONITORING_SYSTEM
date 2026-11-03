@@ -49,17 +49,12 @@ class PlateVotingTests(unittest.TestCase):
         vote = vote_plate(reads(("AB-12345", 0.6), ("AB-12345", 0.6), ("ABC-1234", 0.7)))
         self.assertEqual(vote["plate"], "AB-12345")
 
-    def test_a_car_needs_a_3_letter_plate_and_a_motorcycle_may_have_2(self):
-        # Measured on Gate 1: "LAK 3767" read as AK-3767 and IK-3767 (first letter missed).
-        missed = reads(("AK-3767", 0.9), ("IK-3767", 0.587))
-        vote = vote_plate(missed, "Car")
-        self.assertEqual((vote["plate"], vote["status"], vote["best_guess"]), (None, "unreadable", "AK-3767"))
-        self.assertIn("letter was probably missed", vote["reason"])
-
-        # A 3-letter read on the same car wins over 2-letter misreads.
-        self.assertEqual(vote_plate(missed + reads(("LAK-3767", 0.85)), "Car")["plate"], "LAK-3767")
-        self.assertEqual(vote_plate(reads(("AB-12345", 0.9)), "Motorcycle")["plate"], "AB-12345")
-        self.assertEqual(vote_plate(reads(("AB-12345", 0.9)))["plate"], "AB-12345")  # type unknown
+    def test_physical_type_cannot_reject_a_supported_layout(self):
+        for vehicle in ("Car", "Motorcycle", "Truck", "E-car", "E-bike", "E-trike", "Tricycle", None):
+            self.assertEqual(vote_plate(reads(("AB-12345", 0.9)), vehicle)["plate"], "AB-12345")
+        # Ambiguous characters still need the existing 60% majority.
+        missed = reads(("AK-3767", 0.5), ("IK-3767", 0.5))
+        self.assertEqual(vote_plate(missed, "Car")["status"], "unreadable")
 
     def test_two_agreeing_frames_stop_ocr_early(self):
         self.assertFalse(frames_agree(reads(("ABC-1234", 0.5), ("ABC-1284", 0.5))))
@@ -71,12 +66,15 @@ class PhilippinePlateFormatTests(unittest.TestCase):
 
     def test_layouts_and_corrections(self):
         self.assertEqual(normalize_plate_text("abc 1234"), "ABC-1234")
-        self.assertEqual(normalize_plate_text("ABC1Z34"), "ABC-1234")   # Z in a digit position -> 2
-        self.assertEqual(normalize_plate_text("A8C1234"), "ABC-1234")   # 8 in a letter position -> B
+        self.assertIsNone(normalize_plate_text("ABC1Z34"))  # No positional substitutions.
+        self.assertIsNone(normalize_plate_text("A8C1234"))
         self.assertEqual(normalize_plate_text("1234ABC"), "ABC-1234")   # read in visual order
         self.assertEqual(normalize_plate_text("NBC 123"), "NBC-123")
         self.assertEqual(normalize_plate_text("AB 12345"), "AB-12345")
         self.assertIsNone(normalize_plate_text("HELLO"))
+        for invalid in ["ABC🚗1234", "ABC/1234", "ABC_1234", "ABC\t1234", "ABC\n1234"]:
+            self.assertIsNone(normalize_plate_text(invalid))
+        self.assertEqual(normalize_plate_text("  ab  00001  "), "AB-00001")
 
 
 if __name__ == "__main__":

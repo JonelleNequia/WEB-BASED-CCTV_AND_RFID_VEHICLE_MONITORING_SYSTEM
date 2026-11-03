@@ -1,8 +1,8 @@
 {{-- Phase 5: plate profiles (every visit of one plate). UI Phase 4: most entries first, "Register this vehicle" and "Merge". --}}
 @php($ranked = ($filters['sort'] ?? '') !== 'recent')
-<x-table title="Plate Profiles" :paginator="$profiles" :empty="$profiles->isEmpty()" empty-title="No plate profiles yet" empty-text="A profile starts the first time a visitor's plate is read or typed.">
+<x-table data-auto-table title="Plate Profiles" :paginator="$profiles" :empty="$profiles->isEmpty()" :empty-title="array_filter($filters, fn ($value) => filled($value)) ? 'No plate profiles match these filters.' : 'No plate profiles yet'" empty-text="A profile starts the first time a visitor's plate is read or typed.">
     <x-slot:filters>
-        <form method="GET" action="{{ route('visitors.index') }}" class="log-filter-form">
+        <form method="GET" action="{{ route('visitors.index') }}" class="log-filter-form" data-auto-filter>
             <input type="hidden" name="tab" value="plates">
             <div class="field">
                 <label for="plate_q">Plate</label>
@@ -17,7 +17,7 @@
                 </select>
             </div>
             <div class="log-filter-actions">
-                <button type="submit" class="button button-secondary">Search</button>
+                <noscript><button type="submit" class="button button-secondary">Search</button></noscript>
             </div>
         </form>
     </x-slot:filters>
@@ -41,7 +41,7 @@
                 <td><strong>{{ $profile->entries_count }}</strong></td>
                 <td>{{ $profile->visit_count }}</td>
                 <td><x-datetime :value="$profile->last_seen_at" /></td>
-                <td>{{ collect([$profile->vehicle_color, $profile->vehicle_type])->filter()->implode(' ') ?: '—' }}</td>
+                <td>{{ $profile->vehicle_type ?: '—' }}</td>
                 <td>{{ \Illuminate\Support\Str::limit((string) $profile->note, 40) ?: '—' }}</td>
                 <td class="row-actions">
                     <div class="row-actions-inline">

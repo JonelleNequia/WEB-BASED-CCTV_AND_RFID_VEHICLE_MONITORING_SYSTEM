@@ -170,14 +170,15 @@ class DashboardController extends Controller
         return Vehicle::query()
             ->where('category', '!=', 'guest')
             ->withCount([
-                'vehicleEvents as total_entries_count' => fn ($query) => $query->where('event_type', 'ENTRY'),
+                'vehicleEvents as total_entries_count' => fn ($query) => $query->where('event_type', 'ENTRY')->where('event_status', VehicleEvent::STATUS_COMPLETED),
                 'vehicleEvents as entries_today_count_from_logs' => fn ($query) => $query
                     ->where('event_type', 'ENTRY')
+                    ->where('event_status', VehicleEvent::STATUS_COMPLETED)
                     ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['event_time', 'created_at'])),
                 // Phase 6 (visitor model): entries the camera saw with no tag read
                 // (visits before registration, moved by "Register this vehicle").
-                'visitorRecords as camera_entries_count' => fn ($query) => $query->active()->where('direction', 'IN'),
-                'visitorRecords as camera_entries_today_count' => fn ($query) => $query->active()->where('direction', 'IN')
+                'visitorRecords as camera_entries_count' => fn ($query) => $query->active()->withoutMovementEvent()->where('direction', 'IN'),
+                'visitorRecords as camera_entries_today_count' => fn ($query) => $query->active()->withoutMovementEvent()->where('direction', 'IN')
                     ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['seen_at'])),
             ])
             ->orderBy('plate_number')

@@ -22,10 +22,9 @@ class CompleteVehicleEventRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'plate_text' => ['required', 'string', 'max:50'],
+            'plate_text' => ['required', 'string', 'max:50', new \App\Rules\PlateIdentifier(legacyValue: $this->route('vehicleEvent')?->plate_text)],
             'plate_confidence' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'vehicle_type' => ['required', 'string', 'max:50'],
-            'vehicle_color' => ['required', 'string', 'max:50'],
+            'vehicle_type' => ['required', 'string', 'max:50', new \App\Rules\ValidVehicleType($this->route('vehicleEvent')?->vehicle_type)],
             'plate_image' => ['nullable', 'image', 'max:5120'],
         ];
     }

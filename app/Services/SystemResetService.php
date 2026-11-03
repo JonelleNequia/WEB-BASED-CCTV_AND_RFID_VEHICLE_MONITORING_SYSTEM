@@ -43,6 +43,7 @@ class SystemResetService
 
     /** Activity tables, emptied in this order. */
     protected const ACTIVITY_TABLES = [
+        'vehicle_occupancy_baselines',
         'vehicle_type_corrections',
         'active_sessions',
         'visitor_records',
@@ -168,6 +169,11 @@ class SystemResetService
 
         try {
             DB::transaction(function () use ($tables, $level): void {
+                if ($level === self::LEVEL_FULL) {
+                    // This existing explicit reset disables FK actions. Keep the
+                    // UID denylist, but detach IDs before registry IDs are reused.
+                    DB::table('unavailable_rfid_uids')->update(['tag_id' => null]);
+                }
                 foreach ($tables as $table) {
                     DB::table($table)->delete();
                 }

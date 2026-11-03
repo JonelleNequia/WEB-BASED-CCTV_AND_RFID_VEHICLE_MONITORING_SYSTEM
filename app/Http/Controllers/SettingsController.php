@@ -19,13 +19,11 @@ class SettingsController extends Controller
     use ResolvesTab;
 
     /**
-     * B1 (Settings): three tabs for a non-technical user. Gates: a card per
-     * gate (camera, RFID reader, detection zone). General: gate names.
+     * Settings: Gates includes names, activation, devices and detection zones.
      * Advanced: everything technical, for an admin or technician.
      */
     public const TABS = [
         'gates' => 'Gates',
-        'general' => 'General',
         'advanced' => 'Advanced',
     ];
 
@@ -66,9 +64,12 @@ class SettingsController extends Controller
     /**
      * Show one Settings tab.
      */
-    public function index(Request $request, SettingsService $settingsService): View
+    public function index(Request $request, SettingsService $settingsService): View|RedirectResponse
     {
         $requested = (string) $request->query('tab', 'gates');
+        if ($requested === 'general') {
+            return redirect()->route('settings.index', ['tab' => 'gates'] + $request->except('tab'));
+        }
         $tab = self::ALIASES[$requested] ?? $requested;
 
         if (! array_key_exists($tab, self::TABS) && ! array_key_exists($tab, self::ADVANCED_SECTIONS) && $tab !== 'calibration') {
@@ -111,7 +112,7 @@ class SettingsController extends Controller
             app(DeviceServiceRuntime::class)->ensureRunning();
         }
 
-        $gates = Gate::query()->orderBy('sort_order')->orderBy('id')->get();
+        $gates = Gate::query()->retained()->orderBy('sort_order')->orderBy('id')->get();
         $devicesPayload = in_array($tab, ['gates', 'devices', 'manual', 'reader-network'], true) ? app(DeviceRegistryService::class)->panelPayload() : null;
         $cameraLive = in_array($tab, ['gates', 'manual'], true)
             ? app(DetectorRuntimeService::class)->withViewerStreamUrls(app(DetectorRuntimeService::class)->ensureRunning(), request()->getHost())
@@ -159,7 +160,7 @@ class SettingsController extends Controller
         app(DeviceRegistryService::class)->exportRuntimeConfig();
 
         $section = [
-            'general' => 'General settings', 'timing' => 'Timing',
+            'general' => 'Gate settings', 'gates' => 'Gate settings', 'timing' => 'Timing',
             'manual' => 'Manual setup', 'stations' => 'Gates & Readers', 'cameras' => 'Cameras',
         ][$request->input('section')] ?? 'Settings';
 
@@ -204,18 +205,8 @@ class SettingsController extends Controller
     public function storeGate(Request $request, SettingsService $settingsService): RedirectResponse
     {
         $validated = $request->validate(['name' => ['nullable', 'string', 'max:100']]);
-        $code = Gate::nextCode();
-        $number = (int) preg_replace('/\D+/', '', $code);
-        $name = trim((string) ($validated['name'] ?? '')) ?: "Gate {$number}";
-
-        Gate::query()->create([
-            'code' => $code,
-            'name' => $name,
-            'sort_order' => ((int) Gate::query()->max('sort_order')) + 1,
-            'is_active' => true,
-            'reader_type' => 'uhf_ethernet',
-            'reader_name' => $name.' UHF Reader',
-        ]);
+        $gate = app(\App\Services\GateManagementService::class)->create($validated['name'] ?? null);
+        $name = $gate->name;
 
         $settingsService->ensureCameraRuntimeConfigExists();
         app(DeviceRegistryService::class)->exportRuntimeConfig();
@@ -224,5 +215,14 @@ class SettingsController extends Controller
 
         return redirect()->route('settings.index', ['tab' => 'gates'])
             ->with('status', "{$name} added. Add its camera and RFID reader, then set up its detection zone.");
+    }
+
+    public function removeGate(Request $request, string $gate, \App\Services\GateManagementService $management): RedirectResponse
+    {
+        $request->validate(['confirm' => ['required', 'accepted']]);
+        $removed = $management->archive($gate);
+
+        return redirect()->route('settings.index', ['tab' => 'gates'])
+            ->with('status', $removed->name.' removed. Device assignments released; historical records and calibration kept.');
     }
 }

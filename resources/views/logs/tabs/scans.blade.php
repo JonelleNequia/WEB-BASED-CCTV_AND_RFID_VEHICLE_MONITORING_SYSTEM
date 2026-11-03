@@ -1,7 +1,7 @@
 {{-- UI Phase 2: Activity Logs › RFID Scans (the old RFID Desk history). --}}
-    <x-table title="RFID Scans" :paginator="$scanLogs" :empty="$scanLogs->isEmpty()" empty-title="No tag reads yet" empty-text="Tags read at the gates appear here.">
+    <x-table data-auto-table title="RFID Scans" :paginator="$scanLogs" :empty="$scanLogs->isEmpty()" :empty-title="array_filter($filters, fn ($value) => filled($value)) ? 'No scans match these filters.' : 'No tag reads yet'" empty-text="Tags read at the gates appear here.">
         <x-slot:filters>
-        <form method="GET" action="{{ route('logs.index') }}" class="form-grid filter-grid">
+        <form method="GET" action="{{ route('logs.index') }}" class="form-grid filter-grid" data-auto-filter>
             <input type="hidden" name="tab" value="scans">
             <div class="field span-2">
                 <label for="history_q">Search RFID Scan History</label>
@@ -17,7 +17,7 @@
                 <label for="history_scan_location">Gate</label>
                 <select id="history_scan_location" name="scan_location">
                     <option value="">All</option>
-                    @foreach (\App\Models\Gate::options() as $gateCode => $gateName)
+                    @foreach (\App\Models\Gate::historicalOptions() as $gateCode => $gateName)
                         <option value="{{ $gateCode }}" @selected(($filters['scan_location'] ?? '') === $gateCode)>{{ $gateName }}</option>
                     @endforeach
                 </select>
@@ -35,8 +35,8 @@
 
             <div class="field field-actions">
                 <div class="button-row">
-                    <button type="submit" class="button button-secondary">Filter History</button>
-                    <a href="{{ route('logs.index', ['tab' => 'scans']) }}" class="button button-secondary">Reset</a>
+                    <noscript><button type="submit" class="button button-secondary">Filter History</button></noscript>
+                    <a href="{{ route('logs.index', ['tab' => 'scans']) }}" class="button button-secondary" data-auto-reset>Reset</a>
                 </div>
             </div>
         </form>

@@ -688,6 +688,12 @@ class DeviceRegistryService
             ])->all(),
         ];
 
+        // A queued network action must not keep configuring a removed gate.
+        if (isset($payload['reader_network_request']['station'])
+            && Gate::resolveCode((string) $payload['reader_network_request']['station']) === null) {
+            $payload['reader_network_request'] = null;
+        }
+
         // Rewrite only on a real change so Python does not reload for nothing.
         $withoutTime = Arr::except($current, ['generated_at']);
         if ($withoutTime == $payload) {

@@ -39,10 +39,27 @@ Route::get('/', function () {
 })->name('home');
 
 Route::middleware('guest')->group(function (): void {
+    Route::get('/setup', [\App\Http\Controllers\Auth\AccountController::class, 'setupForm'])->name('account.setup.form');
+    Route::post('/setup', [\App\Http\Controllers\Auth\AccountController::class, 'setup'])->middleware('throttle:5,1')->name('account.setup');
+    Route::get('/activate', [\App\Http\Controllers\Auth\AccountController::class, 'activationForm'])->name('account.activate.form');
+    Route::post('/activate', [\App\Http\Controllers\Auth\AccountController::class, 'activate'])->middleware('throttle:5,1')->name('account.activate');
     Route::get('/login', [LoginController::class, 'create'])->name('login');
     Route::post('/login', [LoginController::class, 'store'])
         ->middleware('throttle:5,1')
         ->name('login.store');
+});
+
+// Restricted sessions may change their password or log out, never operate gates.
+Route::middleware('auth')->group(function (): void {
+    Route::get('/account/password', [\App\Http\Controllers\Auth\AccountController::class, 'passwordForm'])->name('account.password.edit');
+    Route::put('/account/password', [\App\Http\Controllers\Auth\AccountController::class, 'password'])->middleware('throttle:5,1')->name('account.password.update');
+    Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
+    Route::middleware('admin')->group(function (): void {
+        Route::get('/accounts', [\App\Http\Controllers\Auth\AccountController::class, 'index'])->name('accounts.index');
+        Route::post('/accounts', [\App\Http\Controllers\Auth\AccountController::class, 'store'])->middleware('throttle:10,1')->name('accounts.store');
+        Route::post('/accounts/{user}/activation', [\App\Http\Controllers\Auth\AccountController::class, 'replace'])->middleware('throttle:10,1')->name('accounts.activation.replace');
+        Route::patch('/accounts/{user}', [\App\Http\Controllers\Auth\AccountController::class, 'update'])->name('accounts.update');
+    });
 });
 
 // Phase 6: camera frames and detector status are no longer public files.
@@ -65,7 +82,6 @@ Route::middleware('auth')->group(function (): void {
 
 // Phase 1: 'detector' keeps vehicle detection running on every signed-in page.
 Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect): void {
-    Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
 
     // Phase 1: one kiosk per gate. The old station links open Gate 1 / Gate 2.
     Route::get('/gates/{location}/kiosk', [StationController::class, 'show'])
@@ -93,7 +109,7 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
 
     // Phase 5 (visitor model): Unregistered Visitor records and plate profiles.
     // Guards correct plates and keep notes; merging plates is for admins.
-    Route::get('/visitors', [VisitorController::class, 'index'])->name('visitors.index');
+    Route::get('/visitors', [VisitorController::class, 'index'])->middleware(\App\Http\Middleware\ValidateListFilters::class)->name('visitors.index');
     // Phase 8: the old Guests page is the Visitors page (guards too).
     Route::get('/guests', $legacyRedirect('visitors.index'))->name('guests.index');
     Route::post('/visitors/records', [VisitorController::class, 'store'])->name('visitors.records.store');
@@ -118,10 +134,10 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         Route::get('/admin/live-state', [DashboardController::class, 'liveState'])->name('dashboard.live-state');
         Route::redirect('/dashboard', '/admin')->name('dashboard.legacy');
         // UI Phase 2: the six sidebar pages.
-        Route::get('/registry', [RegistryController::class, 'index'])->name('registry.index');
-        Route::get('/logs', [ActivityLogController::class, 'index'])->name('logs.index');
+        Route::get('/registry', [RegistryController::class, 'index'])->middleware(\App\Http\Middleware\ValidateListFilters::class)->name('registry.index');
+        Route::get('/logs', [ActivityLogController::class, 'index'])->middleware(\App\Http\Middleware\ValidateListFilters::class)->name('logs.index');
         // ROI work, Phase 7: the printable Vehicle Activity Report (Print and Save as PDF).
-        Route::get('/logs/print', [VehicleEventController::class, 'printReport'])->name('logs.print');
+        Route::get('/logs/print', [VehicleEventController::class, 'printReport'])->middleware(\App\Http\Middleware\ValidateListFilters::class)->name('logs.print');
 
         // UI Phase 2: old page URLs (names kept so old links keep working).
         Route::get('/vehicle-registry', $legacyRedirect('registry.index', ['tab' => 'vehicles']))->name('vehicle-registry.index');
@@ -164,7 +180,7 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
             ->name('guest-observations.verify');
         Route::get('/vehicle-events/create', [VehicleEventController::class, 'create'])->name('vehicle-events.create');
         Route::post('/vehicle-events', [VehicleEventController::class, 'store'])->name('vehicle-events.store');
-        Route::get('/vehicle-events/export/csv', [VehicleEventController::class, 'exportCsv'])->name('vehicle-events.export.csv');
+        Route::get('/vehicle-events/export/csv', [VehicleEventController::class, 'exportCsv'])->middleware(\App\Http\Middleware\ValidateListFilters::class)->name('vehicle-events.export.csv');
         Route::get('/vehicle-events/{vehicleEvent}', [VehicleEventController::class, 'show'])
             ->whereNumber('vehicleEvent')
             ->name('vehicle-events.show');
@@ -174,6 +190,8 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('settings.update');
         Route::post('/settings/gates', [SettingsController::class, 'storeGate'])->name('settings.gates.store');
+        Route::delete('/settings/gates/{gate}', [SettingsController::class, 'removeGate'])
+            ->where('gate', '[a-z0-9-]+')->name('settings.gates.destroy');
         // B1 (Settings): defaults and the gate cards' "⋯" actions.
         Route::post('/settings/restore-defaults', [SettingsController::class, 'restoreDefaults'])->name('settings.restore-defaults');
         Route::prefix('/settings/gates/{gate}')->where(['gate' => '[a-z0-9-]+'])->name('settings.gate.')->group(function (): void {

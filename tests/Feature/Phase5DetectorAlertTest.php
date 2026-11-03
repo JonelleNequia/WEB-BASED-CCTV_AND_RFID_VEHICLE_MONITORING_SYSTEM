@@ -13,7 +13,7 @@ use App\Models\VehicleEvent;
 use App\Services\MatchingService;
 use App\Services\RfidIngestService;
 use Carbon\Carbon;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -37,7 +37,7 @@ class Phase5DetectorAlertTest extends TestCase
         parent::setUp();
 
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $this->start = now()->startOfSecond();
         $this->travelTo($this->start);

@@ -9,7 +9,7 @@ use App\Models\User;
 use App\Services\CameraProbeService;
 use App\Services\SettingsService;
 use App\Support\CameraFiles;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -17,7 +17,7 @@ use Tests\TestCase;
 
 /**
  * B1 + B3 (Settings): Gates (a card per gate: camera, RFID reader, detection
- * zone), General (gate names), Advanced (everything technical).
+ * zone and gate names), Advanced (everything technical).
  */
 class SettingsGatesLayoutTest extends TestCase
 {
@@ -29,7 +29,7 @@ class SettingsGatesLayoutTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
 
@@ -40,13 +40,16 @@ class SettingsGatesLayoutTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_three_tabs_and_older_links_still_open(): void
+    public function test_two_tabs_and_older_links_still_open(): void
     {
         $html = $this->actingAs($this->admin)->get(route('settings.index'))->assertOk()->getContent();
-        foreach (['Gates', 'General', 'Advanced'] as $tab) {
+        foreach (['Gates', 'Advanced'] as $tab) {
             $this->assertMatchesRegularExpression('/class="tab[^"]*"[^>]*>\s*'.$tab.'\s*</', $html, $tab);
         }
         $this->assertStringContainsString('data-gate-card="gate-1"', $html);
+        $this->assertStringNotContainsString('tab=general', $html);
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'general']))
+            ->assertRedirect(route('settings.index', ['tab' => 'gates']));
 
         $advanced = $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'advanced']))->assertOk()->getContent();
         foreach (['System status', 'All network devices', 'Detection', 'Timing', 'Manual setup', 'Test Scan'] as $section) {
@@ -132,8 +135,8 @@ class SettingsGatesLayoutTest extends TestCase
         $this->assertStringContainsString('No tag read yet', $card);
 
         $this->actingAs($this->admin)->patch(route('settings.gate.reader.name', 'gate-1'), ['reader_name' => 'Front Reader'])->assertRedirect();
-        // Saving General (gate names) keeps the reader's own name.
-        $this->actingAs($this->admin)->put(route('settings.update'), ['section' => 'general', 'gates' => ['gate-1' => ['name' => 'Front Gate', 'is_active' => '1']]])->assertRedirect();
+        // Saving gate names keeps the reader's own name.
+        $this->actingAs($this->admin)->put(route('settings.update'), ['section' => 'gates', 'gates' => ['gate-1' => ['name' => 'Front Gate', 'is_active' => '1']]])->assertRedirect();
         $gate = Gate::query()->where('code', 'gate-1')->firstOrFail();
         $this->assertSame(['Front Gate', 'Front Reader'], [$gate->name, $gate->reader_name]);
 

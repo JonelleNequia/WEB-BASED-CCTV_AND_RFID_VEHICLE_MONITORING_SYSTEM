@@ -7,7 +7,7 @@ use App\Models\RfidTag;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Models\VehicleEvent;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
@@ -19,7 +19,7 @@ class EventLogReportIntegrationTest extends TestCase
 
     public function test_event_logs_render_integrated_report_actions(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -38,13 +38,13 @@ class EventLogReportIntegrationTest extends TestCase
             ->assertDontSee('event-log-report-data', false)
             ->assertSee('CSV')
             ->assertSee('event-log-list-view', false)
-            ->assertSee('Color')
+            ->assertDontSee('Vehicle / Color')
             ->assertDontSee('Daily and date-range reports');
     }
 
     public function test_event_log_record_csv_export_contains_one_compact_record(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $event = VehicleEvent::query()->create([
@@ -71,14 +71,14 @@ class EventLogReportIntegrationTest extends TestCase
 
         // Phase 4: CSV now includes Log Type and Source (e.g. "Guest Pass #G-03").
         // Phase 7 (visitor model): Category and Gate columns.
-        $this->assertStringContainsString('Type,"Log Type",Source,Plate,Owner,Vehicle,Color,Category,Gate,State,Time,Status,"RFID Tag"', $csv);
+        $this->assertStringContainsString('Type,"Log Type",Source,Plate,Owner,Vehicle,Category,Gate,State,Time,Status,"RFID Tag"', $csv);
         $this->assertMatchesRegularExpression('/ENTRY,[^,]+,[^,]*,ONE-1001/', $csv);
         $this->assertStringNotContainsString('Record Type,ID', $csv);
     }
 
     public function test_legacy_reports_route_redirects_to_event_logs(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -90,7 +90,7 @@ class EventLogReportIntegrationTest extends TestCase
     public function test_event_logs_include_guest_observation_records(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         Storage::disk('public')->put('guest_snapshots/event-log-guest.jpg', 'guest-snapshot');
@@ -111,7 +111,7 @@ class EventLogReportIntegrationTest extends TestCase
             ->assertOk()
             ->assertSee('Unregistered')
             ->assertSee('GST-LOG-01')
-            ->assertSee('White')
+            ->assertDontSee('White')
             ->assertSee('/storage/guest_snapshots/event-log-guest.jpg', false)
             ->assertSee('Unregistered Visitor #'.$observation->id)
             ->assertDontSee('Guest Observation');
@@ -119,7 +119,7 @@ class EventLogReportIntegrationTest extends TestCase
 
     public function test_event_logs_can_filter_records_by_current_month(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $now = Carbon::parse('2026-05-10 10:00:00', 'Asia/Manila');
@@ -162,7 +162,7 @@ class EventLogReportIntegrationTest extends TestCase
     public function test_realtime_log_endpoints_return_latest_guest_and_event_rows(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         Storage::disk('public')->put('guest_snapshots/realtime-guest.jpg', 'guest-snapshot');
 
@@ -183,7 +183,7 @@ class EventLogReportIntegrationTest extends TestCase
         $this->getJson(route('api.recent-guest-logs'))
             ->assertOk()
             ->assertJsonPath('logs.0.plate_number', 'GST-RT-01')
-            ->assertJsonPath('logs.0.vehicle_color', 'Blue');
+            ->assertJsonMissingPath('logs.0.vehicle_color');
 
         $this->getJson(route('api.recent-event-logs'))
             ->assertOk()
@@ -200,7 +200,7 @@ class EventLogReportIntegrationTest extends TestCase
     {
         // Phase 8 (visitor model): the old "Guest" category no longer creates
         // a guest record; the read is flagged so the Registry entry gets fixed.
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $vehicle = Vehicle::query()->create([

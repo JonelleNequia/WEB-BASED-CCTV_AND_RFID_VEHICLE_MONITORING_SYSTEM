@@ -11,7 +11,7 @@ use App\Services\CameraProbeService;
 use App\Services\DeviceRegistryService;
 use App\Support\CameraFiles;
 use App\Support\DeviceFiles;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Illuminate\Testing\TestResponse;
@@ -43,7 +43,7 @@ class AddDeviceToGateTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         File::deleteDirectory(DeviceFiles::directory());
         $this->app->instance(CameraProbeService::class, new class extends CameraProbeService

@@ -4,27 +4,25 @@ Parking-focused, offline-first Laravel capstone prototype for PHILCST.
 
 This version uses:
 
-- RFID as the primary identifier for recurring registered vehicles
+- Registered plate identification, with optional RFID for recurring vehicles
 - CCTV/browser camera preview for guest monitoring, parking observation, and visual confirmation
 - local-only storage and local database (no cloud dependency)
 
 ## System Direction (Current Build)
 
 - Offline local deployment only
-- Recurring registered vehicles use RFID state-based movement logic
+- Registered vehicles use known camera/staff-confirmed IN/OUT directions, with the existing RFID fallback when the camera is offline
 - Guest vehicles are monitored through manual/CCTV-supported observation
 - Camera pages remain available for live observation and calibration
 - Legacy manual/CCTV event completion and weighted matching remain available for compatibility
 
 ## Core Operational Flow
 
-1. Register recurring vehicle in `Vehicle Registry` with category and RFID tag.
-2. Scan RFID from entrance/exit station or RFID desk.
-3. System decides movement using current state:
-   - `outside` -> next valid scan becomes `ENTRY`
-   - `inside` -> next valid scan becomes `EXIT`
-4. System updates vehicle parking state and daily counts.
-5. RFID scan log + vehicle event log are created automatically.
+1. Register a vehicle in `Vehicle Registry` with a unique valid plate, staff attribution and category. RFID is optional and can be assigned later.
+2. Identify a camera crossing through reliable exact OCR, existing manual plate Review, or a genuine eligible RFID read.
+3. Known IN/OUT sets occupancy chronologically. Unknown camera direction stays in Review and does not toggle state. The existing camera-offline RFID fallback uses the vehicle's state.
+4. Each logical pass contributes one movement and its applicable occupancy effect; retries and late evidence share that occurrence.
+5. Plate movements use a vehicle event without a synthetic RFID scan. Only actual RFID evidence creates a scan log.
 6. Dashboard and logs update with latest registered activity.
 7. Guest vehicles are encoded in `Guest Monitoring` (manual/CCTV-supported), separate from recurring RFID flow.
 
@@ -57,6 +55,25 @@ Business rule:
 - Settings
 - Entrance Portal
 - Exit Portal
+
+## Gate management
+
+Settings has **Gates** and **Advanced**. Rename gates and change their active
+state on Gates, alongside camera, reader and calibration setup. Older
+`/settings?tab=general` bookmarks redirect to Gates.
+
+At least two non-archived gates are retained; inactive gates count toward
+this minimum. An admin can remove a gate when more than two remain, after
+confirmation. Removal archives the gate, stops its monitoring and releases
+its device assignments. Devices, calibration, camera IDs, snapshots and
+historical records are kept. Archived gates remain in historical report
+filters but cannot be selected for new records. Gate codes and IDs are never
+renumbered or reused.
+
+The gate-management migration adds missing gates to installations with fewer
+than two. These added gates are inactive and unconfigured; existing names,
+devices, records and accounts are preserved. See DEPLOYMENT.md for upgrading
+the Windows installation.
 
 ## CCTV Positioning
 
@@ -170,10 +187,11 @@ Detector models and go2rtc are not in git; fetch them once (checked by SHA-256):
 php artisan runtime:fetch
 ```
 
-Migrate + seed:
+On a fresh installation, migrate and add required non-account seed data:
 
 ```bash
-php artisan migrate:fresh --seed
+php artisan migrate --force
+php artisan db:seed --class=InstallSeeder --force
 php artisan storage:link
 ```
 
@@ -223,7 +241,9 @@ video settings): see [DEPLOYMENT.md](DEPLOYMENT.md).
    network must send it as the `X-Api-Key` header. Without a key, the API
    only answers this PC and only when `APP_ENV` is not `production`.
 
-3. **Change the admin password** (`admin@philcst.local` / `password` is public).
+3. **Provision the first administrator locally.** Follow [ACCOUNT-SECURITY.md](ACCOUNT-SECURITY.md).
+   There are no default login credentials. Existing users sign in with their
+   own current credentials and must choose a new personal password once.
 
 4. **Apply migrations and cache the config:**
 
@@ -250,10 +270,12 @@ video settings): see [DEPLOYMENT.md](DEPLOYMENT.md).
    full-quality live view goes through the signed-in pages and the WebRTC
    port 8555; `tools/start/install-windows-autostart.ps1` opens only that).
 
-## Demo Login
+## Account setup and activation
 
-- Email: `admin@philcst.local`
-- Password: `password`
+No public signup or demo login is provided. The local installer delivers a
+protected, expiring first-admin setup code. After setup, admins manage individual
+accounts under **Accounts**; owners activate using privately delivered codes.
+See [ACCOUNT-SECURITY.md](ACCOUNT-SECURITY.md) for setup, migration and password policy.
 
 ## Testing the New Parking Flow
 
@@ -278,7 +300,51 @@ The following remain for compatibility and staged development:
 
 ## Optional Python Module
 
+Vehicle Color has been retired from active entry, review, logs, reports and
+exports. Older detector color fields are accepted and ignored. Stored historical
+values and backup/restore schemas are retained; no database migration is needed.
+See [PHASE2-VEHICLE-COLOR.md](PHASE2-VEHICLE-COLOR.md) for compatibility and checks.
+
+Existing Registry, Visitors and Activity Logs list filters now update automatically
+using local server requests. Search waits about 300 ms after typing; selected
+filters, pagination, history and matching export links are retained. See
+[PHASE3-AUTO-FILTERS.md](PHASE3-AUTO-FILTERS.md) for behavior and verification.
+
+Activity Logs no longer defaults unknown/unassigned RFID scans to Registered.
+Registration display uses vehicle relationships or verified historical category
+receipts; readable plate text alone is not evidence. Historical stored values
+are retained. See [PHASE4-CLASSIFICATION.md](PHASE4-CLASSIFICATION.md).
+
 The Python folder `school-vehicle-monitoring-detector` is still available for local experiments and future hardware integration readiness.
+
+New vehicle registrations require **Registered by**, a staff name separate from
+the optional owner. Each record keeps its name, and the last successful name
+becomes the installation-wide default for new registrations. Historical rows
+remain usable without a backfill. This batch needs one additive migration; see
+[REGISTRATION-PHASE1.md](REGISTRATION-PHASE1.md) for verification and update steps.
+
+Registration Phase 2 shares plate normalization across registration, OCR,
+correction and searches. Reliable exact matches can identify registered vehicles;
+uncertain or ambiguous results stay in existing Review. Corrections retain the
+same pass, images and audit. See
+[REGISTRATION-PHASE2.md](REGISTRATION-PHASE2.md) for the decision table, additive
+migration, compatibility notes and pending Windows update steps.
+
+Registration Phase 3 makes RFID optional, adds chronological plate-based
+occupancy, and supports later assignment/replacement on the same registration.
+Lost UIDs become permanently **Lost / Unavailable**; new reads are ignored
+without business scan/event records or operator alerts. Historical records and
+the four known broken references are retained. See
+[REGISTRATION-PHASE3.md](REGISTRATION-PHASE3.md) for decisions, changed files,
+verification and the pending additive Windows migration. No historical occupancy
+rebuild runs automatically.
+
+Registration Phase 4 shares physical vehicle types across registration, editing,
+manual entry and corrections. Electric types and Tricycle remain distinct.
+Occurrences retain detector evidence, registry snapshots and staff corrections
+separately, with type provenance in logs/reports. Installed models expose Car,
+Motorcycle, Bus and Truck; fine-grained electric recognition is not claimed.
+There is no Phase 4 migration. See [REGISTRATION-PHASE4.md](REGISTRATION-PHASE4.md).
 
 Normal parking workflow pages remain usable even when Python services are not running.
 

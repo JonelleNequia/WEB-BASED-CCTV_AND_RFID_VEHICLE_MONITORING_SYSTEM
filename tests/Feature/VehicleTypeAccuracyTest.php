@@ -11,7 +11,7 @@ use App\Models\VehicleTypeCorrection;
 use App\Models\VisitorRecord;
 use App\Services\SettingsService;
 use App\Support\VehicleType;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
@@ -30,25 +30,25 @@ class VehicleTypeAccuracyTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
 
-    public function test_labels_become_three_types(): void
+    public function test_labels_preserve_specific_physical_types(): void
     {
-        $this->assertSame([VehicleType::CAR, VehicleType::CAR, VehicleType::MOTORCYCLE, VehicleType::TRUCK_BUS, VehicleType::TRUCK_BUS, null],
+        $this->assertSame(['Pickup', 'SUV', 'Tricycle', 'Bus', VehicleType::TRUCK_BUS, null],
             array_map([VehicleType::class, 'category'], ['Pickup Truck', 'SUV', 'tricycle', 'Bus', 'Truck/Bus', 'Others']));
     }
 
     public function test_a_guard_corrects_the_type_and_it_is_logged(): void
     {
         $record = $this->visitorRecord('Truck/Bus');
-        $guard = User::query()->create(['name' => 'Guard', 'email' => 'guard.type@philcst.local', 'password' => bcrypt('password'), 'role' => 'guard']);
+        $guard = User::query()->create(['name' => 'Guard', 'email' => 'guard.type@philcst.local', 'password' => \Illuminate\Support\Facades\Hash::make('password'), 'role' => 'guard']);
 
         $this->actingAs($guard)->get(route('visitors.index'))->assertOk()
             ->assertSee('data-visitor-action="type"', false)
             ->assertSee('id="visitor-type-modal"', false)
-            ->assertSee('Sedan, hatchback, SUV, AUV, pickup, van');
+            ->assertSee('Electric bicycle')->assertSee('Electric tricycle');
 
         $this->actingAs($guard)->patch(route('visitors.records.type', $record), ['vehicle_type' => 'Car'])->assertRedirect();
         $this->actingAs($guard)->patch(route('visitors.records.type', $record), ['vehicle_type' => 'Bicycle'])->assertSessionHasErrors('vehicle_type');

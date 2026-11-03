@@ -11,6 +11,7 @@ records are never polluted with fake plate numbers.
 import re
 import shutil
 import time
+import unicodedata
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
@@ -114,7 +115,14 @@ def preprocess_variants_for_ocr(crop) -> List[np.ndarray]:
 
 
 def normalize_plate_text(text: str) -> Optional[str]:
-    cleaned = re.sub(r"[^A-Z0-9]", "", (text or "").upper())
+    # Same identifier alphabet as Laravel PlateNumber. Never remove symbols
+    # or change O/0, I/1, etc. to manufacture a registered identity.
+    normalized = "".join(" " if unicodedata.category(char) == "Zs" else char for char in (text or ""))
+    normalized = re.sub(r" +", " ", normalized).strip(" ")
+    normalized = re.sub(r"[a-z]", lambda match: match.group(0).upper(), normalized)
+    if not re.fullmatch(r"[A-Z0-9 -]+", normalized):
+        return None
+    cleaned = normalized.replace(" ", "").replace("-", "")
 
     if len(cleaned) < 5:
         return None
@@ -127,10 +135,9 @@ def normalize_plate_text(text: str) -> Optional[str]:
     if reordered_plate:
         return reordered_plate
 
-    candidates = plate_layout_candidates(cleaned)
-
-    if candidates:
-        return candidates[0]
+    for prefix_len, digit_len in PLATE_LAYOUTS:
+        if re.fullmatch(rf"[A-Z]{{{prefix_len}}}\d{{{digit_len}}}", cleaned):
+            return f"{cleaned[:prefix_len]}-{cleaned[prefix_len:]}"
 
     return None
 
@@ -153,6 +160,8 @@ def number_first_plate_candidate(text: str) -> Optional[str]:
 
 def plate_layout_candidates(text: str) -> List[str]:
     """
+    Legacy candidate helper; the active normalize_plate_text path does not
+    use its positional guesses or substring extraction for identity.
     Accept only letter-first PH-style plate candidates after number-first
     OCR group ordering has already been normalized.
     """

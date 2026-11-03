@@ -4,6 +4,7 @@
 @section('title', 'Visitors | PHILCST Vehicle Monitoring')
 
 @section('content')
+    @include('partials.filter-errors')
     <x-page-header title="Visitors">
         <x-slot:actions>
             <button type="button" class="button button-primary" data-drawer-open="add-visitor-drawer">Add visitor manually</button>
@@ -12,6 +13,10 @@
 
     <x-tabs :tabs="array_replace(\App\Http\Controllers\VisitorController::TABS, ['review' => 'Review'.($reviewCount ? ' ('.$reviewCount.')' : '')])" :active="$tab" />
 
+    @if ($tab !== 'review')
+        <div data-auto-list="visitors-{{ $tab }}" data-auto-default-tab="records">
+        @include('partials.auto-filter-status')
+    @endif
     @if ($tab === 'plates')
         @include('visitors.partials.plates')
     @elseif ($tab === 'review')
@@ -38,9 +43,9 @@
             </section>
         @endif
 
-        <x-table title="Unregistered Visitors" :paginator="$records" :empty="$records->isEmpty()" empty-title="No unregistered visitors yet" empty-text="Vehicles that cross a gate without a registered tag appear here.">
+        <x-table data-auto-table title="Unregistered Visitors" :paginator="$records" :empty="$records->isEmpty()" :empty-title="array_filter($filters, fn ($value) => filled($value)) ? 'No visitors match these filters.' : 'No unregistered visitors yet'" empty-text="Vehicles that cross a gate without a registered tag appear here.">
             <x-slot:filters>
-                <form method="GET" action="{{ route('visitors.index') }}" class="log-filter-form">
+                <form method="GET" action="{{ route('visitors.index') }}" class="log-filter-form" data-auto-filter>
                     <input type="hidden" name="tab" value="records">
                     <div class="field">
                         <label for="visitor_q">Plate</label>
@@ -50,7 +55,7 @@
                         <label for="visitor_gate">Gate</label>
                         <select id="visitor_gate" name="gate">
                             <option value="">All</option>
-                            @foreach ($gates as $code => $name)
+                            @foreach ($historicalGates as $code => $name)
                                 <option value="{{ $code }}" @selected(($filters['gate'] ?? '') === $code)>{{ $name }}</option>
                             @endforeach
                         </select>
@@ -73,8 +78,8 @@
                         </select>
                     </div>
                     <div class="log-filter-actions">
-                        <button type="submit" class="button button-secondary">Filter</button>
-                        <a href="{{ route('visitors.index') }}" class="button button-secondary">Reset</a>
+                        <noscript><button type="submit" class="button button-secondary">Filter</button></noscript>
+                        <a href="{{ route('visitors.index') }}" class="button button-secondary" data-auto-reset>Reset</a>
                     </div>
                 </form>
             </x-slot:filters>
@@ -82,6 +87,10 @@
         </x-table>
     @endif
 
+    @if ($tab !== 'review')
+        </div>
+        @include('partials.auto-filter-assets')
+    @endif
     @include('visitors.partials.record-dialogs')
 
     {{-- Phase 8 (visitor model): replaces "Add Guest Observation" (Activity Logs › Alerts). --}}
@@ -113,16 +122,17 @@
             </div>
             <div class="field">
                 <label for="manual_plate">Plate number (optional)</label>
-                <input id="manual_plate" type="text" name="plate_number" value="{{ old('plate_number') }}" placeholder="ABC 1234" maxlength="30" autocomplete="off">
+                <input id="manual_plate" type="text" name="plate_number" value="{{ old('plate_number') }}" placeholder="ABC 1234" maxlength="30" autocomplete="off" data-normalize-plate>
                 @error('plate_number')<span class="field-error">{{ $message }}</span>@enderror
             </div>
             <div class="field">
                 <label for="manual_type">Vehicle type (optional)</label>
-                <input id="manual_type" type="text" name="vehicle_type" value="{{ old('vehicle_type') }}" placeholder="Car, Van, Motorcycle" maxlength="50">
-            </div>
-            <div class="field">
-                <label for="manual_color">Color (optional)</label>
-                <input id="manual_color" type="text" name="vehicle_color" value="{{ old('vehicle_color') }}" maxlength="30">
+                <select id="manual_type" name="vehicle_type">
+                    <option value="">Unknown / not recorded</option>
+                    @foreach (\App\Support\VehicleType::TYPES as $type)
+                        <option value="{{ $type }}" @selected(\App\Support\VehicleType::canonical(old('vehicle_type')) === $type)>{{ $type }}</option>
+                    @endforeach
+                </select>
             </div>
             <div class="field">
                 <label for="manual_note">Note (optional)</label>

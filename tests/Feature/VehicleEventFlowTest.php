@@ -6,7 +6,7 @@ use App\Models\ActiveSession;
 use App\Models\Camera;
 use App\Models\User;
 use App\Models\VehicleEvent;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -19,7 +19,7 @@ class VehicleEventFlowTest extends TestCase
      */
     public function test_exit_events_are_automatically_matched_to_open_entries(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $camera = Camera::query()->where('camera_name', 'PHILCST Entrance Camera')->firstOrFail();
@@ -66,7 +66,7 @@ class VehicleEventFlowTest extends TestCase
 
     public function test_manual_exit_matching_ignores_open_guest_sessions(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $guestEntry = VehicleEvent::query()->create([

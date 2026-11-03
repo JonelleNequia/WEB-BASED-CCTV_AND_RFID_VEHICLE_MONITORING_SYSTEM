@@ -10,7 +10,7 @@ use App\Models\VehicleEvent;
 use App\Models\VisitorRecord;
 use App\Services\MovementCountService;
 use Carbon\Carbon;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
@@ -30,7 +30,7 @@ class Phase8CleanupTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $this->travelTo(Carbon::parse('2026-10-14 10:00:00', 'Asia/Manila'));
     }

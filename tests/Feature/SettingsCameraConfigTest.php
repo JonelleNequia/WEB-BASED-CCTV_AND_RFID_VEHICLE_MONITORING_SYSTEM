@@ -4,7 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Camera;
 use App\Models\User;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
@@ -18,7 +18,7 @@ class SettingsCameraConfigTest extends TestCase
      */
     public function test_saving_settings_writes_the_runtime_camera_config_file(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $configPath = app(\App\Services\SettingsService::class)->cameraRuntimeConfigPath();
         $configDir = dirname($configPath);
@@ -99,7 +99,7 @@ class SettingsCameraConfigTest extends TestCase
      */
     public function test_rtsp_camera_source_rejects_a_webcam_index_and_webcams_are_gone(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 

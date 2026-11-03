@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class RfidTag extends Model
 {
@@ -76,6 +78,8 @@ class RfidTag extends Model
     protected static function booted(): void
     {
         static::saving(function (RfidTag $tag): void {
+            $stored = $tag->exists ? DB::table($tag->getTable())->where('id', $tag->id)->first() : null;
+            $oldUid = self::normalizeUid((string) ($stored?->uid ?: $stored?->tag_uid));
             $uid = $tag->uid ?: ($tag->attributes['tag_uid'] ?? null);
 
             if ($uid) {
@@ -91,12 +95,62 @@ class RfidTag extends Model
             if (! $tag->tag_type) {
                 $tag->tag_type = self::TYPE_VEHICLE;
             }
+            if (($stored?->status === self::STATUS_LOST || ($oldUid !== '' && self::isUnavailableUid($oldUid)))
+                && ($tag->status !== self::STATUS_LOST || $tag->uid !== $oldUid)) {
+                throw ValidationException::withMessages(['status' => 'Lost / Unavailable tags cannot be reactivated or changed.']);
+            }
+            if (self::isUnavailableUid((string) $tag->uid) && (! $stored || $oldUid !== $tag->uid)) {
+                throw ValidationException::withMessages(['uid' => 'This UID is permanently Lost / Unavailable. Use a different tag.']);
+            }
+            if ($tag->status === self::STATUS_LOST) {
+                DB::table('unavailable_rfid_uids')->insertOrIgnore([
+                    'uid' => $tag->uid, 'tag_id' => $stored?->id,
+                    'marked_by' => auth()->id(), 'marked_at' => now(), 'previous_status' => $stored?->status,
+                ]);
+            }
+        });
+        static::deleting(function (RfidTag $tag): void {
+            if (self::isUnavailableUid((string) $tag->uid)) {
+                throw ValidationException::withMessages(['uid' => 'Lost / Unavailable tag history must be retained.']);
+            }
         });
     }
 
     public static function normalizeUid(string $uid): string
     {
         return strtoupper(trim((string) preg_replace('/\s+/', '', $uid)));
+    }
+
+    public static function isUnavailableUid(string $uid): bool
+    {
+        $uid = self::normalizeUid($uid);
+
+        return $uid !== '' && (DB::table('unavailable_rfid_uids')->where('uid', $uid)->exists()
+            || self::query()->where('status', self::STATUS_LOST)->get(['uid', 'tag_uid'])->contains(
+                fn (self $tag) => self::normalizeUid((string) $tag->uid) === $uid
+                    || self::normalizeUid((string) $tag->getRawOriginal('tag_uid')) === $uid
+            ));
+    }
+
+    /** Return no arbitrary identity when legacy canonical UIDs collide. */
+    public static function findUid(string $uid): ?self
+    {
+        $matches = self::matchingUid($uid);
+
+        return $matches->count() === 1 ? $matches->first() : null;
+    }
+
+    public static function matchingUid(string $uid): \Illuminate\Support\Collection
+    {
+        $uid = self::normalizeUid($uid);
+        return self::query()->with('vehicle')->get()->filter(fn (self $tag) => self::normalizeUid((string) $tag->uid) === $uid
+            || self::normalizeUid((string) $tag->getRawOriginal('tag_uid')) === $uid);
+    }
+
+    public function getStatusLabelAttribute(): string
+    {
+        return $this->status === self::STATUS_LOST || self::isUnavailableUid((string) $this->uid)
+            ? 'Lost / Unavailable' : ucfirst($this->status);
     }
 
     public function getTagUidAttribute(?string $value): ?string
@@ -136,7 +190,13 @@ class RfidTag extends Model
 
     public function scopeAvailable(Builder $query): Builder
     {
-        return $query->where('status', self::STATUS_AVAILABLE);
+        $uid = 'upper(uid)';
+        foreach ([' ', "\t", "\n", "\r", "\v", "\f"] as $space) {
+            $uid = "replace($uid, '".$space."', '')";
+        }
+
+        return $query->where('status', self::STATUS_AVAILABLE)
+            ->whereNotIn(DB::raw($uid), DB::table('unavailable_rfid_uids')->select('uid'));
     }
 
     public function scopeAssigned(Builder $query): Builder

@@ -9,7 +9,7 @@
     $categoryLabel = fn (?string $category): string => \App\Support\VehicleCategory::label($category);
 @endphp
 
-<x-stat-row>
+<x-stat-row data-auto-update="summary">
     <x-stat label="Registered Vehicles" :value="$rfidStats['registered_vehicles'] ?? 0" />
     {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
     <x-stat label="Inside Campus" :value="$rfidStats['vehicles_inside'] ?? 0"
@@ -17,11 +17,11 @@
     <x-stat label="Available RFID Tags" :value="$rfidStats['available_tags'] ?? 0" :href="route('registry.index', ['tab' => 'tags', 'status' => 'available'])" />
 </x-stat-row>
 
-<x-table :empty="$vehicles->isEmpty()"
-         :empty-title="array_filter($filters ?? []) ? 'No vehicles match these filters.' : 'No registered vehicles yet.'"
-         empty-text="Add a vehicle by scanning its RFID tag.">
+<x-table data-auto-table :empty="$vehicles->isEmpty()"
+         :empty-title="array_filter($filters ?? [], fn ($value) => filled($value)) ? 'No vehicles match these filters.' : 'No registered vehicles yet.'"
+         empty-text="Add a vehicle by plate, with or without an RFID tag.">
     <x-slot:toolbar>
-        <form method="GET" action="{{ route('registry.index') }}" class="toolbar-search" role="search">
+        <form method="GET" action="{{ route('registry.index') }}" class="toolbar-search" role="search" data-auto-filter>
             <input type="hidden" name="tab" value="vehicles">
             <label class="sr-only" for="vehicle_q">Search vehicles</label>
             <input id="vehicle_q" type="search" name="q" value="{{ $filters['q'] ?? '' }}" placeholder="Plate, owner or tag">
@@ -44,10 +44,12 @@
                 <option value="active" @selected(($filters['status'] ?? '') === 'active')>Active</option>
                 <option value="inactive" @selected(($filters['status'] ?? '') === 'inactive')>Inactive</option>
             </select>
-            <button type="submit" class="button button-secondary button-sm">Filter</button>
+            <noscript><button type="submit" class="button button-secondary button-sm">Filter</button></noscript>
+            <span data-auto-update="reset">
             @if (array_filter($filters ?? []))
-                <a href="{{ route('registry.index') }}" class="button button-secondary button-sm">Reset</a>
+                <a href="{{ route('registry.index') }}" class="button button-secondary button-sm" data-auto-reset>Reset</a>
             @endif
+            </span>
         </form>
     </x-slot:toolbar>
     <x-slot:emptyAction>
@@ -77,10 +79,10 @@
                     @if ($vehicle->rfidTag)
                         #{{ $vehicle->rfidTag->tag_number ?: '—' }}
                         @if ($vehicle->rfidTag->status !== 'assigned')
-                            <x-badge :status="$vehicle->rfidTag->status" />
+                            <x-badge :status="$vehicle->rfidTag->status" :label="$vehicle->rfidTag->status_label" />
                         @endif
                     @else
-                        <x-badge status="no_tag" />
+                        <x-badge status="no_tag" label="No RFID assigned" />
                     @endif
                 </td>
                 <td>
@@ -133,20 +135,30 @@
             <input type="hidden" name="plate_profile_id" value="{{ $registerPlateId }}">
         @endif
         @if ($registerPlate)
-            <p class="field-help" data-register-plate>Registering <strong>{{ $registerPlate->plate_number }}</strong>, seen {{ $registerPlate->visit_count }} {{ \Illuminate\Support\Str::plural('time', $registerPlate->visit_count) }} as an unregistered visitor. Those visits move to this vehicle when you save. Give it an RFID tag first.</p>
+            <p class="field-help" data-register-plate>Registering <strong>{{ $registerPlate->plate_number }}</strong>, seen {{ $registerPlate->visit_count }} {{ \Illuminate\Support\Str::plural('time', $registerPlate->visit_count) }} as an unregistered visitor. Those visits move to this vehicle when you save. RFID is optional and can be assigned later.</p>
         @endif
 
         @error('vehicle')
             <p class="field-error">{{ $message }}</p>
         @enderror
 
-        <span class="step-label">1 · Tag</span>
+        <span class="step-label">1 · RFID (optional)</span>
         @include('registry.partials.tag-picker', ['prefix' => 'add', 'useOld' => $failedForm === 'add', 'legend' => 'RFID Tag', 'prefillUid' => $registerTag ?: null])
 
         <span class="step-label">2 · Vehicle details</span>
+        <div class="field">
+            <label for="add_registered_by">Registered by</label>
+            <input id="add_registered_by" name="registered_by" type="text" required
+                   value="{{ $failedForm === 'add' ? old('registered_by', '') : ($registrationStaffName ?? '') }}"
+                   autocomplete="off" data-registration-staff
+                   aria-describedby="add_registered_by_help add_registered_by_error"
+                   aria-invalid="{{ $failedForm === 'add' && $errors->has('registered_by') ? 'true' : 'false' }}">
+            <span class="field-help" id="add_registered_by_help">Staff member processing this registration. The last successfully used name is remembered on this installation. Up to 100 characters.</span>
+            <span class="field-error" id="add_registered_by_error" aria-live="polite" aria-atomic="true" @if($failedForm !== 'add' || !$errors->has('registered_by')) hidden @endif>{{ $failedForm === 'add' ? $errors->first('registered_by') : '' }}</span>
+        </div>
         @include('registry.partials.vehicle-fields', ['prefix' => 'add', 'useOld' => $failedForm === 'add', 'prefill' => $registerPlate ? [
             'plate_number' => $registerPlate->plate_number,
-            'vehicle_type' => $registerPlate->vehicle_type ? \Illuminate\Support\Str::title($registerPlate->vehicle_type) : 'Car',
+            'vehicle_type' => \App\Support\VehicleType::canonical($registerPlate->vehicle_type) ?? '',
             'category' => \App\Support\VehicleCategory::REGISTERED_VISITOR,
         ] : []])
 
@@ -193,6 +205,7 @@
 <x-drawer id="replace-tag-drawer" title="Replace Tag" :open="(bool) $replaceVehicle">
     <form method="POST" action="{{ $replaceVehicle ? route('registry.vehicles.replace-tag', $replaceVehicle) : '#' }}" class="stack-form" data-vehicle-form="replace">
         @csrf
+        <input type="hidden" name="expected_tag_id" value="{{ $replaceVehicle ? old('expected_tag_id', $replaceVehicle->rfid_tag_id ?? 0) : '' }}" data-field="expected_tag_id">
         <input type="hidden" name="_form" value="replace">
         <input type="hidden" name="_vehicle_id" value="{{ $replaceVehicle?->id }}" data-field="id">
 
@@ -206,7 +219,7 @@
 
         <fieldset class="field" data-old-tag-fieldset>
             <legend>What happened to the old tag?</legend>
-            <label class="checkbox-row"><input type="radio" name="old_tag_status" value="lost" @checked(old('old_tag_status', 'lost') === 'lost')> Lost (scans of it raise an alert)</label>
+            <label class="checkbox-row"><input type="radio" name="old_tag_status" value="lost" @checked(old('old_tag_status', 'lost') === 'lost')> Lost / Unavailable permanently (future reads ignored)</label>
             <label class="checkbox-row"><input type="radio" name="old_tag_status" value="disabled" @checked(old('old_tag_status') === 'disabled')> Damaged / disabled</label>
             @error('old_tag_status')<span class="field-error">{{ $message }}</span>@enderror
         </fieldset>
@@ -225,5 +238,6 @@
 
 @push('scripts')
     <script src="{{ asset('js/uhf-tag-reader.js') }}"></script>
-    <script src="{{ asset('js/registry.js') }}"></script>
+    <script src="{{ asset('js/registration-staff.js') }}?v={{ filemtime(public_path('js/registration-staff.js')) }}"></script>
+    <script src="{{ asset('js/registry.js') }}?v={{ filemtime(public_path('js/registry.js')) }}"></script>
 @endpush

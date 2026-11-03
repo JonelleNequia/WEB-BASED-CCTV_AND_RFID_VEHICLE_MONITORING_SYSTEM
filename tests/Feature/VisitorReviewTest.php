@@ -10,7 +10,7 @@ use App\Services\MovementCountService;
 use App\Services\PlateMatchService;
 use App\Services\VisitorRecordService;
 use App\Services\VisitorReviewService;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Testing\TestResponse;
@@ -36,7 +36,7 @@ class VisitorReviewTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->freezeTime();
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $this->guard = User::query()->create(['name' => 'Gate Guard', 'email' => 'guard.review@philcst.local', 'password' => Hash::make('password'), 'role' => 'guard']);
@@ -111,8 +111,8 @@ class VisitorReviewTest extends TestCase
         $this->assertSame([PlateMatchService::CONFIRMED, 'KVC5555'], [$unsure->fresh()->match_confidence, $unsure->fresh()->plateProfile->plate_key]);
 
         // A name is kept with the plate.
-        $this->act($unsure, 'set_name', ['name' => 'Juan Dela Cruz (delivery)'])->assertOk();
-        $this->assertSame('Juan Dela Cruz (delivery)', $unsure->fresh()->plateProfile->owner_name);
+        $this->act($unsure, 'set_name', ['name' => 'Ma. José Dela Cruz'])->assertOk();
+        $this->assertSame('Ma. José Dela Cruz', $unsure->fresh()->plateProfile->owner_name);
         // Not before the plate is known.
         $this->act($ghost, 'set_name', ['name' => 'Someone'])->assertUnprocessable()->assertJsonValidationErrors('name');
 

@@ -4,6 +4,7 @@
 @section('title', 'Registry | PHILCST Vehicle Monitoring')
 
 @section('content')
+    @include('partials.filter-errors')
     <x-page-header title="Registry">
         <x-slot:actions>
             @switch($tab)
@@ -18,5 +19,9 @@
 
     <x-tabs :tabs="\App\Http\Controllers\RegistryController::TABS" :active="$tab" />
 
-    @include('registry.tabs.'.$tab)
+    <div data-auto-list="registry-{{ $tab }}" data-auto-default-tab="vehicles">
+        @include('partials.auto-filter-status')
+        @include('registry.tabs.'.$tab)
+    </div>
+    @include('partials.auto-filter-assets')
 @endsection

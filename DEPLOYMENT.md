@@ -51,8 +51,8 @@ changes. Nobody edits it by hand.
    DETECTOR_API_KEY=<php -r "echo bin2hex(random_bytes(24));">
    ```
 
-   Then `php artisan config:cache`. Change the admin password after the
-   first sign-in.
+   Then `php artisan config:cache`. Complete protected first-admin setup as
+   described in [ACCOUNT-SECURITY.md](ACCOUNT-SECURITY.md); there is no seeded login.
 
 ## 3. Start with Windows
 
@@ -189,3 +189,56 @@ tools/start/start-system.sh
 Starts the same parts in this terminal (Ctrl+C stops the web system and the
 scheduler). go2rtc runs from `storage/app/go2rtc`; `php artisan go2rtc:start`
 starts it alone.
+
+After updating a local source checkout, stop the application services and
+apply the database upgrade before starting the updated application:
+
+```sh
+php artisan backup:run --label=before-update
+php artisan migrate --force
+php artisan config:clear
+php artisan route:clear
+php artisan view:clear
+npm install
+npm run build
+```
+
+If the log reports missing `gate_management_locks` or
+`account_security_state`, check `php artisan migrate:status` and apply the
+pending migrations. Do not reset or reseed the database. Existing accounts
+must sign in and complete `/account/password` after the security upgrade;
+this redirect is required. PHPUnit writes expected test exceptions to
+`storage/logs/testing.log`, separate from the running installation's log.
+
+## Settings and gate-management upgrade
+
+Settings now contains Gates and Advanced. Gate names and activation moved
+from General to Gates; existing General bookmarks redirect there. Inactive
+gates still count toward the minimum of two retained gates. With more than
+two, an admin can confirm **Remove gate**. This archives the gate and releases
+its camera/reader assignments without deleting devices, calibration or
+historical records. Archived gates are excluded from monitoring and new
+record selectors; report filters still include them.
+
+For a bundled Windows installation, use the existing `deploy\windows\update.bat`
+workflow with a release containing these changes. It backs up the installation,
+stops services, preserves `.env`, database and storage, then runs migrations,
+refreshes runtime configuration/caches and restarts services.
+
+For a technician applying application files manually, back up first, stop
+the application services, and use the bundled PHP with the installation's
+`config\php.ini` to run `artisan migrate --force`, `artisan detector:start`,
+`artisan go2rtc:start`, `artisan config:cache`, `artisan route:cache` and
+`artisan view:cache`, then restart services. On the first Gates page visit,
+device runtime configuration can be refreshed by saving Gates settings.
+Do not run `migrate:fresh` or demo seeders during an upgrade.
+
+Migration `2026_10_30_000001_archive_gates_and_ensure_minimum` adds the archive
+column and gate-management mutex. If fewer than two non-archived gates exist,
+it adds only the missing inactive, unconfigured gates, without overwriting
+existing data. Activate/configure those gates on Gates when ready. Removal
+count checks and archival share a database transaction: an initial mutex-row
+write serializes SQLite writers and takes a row lock on MySQL. Keep this
+mutex table when backing up/restoring the database. This gate migration does
+not change accounts; the accompanying account-security migration and its
+one-time password transition are described in [ACCOUNT-SECURITY.md](ACCOUNT-SECURITY.md).

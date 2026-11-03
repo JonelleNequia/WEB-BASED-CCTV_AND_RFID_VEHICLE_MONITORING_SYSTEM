@@ -11,7 +11,7 @@ use Illuminate\View\View;
 class LoginController extends Controller
 {
     /**
-     * Show the single-admin login form.
+     * Show the individual-account login form.
      */
     public function create(): View|RedirectResponse
     {
@@ -23,7 +23,7 @@ class LoginController extends Controller
     }
 
     /**
-     * Handle an admin login request.
+     * Handle an active account's login request.
      */
     public function store(Request $request): RedirectResponse
     {
@@ -31,14 +31,21 @@ class LoginController extends Controller
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
         ]);
+        $credentials['account_status'] = 'active';
 
-        if (! Auth::attempt($credentials)) {
+        // Serialize verification/rehashing with password changes and account
+        // deactivation, so a racing login cannot restore an obsolete hash.
+        if (! app(\App\Services\AccountSecurityService::class)->locked(fn () => Auth::attempt($credentials))) {
             return back()
-                ->withErrors(['email' => 'The provided admin credentials are invalid.'])
+                ->withErrors(['email' => 'The provided credentials are invalid.'])
                 ->onlyInput('email');
         }
 
         $request->session()->regenerate();
+        $request->session()->put('auth_version', Auth::user()->session_version);
+        if (Auth::user()->password_policy_version < 1) {
+            return redirect()->route('account.password.edit');
+        }
 
         return redirect()->intended(route($this->homeRouteName()));
     }

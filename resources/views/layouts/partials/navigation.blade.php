@@ -89,6 +89,7 @@
                 <span class="sidebar-health-item" data-health="{{ $health['key'] }}" title="{{ $health['label'] }}: {{ $health['detail'] }}">
                     <span class="health-dot {{ $health['ok'] ? 'is-ok' : 'is-down' }}" aria-hidden="true"></span>
                     <span class="sidebar-health-label">{{ $health['label'] }}</span>
+                    <span class="sidebar-health-state" data-health-state>{{ $health['ok'] ? 'OK' : 'Check' }}</span>
                     <span class="sr-only" data-health-detail>{{ $health['ok'] ? 'OK' : 'Needs attention' }}: {{ $health['detail'] }}</span>
                 </span>
             @endforeach
@@ -97,8 +98,21 @@
         <div class="sidebar-account">
             <strong>{{ auth()->user()->name ?? 'System User' }}</strong>
             <span class="sidebar-account-email">{{ auth()->user()->email }}</span>
+            <div class="sidebar-account-links">
+                @if ($isAdmin)<a href="{{ route('accounts.index') }}" @if(request()->routeIs('accounts.*')) aria-current="page" @endif>Accounts</a>@endif
+                <a href="{{ route('account.password.edit') }}">Change password</a>
+            </div>
         </div>
 
+        <details class="sidebar-compact-account">
+            <summary aria-label="Account options" title="Account options">{!! $navIcon('guest') !!}</summary>
+            <div class="compact-account-panel">
+                <strong>{{ auth()->user()->name }}</strong>
+                <span>{{ auth()->user()->email }}</span>
+                @if ($isAdmin)<a href="{{ route('accounts.index') }}">Accounts</a>@endif
+                <a href="{{ route('account.password.edit') }}">Change password</a>
+            </div>
+        </details>
         <form method="POST" action="{{ route('logout') }}">
             @csrf
             <button type="submit" class="sidebar-logout-button button-full" title="Logout">

@@ -9,7 +9,7 @@ use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Services\DetectorRuntimeService;
 use App\Services\RfidService;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -104,7 +104,7 @@ class Phase1BugFixTest extends TestCase
 
     public function test_all_pages_show_the_same_vehicles_inside_count(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->registeredVehicle('IN 0001', 'IN-TAG-1', Vehicle::STATE_INSIDE);

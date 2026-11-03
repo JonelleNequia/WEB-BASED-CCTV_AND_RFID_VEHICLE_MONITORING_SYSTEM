@@ -79,7 +79,7 @@
     /* UI Phase 4: the big result (latest vehicle at this gate, or a kiosk scan). */
     const resultBox = document.querySelector('[data-scan-result]');
     // UI Phase 3 colors: green registered, gray unregistered, yellow needs a
-    // look (unknown tag), red real problem (anomaly, lost tag, inactive vehicle).
+    // look (unknown tag), red real problem (anomaly, disabled tag, inactive vehicle).
     const RESULT_WORD = {
         checking: 'CHECKING',
         verified: 'VERIFIED',
@@ -185,6 +185,7 @@
     }
 
     function handleScanResult(body) {
+        if (body.outcome === 'ignored') return;
         if (!body.duplicate_ignored) {
             showScanResult(...scanResultFor(body));
         }

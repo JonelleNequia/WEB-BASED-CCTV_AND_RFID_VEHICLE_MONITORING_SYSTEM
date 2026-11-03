@@ -1,8 +1,8 @@
 """
 Phase 5 (visitor model): one plate per vehicle from several frames.
 
-Each frame gives at most one plate (already in PH letter-first form with
-position-safe corrections, e.g. "ABC-1234", see anpr.py) and a score. The
+Each frame gives at most one plate (literal PH letter-first form,
+e.g. "ABC-1234", see anpr.py) and a score. The
 vote:
 
 - groups the reads by layout (3 letters + 4 digits, 3+3, 2+5, 2+4) and takes
@@ -12,10 +12,8 @@ vote:
 - says "unreadable" (keeping the best guess for the guard) when no frame
   read a plate, when frames disagree on a character (no majority), or when
   only one frame read it and that read is weak;
-- on a car, jeep, bus or truck accepts only 3-letter plates: a 2-letter
-  read there is a 3-letter plate with a letter missed (measured on Gate 1
-  snapshots: "LAK 3767" read as "AK-3767" and "IK-3767"). 2-letter layouts
-  are for motorcycles and tricycles.
+- accepts the supported literal layouts for every physical type; vehicle
+  subtype is not evidence that a letter was missing.
 """
 
 import re
@@ -24,8 +22,6 @@ import re
 STRONG_SINGLE_READ = 0.80
 # Each character needs this share of the weight when frames disagree.
 MAJORITY_SHARE = 0.6
-# Vehicle classes whose plates may have 2 letters (detector labels, lowercase).
-TWO_LETTER_PLATE_VEHICLES = {"motorcycle", "motorbike", "electric scooter", "auto rickshaw", "tricycle"}
 # Two frames that agree on the exact plate end OCR early.
 AGREEING_FRAMES_TO_STOP = 2
 
@@ -80,16 +76,8 @@ def vote_plate(frame_reads, vehicle_type=None):
         result["reason"] = f"No plate found in {len(frame_reads)} frame(s)."
         return result
 
-    vehicle = str(vehicle_type or "").strip().lower()
-    if vehicle and vehicle not in TWO_LETTER_PLATE_VEHICLES:
-        three_letter = [read for read in reads if plate_layout(read["plate"])[0] >= 3]
-        if not three_letter:
-            best = max(reads, key=lambda read: read["score"])
-            result["best_guess"] = best["plate"]
-            result["reason"] = f"Only 2-letter plates were read on a {vehicle}; a letter was probably missed."
-            return result
-        reads = three_letter
-
+    # Physical type (especially a broad/mistaken model class) is not proof
+    # of a plate layout. Keep the same literal layouts and voting thresholds.
     layouts = {}
     for read in reads:
         layouts.setdefault(plate_layout(read["plate"]), []).append(read)

@@ -144,7 +144,7 @@ class SettingsService
     protected function saveGates(array $gates): void
     {
         foreach ($gates as $code => $values) {
-            $gate = Gate::query()->where('code', $code)->first();
+            $gate = Gate::query()->retained()->where('code', $code)->first();
 
             if (! $gate || ! is_array($values)) {
                 continue;

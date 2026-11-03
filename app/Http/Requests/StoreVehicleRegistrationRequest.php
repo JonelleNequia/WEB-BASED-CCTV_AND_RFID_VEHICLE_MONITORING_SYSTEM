@@ -4,6 +4,9 @@ namespace App\Http\Requests;
 
 use App\Models\RfidTag;
 use App\Models\Vehicle;
+use App\Rules\PersonalName;
+use App\Rules\PlateIdentifier;
+use App\Rules\RegistrationStaffName;
 use App\Support\VehicleCategory;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
@@ -28,11 +31,19 @@ class StoreVehicleRegistrationRequest extends FormRequest
     public function rules(): array
     {
         $vehicleId = $this->routeVehicleId();
+        $vehicle = $this->route('vehicle');
+        $legacyOwner = $vehicle instanceof Vehicle ? $vehicle->vehicle_owner_name : null;
+        $legacyPlate = $vehicle instanceof Vehicle ? $vehicle->plate_number : null;
+        $blankFields = $this->attributes->get('blank_name_fields', []);
+        $blankOwner = in_array('vehicle_owner_name', $blankFields, true)
+            || ($this->input('vehicle_owner_name') === null && in_array('owner_name', $blankFields, true));
 
         return [
+            // Registration attribution is recorded once; unrelated edits leave
+            // both it and the installation's new-registration default alone.
+            ...($vehicle instanceof Vehicle ? [] : ['registered_by' => RegistrationStaffName::rules()]),
             'rfid_tag_id' => [
                 'nullable',
-                'required_without_all:rfid_uid,rfid_tag_uid',
                 'integer',
                 'exists:vehicle_rfid_tags,id',
             ],
@@ -41,6 +52,7 @@ class StoreVehicleRegistrationRequest extends FormRequest
                 'string',
                 'max:100',
             ],
+            'rfid_scan_uid' => ['nullable', 'string', 'max:100'],
             'rfid_tag_uid' => [
                 'nullable',
                 'string',
@@ -51,13 +63,17 @@ class StoreVehicleRegistrationRequest extends FormRequest
                 'required',
                 'string',
                 'max:50',
+                new PlateIdentifier(legacyValue: $legacyPlate),
                 Rule::unique('vehicles', 'plate_number')->ignore($vehicleId),
             ],
-            'vehicle_owner_name' => ['nullable', 'string', 'max:100'],
+            'vehicle_owner_name' => ['bail', 'nullable', 'string', new PersonalName($legacyOwner, $blankOwner), Rule::when(
+                $legacyOwner === null || ! is_string($this->input('vehicle_owner_name')) || PersonalName::normalize($this->input('vehicle_owner_name')) !== PersonalName::normalize($legacyOwner),
+                'max:100'
+            )],
             // Phase 4 (visitor model): Faculty & Staff or Registered Visitor.
             // Unregistered Visitor is set by the system (camera, no tag).
             'category' => [
-                'required',
+                'bail', 'required',
                 'string',
                 function (string $attribute, mixed $value, \Closure $fail): void {
                     $value = strtolower(trim((string) $value));
@@ -69,10 +85,12 @@ class StoreVehicleRegistrationRequest extends FormRequest
                     }
                 },
             ],
-            'vehicle_type' => ['required', 'string', 'max:50'],
+            'vehicle_type' => ['required', 'string', new \App\Rules\ValidVehicleType($vehicle instanceof Vehicle ? $vehicle->vehicle_type : null),
+                Rule::when(! $vehicle instanceof Vehicle || $this->input('vehicle_type') !== $vehicle->vehicle_type, 'max:50')],
             // Phase 6 (visitor model): "Register this vehicle" from the Visitor Ranking.
             'plate_profile_id' => ['nullable', 'integer', 'exists:plate_profiles,id'],
-            'vehicle_type_other' => ['nullable', 'required_if:vehicle_type,Others', 'string', 'max:50'],
+            'vehicle_type_other' => ['nullable', 'required_if:vehicle_type,Others', 'string',
+                Rule::when(! $vehicle instanceof Vehicle || $this->input('vehicle_type_other') !== $vehicle->vehicle_type, 'max:50')],
             // UI Phase 3: Add Vehicle drawer registers a new scanned tag automatically.
             'auto_register_tag' => ['sometimes', 'boolean'],
         ];
@@ -84,6 +102,7 @@ class StoreVehicleRegistrationRequest extends FormRequest
     public function messages(): array
     {
         return [
+            ...RegistrationStaffName::messages(),
             // UI Phase 3: clear message for the Add Vehicle / Edit drawers.
             'rfid_tag_uid.unique' => 'This RFID tag is already assigned to another vehicle. Use Replace Tag on that vehicle first.',
         ];
@@ -94,19 +113,26 @@ class StoreVehicleRegistrationRequest extends FormRequest
      */
     protected function prepareForValidation(): void
     {
-        if (! $this->filled('vehicle_owner_name') && $this->filled('owner_name')) {
+        if (! $this->filled('rfid_uid') && ! $this->filled('rfid_tag_id') && is_string($this->input('rfid_scan_uid'))) {
+            $this->merge(['rfid_uid' => $this->input('rfid_scan_uid')]);
+        }
+        if (is_string($this->input('registered_by'))) {
+            $this->merge(['registered_by' => RegistrationStaffName::normalize($this->input('registered_by'))]);
+        }
+
+        if (in_array($this->input('vehicle_owner_name'), [null, ''], true) && $this->filled('owner_name')) {
             $this->merge(['vehicle_owner_name' => $this->input('owner_name')]);
         }
 
-        if (! $this->filled('rfid_tag_uid') && $this->filled('tag_uid')) {
+        if (in_array($this->input('rfid_tag_uid'), [null, ''], true) && $this->filled('tag_uid')) {
             $this->merge(['rfid_tag_uid' => $this->input('tag_uid')]);
         }
 
-        if (! $this->filled('rfid_tag_uid') && $this->filled('rfid_uid')) {
+        if (in_array($this->input('rfid_tag_uid'), [null, ''], true) && $this->filled('rfid_uid')) {
             $this->merge(['rfid_tag_uid' => $this->input('rfid_uid')]);
         }
 
-        if ($this->filled('rfid_tag_uid')) {
+        if (is_string($this->input('rfid_tag_uid')) && $this->filled('rfid_tag_uid')) {
             $normalizedUid = RfidTag::normalizeUid((string) $this->input('rfid_tag_uid'));
 
             $this->merge([
@@ -115,33 +141,32 @@ class StoreVehicleRegistrationRequest extends FormRequest
             ]);
         }
 
-        if ($this->filled('plate_number')) {
-            $normalizedPlate = preg_replace('/\s+/', ' ', (string) $this->input('plate_number'));
+        if (is_string($this->input('plate_number')) && $this->filled('plate_number')) {
             $this->merge([
-                'plate_number' => strtoupper(trim((string) $normalizedPlate)),
+                'plate_number' => \App\Support\PlateNumber::normalize($this->input('plate_number')),
             ]);
         }
 
-        if ($this->filled('vehicle_owner_name')) {
-            $normalizedOwner = preg_replace('/\s+/', ' ', (string) $this->input('vehicle_owner_name'));
+        if (is_string($this->input('vehicle_owner_name')) && $this->filled('vehicle_owner_name')) {
+            $normalizedOwner = PersonalName::normalize($this->input('vehicle_owner_name'));
 
             $this->merge([
                 'vehicle_owner_name' => trim((string) $normalizedOwner),
             ]);
         }
 
-        if (! $this->filled('category')) {
+        if (in_array($this->input('category'), [null, ''], true)) {
             $this->merge(['category' => VehicleCategory::FACULTY_STAFF]);
         }
 
         // Phase 4: old forms and clients may still send Parent / Student / Guard.
-        if (in_array(strtolower((string) $this->input('category')), VehicleCategory::LEGACY_REGISTERED, true)) {
+        if (is_string($this->input('category')) && in_array(strtolower($this->input('category')), VehicleCategory::LEGACY_REGISTERED, true)) {
             $this->merge(['category' => VehicleCategory::REGISTERED_VISITOR]);
         }
 
-        if ($this->input('vehicle_type') === 'Others' && $this->filled('vehicle_type_other')) {
+        if ($this->input('vehicle_type') === 'Others' && is_string($this->input('vehicle_type_other')) && $this->filled('vehicle_type_other')) {
             $this->merge([
-                'vehicle_type' => Str::title(trim((string) $this->input('vehicle_type_other'))),
+                'vehicle_type' => \App\Support\VehicleType::canonical($this->input('vehicle_type_other')) ?? trim($this->input('vehicle_type_other')),
             ]);
         }
     }
@@ -149,6 +174,9 @@ class StoreVehicleRegistrationRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
+            if ($validator->errors()->isNotEmpty()) {
+                return;
+            }
             $this->validateUniqueOwnerPlatePair($validator);
 
             if (! $this->filled('rfid_tag_id')) {
@@ -163,8 +191,7 @@ class StoreVehicleRegistrationRequest extends FormRequest
 
             $vehicle = $this->route('vehicle');
             $belongsToCurrentVehicle = $vehicle
-                && (int) $tag->vehicle_id === (int) $vehicle->id
-                && $tag->status === RfidTag::STATUS_ASSIGNED;
+                && (int) $tag->id === (int) $vehicle->rfid_tag_id;
 
             if ($tag->status !== RfidTag::STATUS_AVAILABLE && ! $belongsToCurrentVehicle) {
                 $validator->errors()->add('rfid_tag_id', 'The selected RFID tag is not available.');

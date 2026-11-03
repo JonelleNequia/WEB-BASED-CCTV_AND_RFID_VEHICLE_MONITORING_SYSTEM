@@ -6,7 +6,7 @@ use App\Models\RfidTag;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Services\RfidIngestService;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -23,14 +23,14 @@ class UiPhase4PagesTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
 
     public function test_dashboard_has_kpis_needs_attention_and_hourly_chart(): void
     {
         // Phase 1: gates have no fixed direction, so the anomaly is a lost tag read.
-        $this->vehicle('ANO 101', 'ANO-TAG', 'INSIDE')->rfidTag->forceFill(['status' => 'lost'])->save();
+        $this->vehicle('ANO 101', 'ANO-TAG', 'INSIDE')->rfidTag->forceFill(['status' => 'disabled'])->save();
         app(RfidIngestService::class)->ingest(['tag_uid' => 'ANO-TAG', 'scan_location' => 'gate-1']);
 
         $html = $this->actingAs($this->admin)->get(route('dashboard.index'))->assertOk()->getContent();
@@ -56,7 +56,7 @@ class UiPhase4PagesTest extends TestCase
     {
         $this->vehicle('LOG 101', 'LOG-TAG', 'OUTSIDE');
         app(RfidIngestService::class)->ingest(['tag_uid' => 'LOG-TAG', 'scan_location' => 'gate-1']);
-        $this->vehicle('ALR 101', 'ALR-TAG', 'INSIDE')->rfidTag->forceFill(['status' => 'lost'])->save();
+        $this->vehicle('ALR 101', 'ALR-TAG', 'INSIDE')->rfidTag->forceFill(['status' => 'disabled'])->save();
         app(RfidIngestService::class)->ingest(['tag_uid' => 'ALR-TAG', 'scan_location' => 'gate-1']); // anomaly (lost tag)
 
         $this->actingAs($this->admin)

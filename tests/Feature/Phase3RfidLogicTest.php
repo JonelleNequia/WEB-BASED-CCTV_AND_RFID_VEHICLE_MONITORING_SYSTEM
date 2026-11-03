@@ -12,7 +12,7 @@ use App\Services\RfidIngestService;
 use App\Services\RfidService;
 use App\Services\VehicleOccupancyService;
 use App\Support\RfidIngestResult;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
@@ -29,7 +29,7 @@ class Phase3RfidLogicTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
     }
 
     public function test_entrance_records_entry_and_exit_records_exit(): void

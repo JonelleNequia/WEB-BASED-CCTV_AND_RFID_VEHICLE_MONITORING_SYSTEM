@@ -106,13 +106,15 @@ class RfidService
     {
         return RfidScanLog::query()
             ->with(['vehicle', 'vehicleRfidTag', 'correlatedVehicleEvent.camera', 'guestVehicleObservation.camera'])
-            ->when(! empty($filters['history_q']), function ($query) use ($filters): void {
-                $term = '%'.trim((string) $filters['history_q']).'%';
+            ->when(filled($filters['history_q'] ?? null), function ($query) use ($filters): void {
+                $search = trim((string) $filters['history_q']);
+                $term = '%'.$search.'%';
 
-                $query->where(function ($query) use ($term): void {
+                $query->where(function ($query) use ($term, $search): void {
                     $query->where('tag_uid', 'like', $term)
-                        ->orWhereHas('vehicle', function ($vehicleQuery) use ($term): void {
+                        ->orWhereHas('vehicle', function ($vehicleQuery) use ($term, $search): void {
                             $vehicleQuery->where('plate_number', 'like', $term)
+                                ->orWhere(fn ($plates) => \App\Support\PlateNumber::search($plates, ['plate_number'], $search))
                                 ->orWhere('vehicle_owner_name', 'like', $term)
                                 ->orWhere('owner_name', 'like', $term);
                         })
@@ -123,7 +125,7 @@ class RfidService
                 });
             })
             ->when(! empty($filters['scan_location']), function ($query) use ($filters): void {
-                $query->where('scan_location', Gate::normalizeCode((string) $filters['scan_location']));
+                $query->where('scan_location', Gate::resolveCode((string) $filters['scan_location'], historical: true) ?? '__none__');
             })
             ->when(! empty($filters['verification_status']), function ($query) use ($filters): void {
                 // Phase 4: "anomaly" filters every flagged scan.
@@ -135,6 +137,11 @@ class RfidService
 
                 // Phase 3: fusion results, and unknown tags (stored as "guest" before).
                 match ($filters['verification_status']) {
+                    'verified' => $query->where('verification_status', 'verified')->where(fn ($proof) => $proof
+                        ->whereHas('vehicle')
+                        ->orWhereIn(\Illuminate\Support\Facades\DB::raw('lower(trim(vehicle_category))'), [
+                            ...\App\Support\VehicleCategory::REGISTRY, ...\App\Support\VehicleCategory::LEGACY_REGISTERED,
+                        ])),
                     'pending', 'scan_only' => $query->where('fusion_status', $filters['verification_status']),
                     'unknown_tag' => $query->where(fn ($inner) => $inner->where('verification_status', 'unknown_tag')
                         ->orWhere(fn ($legacy) => $legacy->where('verification_status', 'guest')->whereNull('vehicle_id')->whereNull('vehicle_rfid_tag_id'))),
@@ -197,7 +204,7 @@ class RfidService
                 ->sum('exits_today_count'),
             'registered_tags' => RfidTag::query()->count(),
             'available_tags' => RfidTag::query()
-                ->where('status', RfidTag::STATUS_AVAILABLE)
+                ->available()
                 ->count(),
             'scans_today' => RfidScanLog::query()
                 ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['scan_time', 'created_at']))

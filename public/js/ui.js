@@ -235,13 +235,18 @@
         });
 
         if (focusable.length === 0) {
+            event.preventDefault();
+            open.querySelector('.drawer-panel').focus();
             return;
         }
 
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
 
-        if (event.shiftKey && document.activeElement === first) {
+        if (!open.contains(document.activeElement) || document.activeElement === open.querySelector('.drawer-panel')) {
+            event.preventDefault();
+            (event.shiftKey ? last : first).focus();
+        } else if (event.shiftKey && document.activeElement === first) {
             event.preventDefault();
             last.focus();
         } else if (!event.shiftKey && document.activeElement === last) {
@@ -401,6 +406,10 @@
                 node.title = `${item.label}: ${item.detail}`;
                 node.querySelector('.health-dot').className = `health-dot ${item.ok ? 'is-ok' : 'is-down'}`;
                 const detail = node.querySelector('[data-health-detail]');
+                const state = node.querySelector('[data-health-state]');
+                if (state) {
+                    state.textContent = item.ok ? 'OK' : 'Check';
+                }
                 if (detail) {
                     detail.textContent = `${item.ok ? 'OK' : 'Needs attention'}: ${item.detail}`;
                 }
@@ -507,7 +516,7 @@
         setLive: setLive,
         liveFetch: liveFetch,
         toast: toast,
-        openDrawer: function (id) { openDrawer(document.getElementById(id)); },
+        openDrawer: function (id, trigger) { openDrawer(document.getElementById(id), trigger); },
         closeDrawer: function (id) { closeDrawer(document.getElementById(id)); },
         formatDate: formatDate,
         formatTime: formatTime,

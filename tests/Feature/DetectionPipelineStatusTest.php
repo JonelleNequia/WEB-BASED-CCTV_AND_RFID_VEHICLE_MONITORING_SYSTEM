@@ -5,7 +5,7 @@ namespace Tests\Feature;
 use App\Models\User;
 use App\Support\CameraFiles;
 use App\Support\DetectionStatus;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
@@ -28,7 +28,7 @@ class DetectionPipelineStatusTest extends TestCase
 
     public function test_system_status_explains_each_gate_with_a_next_step(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         File::ensureDirectoryExists(CameraFiles::directory());

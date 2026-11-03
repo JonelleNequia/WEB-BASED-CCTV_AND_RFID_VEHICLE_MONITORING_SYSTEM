@@ -41,7 +41,7 @@
             $needsPlate = $record->plateNeedsReview();
             $needsDirection = $record->direction === 'UNKNOWN';
             $suggestions = $reviewService->suggestions($record);
-            $read = $record->plate_number ?: $record->ocr_plate_number;
+            $read = $record->ocr_plate_number ?: $record->plate_number;
             $why = match (true) {
                 $record->plate_status === \App\Models\VisitorRecord::PLATE_UNREADABLE => 'Plate unreadable',
                 $record->match_confidence === 'low' => 'Possible match',
@@ -74,6 +74,7 @@
 
                 <div class="review-facts">
                     <div class="review-reasons">
+                        <span class="field-help" data-registration-reason @if(!$record->registration_reason) hidden @endif>{{ $record->registration_reason }}</span>
                         @if ($why)<x-badge tone="warning" :label="$why" />@endif
                         @if ($needsDirection)<x-badge tone="warning" label="Direction unknown" />@endif
                     </div>
@@ -82,7 +83,7 @@
                         <div><dt>Gate</dt><dd>{{ $gateLabel($record->gate) }}</dd></div>
                         <div><dt>Direction</dt><dd data-review-direction>{{ $needsDirection ? 'Unknown' : $record->direction }}</dd></div>
                         <div><dt>Time</dt><dd><x-datetime :value="$record->seen_at" /></dd></div>
-                        <div><dt>Vehicle</dt><dd>{{ collect([$record->vehicle_color, $record->vehicle_type])->filter()->implode(' ') ?: '—' }}</dd></div>
+                        <div><dt>Vehicle</dt><dd>{{ $record->display_vehicle_type }}</dd></div>
                         <div><dt>Plate profile</dt><dd>
                             @if ($record->plateProfile)
                                 <a href="{{ route('visitors.profiles.show', $record->plateProfile) }}">{{ $record->plateProfile->plate_number }}</a>
@@ -109,7 +110,7 @@
                         @endif
                         <div class="review-inline">
                             <label class="sr-only" for="review-plate-{{ $record->id }}-input">Plate of record #{{ $record->id }}</label>
-                            <input id="review-plate-{{ $record->id }}-input" type="text" name="plate" value="{{ $record->suggestedProfile?->plate_number ?: $read }}" list="review-plate-options" placeholder="ABC 1234" maxlength="30" autocomplete="off" data-review-plate-input>
+                            <input id="review-plate-{{ $record->id }}-input" type="text" name="plate" value="{{ $record->suggestedProfile?->plate_number ?: $read }}" list="review-plate-options" placeholder="ABC 1234" maxlength="30" autocomplete="off" data-review-plate-input data-normalize-plate>
                             <button type="submit" name="action" value="correct_plate" class="button button-primary button-sm" data-review-enter>Save plate</button>
                         </div>
                         <div class="review-buttons">
@@ -128,7 +129,8 @@
 
                     <div class="review-section review-inline">
                         <label class="review-label" for="review-name-{{ $record->id }}">Name</label>
-                        <input id="review-name-{{ $record->id }}" type="text" name="name" value="{{ $record->plateProfile?->owner_name }}" maxlength="120" placeholder="e.g. Juan Dela Cruz (delivery)" autocomplete="off" data-review-name-input>
+                        <input id="review-name-{{ $record->id }}" type="text" name="name" value="{{ $record->plateProfile?->owner_name }}" placeholder="e.g. Ma. José Dela Cruz" autocomplete="off" data-review-name-input aria-describedby="review-name-help-{{ $record->id }}">
+                        <span class="field-help" id="review-name-help-{{ $record->id }}">Optional. New names use letters, spaces, apostrophes, hyphens and periods (up to 120 characters). Existing organization names can be kept unchanged.</span>
                         <button type="submit" name="action" value="set_name" class="button button-secondary button-sm">Save name</button>
                     </div>
 

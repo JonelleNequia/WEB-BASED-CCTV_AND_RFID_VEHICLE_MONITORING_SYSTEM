@@ -127,7 +127,7 @@
                                 <td class="col-plate"><strong>{{ $row['plate'] }}</strong></td>
                                 <td class="col-owner">{{ $row['owner'] }}</td>
                                 <td class="col-category">{{ $row['category'] }}</td>
-                                <td class="col-type">{{ $row['type'] }}</td>
+                                <td class="col-type">{{ $row['type'] }}<div class="sub">{{ $row['type_source'] }}</div></td>
                                 <td class="col-direction direction-{{ $row['direction_key'] }}">{{ $row['direction'] }}</td>
                                 <td class="col-gate">{{ $row['gate'] }}</td>
                             </tr>

@@ -4,7 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Camera;
 use App\Models\User;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
@@ -18,7 +18,7 @@ class CalibrationSaveTest extends TestCase
      */
     public function test_calibration_endpoint_saves_mask_and_the_gate_direction(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $camera = Camera::query()->forRole('gate-1')->firstOrFail();
@@ -55,7 +55,7 @@ class CalibrationSaveTest extends TestCase
 
     public function test_calibration_heartbeat_keeps_detector_camera_runtime_active(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         File::delete(app(\App\Services\DetectorRuntimeService::class)->stationActivityPath());

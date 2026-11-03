@@ -96,6 +96,9 @@ class RfidScanController extends Controller
             ], $result->isDuplicate() || ! $result->isSaved() ? 200 : 201);
         }
 
+        if ($result->outcome === \App\Support\RfidIngestResult::IGNORED) {
+            return back();
+        }
         return back()->with(
             'status',
             $statusMessage

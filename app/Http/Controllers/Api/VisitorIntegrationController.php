@@ -27,7 +27,10 @@ class VisitorIntegrationController extends Controller
 
         // Multipart sends the vote details as a JSON string.
         if (is_string($request->input('ocr_details'))) {
-            $request->merge(['ocr_details' => json_decode($request->input('ocr_details'), true) ?: []]);
+            $details = json_decode($request->input('ocr_details'), true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($details)) {
+                $request->merge(['ocr_details' => $details]);
+            }
         }
 
         $validated = $request->validate([
@@ -35,10 +38,10 @@ class VisitorIntegrationController extends Controller
             'camera_role' => ['required', 'string', new ValidGate],
             'event_time' => ['required', 'date'],
             'plate_status' => ['required', 'in:read,unreadable'],
-            'plate_number' => ['nullable', 'required_if:plate_status,read', 'string', 'max:30'],
+            // Invalid OCR is evidence to review, not a sanitized registered key.
+            'plate_number' => ['nullable', 'string', 'max:30'],
             'plate_confidence' => ['nullable', 'numeric', 'between:0,1'],
             'best_guess' => ['nullable', 'string', 'max:30'],
-            'vehicle_color' => ['nullable', 'string', 'max:30'],
             'detected_vehicle_type' => ['nullable', 'string', 'max:50'],
             'ocr_details' => ['nullable', 'array'],
             'plate_image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:5120'],
@@ -54,6 +57,13 @@ class VisitorIntegrationController extends Controller
                 'plate_status' => $record->plate_status,
                 'plate_number' => $record->plate_number,
                 'plate_profile_id' => $record->plate_profile_id,
+                'registration_status' => $record->registration_status,
+                'registration_reason' => $record->registration_reason,
+                'vehicle_id' => $record->vehicle_id,
+                'vehicle_event_id' => $record->movementEvent?->id,
+                'vehicle_type' => $record->display_vehicle_type,
+                'vehicle_type_source' => $record->vehicle_type_source_label,
+                'detected_vehicle_type' => data_get($record->ocr_details_json, \App\Services\VehicleTypeEvidenceService::KEY.'.raw'),
             ],
         ]);
     }

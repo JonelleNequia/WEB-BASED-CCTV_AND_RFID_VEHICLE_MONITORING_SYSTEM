@@ -22,8 +22,9 @@ class SaveCalibrationRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'camera_id' => ['required', 'integer', 'exists:cameras,id'],
+            'camera_id' => ['required', 'integer', \Illuminate\Validation\Rule::exists('cameras', 'id')->whereIn('camera_role', \App\Models\Gate::query()->retained()->pluck('code')->all())],
             'calibration_mask' => ['nullable', 'array', 'min:3'],
+            'calibration_mask.*' => ['array'],
             'calibration_mask.*.x' => ['required_with:calibration_mask', 'numeric', 'between:0,1'],
             'calibration_mask.*.y' => ['required_with:calibration_mask', 'numeric', 'between:0,1'],
             // ROI work: only the zone is drawn; the gate says whether a vehicle

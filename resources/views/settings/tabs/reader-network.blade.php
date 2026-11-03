@@ -48,12 +48,10 @@
     @endif
 </section>
 
-<section class="panel">
-    <div class="panel-header panel-header-modern">
-        <h2 class="panel-title">If the move does not work: NetModuleConfig</h2>
-    </div>
+<details class="panel settings-help">
+    <summary>If the move does not work: NetModuleConfig</summary>
     @include('settings.partials.netmodule-guide')
-</section>
+</details>
 
 <x-modal id="reader-move" title="Move the reader to this network" size="md">
     <p class="field-help">Reader of <strong data-reader-move-gate></strong></p>

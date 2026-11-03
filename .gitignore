@@ -39,3 +39,7 @@ __pycache__/
 /build/windows/cache/
 *.sqlite-wal
 *.sqlite-shm
+# Local provisioning handover/installation metadata, never source artifacts.
+**/first-admin.txt
+**/install-result.txt
+**/install.json

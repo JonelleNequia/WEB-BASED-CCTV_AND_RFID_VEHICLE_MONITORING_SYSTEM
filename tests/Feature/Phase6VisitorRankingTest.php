@@ -8,7 +8,7 @@ use App\Models\User;
 use App\Models\Vehicle;
 use App\Models\VisitorRecord;
 use App\Services\RfidIngestService;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -29,7 +29,7 @@ class Phase6VisitorRankingTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         Storage::fake('public');
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
@@ -72,6 +72,7 @@ class Phase6VisitorRankingTest extends TestCase
         $tag = RfidTag::query()->create(['uid' => 'NEW-VIS-TAG', 'status' => RfidTag::STATUS_AVAILABLE]);
         $this->actingAs($this->admin)
             ->post(route('vehicle-registry.store'), [
+                'registered_by' => 'Test Registrar',
                 'rfid_tag_id' => $tag->id,
                 'plate_number' => 'VIS 4321',
                 'vehicle_owner_name' => 'Supplier Driver',
@@ -116,7 +117,7 @@ class Phase6VisitorRankingTest extends TestCase
         $this->actingAs($this->admin)->get(route('visitors.index'))->assertOk()->assertSee('Registered vehicle · tag not read');
     }
 
-    public function test_adding_or_correcting_a_vehicle_with_a_known_plate_also_moves_its_history(): void
+    public function test_ordinary_registration_or_plate_edit_does_not_relink_earlier_passes(): void
     {
         $this->visits('ABC-1234', ['IN', 'IN']);
         $this->visits('XYZ-9876', ['IN']);
@@ -124,17 +125,18 @@ class Phase6VisitorRankingTest extends TestCase
         // Plain Add Vehicle with the same plate (typed differently).
         $tag = RfidTag::query()->create(['uid' => 'PLAIN-TAG', 'status' => RfidTag::STATUS_AVAILABLE]);
         $this->actingAs($this->admin)->post(route('vehicle-registry.store'), [
+            'registered_by' => 'Test Registrar',
             'rfid_tag_id' => $tag->id, 'plate_number' => 'abc1234', 'category' => 'faculty_staff', 'vehicle_type' => 'Car',
         ])->assertSessionHasNoErrors();
         $vehicle = Vehicle::query()->where('plate_number', 'ABC1234')->sole();
-        $this->assertSame(2, VisitorRecord::query()->where('vehicle_id', $vehicle->id)->count());
+        $this->assertSame(0, VisitorRecord::query()->where('vehicle_id', $vehicle->id)->count());
 
         // A vehicle's plate corrected to XYZ 9876 takes that plate's visit.
         $other = $this->registeredVehicle('XYZ 9870', 'OTHER-TAG');
         $this->actingAs($this->admin)->put(route('vehicle-registry.update', $other), [
             'rfid_tag_id' => $other->rfid_tag_id, 'plate_number' => 'XYZ 9876', 'category' => 'faculty_staff', 'vehicle_type' => 'Car',
         ])->assertSessionHasNoErrors();
-        $this->assertSame(1, VisitorRecord::query()->where('vehicle_id', $other->id)->count());
+        $this->assertSame(0, VisitorRecord::query()->where('vehicle_id', $other->id)->count());
     }
 
     /**

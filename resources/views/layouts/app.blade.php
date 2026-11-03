@@ -6,6 +6,7 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title', 'PHILCST Vehicle Monitoring')</title>
     <link rel="stylesheet" href="{{ asset('css/app.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/layout-settings.css') }}?v={{ filemtime(public_path('css/layout-settings.css')) }}">
     {{-- UI Phase 5: restore the collapsed sidebar before first paint (per browser). --}}
     <script>
         try {
@@ -43,7 +44,8 @@
         </div>
     </div>
 
-    <script src="{{ asset('js/ui.js') }}"></script>
+    <script src="{{ asset('js/ui.js') }}?v={{ filemtime(public_path('js/ui.js')) }}"></script>
     @stack('scripts')
+    <script src="{{ asset('js/plate-input.js') }}?v={{ filemtime(public_path('js/plate-input.js')) }}"></script>
 </body>
 </html>

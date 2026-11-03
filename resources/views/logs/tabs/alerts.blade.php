@@ -1,16 +1,17 @@
 {{--
     Activity Logs › Alerts: what needs a look. Anomalies (direction does not
-    fit, lost or disabled tag, inactive vehicle...) and unknown tags.
+    fit, disabled tag, inactive vehicle...) and unknown tags. Old lost-tag
+    alerts remain historical evidence; new lost reads are ignored.
     Unregistered visitors are normal traffic: see the Visitors page.
 --}}
-<x-stat-row>
-    <x-stat label="Anomalies Today" :value="$alertCounts['anomalies'] ?? 0" tone="danger" hint="Direction does not fit, lost or disabled tag" />
+<x-stat-row data-auto-update="summary">
+    <x-stat label="Anomalies Today" :value="$alertCounts['anomalies'] ?? 0" tone="danger" hint="Direction does not fit, disabled tag or inactive vehicle" />
     <x-stat label="Unknown Tags Today" :value="$alertCounts['unknown_tags'] ?? 0" hint="Tags that are not in the Registry" />
 </x-stat-row>
 
-<x-table title="Alerts" :paginator="$alerts" :empty="$alerts->isEmpty()" empty-title="No alerts" empty-text="Anomalies and unknown tags appear here.">
+<x-table data-auto-table title="Alerts" :paginator="$alerts" :empty="$alerts->isEmpty()" :empty-title="array_filter($filters, fn ($value) => filled($value)) ? 'No alerts match these filters.' : 'No alerts'" empty-text="Anomalies and unknown tags appear here.">
     <x-slot:filters>
-        <form method="GET" action="{{ route('logs.index') }}" class="form-grid filter-grid">
+        <form method="GET" action="{{ route('logs.index') }}" class="form-grid filter-grid" data-auto-filter>
             <input type="hidden" name="tab" value="alerts">
             <div class="field">
                 <label for="alert_type">Show</label>
@@ -26,8 +27,8 @@
             </div>
             <div class="field field-actions">
                 <div class="button-row">
-                    <button type="submit" class="button button-secondary">Filter</button>
-                    <a href="{{ route('logs.index', ['tab' => 'alerts']) }}" class="button button-secondary">Reset</a>
+                    <noscript><button type="submit" class="button button-secondary">Filter</button></noscript>
+                    <a href="{{ route('logs.index', ['tab' => 'alerts']) }}" class="button button-secondary" data-auto-reset>Reset</a>
                 </div>
             </div>
         </form>

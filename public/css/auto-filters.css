@@ -1,0 +1,21 @@
+[data-auto-list] { display: contents; }
+.auto-filter-feedback {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .65rem;
+    margin: 0;
+    font-size: .85rem;
+    color: var(--muted, #64748b);
+}
+[data-auto-state="error"] [data-auto-status] { color: #b91c1c; }
+[data-auto-state="loading"] [data-auto-update="results"] { opacity: .65; }
+[data-auto-export][aria-disabled="true"] { opacity: .55; cursor: progress; }
+[data-auto-retry][hidden], [data-auto-live][hidden] { display: none; }
+
+/* Keep the existing direct-child print layout through the list scope. */
+@media print {
+    body.app-body .page-content > [data-auto-list] { display: contents !important; }
+    [data-auto-list] > :not(.printable-report-panel):not(.event-log-print-sheet),
+    body.is-printing-event-log [data-auto-list] > :not(.event-log-print-sheet) { display: none !important; }
+}

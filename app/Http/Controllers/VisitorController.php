@@ -47,7 +47,7 @@ class VisitorController extends Controller
                 ? PlateProfile::query()->current()
                     ->with('vehicle')
                     ->withCount(['records as entries_count' => fn ($query) => $query->active()->where('direction', 'IN')])
-                    ->when(filled($filters['q'] ?? null), fn (Builder $query) => $query->where('plate_key', 'like', '%'.PlateNumber::key($filters['q']).'%'))
+                    ->when(filled($filters['q'] ?? null), fn (Builder $query) => PlateNumber::search($query, ['plate_number', 'plate_key'], $filters['q']))
                     // UI Phase 4: most entries first by default; "recent" = last seen first;
                     // "entries" = Phase 6 Visitor Ranking (not registered).
                     ->when(($filters['sort'] ?? '') === 'entries', fn (Builder $query) => $query->whereNull('vehicle_id'))
@@ -62,6 +62,7 @@ class VisitorController extends Controller
                 ? PlateProfile::query()->current()->orderBy('plate_number')->get(['id', 'plate_number', 'visit_count'])
                 : collect(),
             'gates' => Gate::options(),
+            'historicalGates' => Gate::historicalOptions(),
             // ROI work: registered records the camera could not tell (saved before Phase A's state fallback).
             'review' => $tab === 'review' ? $this->directionUnknown() : null,
             // Gate direction work, Phase D: the Review cards (plate to check, unknown direction).
@@ -72,7 +73,8 @@ class VisitorController extends Controller
                 : collect(),
             'reviewLog' => $tab === 'review' ? $reviewService->recent() : collect(),
             'reviewCount' => $reviewService->count()
-                + VehicleEvent::query()->where('event_type', VehicleEvent::TYPE_UNKNOWN)->whereNotNull('vehicle_id')->count(),
+                + VehicleEvent::query()->where('event_type', VehicleEvent::TYPE_UNKNOWN)->whereNotNull('vehicle_id')
+                    ->where('event_status', VehicleEvent::STATUS_COMPLETED)->count(),
         ]);
     }
 
@@ -88,16 +90,17 @@ class VisitorController extends Controller
     {
         // Gate direction work, Phase D: unregistered records are Review cards now.
         $registered = VehicleEvent::query()->where('event_type', VehicleEvent::TYPE_UNKNOWN)->whereNotNull('vehicle_id')
-            ->with(['vehicle', 'rfidScanLog.vehicleCrossing'])->latest('event_time')->limit(200)->get()
+            ->where('event_status', VehicleEvent::STATUS_COMPLETED)
+            ->with(['vehicle', 'rfidScanLog.vehicleCrossing', 'visitorRecord.crossing'])->latest('event_time')->limit(200)->get()
             ->map(fn (VehicleEvent $event): array => [
                 'key' => 'event-'.$event->id,
                 'time' => $event->event_time,
-                'gate' => $event->rfidScanLog?->scan_location,
+                'gate' => $event->rfidScanLog?->scan_location ?? $event->visitorRecord?->gate,
                 'plate' => $event->plate_text ?: $event->vehicle?->plate_number ?: 'No plate',
                 'who' => 'Registered · '.($event->vehicle?->vehicle_owner_name ?: $event->vehicle?->owner_name ?: 'owner not set'),
-                'snapshot_url' => $event->rfidScanLog?->vehicleCrossing?->snapshot_url,
-                'plate_image_url' => null,
-                'reason' => $event->rfidScanLog?->vehicleCrossing?->direction_reason,
+                'snapshot_url' => $event->rfidScanLog?->vehicleCrossing?->snapshot_url ?? $event->visitorRecord?->snapshot_url,
+                'plate_image_url' => $event->visitorRecord?->plate_image_url,
+                'reason' => $event->rfidScanLog?->vehicleCrossing?->direction_reason ?? $event->visitorRecord?->crossing?->direction_reason,
                 'url' => route('vehicle-events.direction', $event),
             ]);
 
@@ -145,9 +148,8 @@ class VisitorController extends Controller
             'gate' => ['required', 'string', new \App\Rules\ValidGate],
             'direction' => ['required', 'in:IN,OUT'],
             'seen_at' => ['required', 'date', 'before_or_equal:now'],
-            'plate_number' => ['nullable', 'string', 'max:30', 'regex:/^[A-Za-z0-9 -]+$/'],
-            'vehicle_type' => ['nullable', 'string', 'max:50'],
-            'vehicle_color' => ['nullable', 'string', 'max:30'],
+            'plate_number' => ['nullable', 'string', 'max:30', 'regex:/^[A-Za-z0-9 -]+$/', new \App\Rules\PlateIdentifier(20)],
+            'vehicle_type' => ['nullable', 'string', 'max:50', new \App\Rules\ValidVehicleType],
             'note' => ['nullable', 'string', 'max:200'],
             'snapshot' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
         ], ['plate_number.regex' => 'Use letters, digits, spaces or a dash.']);
@@ -161,15 +163,12 @@ class VisitorController extends Controller
     public function correctPlate(Request $request, VisitorRecord $visitorRecord, VisitorRecordService $service): RedirectResponse
     {
         $validated = $request->validate([
-            'plate_number' => ['nullable', 'required_unless:unreadable,1', 'string', 'max:30', 'regex:/^[A-Za-z0-9 -]+$/'],
+            'plate_number' => ['nullable', 'required_unless:unreadable,1', 'string', 'max:30', 'regex:/^[A-Za-z0-9 -]+$/', new \App\Rules\PlateIdentifier(20, $visitorRecord->plate_number)],
             'unreadable' => ['nullable', 'in:0,1'],
         ], ['plate_number.regex' => 'Use letters, digits, spaces or a dash.']);
 
         $plate = ($validated['unreadable'] ?? '0') === '1' ? null : $validated['plate_number'];
-        $before = $visitorRecord->plate_number ?: $visitorRecord->plate_status.($visitorRecord->ocr_plate_number ? ' (guess '.$visitorRecord->ocr_plate_number.')' : '');
         $record = $service->correctPlate($visitorRecord, $plate, $request->user());
-        // Gate direction work, Phase D: in the Review audit log too.
-        app(\App\Services\VisitorReviewService::class)->log($record, $plate === null ? 'no_plate' : 'correct_plate', $before, $record->plate_number, $request->user());
 
         $message = $plate === null
             ? "Record #{$record->id} marked as plate unreadable."
@@ -192,10 +191,13 @@ class VisitorController extends Controller
     {
         $validated = $request->validate([
             'action' => ['required', 'string', 'max:40'],
-            'plate' => ['nullable', 'string', 'max:30'],
+            'plate' => ['nullable', 'string', 'max:30', new \App\Rules\PlateIdentifier(20, $visitorRecord->plate_number)],
             'profile_id' => ['nullable', 'integer'],
             'direction' => ['nullable', 'in:IN,OUT'],
-            'name' => ['nullable', 'string', 'max:120'],
+            'name' => ['nullable', 'string', \Illuminate\Validation\Rule::when(
+                ! is_string($request->input('name')) || \App\Rules\PersonalName::normalize($request->input('name')) !== \App\Rules\PersonalName::normalize($visitorRecord->plateProfile?->owner_name ?? ''),
+                'max:120'
+            )],
             'reason' => ['nullable', 'string', 'max:40'],
         ]);
         [$action, $argument] = array_pad(explode(':', $validated['action'], 2), 2, null);
@@ -219,7 +221,7 @@ class VisitorController extends Controller
      */
     public function correctType(Request $request, VisitorRecord $visitorRecord, VisitorRecordService $service): RedirectResponse
     {
-        $validated = $request->validate(['vehicle_type' => ['required', \Illuminate\Validation\Rule::in(\App\Support\VehicleType::TYPES)]]);
+        $validated = $request->validate(['vehicle_type' => ['required', 'string', 'max:50', new \App\Rules\ValidVehicleType]]);
         $record = $service->correctType($visitorRecord, $validated['vehicle_type'], $request->user());
 
         return back()->with('status', "Record #{$record->id} is now a {$record->vehicle_type}.");
@@ -265,9 +267,7 @@ class VisitorController extends Controller
             ->when(filled($filters['gate'] ?? null), fn (Builder $query) => $query->where('gate', $filters['gate']))
             ->when(filled($filters['plate_status'] ?? null), fn (Builder $query) => $query->where('plate_status', $filters['plate_status']))
             ->when(filled($filters['q'] ?? null), function (Builder $query) use ($filters): void {
-                $key = '%'.PlateNumber::key($filters['q']).'%';
-                $query->where(fn (Builder $inner) => $inner->where('plate_key', 'like', $key)
-                    ->orWhereRaw("replace(replace(coalesce(ocr_plate_number, ''), ' ', ''), '-', '') like ?", [$key]));
+                PlateNumber::search($query, ['plate_number', 'ocr_plate_number'], $filters['q']);
             })
             ->latest('seen_at')
             ->latest('id');

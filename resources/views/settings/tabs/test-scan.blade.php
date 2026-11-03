@@ -27,6 +27,10 @@
     @php($selectedRegisteredTagId = (string) old('vehicle_rfid_tag_id', ''))
     @php($selectedRegisteredTag = $registeredTagOptions->first(fn ($option) => (string) $option['id'] === $selectedRegisteredTagId))
 
+    <div class="settings-preview-notice" role="note">
+        <strong>Test Scan · Preview only</strong>
+        <p class="field-help">Check a tag without creating a vehicle event, RFID scan or visitor record. Activity totals below describe existing records.</p>
+    </div>
     <x-stat-row>
         <x-stat label="Registered Vehicles" :value="$rfidStats['registered_vehicles'] ?? 0" />
         {{-- Phase 1: shared inside count (VehicleOccupancyService) --}}
@@ -38,7 +42,7 @@
                 hint="Anomalies and unknown tags today" />
     </x-stat-row>
 
-    {{-- Phase 4: today's anomalies and lost/disabled pass alerts. --}}
+    {{-- Existing historical alerts are retained; new lost UIDs are ignored. --}}
     @if ($attentionItems->isNotEmpty())
         <section class="panel attention-list">
             @foreach ($attentionItems as $item)
@@ -55,7 +59,7 @@
             <div class="panel-header">
                 <div>
                     <div class="panel-title-row">
-                        <h3>Scan RFID</h3>
+                        <h3>Check an RFID tag</h3>
                     </div>
                 </div>
             </div>
@@ -110,7 +114,7 @@
                     {{-- RFID only with a vehicle: a test scan is a preview. --}}
                     <strong>Preview only. Nothing is recorded.</strong>
                     <p>
-                        Shows whether the tag is registered, unknown or flagged. A tag is recorded only when the camera sees a vehicle cross the line
+                        Shows whether the tag is registered, unknown or flagged. A tag is recorded only when the camera sees a vehicle pass through the detection zone
                         (or "RFID only" while the camera is offline).
                     </p>
                 </div>
@@ -157,7 +161,7 @@
                     </div>
                 </div>
             @else
-                <x-empty-state title="No scan result yet" text="Record the first RFID scan to see the latest result here." />
+                <x-empty-state title="No scan result yet" text="Check a tag to preview its result. Nothing will be recorded." />
             @endif
         </section>
     </div>

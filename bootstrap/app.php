@@ -12,6 +12,10 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->prepend(\App\Http\Middleware\CaptureNameInput::class);
+        $middleware->append(\App\Http\Middleware\DiscardVehicleColor::class);
+        $middleware->append(\App\Http\Middleware\NormalizePlateInput::class);
+        $middleware->trimStrings(except: ['password', 'password_confirmation', 'current_password', 'code', 'registered_by', 'plate_number', 'plate_text', 'plate']);
         if (env('APP_ENV') === 'local') {
             $middleware->trustProxies(at: '*');
         }
@@ -24,8 +28,9 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Phase 3 (visitor model): close tag reads whose camera crossing never came.
         $middleware->appendToGroup('web', \App\Http\Middleware\FinalizePendingScans::class);
+        $middleware->appendToGroup('web', \App\Http\Middleware\EnsureAccountReady::class);
         $middleware->appendToGroup('api', \App\Http\Middleware\FinalizePendingScans::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->dontFlash(['code', 'current_password', 'password', 'password_confirmation']);
     })->create();

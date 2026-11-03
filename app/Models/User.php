@@ -34,6 +34,7 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'activation_hash',
     ];
 
     /**
@@ -46,6 +47,10 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'activation_expires_at' => 'datetime',
+            'password_changed_at' => 'datetime',
+            'session_version' => 'integer',
+            'password_policy_version' => 'integer',
         ];
     }
 
@@ -56,5 +61,4 @@ class User extends Authenticatable
     {
         return $this->role === self::ROLE_ADMIN;
     }
-
 }

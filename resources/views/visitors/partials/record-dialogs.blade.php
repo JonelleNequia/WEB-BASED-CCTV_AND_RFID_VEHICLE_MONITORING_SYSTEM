@@ -5,7 +5,7 @@
         @method('PATCH')
         <div class="field">
             <label for="visitor_plate_value">Plate number</label>
-            <input id="visitor_plate_value" type="text" name="plate_number" placeholder="ABC 1234" maxlength="30" autocomplete="off" data-visitor-value>
+            <input id="visitor_plate_value" type="text" name="plate_number" placeholder="ABC 1234" maxlength="30" autocomplete="off" data-visitor-value data-normalize-plate>
             <span class="field-help">Every visit of this plate is kept on its plate profile.</span>
         </div>
         <div class="button-row button-row-end">

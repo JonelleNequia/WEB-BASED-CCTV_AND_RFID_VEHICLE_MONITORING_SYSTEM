@@ -4,6 +4,17 @@
     menus rename, test or remove. Technical settings are in Advanced.
 --}}
 @php($lanProblem = $gateCards[0]['lan_problem'] ?? null)
+<p class="settings-intro">Configure each gate's camera, RFID reader and detection zone. Use Manage gate to rename, activate or remove it.</p>
+{{-- One form retains the existing all-gates activation validation. Controls
+     inside each management section associate with it using form="...". --}}
+<form id="gate-settings-form" method="POST" action="{{ route('settings.update') }}">
+    @csrf
+    @method('PUT')
+    <input type="hidden" name="section" value="gates">
+</form>
+@error('gates')<p class="field-error" role="alert">{{ $message }}</p>@enderror
+@error('gate')<p class="field-error" role="alert">{{ $message }}</p>@enderror
+@error('confirm')<p class="field-error" role="alert">{{ $message }}</p>@enderror
 @if ($lanProblem)
     {{-- No camera or reader can answer: the LAN itself (said once, in plain words). --}}
     <div class="devices-banner" role="status" data-lan-problem>
@@ -16,11 +27,12 @@
         <article class="gate-setup-card" data-gate-card="{{ $gate['code'] }}">
             <header class="gate-setup-head">
                 <h2>{{ $gate['name'] }}</h2>
-                @unless ($gate['active'])
-                    <x-badge tone="neutral" label="Inactive" />
-                @endunless
+                <x-badge :tone="$gate['active'] ? 'success' : 'neutral'" :label="$gate['active'] ? 'Active' : 'Inactive'" />
                 <a href="{{ $gate['kiosk_url'] }}" target="_blank" rel="noopener" class="gate-setup-kiosk">Open kiosk</a>
             </header>
+            @unless ($gate['active'])
+                <p class="gate-inactive-note">Inactive gate · excluded from active monitoring. Device status is shown separately below.</p>
+            @endunless
 
             {{-- Camera --}}
             <section class="setup-part" data-part="camera">
@@ -47,8 +59,8 @@
                         </div>
                         <div class="setup-device-text">
                             <strong>{{ $camera['name'] }}</strong>
-                            <span class="status-line"><span @class(['status-dot', 'is-online' => $camera['state'] === 'online', 'is-warning' => $camera['state'] === 'starting']) aria-hidden="true"></span>{{ $camera['line'] }}</span>
-                            @if ($camera['next_step'] !== '')
+                            <span class="status-line"><span @class(['status-dot', 'is-online' => $camera['state'] === 'online', 'is-warning' => $camera['state'] === 'starting']) aria-hidden="true"></span>{{ $lanProblem && str_contains($camera['line'], $lanProblem['line']) ? 'Offline · see the network warning above.' : $camera['line'] }}</span>
+                            @if ($camera['next_step'] !== '' && (! $lanProblem || $camera['next_step'] !== $lanProblem['next_step']))
                                 <span class="next-step">→ {{ $camera['next_step'] }}</span>
                             @endif
                             @if ($camera['lan_note'] ?? null)
@@ -118,8 +130,8 @@
                         </div>
                         <div class="setup-device-text">
                             <strong>{{ $reader['name'] }}</strong>
-                            <span class="status-line"><span @class(['status-dot', 'is-online' => $reader['state'] === 'online', 'is-warning' => $reader['state'] === 'starting']) aria-hidden="true"></span>{{ $reader['line'] }}</span>
-                            @if ($reader['next_step'] !== '')
+                            <span class="status-line"><span @class(['status-dot', 'is-online' => $reader['state'] === 'online', 'is-warning' => $reader['state'] === 'starting']) aria-hidden="true"></span>{{ $lanProblem && str_contains($reader['line'], $lanProblem['line']) ? 'Offline · see the network warning above.' : $reader['line'] }}</span>
+                            @if ($reader['next_step'] !== '' && (! $lanProblem || $reader['next_step'] !== $lanProblem['next_step']))
                                 <span class="next-step">→ {{ $reader['next_step'] }}</span>
                             @endif
                             @if ($reader['lan_note'] ?? null)
@@ -201,14 +213,33 @@
                     <a href="{{ $gate['zone']['setup_url'] }}" class="button {{ $gate['zone']['ready'] && $awaySet ? 'button-secondary' : 'button-primary' }}">{{ $gate['zone']['ready'] && $awaySet ? 'Edit' : 'Set up' }}</a>
                 </div>
             </section>
+            <details class="gate-management" @if ($errors->has('gates') || $errors->has('gates.'.$gate['code'].'.name') || $errors->has('gates.'.$gate['code'].'.is_active')) open @endif>
+                <summary>Manage {{ $gate['name'] }}</summary>
+                @include('settings.partials.gate-names', ['managedGates' => $gates->where('code', $gate['code'])])
+                <div class="gate-removal-area">
+                    @if ($gates->count() > 2)
+                        <form method="POST" action="{{ route('settings.gates.destroy', $gate['code']) }}" class="stack-form"
+                              data-confirm-title="Remove {{ $gate['name'] }}?" data-confirm-label="Remove gate"
+                              data-confirm="Remove {{ $gate['name'] }}? Monitoring will stop and its camera and reader assignments will be released. Devices, calibration and historical records will be kept.">
+                            @csrf
+                            @method('DELETE')
+                            <p class="field-help">Removal archives this gate and releases its camera and reader assignments. Devices, calibration and historical records are kept.</p>
+                            <label class="checkbox-row"><input type="checkbox" name="confirm" value="1" required> Confirm removal of {{ $gate['name'] }}</label>
+                            <button type="submit" class="button button-danger">Remove gate…</button>
+                        </form>
+                    @else
+                        <p class="field-help">At least two gates are required.</p>
+                    @endif
+                </div>
+            </details>
         </article>
     @endforeach
 
     {{-- Phase 1: another gate gets a kiosk, a camera slot and a reader slot. --}}
-    <form method="POST" action="{{ route('settings.gates.store') }}" class="gate-setup-add">
+    <form method="POST" action="{{ route('settings.gates.store') }}" class="gate-setup-add" id="add-gate">
         @csrf
         <label for="new_gate_name" class="sr-only">New gate name</label>
-        <input id="new_gate_name" type="text" name="name" placeholder="Gate {{ count($gateCards) + 1 }}" maxlength="100">
+        <input id="new_gate_name" type="text" name="name" placeholder="Gate {{ substr(\App\Models\Gate::nextCode(), 5) }}" maxlength="100">
         <button type="submit" class="add-device-button">+ Add gate</button>
     </form>
 </div>
@@ -216,6 +247,7 @@
 {{-- B2: the add-device wizard ("+ Add camera" / "+ Add reader"), drawn by public/js/add-device.js. --}}
 <x-modal id="add-device-modal" title="Add device" size="md">
     <div class="add-device" data-add-device-box aria-live="polite"></div>
+    <x-slot:footer><div data-add-device-footer></div></x-slot:footer>
 </x-modal>
 <script id="add-device-data" type="application/json">{!! json_encode([
     'indexUrl' => route('settings.devices.index'),
@@ -296,7 +328,7 @@
 @include('settings.partials.device-delete')
 
 @push('scripts')
-    <script src="{{ asset('js/gate-setup.js') }}"></script>
+    <script src="{{ asset('js/gate-setup.js') }}?v={{ filemtime(public_path('js/gate-setup.js')) }}"></script>
     <script src="{{ asset('js/reader-network.js') }}"></script>
-    <script src="{{ asset('js/add-device.js') }}"></script>
+    <script src="{{ asset('js/add-device.js') }}?v={{ filemtime(public_path('js/add-device.js')) }}"></script>
 @endpush

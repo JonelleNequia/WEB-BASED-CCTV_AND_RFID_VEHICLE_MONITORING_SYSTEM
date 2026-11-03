@@ -10,7 +10,7 @@ use App\Models\User;
 use App\Services\CameraProbeService;
 use App\Services\DeviceRegistryService;
 use App\Support\DeviceFiles;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
@@ -33,7 +33,7 @@ class PlugAndDetectDevicesTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         File::deleteDirectory(DeviceFiles::directory());
 

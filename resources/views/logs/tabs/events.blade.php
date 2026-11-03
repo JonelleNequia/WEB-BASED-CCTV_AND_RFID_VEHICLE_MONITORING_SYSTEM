@@ -23,7 +23,7 @@
     $hasMoreFilters = filled($filters['category'] ?? null) || filled($filters['event_type'] ?? null) || filled($filters['match_status'] ?? null) || filled($filters['vehicle_owner_name'] ?? null) || filled($filters['gate'] ?? null);
 @endphp
 
-<x-stat-row>
+<x-stat-row data-auto-update="summary">
     <x-stat :label="$selectedPeriodLabel" :value="$eventLogSummary['total']" hint="Records" data-log-summary="total" />
     <x-stat label="IN" :value="$eventLogSummary['entries']" data-log-summary="entries" />
     <x-stat label="OUT" :value="$eventLogSummary['exits']" data-log-summary="exits" />
@@ -31,9 +31,9 @@
     <x-stat label="RFID Only" :value="$eventLogSummary['rfid']" hint="Scans without a linked event" data-log-summary="rfid" />
 </x-stat-row>
 
-<x-table :paginator="$logs" class="printable-report-panel event-log-list-view">
+<x-table data-auto-table :paginator="$logs" class="printable-report-panel event-log-list-view">
     <x-slot:toolbar>
-        <div class="chip-group" role="group" aria-label="Log type">
+        <div class="chip-group" role="group" aria-label="Log type" data-auto-update="log-types">
             @foreach ($logFilterChips as $value => $label)
                 <a href="{{ route('logs.index', array_filter(array_merge($baseQuery, ['log_type' => $value, 'page' => null]), fn ($v) => filled($v))) }}"
                    @class(['chip', 'chip-brand' => $activeChip === $value, 'chip-soft' => $activeChip !== $value])
@@ -41,7 +41,7 @@
             @endforeach
         </div>
 
-        <div class="chip-group" role="group" aria-label="Timeframe">
+        <div class="chip-group" role="group" aria-label="Timeframe" data-auto-update="periods">
             @foreach ($periodLinks as $period => $link)
                 <a href="{{ $link['url'] }}"
                    @class(['chip', 'chip-brand' => $activePeriod === $period, 'chip-soft' => $activePeriod !== $period])>{{ $link['label'] }}</a>
@@ -55,7 +55,7 @@
                 <span class="menu-title">Vehicle Activity Report</span>
                 @foreach (\App\Http\Controllers\VehicleEventController::PRINT_REPORTS as $reportKey => $reportLabel)
                     <a href="{{ route('logs.print', $printQuery + ['report' => $reportKey, 'autoprint' => 1]) }}" class="menu-link" role="menuitem"
-                       target="_blank" rel="noopener" data-event-log-report-print="{{ $reportKey }}">{{ $reportLabel }}</a>
+                       target="_blank" rel="noopener" data-auto-export data-auto-link="report-{{ $reportKey }}" data-event-log-report-print="{{ $reportKey }}">{{ $reportLabel }}</a>
                 @endforeach
                 <label class="menu-check">
                     <input type="checkbox" data-event-log-print-snapshots>
@@ -63,15 +63,13 @@
                 </label>
             </div>
         </details>
-        <a href="{{ route('vehicle-events.export.csv', $csvQuery) }}" class="button button-secondary button-sm">CSV</a>
+        <a href="{{ route('vehicle-events.export.csv', $csvQuery) }}" class="button button-secondary button-sm" data-auto-export data-auto-link="csv">CSV</a>
     </x-slot:toolbar>
 
     <x-slot:filters>
-        <form method="GET" action="{{ route('logs.index') }}" class="log-filter-form">
+        <form method="GET" action="{{ route('logs.index') }}" class="log-filter-form" data-auto-filter>
             <input type="hidden" name="tab" value="events">
-            @if ($activeChip !== '')
-                <input type="hidden" name="log_type" value="{{ $activeChip }}">
-            @endif
+            <input type="hidden" name="log_type" value="{{ $activeChip }}">
 
             <div class="field">
                 <label for="plate_text">Plate</label>
@@ -97,8 +95,8 @@
             </div>
 
             <div class="log-filter-actions">
-                <button type="submit" class="button button-primary button-sm">Apply</button>
-                <a href="{{ route('logs.index') }}" class="button button-secondary button-sm">Reset</a>
+                <noscript><button type="submit" class="button button-primary button-sm">Apply</button></noscript>
+                <a href="{{ route('logs.index') }}" class="button button-secondary button-sm" data-auto-reset>Reset</a>
             </div>
 
             <details class="more-filters" @if ($hasMoreFilters) open @endif>
@@ -146,7 +144,7 @@
             <th>Time</th>
             <th><span class="sr-only">Snapshot</span></th>
             <th>Plate</th>
-            <th>Vehicle / Color</th>
+            <th>Vehicle</th>
             <th>Movement</th>
             <th>Log Type</th>
             <th>Gate</th>
@@ -187,12 +185,12 @@
 
 <section class="event-log-print-sheet" data-event-log-print-sheet hidden></section>
 
-<script id="event-log-modal-data" type="application/json">{!! json_encode($logs->getCollection()->values(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
+<script id="event-log-modal-data" type="application/json" data-auto-update="modal-data">{!! json_encode($logs->getCollection()->values(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 <script id="event-log-realtime-data" type="application/json">{!! json_encode([
     // UI Phase 4: page 1 refreshes itself with the same filters.
     'refreshUrl' => (int) request('page', 1) === 1 ? route('logs.index', $baseQuery) : null,
 ], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 
 @push('scripts')
-    <script src="{{ asset('js/activity-logs.js') }}"></script>
+    <script src="{{ asset('js/activity-logs.js') }}?v={{ filemtime(public_path('js/activity-logs.js')) }}"></script>
 @endpush

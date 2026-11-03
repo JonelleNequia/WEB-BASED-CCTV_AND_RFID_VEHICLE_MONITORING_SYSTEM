@@ -8,6 +8,7 @@ use App\Models\GuestVehicleObservation;
 use App\Models\Gate;
 use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
+use App\Models\VisitorRecord;
 use App\Support\DisplayTime;
 use App\Support\MovementRow;
 use App\Support\VehicleCategory;
@@ -89,10 +90,11 @@ class RealtimeLogController extends Controller
 
         return $eventLogs
             ->concat($guestLogs)
+            ->concat($this->visitorRows(null, $limit, true))
             ->concat($this->tagOnlyRows(null, $limit))
             ->sortByDesc('sort_time')
             ->take($limit)
-            // UI Phase 3 color + UI Phase 4 short form (IN / OUT, category).
+            // UI Phase 4 short form (IN / OUT, category).
             ->map(fn (array $log): array => MovementRow::finish($log))
             ->values()
             ->all();
@@ -132,6 +134,7 @@ class RealtimeLogController extends Controller
         // UI Phase 4: tag reads with no IN/OUT (yet) too, as on the kiosk.
         return $eventLogs
             ->concat($guestLogs)
+            ->concat($this->visitorRows($location, $limit, true))
             ->concat($this->tagOnlyRows($location, $limit))
             ->sortByDesc('sort_time')
             ->take($limit)
@@ -161,7 +164,7 @@ class RealtimeLogController extends Controller
             ->limit($limit)
             ->get()
             ->map(function (RfidScanLog $scan): array {
-                $unknown = in_array($scan->verification_status, ['unknown_tag', 'unassigned_tag'], true);
+                $unknown = $scan->isUnknownTag() || $scan->verification_status === 'unassigned_tag';
                 $flagged = ! $unknown && $scan->is_anomaly && ! $scan->correlated_vehicle_event_id;
 
                 return [
@@ -176,7 +179,8 @@ class RealtimeLogController extends Controller
                     'anomaly' => $flagged,
                     'plate_number' => $scan->vehicle?->plate_number ?: $scan->tag_uid,
                     'owner_name' => $scan->vehicle?->owner_name ?: 'N/A',
-                    'vehicle_type' => $scan->vehicle?->vehicle_type ?: 'Vehicle',
+                    'vehicle_type' => $scan->display_vehicle_type,
+                    'vehicle_type_source' => $scan->vehicle_type_source_label,
                     'category_label' => $unknown ? 'Unknown tag' : ($flagged ? $scan->verificationLabel : VehicleCategory::label($scan->vehicle?->category)),
                     'camera_role' => null,
                     'scan_location' => $scan->scan_location,
@@ -218,6 +222,7 @@ class RealtimeLogController extends Controller
 
         return $eventLogs
             ->concat($guestLogs)
+            ->concat($this->visitorRows(null, $limit))
             ->sortByDesc('sort_time')
             ->take($limit)
             ->values();
@@ -226,6 +231,9 @@ class RealtimeLogController extends Controller
     protected function unmirroredGuestObservationsQuery()
     {
         return GuestVehicleObservation::query()
+            ->notConverted()
+            ->where(fn ($query) => $query->whereNull('external_event_key')
+                ->orWhereNotIn('external_event_key', VisitorRecord::query()->select('external_event_key')))
             ->where(function ($query): void {
                 $query->whereNull('external_event_key')
                     ->orWhereNotExists(function ($subquery): void {
@@ -234,6 +242,30 @@ class RealtimeLogController extends Controller
                             ->whereColumn('vehicle_events.external_event_key', 'guest_vehicle_observations.external_event_key')
                             ->whereIn('vehicle_events.event_origin', ['guest_cctv', 'guest_manual']);
                     });
+            });
+    }
+
+    protected function visitorRows(?string $gate, int $limit, bool $station = false): Collection
+    {
+        return VisitorRecord::query()->active()->with(['vehicle', 'plateProfile'])
+            ->withoutMovementEvent()
+            ->whereDoesntHave('crossing.rfidScanLog.correlatedVehicleEvent', fn ($query) => $query->where('event_status', VehicleEvent::STATUS_COMPLETED))
+            ->when($gate !== null, fn ($query) => $query->where('gate', $gate))
+            ->latest('created_at')->latest('id')->limit($limit)
+            ->get()->map(function (VisitorRecord $record) use ($station): array {
+                $row = \App\Support\VisitorRecordLog::fields($record);
+                if (! $station) {
+                    return $row;
+                }
+
+                return array_replace($row, [
+                    'id' => 'visitor-'.$record->id, 'registered' => $record->isRegisteredAtOccurrence(),
+                    'camera_role' => $record->gate, 'scan_location' => $record->gate,
+                    'direction' => MovementRow::direction($record->direction),
+                    'verification_label' => $row['match_label'], 'status' => $row['status_label'],
+                    'resulting_state' => $row['state_label'], 'entries_today_count' => 0, 'exits_today_count' => 0,
+                    'event_time' => $record->seen_at?->toIso8601String(),
+                ]);
             });
     }
 
@@ -246,7 +278,6 @@ class RealtimeLogController extends Controller
             'id' => $observation->id,
             'plate_number' => $observation->plate_number ?: $observation->plate_text,
             'vehicle_type' => $observation->vehicle_type,
-            'vehicle_color' => $observation->vehicle_color,
             'location' => $observation->location,
             'location_label' => Gate::labelFor($observation->location),
             'observed_at' => $observation->observed_at?->format('Y-m-d\TH:i'),
@@ -280,6 +311,7 @@ class RealtimeLogController extends Controller
         return [
             'id' => $event->id,
             'record_type' => 'vehicle_event',
+            'visitor_record_id' => $event->visitor_record_id,
             'event_type' => $event->event_type,
             // ROI work, Phase 3: the kiosk's "Registered: plate" result, and
             // the detector pass this record finished ("checking RFID" ends).
@@ -288,6 +320,8 @@ class RealtimeLogController extends Controller
             'plate_number' => $event->plate_text ?: $vehicle?->plate_number ?: 'No plate',
             'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',
             'vehicle_type' => $event->display_vehicle_type,
+            'vehicle_type_source' => $event->vehicle_type_source_label,
+            'detected_vehicle_type' => $event->detected_vehicle_type,
             'camera_role' => $event->camera?->camera_role,
             'scan_location' => $scanLog?->scan_location,
             'verification_label' => $scanLog?->verificationLabel
@@ -322,7 +356,8 @@ class RealtimeLogController extends Controller
             'pass_key' => $observation->external_event_key,
             'plate_number' => $observation->plate_number ?: $observation->plate_text ?: 'No plate',
             'owner_name' => 'N/A',
-            'vehicle_type' => $observation->vehicle_type ?: 'Vehicle',
+            'vehicle_type' => $observation->display_vehicle_type,
+            'vehicle_type_source' => $observation->vehicle_type_source_label,
             'camera_role' => $observation->camera?->camera_role,
             'scan_location' => $observation->location,
             'verification_label' => 'Unregistered Visitor',
@@ -348,9 +383,11 @@ class RealtimeLogController extends Controller
         $time = $event->event_time;
 
         return [
+            ...($event->visitor_record_id ? ['log_type' => 'registered', 'log_type_label' => 'Registered', 'is_guest' => false] : []),
             'record_type' => 'vehicle_event',
             'record_type_label' => 'Vehicle Event',
             'id' => $event->id,
+            'visitor_record_id' => $event->visitor_record_id,
             'detail_url' => route('vehicle-events.show', $event),
             'export_url' => route('vehicle-events.export.csv', [
                 'record_type' => 'vehicle_event',
@@ -360,7 +397,8 @@ class RealtimeLogController extends Controller
             'plate_number' => $event->plate_text ?: $vehicle?->plate_number ?: 'No plate',
             'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',
             'vehicle_type' => $event->display_vehicle_type,
-            'vehicle_color' => $event->vehicle_color ?: 'N/A',
+            'vehicle_type_source' => $event->vehicle_type_source_label,
+            'detected_vehicle_type' => $event->detected_vehicle_type,
             'category_label' => $this->displayCategory($event->vehicle_category ?: $vehicle?->category),
             'source_label' => $event->event_origin_label,
             'station_label' => $event->camera?->camera_name ?: ($event->roi_name ?: 'No camera linked'),
@@ -395,8 +433,8 @@ class RealtimeLogController extends Controller
             'event_type' => 'UNREGISTERED',
             'plate_number' => $observation->plate_number ?: $observation->plate_text ?: 'No plate',
             'owner_name' => 'N/A',
-            'vehicle_type' => $observation->vehicle_type ?: 'Vehicle',
-            'vehicle_color' => $observation->vehicle_color ?: 'N/A',
+            'vehicle_type' => $observation->display_vehicle_type,
+            'vehicle_type_source' => $observation->vehicle_type_source_label,
             'category_label' => \App\Support\VehicleCategory::LABELS[\App\Support\VehicleCategory::UNREGISTERED_VISITOR],
             'source_label' => $observation->observation_source === 'cctv' ? 'Camera · no registered tag' : 'Manual · no registered tag',
             'station_label' => Gate::labelFor($observation->location),

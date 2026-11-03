@@ -20,7 +20,7 @@ final class RfidIngestResult
     /** Recorded, but needs review (direction mismatch, unassigned tag, ...). */
     public const ANOMALY = 'anomaly';
 
-    /** Lost or disabled tag: shown as an alert on the dashboard. */
+    /** Disabled tag: shown as an alert on the dashboard. Lost UIDs are ignored. */
     public const ALERT = 'alert';
 
     /** Guest-category vehicle: handled as a guest observation. */
@@ -34,6 +34,8 @@ final class RfidIngestResult
 
     /** RFID only with a vehicle: the read waits in the buffer; nothing saved. */
     public const BUFFERED = 'buffered';
+
+    public const IGNORED = 'ignored';
 
     /** Settings › Test Scan: what the tag is; nothing saved. */
     public const PREVIEW = 'preview';

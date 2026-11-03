@@ -41,10 +41,7 @@
                     @endif
                 </div>
                 <div class="table-subtext">
-                    {{-- A2: the vehicle type (Car / Motorcycle / Truck/Bus). --}}
-                    @if ($record->vehicle_type)
-                        <span data-vehicle-type>{{ \App\Support\VehicleType::category($record->vehicle_type) ?? $record->vehicle_type }}</span> ·
-                    @endif
+                    <span data-vehicle-type title="{{ $record->vehicle_type_source_label }}">{{ $record->display_vehicle_type }}</span> ·
                     @switch($record->plate_status)
                         @case('read') Camera{{ $record->plate_confidence !== null ? ' · '.number_format($record->plate_confidence * 100).'%' : '' }} @break
                         @case('corrected') {{ $record->source === 'manual' ? 'Typed by' : 'Corrected by' }} {{ $record->corrector?->name ?? 'a guard' }}{{ $record->ocr_plate_number && $record->ocr_plate_number !== $record->plate_number ? ' · camera read '.$record->ocr_plate_number : '' }} @break
@@ -62,9 +59,13 @@
                         · Recorded by hand
                     @endif
                 </div>
-                @if ($record->vehicle)
+                @if ($record->classificationCategory() === 'review')
+                    <div class="table-subtext">Review · {{ $record->registration_reason ?: 'Check the plate.' }}</div>
+                @elseif ($record->isRegisteredAtOccurrence())
+                    <div class="table-subtext">Registered vehicle · tag not read</div>
+                @elseif ($record->vehicle)
                     {{-- Phase 6: the plate is in the Registry (registered later, or its tag was not read). --}}
-                    <div class="table-subtext">Registered vehicle{{ $record->seen_at && $record->plateProfile?->registered_at && $record->seen_at->lt($record->plateProfile->registered_at) ? ' (visit before registration)' : ' · tag not read' }}</div>
+                    <div class="table-subtext">Unregistered at occurrence · vehicle registered later</div>
                 @endif
                 @if ($record->tag_uid)
                     {{-- RFID only with a vehicle: its tag was read but is not in the registry. --}}

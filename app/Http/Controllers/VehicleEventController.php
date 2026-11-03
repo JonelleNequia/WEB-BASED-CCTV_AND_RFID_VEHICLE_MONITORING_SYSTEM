@@ -65,7 +65,7 @@ class VehicleEventController extends Controller
             'logFilterChips' => self::LOG_FILTER_CHIPS,
             'periodOptions' => $this->periodOptions(),
             'categoryOptions' => $this->categoryOptions(),
-            'gateOptions' => \App\Models\Gate::options(),
+            'gateOptions' => \App\Models\Gate::historicalOptions(),
         ]);
     }
 
@@ -94,7 +94,6 @@ class VehicleEventController extends Controller
                 'Plate',
                 'Owner',
                 'Vehicle',
-                'Color',
                 'Category',
                 'Gate',
                 'State',
@@ -102,6 +101,7 @@ class VehicleEventController extends Controller
                 'Status',
                 'RFID Tag',
                 'Direction From',
+                'Vehicle Type Source',
             ]);
 
             $rows->each(function (array $log) use ($handle): void {
@@ -112,7 +112,6 @@ class VehicleEventController extends Controller
                     $log['plate_number'],
                     $log['owner_name'],
                     $log['vehicle_type'],
-                    $log['vehicle_color'],
                     $log['category_label'] ?? '',
                     $log['station_label'],
                     $log['state_label'],
@@ -120,6 +119,7 @@ class VehicleEventController extends Controller
                     $log['status_label'],
                     $log['rfid_tag_uid'],
                     $log['direction_source_label'] ?? '',
+                    $log['vehicle_type_source'] ?? 'Historical record',
                 ]);
             });
 
@@ -181,10 +181,9 @@ class VehicleEventController extends Controller
 
         return view('vehicle-events.create', [
             'eventType' => $eventType,
-            'cameras' => Camera::query()->orderBy('camera_name')->get(),
-            'rois' => Roi::query()->with('camera')->orderBy('roi_name')->get(),
+            'cameras' => Camera::query()->operational()->orderBy('camera_name')->get(),
+            'rois' => Roi::query()->whereHas('camera', fn ($query) => $query->operational())->with('camera')->orderBy('roi_name')->get(),
             'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
-            'vehicleColors' => $vehicleRegistryService->vehicleColors(),
         ]);
     }
 
@@ -218,7 +217,6 @@ class VehicleEventController extends Controller
                 'activeSession',
             ]),
             'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
-            'vehicleColors' => $vehicleRegistryService->vehicleColors(),
         ]);
     }
 
@@ -375,6 +373,7 @@ class VehicleEventController extends Controller
             'owner' => $known($log['owner_name'] ?? null),
             'category' => $known($log['category_label'] ?? null),
             'type' => $known($log['vehicle_type'] ?? null),
+            'type_source' => $log['vehicle_type_source'] ?? 'Historical record',
             'direction' => $direction.(($log['direction_source'] ?? null) === \App\Support\DirectionSource::STATE ? ' (from vehicle state)' : ''),
             'direction_key' => $directionKey,
             'gate' => $known($log['station_label'] ?? null),
@@ -482,12 +481,10 @@ class VehicleEventController extends Controller
             ->withoutHiddenGuestCopies(visitorCopies: true)
             ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
             ->when($request->filled('plate_text'), function ($query) use ($request): void {
-                $plate = '%'.$request->string('plate_text')->trim().'%';
-
+                $plate = $request->string('plate_text')->value();
                 $query->where(function ($query) use ($plate): void {
-                    $query->where('plate_text', 'like', $plate)
-                        ->orWhere('plate_number', 'like', $plate)
-                        ->orWhereHas('vehicle', fn ($vehicleQuery) => $vehicleQuery->where('plate_number', 'like', $plate));
+                    \App\Support\PlateNumber::search($query, ['plate_text', 'plate_number'], $plate);
+                    $query->orWhereHas('vehicle', fn ($vehicleQuery) => \App\Support\PlateNumber::search($vehicleQuery, ['plate_number'], $plate));
                 });
             })
             ->when($request->filled('event_type'), function ($query) use ($request): void {
@@ -582,7 +579,12 @@ class VehicleEventController extends Controller
             ->map(fn (GuestVehicleObservation $observation): array => $this->guestLogPayload($observation));
         $rfidOnlyLogs = $this->filteredRfidOnlyLogs($request, $dateFrom, $dateUntil)
             ->get()
-            ->map(fn (RfidScanLog $scanLog): array => $this->rfidOnlyLogPayload($scanLog));
+            ->map(fn (RfidScanLog $scanLog): array => $this->rfidOnlyLogPayload($scanLog))
+            // Use the same effective classification as the row/export. Stale
+            // category text on an unknown scan cannot establish registration.
+            ->when($request->filled('category'), fn (Collection $logs) => $logs->where(
+                'category_label', VehicleCategory::label($request->string('category')->value())
+            ));
         $visitorLogs = $this->filteredVisitorLogs($request, $dateFrom, $dateUntil);
 
         return $eventLogs
@@ -693,12 +695,7 @@ class VehicleEventController extends Controller
                 });
             })
             ->when($request->filled('plate_text'), function ($query) use ($request): void {
-                $plate = '%'.$request->string('plate_text')->trim().'%';
-
-                $query->where(function ($query) use ($plate): void {
-                    $query->where('plate_number', 'like', $plate)
-                        ->orWhere('plate_text', 'like', $plate);
-                });
+                \App\Support\PlateNumber::search($query, ['plate_number', 'plate_text'], $request->string('plate_text')->value());
             })
             ->when($request->filled('event_type'), function ($query) use ($request): void {
                 if ($request->string('event_type')->upper()->value() !== 'GUEST') {
@@ -752,16 +749,6 @@ class VehicleEventController extends Controller
             ->when($request->filled('match_status'), function ($query): void {
                 $query->whereRaw('1 = 0');
             })
-            ->when($request->filled('category'), function ($query) use ($request): void {
-                $category = $request->string('category')->value();
-
-                // Phase 4: a category also matches its older stored values (Student -> Registered Visitor).
-                $values = \App\Support\VehicleCategory::storedValues($category);
-                $query->where(function ($query) use ($values): void {
-                    $query->whereIn('vehicle_category', $values)
-                        ->orWhereHas('vehicle', fn ($vehicleQuery) => $vehicleQuery->whereIn('category', $values));
-                });
-            })
             ->when($request->filled('vehicle_owner_name'), function ($query) use ($request): void {
                 $owner = '%'.$request->string('vehicle_owner_name')->trim().'%';
 
@@ -807,6 +794,7 @@ class VehicleEventController extends Controller
             'record_type' => 'vehicle_event',
             'record_type_label' => 'Vehicle Event',
             'id' => $event->id,
+            'visitor_record_id' => $event->visitor_record_id,
             'detail_url' => route('vehicle-events.show', $event),
             'export_url' => route('vehicle-events.export.csv', [
                 'record_type' => 'vehicle_event',
@@ -816,7 +804,8 @@ class VehicleEventController extends Controller
             'plate_number' => $event->plate_text ?: $vehicle?->plate_number ?: 'No plate',
             'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',
             'vehicle_type' => $event->display_vehicle_type,
-            'vehicle_color' => $event->vehicle_color ?: 'N/A',
+            'vehicle_type_source' => $event->vehicle_type_source_label,
+            'detected_vehicle_type' => $event->detected_vehicle_type,
             'category_label' => $this->displayCategory($event->vehicle_category ?: $vehicle?->category),
             'source_label' => $event->source_display_label,
             // Phase 7: the gate (reader or camera); the camera name only when there is no gate.
@@ -878,8 +867,8 @@ class VehicleEventController extends Controller
             'direction' => VehicleEvent::directionForEventType(VehicleEvent::eventTypeForDirection(data_get($observation->detection_metadata_json, 'direction'))),
             'plate_number' => $observation->plate_number ?: $observation->plate_text ?: 'No plate',
             'owner_name' => 'N/A',
-            'vehicle_type' => $observation->vehicle_type ?: 'Vehicle',
-            'vehicle_color' => $observation->vehicle_color ?: 'N/A',
+            'vehicle_type' => $observation->display_vehicle_type,
+            'vehicle_type_source' => $observation->vehicle_type_source_label,
             'category_label' => \App\Support\VehicleCategory::LABELS[\App\Support\VehicleCategory::UNREGISTERED_VISITOR],
             'source_label' => $observation->observation_source === 'cctv' ? 'Camera · no registered tag' : 'Manual · no registered tag',
             'station_label' => \App\Models\Gate::labelFor($observation->location),
@@ -920,8 +909,8 @@ class VehicleEventController extends Controller
             'event_type' => 'RFID',
             'plate_number' => $vehicle?->plate_number ?: ($scanLog->isUnknownTag() ? 'Unknown tag' : 'No plate'),
             'owner_name' => $vehicle?->vehicle_owner_name ?: $vehicle?->owner_name ?: 'N/A',
-            'vehicle_type' => $vehicle?->vehicle_type ?: 'N/A',
-            'vehicle_color' => 'N/A',
+            'vehicle_type' => $scanLog->display_vehicle_type,
+            'vehicle_type_source' => $scanLog->vehicle_type_source_label,
             'category_label' => $this->displayCategory($scanLog->vehicle_category ?: $vehicle?->category),
             'source_label' => 'RFID Scan',
             'station_label' => \App\Models\Gate::labelFor($scanLog->scan_location),
@@ -937,14 +926,7 @@ class VehicleEventController extends Controller
             'is_alert' => (bool) $scanLog->is_anomaly || in_array($scanLog->verification_status, ['guest', 'guest_pass_lost', 'guest_pass_disabled', 'inactive_tag'], true),
             'alert_reason' => $scanLog->anomaly_reason,
             'sort_time' => $this->sortTimestamp($scanLog->created_at, $time),
-            ...$this->logTypeFields(
-                match (true) {
-                    $scanLog->vehicle_category === 'guest_pass' => 'guest_pass',
-                    $scanLog->verification_status === 'guest' => 'no_pass_alert',
-                    default => 'registered',
-                },
-                in_array($scanLog->vehicle_category, ['guest_pass', 'guest'], true) || $scanLog->verification_status === 'guest'
-            ),
+            ...\App\Support\RfidLogClassification::fields($scanLog),
         ];
     }
 
@@ -965,15 +947,15 @@ class VehicleEventController extends Controller
         $records = VisitorRecord::query()
             ->with(['vehicle', 'plateProfile'])
             ->active()
+            ->withoutMovementEvent()
+            ->whereDoesntHave('crossing.rfidScanLog.correlatedVehicleEvent', fn ($query) => $query->where('event_status', VehicleEvent::STATUS_COMPLETED))
             ->when($eventType !== null, fn ($query) => $query->where('direction', match ($eventType) {
                 'ENTRY' => 'IN',
                 'EXIT' => 'OUT',
                 default => 'UNKNOWN',
             }))
             ->when($request->filled('plate_text'), function ($query) use ($request): void {
-                $key = '%'.\App\Support\PlateNumber::key($request->string('plate_text')->value()).'%';
-                $query->where(fn ($inner) => $inner->where('plate_key', 'like', $key)
-                    ->orWhereRaw("replace(replace(coalesce(ocr_plate_number, ''), ' ', ''), '-', '') like ?", [$key]));
+                \App\Support\PlateNumber::search($query, ['plate_number', 'ocr_plate_number'], $request->string('plate_text')->value());
             })
             ->when($this->gateFilter($request) !== null, fn ($query) => $query->whereIn('gate', $this->gateFilterValues($request)))
             ->when($dateFrom !== null, fn ($query) => $query->where('seen_at', '>=', $dateFrom->copy()->startOfDay()))
@@ -996,70 +978,8 @@ class VehicleEventController extends Controller
      */
     protected function visitorRecordLogPayload(VisitorRecord $record): array
     {
-        $time = $record->seen_at;
-        $vehicle = $record->vehicle;
-        // Option A (Phase 7): the plate of a registered vehicle, read without its tag.
-        $plateOnly = $vehicle && $vehicle->created_at && $vehicle->created_at->lte($time);
-        $category = $plateOnly ? VehicleCategory::normalize($vehicle->category) : VehicleCategory::UNREGISTERED_VISITOR;
-
-        return [
-            'record_type' => 'visitor_record',
-            'record_type_label' => 'Unregistered Visitor',
-            'id' => $record->id,
-            'detail_url' => $record->plateProfile
-                ? route('visitors.profiles.show', $record->plateProfile)
-                : route('visitors.index', ['plate_status' => $record->plate_status]).'#visitor-record-'.$record->id,
-            'export_url' => route('vehicle-events.export.csv', [
-                'record_type' => 'visitor_record',
-                'record_id' => $record->id,
-            ]),
-            'event_type' => match ($record->direction) {
-                'IN' => 'ENTRY',
-                'OUT' => 'EXIT',
-                default => 'UNKNOWN',
-            },
-            'movement_label' => $record->direction === 'UNKNOWN' ? 'Direction unknown' : $record->direction,
-            'set_direction_url' => $record->direction === 'UNKNOWN' && $record->status === VisitorRecord::STATUS_ACTIVE
-                ? route('visitors.records.direction', $record) : null,
-            'direction_source' => $record->direction_source,
-            'direction_source_label' => $this->directionSourceLabel($record->direction_source, $record->direction_confidence),
-            'plate_number' => $record->plateLabel(),
-            'owner_name' => $vehicle?->vehicle_owner_name ?: 'N/A',
-            'vehicle_type' => $record->vehicle_type ?: 'Vehicle',
-            'vehicle_color' => $record->vehicle_color ?: 'N/A',
-            'category' => $category,
-            'category_label' => VehicleCategory::label($category),
-            'source_label' => match (true) {
-                $record->source === VisitorRecord::SOURCE_MANUAL => 'Manual · no registered tag',
-                $plateOnly => 'Camera · plate only, no tag read',
-                $record->source === VisitorRecord::SOURCE_LEGACY => 'Camera · older guest record',
-                default => 'Camera · no registered tag',
-            },
-            'station_label' => \App\Models\Gate::labelFor($record->gate),
-            'state_label' => $plateOnly ? 'Not changed (no tag read)' : 'Not tracked (visitor)',
-            'display_time' => DisplayTime::datetime($time, 'No time'),
-            'summary_label' => 'Unregistered Visitor #'.$record->id.' • '.(DisplayTime::datetime($time, 'No time')),
-            'event_time_export' => $time?->toDateTimeString(),
-            // UI Phase 3: what needs a look (yellow) or the plate result.
-            ...match (true) {
-                $record->plate_status === VisitorRecord::PLATE_UNREADABLE => ['status_label' => 'Plate unreadable', 'status_badge_class' => 'manual-review'],
-                $record->direction === 'UNKNOWN' => ['status_label' => 'Direction unknown', 'status_badge_class' => 'manual-review'],
-                $plateOnly => ['status_label' => 'Tag not read', 'status_badge_class' => 'manual-review'],
-                $record->plate_status === VisitorRecord::PLATE_PENDING => ['status_label' => 'Reading plate…', 'status_badge_class' => 'secondary'],
-                $record->plate_status === VisitorRecord::PLATE_CORRECTED => ['status_label' => 'Plate corrected', 'status_badge_class' => 'matched'],
-                default => ['status_label' => 'Plate read', 'status_badge_class' => 'matched'],
-            },
-            'match_label' => $plateOnly ? 'Registered vehicle (plate only)' : 'Unregistered',
-            'rfid_tag_uid' => 'N/A',
-            'image_url' => $record->snapshot_url,
-            // Unregistered visitors are normal traffic, not alerts.
-            'is_alert' => false,
-            'alert_reason' => null,
-            'sort_time' => $this->sortTimestamp($record->created_at, $time),
-            ...$this->logTypeFields($plateOnly ? 'registered' : 'unregistered_visitor', ! $plateOnly),
-        ];
+        return \App\Support\VisitorRecordLog::fields($record);
     }
-
     /**
      * UI Phase 3: status of a vehicle log row: Anomaly (red), Unregistered
      * (gray), or the vehicle's state after the movement.
@@ -1081,7 +1001,7 @@ class VehicleEventController extends Controller
 
     protected function gateFilter(Request $request): ?string
     {
-        return $request->filled('gate') ? \App\Models\Gate::resolveCode($request->string('gate')->value()) ?? '__none__' : null;
+        return $request->filled('gate') ? \App\Models\Gate::resolveCode($request->string('gate')->value(), historical: true) ?? '__none__' : null;
     }
 
     /**

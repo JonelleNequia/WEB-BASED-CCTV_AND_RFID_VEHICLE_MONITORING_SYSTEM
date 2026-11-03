@@ -14,7 +14,7 @@ class SaveSettingsRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return true;
+        return $this->user()?->isAdmin() === true;
     }
 
     /**
@@ -42,7 +42,8 @@ class SaveSettingsRequest extends FormRequest
 
     /** UI Phase 2: which fields each Settings tab saves. */
     public const SECTIONS = [
-        // B1 (Settings): General (gate names), Advanced › Timing, Detection, Manual setup.
+        // General is accepted for forms opened before the Settings cleanup.
+        'gates' => ['gates'],
         'general' => ['gates'],
         'timing' => [
             'rfid_cooldown_seconds', 'rfid_lookback_seconds', 'rfid_lookahead_seconds',
@@ -80,6 +81,7 @@ class SaveSettingsRequest extends FormRequest
             // picked in Devices; the manual address (a local address only) is
             // an override.
             'gates' => ['sometimes', 'array'],
+            'gates.*' => ['array'],
             'gates.*.name' => ['required', 'string', 'max:100'],
             'gates.*.reader_type' => ['sometimes', Rule::in(array_keys(Gate::READER_TYPES))],
             'gates.*.reader_manual' => ['sometimes', 'in:0,1'],
@@ -100,17 +102,19 @@ class SaveSettingsRequest extends FormRequest
             'pass_min_move.*' => ['nullable', 'integer', 'min:5', 'max:60'],
             // Cameras tab: one camera per gate (keys = gate codes).
             'camera_configs' => ['required', 'array'],
+            'camera_configs.*' => ['array'],
             'camera_configs.*.camera_name' => ['required', 'string', 'max:100'],
             // Camera source work: an assigned camera sends no source (it is found
             // by its MAC); a manual one is an RTSP or stream URL (no webcam).
             'camera_configs.*.source_type' => ['sometimes', 'in:rtsp,url,none'],
-            'camera_configs.*.source_value' => ['nullable', 'required_if:camera_configs.*.source_type,rtsp,url', 'string', 'max:500'],
+            'camera_configs.*.source_value' => ['nullable', 'required_if:camera_configs.*.source_type,rtsp,url', 'string'],
             'camera_configs.*.source_username' => ['nullable', 'string', 'max:255'],
             'camera_configs.*.source_password' => ['nullable', 'string', 'max:255'],
             'camera_configs.*.clear_password' => ['nullable', 'boolean'],
             'camera_configs.*.snapshot_source_value' => ['nullable', 'string', 'max:500'],
             // Live-latency work: stream roles for assigned cameras and tuning.
             'camera_streams' => ['sometimes', 'array'],
+            'camera_streams.*' => ['array'],
             'camera_streams.*.stream' => ['nullable', 'in:main,sub'],
             'camera_streams.*.snapshots' => ['nullable', 'in:0,1'],
         ];
@@ -138,6 +142,9 @@ class SaveSettingsRequest extends FormRequest
      */
     protected function mergeLegacyGateFields(): void
     {
+        if ($this->has('gates') && ! is_array($this->input('gates'))) {
+            return;
+        }
         $gates = (array) $this->input('gates', []);
         $map = [
             'portal_label' => 'name', 'reader_type' => 'reader_type', 'rfid_reader_name' => 'reader_name',
@@ -156,6 +163,9 @@ class SaveSettingsRequest extends FormRequest
         if ($gates !== []) {
             // A legacy form without labels keeps the current names.
             foreach ($gates as $code => $values) {
+                if (! is_array($values)) {
+                    continue;
+                }
                 if (! array_key_exists('name', (array) $values)) {
                     $gates[$code]['name'] = Gate::query()->where('code', $code)->value('name') ?? '';
                 }
@@ -168,9 +178,6 @@ class SaveSettingsRequest extends FormRequest
         }
     }
 
-    /**
-     * @return mixed
-     */
     protected function legacyKeysToGateCodes(mixed $values): mixed
     {
         if (! is_array($values)) {
@@ -208,8 +215,8 @@ class SaveSettingsRequest extends FormRequest
             }
 
             foreach (['camera_name', 'source_type', 'source_value', 'source_username', 'source_password'] as $field) {
-                if (array_key_exists($field, $cameraConfigs[$role])) {
-                    $cameraConfigs[$role][$field] = trim((string) $cameraConfigs[$role][$field]);
+                if (array_key_exists($field, $cameraConfigs[$role]) && is_string($cameraConfigs[$role][$field])) {
+                    $cameraConfigs[$role][$field] = trim($cameraConfigs[$role][$field]);
                 }
             }
         }
@@ -225,17 +232,42 @@ class SaveSettingsRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
-            $gates = (array) $this->input('gates', []);
-            if ($gates !== [] && collect($gates)->every(fn ($gate): bool => (string) ($gate['is_active'] ?? '1') === '0')) {
+            $gates = $this->input('gates', []);
+            $gates = is_array($gates) ? $gates : [];
+            foreach (array_keys($gates) as $code) {
+                if (Gate::resolveCode((string) $code) === null) {
+                    $validator->errors()->add('gates', 'This gate is no longer available. Reload Gates and try again.');
+                }
+            }
+            if ($gates !== [] && collect($gates)->every(fn ($gate): bool => is_array($gate) && in_array($gate['is_active'] ?? '1', ['0', 0, false], true))) {
                 $validator->errors()->add('gates', 'Keep at least one gate active.');
             }
 
-            $configs = (array) $this->input('camera_configs', []);
+            $configs = $this->input('camera_configs', []);
+            $configs = is_array($configs) ? $configs : [];
             foreach (array_keys($configs) as $role) {
+                if (! is_array($configs[$role])) {
+                    continue;
+                }
+                if (Gate::resolveCode((string) $role) === null) {
+                    $validator->errors()->add('camera_configs', 'This gate is no longer available. Reload Gates and try again.');
+                }
                 $label = Gate::labelFor((string) $role);
-                $sourceType = (string) $this->input("camera_configs.$role.source_type", '');
-                $sourceValue = trim((string) $this->input("camera_configs.$role.source_value", ''));
+                $sourceType = $this->input("camera_configs.$role.source_type", '');
+                $sourceValue = $this->input("camera_configs.$role.source_value", '');
+                if (! is_string($sourceType) || ($sourceValue !== null && ! is_string($sourceValue))) {
+                    continue;
+                }
+                $sourceValue = trim($sourceValue ?? '');
                 $field = "camera_configs.$role.source_value";
+                $existing = \App\Models\Camera::query()->where('camera_role', $role)->first();
+                $unchanged = $existing && $sourceValue === trim((string) $existing->source_value);
+                if (! $unchanged && mb_strlen($sourceValue) > 255) {
+                    $validator->errors()->add($field, "$label source must not exceed 255 characters.");
+                }
+                if ($unchanged && $sourceType === $existing->source_type) {
+                    continue;
+                }
 
                 if ($sourceType === 'rtsp') {
                     $parsed = parse_url($sourceValue);

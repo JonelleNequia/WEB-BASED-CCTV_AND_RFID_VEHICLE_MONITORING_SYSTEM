@@ -33,16 +33,16 @@ def vote_with(*frames):
 
 
 class TypeListTests(unittest.TestCase):
-    def test_three_types_and_no_bicycles(self):
-        self.assertEqual([vtype.type_for_label(label) for label in ("pickup", "SUV", "van", "car")], [vtype.CAR] * 4)
-        self.assertEqual([vtype.type_for_label(label) for label in ("motorcycle", "e-bike", "tricycle")], [vtype.MOTORCYCLE] * 3)
-        self.assertEqual([vtype.type_for_label(label) for label in ("truck", "bus", "jeepney")], [vtype.TRUCK_BUS] * 3)
+    def test_named_types_are_distinct_and_bicycles_remain_outside_detection(self):
+        self.assertEqual([vtype.type_for_label(label) for label in ("pickup", "SUV", "van", "car")], ["Pickup", "SUV", "Van", vtype.CAR])
+        self.assertEqual([vtype.type_for_label(label) for label in ("motorcycle", "e-bike", "tricycle")], [vtype.MOTORCYCLE, "E-bike", "Tricycle"])
+        self.assertEqual([vtype.type_for_label(label) for label in ("truck", "bus", "jeepney")], ["Truck", "Bus", "Jeepney"])
         self.assertIsNone(vtype.type_for_label("bicycle"))
 
         class Coco:
             names = {0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
 
-        self.assertEqual(detector.resolve_allowed_vehicle_classes(Coco()), LABELS)
+        self.assertEqual(detector.resolve_allowed_vehicle_classes(Coco()), {2: "Car", 3: "Motorcycle", 5: "Bus", 7: "Truck"})
 
 
 class DecisionTests(unittest.TestCase):
@@ -58,31 +58,31 @@ class DecisionTests(unittest.TestCase):
         decision = vtype.decide(vote, None, ZONE_HEIGHT)
         self.assertEqual((decision["type"], decision["frames"]), (vtype.CAR, 3))
 
-    def test_a_car_sized_back_called_truck_is_a_car(self):
+    def test_a_wide_truck_result_is_not_guessed_to_be_car(self):
         decision = vtype.decide(vote_with((vtype.TRUCK_BUS, 0.8, self.WIDE_LOW_BACK)), None, ZONE_HEIGHT)
-        self.assertEqual(decision["type"], vtype.CAR)
-        self.assertIn("size/shape", decision["rule"])
+        self.assertEqual(decision["type"], vtype.TRUCK_BUS)
+        self.assertNotIn("size/shape", decision["rule"])
 
     def test_a_real_truck_stays_a_truck(self):
         tall = vtype.decide(vote_with((vtype.TRUCK_BUS, 0.8, self.TALL_BACK)), None, ZONE_HEIGHT)
         narrow = vtype.decide(vote_with((vtype.TRUCK_BUS, 0.8, (300, 200, 400, 320))), None, ZONE_HEIGHT)  # 100 x 120: a jeepney's back
         self.assertEqual((tall["type"], narrow["type"]), (vtype.TRUCK_BUS, vtype.TRUCK_BUS))
 
-    def test_the_limits_are_settings(self):
+    def test_legacy_geometric_settings_cannot_relabel_a_model_class(self):
         vote = vote_with((vtype.TRUCK_BUS, 0.8, self.WIDE_LOW_BACK))   # 1.54 wide per 1 high, 45% of the zone
         self.assertEqual(vtype.decide(vote, None, ZONE_HEIGHT, {"type_car_min_aspect": 1.8})["type"], vtype.TRUCK_BUS)
-        self.assertEqual(vtype.decide(vote, None, ZONE_HEIGHT, {"type_car_min_aspect": 1.8, "type_truck_min_height": 0.5})["type"], vtype.CAR)
+        self.assertEqual(vtype.decide(vote, None, ZONE_HEIGHT, {"type_car_min_aspect": 1.8, "type_truck_min_height": 0.5})["type"], vtype.TRUCK_BUS)
 
-    def test_pickup_backs_from_the_first_real_crossings_are_cars(self):
+    def test_vehicle_dimensions_do_not_assert_specific_subtypes(self):
         # A4: boxes of the 2026-10-05 Gate 1 crossings (rear pictures of a Ford Ranger; zone 772 px high).
         for box in ((839.2, 285.7, 1721.7, 1027.9), (714.6, 201.2, 1348.1, 727.4), (232.9, 0.8, 1920, 1036)):
-            self.assertEqual(vtype.decide(vote_with((vtype.TRUCK_BUS, 0.8, box)), None, 772.0)["type"], vtype.CAR, box)
+            self.assertEqual(vtype.decide(vote_with((vtype.TRUCK_BUS, 0.8, box)), None, 772.0)["type"], vtype.TRUCK_BUS, box)
 
     def test_the_second_check_counts_as_much_as_all_frames(self):
         vote = vote_with((vtype.MOTORCYCLE, 0.4, (330, 230, 370, 300)))
         decision = vtype.decide(vote, {"type": vtype.CAR, "confidence": 0.9}, ZONE_HEIGHT)
-        self.assertEqual(decision["type"], vtype.CAR)
-        self.assertIn("second check", decision["rule"])
+        self.assertIsNone(decision["type"])
+        self.assertEqual("uncertain model votes", decision["rule"])
 
     def test_no_votes_keeps_the_trigger_frame_type(self):
         self.assertEqual(vtype.decide(vtype.TrackVote(), None, ZONE_HEIGHT, fallback=vtype.MOTORCYCLE)["type"], vtype.MOTORCYCLE)
@@ -94,7 +94,7 @@ class SecondCheckTests(unittest.TestCase):
 
         image = cv2.imread(str(Path(ultralytics.__file__).resolve().parent / "assets" / "bus.jpg"))
         result = detector.second_pass_type(image, {"type_model": "yolov8n.pt", "type_second_pass_imgsz": 640})
-        self.assertEqual((result["type"], result["model"], result["imgsz"]), (vtype.TRUCK_BUS, "yolov8n.pt", 640))
+        self.assertEqual((result["type"], result["model"], result["imgsz"]), (vtype.BUS, "yolov8n.pt", 640))
         self.assertIsNone(detector.second_pass_type(np.zeros((0, 0, 3), dtype=np.uint8), {}))
 
 

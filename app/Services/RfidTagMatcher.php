@@ -84,6 +84,10 @@ class RfidTagMatcher
      */
     public function addRead(string $gate, string $epc, CarbonInterface $at, ?float $rssi = null): void
     {
+        $epc = RfidTag::normalizeUid($epc);
+        if (RfidTag::isUnavailableUid($epc)) {
+            return;
+        }
         $key = self::READS_PREFIX.$gate;
         $time = $this->seconds($at);
         $absent = (float) config('monitoring.rfid.absent_seconds', 5);
@@ -125,6 +129,10 @@ class RfidTagMatcher
         $candidates = [];
 
         foreach ($this->presences($gate) as $presence) {
+            $presence['epc'] = RfidTag::normalizeUid((string) $presence['epc']);
+            if (RfidTag::isUnavailableUid($presence['epc'])) {
+                continue;
+            }
             $mine = $eventKey !== null && $this->claimedBy($gate, $presence) === $eventKey;
             // This pass's own tag stays its tag (even if it has been read long enough to look parked now).
             if (! $mine && (($presence['stationary'] ?? false) || $presence['last_seen'] < $from || $presence['first_seen'] > $to)) {
@@ -135,7 +143,8 @@ class RfidTagMatcher
             }
 
             $tag = $this->tag($presence['epc']);
-            $registered = $tag?->vehicle !== null && $tag->status === RfidTag::STATUS_ASSIGNED && $tag->vehicle->status === 'active';
+            $registered = $tag?->vehicle !== null && $tag->status === RfidTag::STATUS_ASSIGNED && $tag->vehicle->status === 'active'
+                && (! $tag->vehicle->rfid_tag_id || (int) $tag->vehicle->rfid_tag_id === (int) $tag->id);
             if ($registeredOnly && ! $registered) {
                 continue;
             }
@@ -171,18 +180,25 @@ class RfidTagMatcher
      *
      * @param  array<string, mixed>  $presence
      */
-    public function claim(string $gate, array $presence, ?string $eventKey, CarbonInterface $crossedAt): void
+    public function claim(string $gate, array $presence, ?string $eventKey, CarbonInterface $crossedAt): bool
     {
-        $isNew = ! $this->isClaimed($gate, $presence);
+        return app(PlateProcessingLock::class)->run(function () use ($gate, $presence, $eventKey, $crossedAt): bool {
+            if (RfidTag::isUnavailableUid($presence['epc'])) {
+                return false;
+            }
+            $isNew = ! $this->isClaimed($gate, $presence);
 
-        Cache::put($this->claimKey($gate, $presence), [
-            'event_key' => $eventKey,
-            'at' => $this->seconds($crossedAt),
-        ], now()->addMinutes(self::CLAIM_TTL_MINUTES));
+            Cache::put($this->claimKey($gate, $presence), [
+                'event_key' => $eventKey,
+                'at' => $this->seconds($crossedAt),
+            ], now()->addMinutes(self::CLAIM_TTL_MINUTES));
 
-        if ($isNew) {
-            $this->count($gate, 'attached');
-        }
+            if ($isNew) {
+                $this->count($gate, 'attached');
+            }
+
+            return true;
+        });
     }
 
     /**
@@ -218,7 +234,7 @@ class RfidTagMatcher
 
     protected function tag(string $epc): ?RfidTag
     {
-        return RfidTag::query()->with('vehicle')->whereRaw('upper(uid) = ?', [strtoupper($epc)])->first();
+        return RfidTag::findUid($epc);
     }
 
     /** Today's diagnostic counters (Settings › Advanced › System status). */

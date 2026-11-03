@@ -5,7 +5,7 @@ namespace Tests\Feature;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Models\RfidTag;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -18,7 +18,7 @@ class VehicleRegistryTest extends TestCase
      */
     public function test_vehicle_registry_page_renders_clean_registry(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -41,7 +41,7 @@ class VehicleRegistryTest extends TestCase
      */
     public function test_vehicle_registry_form_creates_vehicle_and_tag(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $tag = RfidTag::query()->create([
@@ -51,6 +51,7 @@ class VehicleRegistryTest extends TestCase
 
         $this->actingAs($user)
             ->post(route('vehicle-registry.store'), [
+                'registered_by' => 'Test Registrar',
                 'rfid_tag_id' => $tag->id,
                 'plate_number' => ' tst-8899 ',
                 'owner_name' => 'Test Owner',
@@ -74,7 +75,7 @@ class VehicleRegistryTest extends TestCase
 
     public function test_vehicle_registry_saves_custom_vehicle_type_but_not_a_custom_category(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $tag = RfidTag::query()->create([
@@ -82,6 +83,7 @@ class VehicleRegistryTest extends TestCase
             'status' => RfidTag::STATUS_AVAILABLE,
         ]);
         $form = [
+            'registered_by' => 'Test Registrar',
             'rfid_tag_id' => $tag->id,
             'plate_number' => 'CUS-3001',
             'vehicle_owner_name' => 'Custom Owner',
@@ -107,7 +109,7 @@ class VehicleRegistryTest extends TestCase
 
     public function test_vehicle_registry_rejects_same_owner_and_plate_with_different_uid(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $assignedTag = RfidTag::query()->create([
@@ -132,6 +134,7 @@ class VehicleRegistryTest extends TestCase
         $this->actingAs($user)
             ->from(route('registry.index'))
             ->post(route('vehicle-registry.store'), [
+                'registered_by' => 'Test Registrar',
                 'rfid_tag_id' => $newTag->id,
                 'plate_number' => 'dup 1001',
                 'vehicle_owner_name' => ' duplicate   owner ',
@@ -149,7 +152,7 @@ class VehicleRegistryTest extends TestCase
 
     public function test_vehicle_registry_allows_same_owner_with_different_plate_and_uid(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         Vehicle::query()->create([
@@ -165,6 +168,7 @@ class VehicleRegistryTest extends TestCase
 
         $this->actingAs($user)
             ->post(route('vehicle-registry.store'), [
+                'registered_by' => 'Test Registrar',
                 'rfid_tag_id' => $tag->id,
                 'plate_number' => 'OWN-2002',
                 'vehicle_owner_name' => 'Shared Owner',
@@ -182,7 +186,7 @@ class VehicleRegistryTest extends TestCase
 
     public function test_vehicle_registry_edit_updates_existing_vehicle(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $vehicle = Vehicle::query()->create([

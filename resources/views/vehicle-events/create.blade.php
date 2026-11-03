@@ -30,7 +30,7 @@
 
             <div class="field">
                 <label for="plate_text">Plate</label>
-                <input id="plate_text" type="text" name="plate_text" value="{{ old('plate_text') }}" placeholder="ABC-1234" required>
+                <input id="plate_text" type="text" name="plate_text" value="{{ old('plate_text') }}" placeholder="ABC-1234" required data-normalize-plate>
             </div>
 
             <div class="field">
@@ -44,16 +44,6 @@
                     <option value="">Select vehicle type</option>
                     @foreach ($vehicleTypes as $vehicleType)
                         <option value="{{ $vehicleType }}" @selected(old('vehicle_type') === $vehicleType)>{{ $vehicleType }}</option>
-                    @endforeach
-                </select>
-            </div>
-
-            <div class="field">
-                <label for="vehicle_color">Vehicle Color</label>
-                <select id="vehicle_color" name="vehicle_color" required>
-                    <option value="">Select vehicle color</option>
-                    @foreach ($vehicleColors as $vehicleColor)
-                        <option value="{{ $vehicleColor }}" @selected(old('vehicle_color') === $vehicleColor)>{{ $vehicleColor }}</option>
                     @endforeach
                 </select>
             </div>

@@ -5,7 +5,7 @@ namespace Tests\Feature;
 use App\Models\RfidTag;
 use App\Models\User;
 use App\Models\Vehicle;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -15,7 +15,7 @@ class DirectRfidRegistryTest extends TestCase
 
     public function test_rfid_inventory_page_renders_standalone_workspace(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -29,7 +29,7 @@ class DirectRfidRegistryTest extends TestCase
 
     public function test_vehicle_registration_assigns_pre_registered_inventory_tag(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -46,6 +46,7 @@ class DirectRfidRegistryTest extends TestCase
 
         $this->actingAs($user)
             ->post(route('vehicle-registry.store'), [
+                'registered_by' => 'Test Registrar',
                 'rfid_tag_id' => $tag->id,
                 'plate_number' => ' dir-3003 ',
                 'vehicle_owner_name' => 'Direct Owner',
@@ -66,13 +67,14 @@ class DirectRfidRegistryTest extends TestCase
 
     public function test_vehicle_registration_rejects_unregistered_direct_uid(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $this->actingAs($user)
             ->from(route('registry.index'))
             ->post(route('vehicle-registry.store'), [
+                'registered_by' => 'Test Registrar',
                 'rfid_uid' => ' direct-4004 ',
                 'plate_number' => ' dir-4004 ',
                 'vehicle_owner_name' => 'Direct Owner',
@@ -92,7 +94,7 @@ class DirectRfidRegistryTest extends TestCase
 
     public function test_registry_lists_vehicle_assignment_tags_by_tag_number(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 

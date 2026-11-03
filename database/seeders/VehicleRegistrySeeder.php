@@ -77,6 +77,7 @@ class VehicleRegistrySeeder extends Seeder
 
             $vehicle = $vehicleRegistryService->register([
                 ...$record,
+                'registered_by' => 'Demo Registrar',
                 'rfid_tag_id' => $tag->id,
             ]);
 

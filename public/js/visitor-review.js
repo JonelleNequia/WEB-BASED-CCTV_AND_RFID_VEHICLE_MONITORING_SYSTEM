@@ -81,6 +81,11 @@
                 remaining.textContent = result.remaining;
             }
             const needs = result.needs || {};
+            const reason = card.querySelector('[data-registration-reason]');
+            if (reason) {
+                reason.textContent = result.registration_reason || '';
+                reason.hidden = !result.registration_reason;
+            }
             if (!needs.plate && !needs.direction) {
                 const index = cards.indexOf(card);
                 card.remove();
@@ -115,6 +120,7 @@
     }
 
     document.addEventListener('keydown', (event) => {
+        if (event.isComposing || event.keyCode === 229) return;
         const card = cards[current];
         if (!card || card.hidden || event.metaKey || event.ctrlKey || event.altKey) {
             return;

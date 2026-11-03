@@ -14,7 +14,7 @@ use App\Models\VehicleEvent;
 use App\Services\RfidIngestService;
 use App\Support\CameraFiles;
 use App\Support\RfidIngestResult;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Illuminate\Testing\TestResponse;
@@ -33,7 +33,7 @@ class Phase3RfidCameraFusionTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->freezeTime();
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
@@ -126,7 +126,7 @@ class Phase3RfidCameraFusionTest extends TestCase
         $this->assertNotNull(VehicleEvent::query()->sole()->anomaly_reason);
     }
 
-    public function test_unknown_camera_direction_of_a_registered_vehicle_uses_its_state(): void
+    public function test_unknown_camera_direction_of_a_registered_vehicle_preserves_its_state(): void
     {
         // Gate direction work, Phase A: the camera saw it but could not tell:
         // the vehicle's state decides (Inside -> OUT), "From vehicle state".
@@ -137,24 +137,25 @@ class Phase3RfidCameraFusionTest extends TestCase
         $this->crossing('UNKNOWN', 'k-unknown', 'track too short');
 
         $scan = RfidScanLog::query()->sole();
-        $this->assertSame(['EXIT', RfidScanLog::FUSION_TOGGLE, RfidIngestResult::RECORDED, false],
+        $this->assertSame(['UNKNOWN', RfidScanLog::FUSION_CAMERA, RfidIngestResult::RECORDED, false],
             [$scan->resolved_event_type, $scan->fusion_status, $scan->outcome, $scan->is_anomaly]);
-        $this->assertStringContainsString('could not tell IN from OUT (track too short); vehicle state used (Inside -> OUT)', $scan->fusion_note);
-        $this->assertSame([Vehicle::STATE_OUTSIDE, 0, 1], [$vehicle->fresh()->current_state, (int) $vehicle->fresh()->entries_today_count, (int) $vehicle->fresh()->exits_today_count]);
+        $this->assertStringContainsString('UNKNOWN', $scan->fusion_note);
+        $this->assertSame([Vehicle::STATE_INSIDE, 0, 0], [$vehicle->fresh()->current_state, (int) $vehicle->fresh()->entries_today_count, (int) $vehicle->fresh()->exits_today_count]);
         $event = VehicleEvent::query()->sole();
-        $this->assertSame(['EXIT', 'OUT', 'state', null], [$event->event_type, $event->direction, $event->direction_source, $event->direction_confidence]);
+        $this->assertSame(['UNKNOWN', 'UNKNOWN', null, null], [$event->event_type, $event->direction, $event->direction_source, $event->direction_confidence]);
         // Counted, and not waiting in Review.
         $counts = app(\App\Services\MovementCountService::class)->counts('today');
-        $this->assertSame([0, 1, 0], [$counts['in'], $counts['out'], $counts['unknown']]);
-        $this->actingAs($this->admin)->get(route('visitors.index', ['tab' => 'review']))->assertOk()->assertSee('Nothing to review');
+        $this->assertSame([0, 0, 1], [$counts['in'], $counts['out'], $counts['unknown']]);
+        $this->actingAs($this->admin)->get(route('visitors.index', ['tab' => 'review']))->assertOk()->assertSee('Review (1)');
 
         // Outside -> IN.
         $other = $this->registeredVehicle('UNK 5006', 'UNK-TAG-6', Vehicle::STATE_OUTSIDE);
         $this->travel(1)->minutes();
+        $this->cameraOnline();
         $this->scan('UNK-TAG-6');
         $this->crossing('UNKNOWN', 'k-unknown-2', 'gate direction not set');
-        $this->assertSame(['ENTRY', 'state'], [VehicleEvent::query()->where('vehicle_id', $other->id)->sole()->event_type, VehicleEvent::query()->where('vehicle_id', $other->id)->sole()->direction_source]);
-        $this->assertSame(Vehicle::STATE_INSIDE, $other->fresh()->current_state);
+        $this->assertSame(['UNKNOWN', null], [VehicleEvent::query()->where('vehicle_id', $other->id)->sole()->event_type, VehicleEvent::query()->where('vehicle_id', $other->id)->sole()->direction_source]);
+        $this->assertSame(Vehicle::STATE_OUTSIDE, $other->fresh()->current_state);
     }
 
     /**

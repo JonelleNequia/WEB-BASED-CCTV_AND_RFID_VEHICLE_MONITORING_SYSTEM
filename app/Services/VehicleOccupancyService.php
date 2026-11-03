@@ -12,9 +12,10 @@ use App\Support\VehicleCategory;
  * (16) while Vehicle Registry and RFID Desk showed registered vehicles only
  * (2). Every page now reads the same numbers from here.
  *
- * Phase 0 (visitor model): only REGISTERED vehicles have an inside/outside
- * state. Vehicles without a tag are counted as IN/OUT movements, never as
- * "inside" (there is no reset for them, so errors would pile up).
+ * Registered vehicles have an inside/outside state from real RFID movements
+ * or a uniquely identified plate with known direction. Unregistered visitors
+ * remain movement counts only. MovementReconciliationService applies new
+ * occurrences chronologically without replaying installation history.
  */
 class VehicleOccupancyService
 {

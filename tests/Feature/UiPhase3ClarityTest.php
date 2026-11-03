@@ -11,7 +11,7 @@ use App\Services\DeviceRegistryService;
 use App\Services\RfidIngestService;
 use App\Support\CameraFiles;
 use App\Support\StatusBadge;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -30,7 +30,7 @@ class UiPhase3ClarityTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
 
@@ -61,7 +61,7 @@ RfidScanLog::query()->create([ // saved before "RFID only with a vehicle"
         // Status is a real status, not the plate again.
         $this->assertSame(['Inside', 'matched'], [$row('COL 1001')['status_label'], $row('COL 1001')['status_badge_class']]);
         $this->assertSame(['Plate read', 'matched'], [$row('VIS 2002')['status_label'], $row('VIS 2002')['status_badge_class']]);
-        $this->assertSame(['Plate unreadable', 'manual-review'], [$row('Plate unreadable')['status_label'], $row('Plate unreadable')['status_badge_class']]);
+        $this->assertSame(['Review', 'manual-review'], [$row('Plate unreadable')['status_label'], $row('Plate unreadable')['status_badge_class']]);
         $this->assertSame('manual-review', $logs->firstWhere('rfid_tag_uid', 'WHO-ARE-YOU')['status_badge_class']); // yellow, not red
 
         // Blue for IN / OUT, gray for unregistered, yellow for an unknown tag, red only for anomalies.

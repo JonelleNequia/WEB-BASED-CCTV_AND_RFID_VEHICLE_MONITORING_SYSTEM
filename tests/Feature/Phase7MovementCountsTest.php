@@ -10,7 +10,7 @@ use App\Services\MovementCountService;
 use App\Services\RfidIngestService;
 use App\Services\VehicleOccupancyService;
 use Carbon\Carbon;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -32,7 +32,7 @@ class Phase7MovementCountsTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         Storage::fake('public');
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         // A Wednesday mid-month, 10 AM in Manila.
@@ -61,20 +61,20 @@ class Phase7MovementCountsTest extends TestCase
         $this->assertSame([4, 5, 5, 5], [$all['today']['in'], $all['week']['in'], $all['month']['in'], $all['year']['in']]);
     }
 
-    public function test_inside_is_registered_vehicles_only_and_a_plate_only_read_does_not_change_it(): void
+    public function test_inside_is_registered_vehicles_only_including_identified_plate_movements(): void
     {
         $occupancy = app(VehicleOccupancyService::class);
 
         // Faculty went IN then OUT; the Registered Visitor is inside; unregistered visitors never are.
-        $this->assertSame(['registered' => 1, 'total' => 1], $occupancy->counts());
-        $this->assertSame(['faculty_staff' => 0, 'registered_visitor' => 1], collect($occupancy->insideByCategory())->map->inside->all());
+        $this->assertSame(['registered' => 2, 'total' => 2], $occupancy->counts());
+        $this->assertSame(['faculty_staff' => 1, 'registered_visitor' => 1], collect($occupancy->insideByCategory())->map->inside->all());
 
         // Option A: NFB 9863's plate was read IN without its tag: counted, but still OUTSIDE.
-        $this->assertSame(Vehicle::STATE_OUTSIDE, Vehicle::query()->where('plate_number', 'NFB 9863')->value('current_state'));
+        $this->assertSame(Vehicle::STATE_INSIDE, Vehicle::query()->where('plate_number', 'NFB 9863')->value('current_state'));
 
         $this->actingAs($this->admin)->getJson(route('dashboard.live-state'))
             ->assertOk()
-            ->assertJsonPath('metrics.vehicles_inside', 1)
+            ->assertJsonPath('metrics.vehicles_inside', 2)
             ->assertJsonPath('metrics.total_vehicles_entered_today', 4)
             ->assertJsonPath('movement_counts.today.gates.gate-2.in', 2)
             ->assertJsonPath('movement_counts.today.categories.unregistered_visitor.out', 2)

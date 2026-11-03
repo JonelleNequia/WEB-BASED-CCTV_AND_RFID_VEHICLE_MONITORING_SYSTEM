@@ -12,9 +12,11 @@ use Illuminate\Contracts\Validation\ValidationRule;
  */
 class ValidGate implements ValidationRule
 {
+    public function __construct(private bool $historical = false) {}
+
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
-        if (! is_string($value) || Gate::resolveCode($value) === null) {
+        if (! is_string($value) || Gate::resolveCode($value, historical: $this->historical) === null) {
             $fail('Choose an existing gate.');
         }
     }

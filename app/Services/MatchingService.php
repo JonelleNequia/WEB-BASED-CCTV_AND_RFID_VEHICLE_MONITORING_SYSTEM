@@ -156,7 +156,7 @@ class MatchingService
      */
     protected function normalizePlate(?string $plate): string
     {
-        return strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', $plate ?? ''));
+        return \App\Support\PlateNumber::key($plate) ?? '';
     }
 
     /**

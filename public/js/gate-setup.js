@@ -5,6 +5,14 @@
  * - Test reader: "hold a tag near the reader" and shows the tag it reads.
  */
 (function () {
+    // Associated gate controls can be inside a closed management disclosure.
+    // Reveal the invalid field before native browser validation focuses it.
+    document.addEventListener('invalid', (event) => {
+        if (event.target.form?.id === 'gate-settings-form') {
+            const management = event.target.closest('.gate-management');
+            if (management) management.open = true;
+        }
+    }, true);
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
     let readerPoll = null;
 

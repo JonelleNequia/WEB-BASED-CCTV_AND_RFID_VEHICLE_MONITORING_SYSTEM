@@ -10,7 +10,7 @@ use App\Models\User;
 use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Services\RfidService;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -25,7 +25,7 @@ class DetectedEventIngestionTest extends TestCase
      */
     public function test_detector_event_ingestion_creates_a_guest_observation_record(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $payload = [
             'external_event_key' => 'test-crossing-entrance-001',
@@ -60,7 +60,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertSame('pending_review', $observation->status);
         $this->assertSame('gate-1', $observation->location);
         $this->assertSame('Car', $observation->vehicle_type);
-        $this->assertSame('Red', $observation->vehicle_color);
+        $this->assertNull($observation->vehicle_color);
     }
 
     /**
@@ -68,7 +68,7 @@ class DetectedEventIngestionTest extends TestCase
      */
     public function test_detector_event_ingestion_is_idempotent_by_external_event_key(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $payload = [
             'external_event_key' => 'test-crossing-exit-duplicate',
@@ -101,7 +101,7 @@ class DetectedEventIngestionTest extends TestCase
      */
     public function test_detector_event_ingestion_returns_registered_overlay_when_rfid_scan_matches(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $tag = $this->createAssignedVehicleWithTag('RFID-DETECT-1001', 'DET-1001');
         $scanTime = now();
@@ -140,7 +140,7 @@ class DetectedEventIngestionTest extends TestCase
      */
     public function test_detector_event_probe_without_rfid_requests_capture_without_creating_event(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $payload = [
             'external_event_key' => 'test-crossing-no-rfid-probe',
@@ -166,7 +166,7 @@ class DetectedEventIngestionTest extends TestCase
 
     public function test_detector_can_poll_rfid_match_endpoint_during_detection_window(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $tag = $this->createAssignedVehicleWithTag('RFID-DETECT-2002', 'DET-2002');
         $scanTime = now();
@@ -194,7 +194,7 @@ class DetectedEventIngestionTest extends TestCase
     /** RFID only with a vehicle: a read belongs to its own gate's vehicles only. */
     public function test_detector_rfid_match_does_not_take_a_read_from_another_gate(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $tag = $this->createAssignedVehicleWithTag('RFID-DETECT-CROSS-2002', 'CRS-2002');
         $scanTime = now();
@@ -220,7 +220,7 @@ class DetectedEventIngestionTest extends TestCase
 
     public function test_local_detector_can_poll_rfid_match_without_key_and_with_detector_timezone(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         config(['services.detector.api_key' => '']);
 
@@ -254,7 +254,7 @@ class DetectedEventIngestionTest extends TestCase
 
     public function test_rfid_match_endpoint_allows_realtime_detector_polling_burst(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $tag = $this->createAssignedVehicleWithTag('RFID-DETECT-4004', 'DET-4004');
         $scanTime = now();
@@ -284,7 +284,7 @@ class DetectedEventIngestionTest extends TestCase
 
     public function test_detector_guest_observation_endpoint_creates_pending_review_record(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $this->withHeaders([
             'X-Api-Key' => 'test-detector-key',
@@ -312,13 +312,13 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertSame('pending_review', $observation->status);
         $this->assertSame('gate-1', $observation->location);
         $this->assertSame('cctv', $observation->observation_source);
-        $this->assertSame('White', $observation->vehicle_color);
+        $this->assertNull($observation->vehicle_color);
     }
 
     public function test_detector_guest_observation_accepts_multipart_snapshot_upload(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $this->withHeaders([
             'X-Api-Key' => 'test-detector-key',
@@ -347,7 +347,7 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertStringStartsWith('guest_snapshots/', $observation->snapshot_path);
         $this->assertSame('ABC1234', $observation->plate_number);
         $this->assertSame('ABC1234', $observation->plate_text);
-        $this->assertSame('Black', $observation->vehicle_color);
+        $this->assertNull($observation->vehicle_color);
         $this->assertSame(55, $observation->detection_metadata_json['track_id']);
         Storage::disk('public')->assertExists($observation->snapshot_path);
 
@@ -370,7 +370,7 @@ class DetectedEventIngestionTest extends TestCase
     public function test_detector_guest_observation_saves_number_first_ocr_as_letter_first_plate(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $this->withHeaders([
             'X-Api-Key' => 'test-detector-key',
@@ -408,7 +408,7 @@ class DetectedEventIngestionTest extends TestCase
     public function test_detector_no_pass_exit_is_not_matched_to_an_entry_by_type_or_color(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $headers = [
             'X-Api-Key' => 'test-detector-key',
@@ -474,7 +474,7 @@ class DetectedEventIngestionTest extends TestCase
     public function test_detector_guest_observation_is_suppressed_when_recent_rfid_scan_is_registered(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $tag = $this->createAssignedVehicleWithTag('RFID-GUEST-SUPPRESS-1001', 'REG-1001');
         $scanTime = now();
@@ -517,7 +517,7 @@ class DetectedEventIngestionTest extends TestCase
     public function test_detector_guest_observation_is_not_suppressed_by_a_read_at_another_gate(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $tag = $this->createAssignedVehicleWithTag('RFID-GUEST-SUPPRESS-CROSS-1001', 'CRS-1001');
         $scanTime = now();
@@ -553,7 +553,7 @@ class DetectedEventIngestionTest extends TestCase
     public function test_detector_guest_observation_merges_recent_duplicate_track_ids_across_stations(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         // One camera watching both gates (the same hand-typed source).
         \App\Models\Camera::query()->update(['source_type' => 'rtsp', 'source_value' => 'rtsp://198.51.100.20:554/stream1']);
 
@@ -620,14 +620,14 @@ class DetectedEventIngestionTest extends TestCase
             ->firstOrFail();
 
         $this->assertSame('GST 123', $observation->plate_number);
-        $this->assertSame('White', $observation->vehicle_color);
+        $this->assertNull($observation->vehicle_color);
         $this->assertSame('complete', $observation->detection_metadata_json['analysis_status']);
     }
 
     public function test_detector_guest_observation_merges_same_plate_after_track_changes_and_keeps_snapshot_for_logs(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $headers = [
             'X-Api-Key' => 'test-detector-key',
@@ -722,7 +722,7 @@ class DetectedEventIngestionTest extends TestCase
     public function test_detector_guest_observation_merges_unplated_same_source_cross_station_by_receive_time(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         // One camera watching both gates (the same hand-typed source).
         \App\Models\Camera::query()->update(['source_type' => 'rtsp', 'source_value' => 'rtsp://198.51.100.20:554/stream1']);
 
@@ -788,7 +788,7 @@ class DetectedEventIngestionTest extends TestCase
     public function test_detector_guest_observation_does_not_merge_unplated_same_source_when_bbox_is_different(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $headers = [
             'X-Api-Key' => 'test-detector-key',
@@ -840,7 +840,7 @@ class DetectedEventIngestionTest extends TestCase
     public function test_consecutive_vehicles_without_a_pass_at_one_station_each_get_an_alert(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $headers = ['X-Api-Key' => 'test-detector-key', 'X-Source-Name' => 'phpunit-detector'];
         $start = now();
@@ -867,7 +867,7 @@ class DetectedEventIngestionTest extends TestCase
     public function test_detector_guest_observation_duplicate_updates_late_ocr_details(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $headers = [
             'X-Api-Key' => 'test-detector-key',
@@ -907,7 +907,7 @@ class DetectedEventIngestionTest extends TestCase
             ->firstOrFail();
 
         $this->assertSame('ABC 123', $observation->plate_number);
-        $this->assertSame('White', $observation->vehicle_color);
+        $this->assertNull($observation->vehicle_color);
         $this->assertSame('complete', $observation->detection_metadata_json['analysis_status']);
         $this->assertSame(1, GuestVehicleObservation::query()->where('external_event_key', 'guest-window-two-step-001')->count());
 
@@ -917,7 +917,7 @@ class DetectedEventIngestionTest extends TestCase
 
         $this->assertSame('ABC 123', $event->plate_text);
         $this->assertSame('ABC 123', $event->plate_number);
-        $this->assertSame('White', $event->vehicle_color);
+        $this->assertNull($event->vehicle_color);
         $this->assertSame($observation->snapshot_path, $event->vehicle_image_path);
         $this->assertSame(0, ActiveSession::query()->count());
 
@@ -930,7 +930,7 @@ class DetectedEventIngestionTest extends TestCase
     public function test_detector_guest_observation_same_event_complete_analysis_replaces_previous_ai_details(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $headers = [
             'X-Api-Key' => 'test-detector-key',
@@ -971,14 +971,14 @@ class DetectedEventIngestionTest extends TestCase
             ->firstOrFail();
 
         $this->assertSame('ABC 123', $observation->plate_number);
-        $this->assertSame('White', $observation->vehicle_color);
+        $this->assertNull($observation->vehicle_color);
 
         $event = VehicleEvent::query()
             ->where('external_event_key', 'guest-window-two-step-replace-001')
             ->firstOrFail();
 
         $this->assertSame('ABC 123', $event->plate_number);
-        $this->assertSame('White', $event->vehicle_color);
+        $this->assertNull($event->vehicle_color);
     }
 
     protected function createAssignedVehicleWithTag(string $tagUid, string $plateNumber): RfidTag

@@ -16,7 +16,9 @@
             <div class="table-subtext">{{ $log['owner_name'] }}</div>
         @endif
     </td>
-    <td>{{ $log['vehicle_type'] }}@if (($log['vehicle_color'] ?? 'N/A') !== 'N/A') · {{ $log['vehicle_color'] }}@endif</td>
+    <td>{{ $log['vehicle_type'] }}
+        @if ($log['vehicle_type_source'] ?? null)<div class="table-subtext">{{ $log['vehicle_type_source'] }}</div>@endif
+    </td>
     {{-- Phase 7: IN / OUT (the tone still follows ENTRY / EXIT). --}}
     <td>
         <x-badge :status="$log['event_type'] === 'UNKNOWN' ? 'direction_unknown' : strtolower($log['event_type'])" :label="$log['movement_label'] ?? $log['event_type']" />

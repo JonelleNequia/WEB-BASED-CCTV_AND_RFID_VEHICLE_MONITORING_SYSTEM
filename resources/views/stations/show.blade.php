@@ -83,7 +83,7 @@
         </aside>
     </main>
 
-    {{-- Banner for anomalies and lost or disabled tags. --}}
+    {{-- Banner for anomalies and disabled tags; lost UIDs are ignored. --}}
     <div class="station-alert" data-station-alert hidden role="alert">
         <strong data-station-alert-title>Needs attention</strong>
         <span data-station-alert-message></span>

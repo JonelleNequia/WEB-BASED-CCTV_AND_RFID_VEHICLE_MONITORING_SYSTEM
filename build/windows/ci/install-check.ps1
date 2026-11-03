@@ -44,9 +44,14 @@ function Install-Once([int]$Round) {
 
 $info = Install-Once 1
 
-# Sign in with the first admin the installer made.
-$password = (Select-String -Path (Join-Path $Dir 'config\first-admin.txt') -Pattern 'Password: (.+)').Matches[0].Groups[1].Value.Trim()
+# Consume the locally delivered setup credential; never print it or a password.
+$setupCode = (Select-String -Path (Join-Path $Dir 'config\setup\first-admin.txt') -Pattern 'Code: (.+)').Matches[0].Groups[1].Value.Trim()
+$password = 'Private test phrase ' + [guid]::NewGuid().ToString('N')
 $base = "http://127.0.0.1:$($info.web_port)"
+$setupPage = Invoke-WebRequest "$base/setup" -SessionVariable setupSession -UseBasicParsing
+$setupToken = [regex]::Match($setupPage.Content, 'name="_token" value="([^"]+)"').Groups[1].Value
+$null = Invoke-WebRequest "$base/setup" -Method Post -WebSession $setupSession -UseBasicParsing -Body @{ _token = $setupToken; code = $setupCode; password = $password; password_confirmation = $password }
+Remove-Item -LiteralPath (Join-Path $Dir 'config\setup\first-admin.txt')
 $login = Invoke-WebRequest "$base/login" -SessionVariable session -UseBasicParsing
 $token = [regex]::Match($login.Content, 'name="_token" value="([^"]+)"').Groups[1].Value
 $after = Invoke-WebRequest "$base/login" -Method Post -WebSession $session -UseBasicParsing -Body @{ _token = $token; email = $info.admin_email; password = $password }

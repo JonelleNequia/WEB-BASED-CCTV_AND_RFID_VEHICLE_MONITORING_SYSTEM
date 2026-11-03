@@ -8,10 +8,8 @@ use App\Models\Vehicle;
 use App\Models\VehicleCrossing;
 use App\Models\VehicleEvent;
 use App\Support\DirectionSource;
-use App\Support\PhilippineTime;
 use App\Support\RfidIngestResult;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Phase 3 (visitor model): a registered tag read takes its direction from the
@@ -22,11 +20,8 @@ use Illuminate\Support\Facades\DB;
  *   `rfid_lookahead_seconds` (2) after it, belongs to that crossing.
  * - Camera IN / OUT sets the vehicle's state. A direction that does not fit
  *   the state (IN while already inside) is still recorded, and flagged.
- * - Gate direction work, Phase A: the camera saw the vehicle but could not
- *   tell IN from OUT (or the gate's direction is not set): the vehicle's
- *   state decides (OUTSIDE -> IN, INSIDE -> OUT), saved as direction source
- *   "state" (shown as "From vehicle state"). (ROI Phase 2 left these "Direction unknown"
- *   for staff; older such records keep Set IN / Set OUT.)
+ * - A camera crossing without a known direction stays UNKNOWN for staff
+ *   Review and never toggles occupancy.
  * - No camera at the gate, or camera offline: the vehicle's state decides
  *   too (OUTSIDE -> IN, INSIDE -> OUT).
  * - Every record keeps direction_source (camera / state / manual) and, for
@@ -152,7 +147,7 @@ class RfidCameraFusionService
      */
     public function attachCrossing(VehicleCrossing $crossing): ?RfidScanLog
     {
-        return DB::transaction(function () use ($crossing): ?RfidScanLog {
+        return app(PlateProcessingLock::class)->run(function () use ($crossing): ?RfidScanLog {
             $crossing = VehicleCrossing::query()->lockForUpdate()->find($crossing->id);
 
             if (! $crossing || $crossing->rfid_scan_log_id) {
@@ -165,7 +160,9 @@ class RfidCameraFusionService
                 return null;
             }
 
-            $this->applyMovement($scan, $crossing);
+            if ($this->applyMovement($scan, $crossing) === RfidIngestResult::IGNORED) {
+                return null;
+            }
 
             return $scan->fresh();
         });
@@ -185,7 +182,7 @@ class RfidCameraFusionService
             ->pluck('id');
 
         foreach ($expired as $id) {
-            DB::transaction(function () use ($id): void {
+            app(PlateProcessingLock::class)->run(function () use ($id): void {
                 $scan = RfidScanLog::query()->lockForUpdate()->find($id);
 
                 if (! $scan || $scan->fusion_status !== RfidScanLog::FUSION_PENDING) {
@@ -195,7 +192,13 @@ class RfidCameraFusionService
                 $problem = $this->cameraProblem($scan->scan_location);
 
                 if ($problem !== null) {
-                    $this->applyMovement($scan, null, 'Camera gave no direction ('.$problem.'); vehicle state used.');
+                    if ($this->applyMovement($scan, null, 'Camera gave no direction ('.$problem.'); vehicle state used.') === RfidIngestResult::IGNORED) {
+                        // Retain an already stored legacy read, but stop retrying
+                        // it after loss/replacement/inactivation. No new record.
+                        $scan->forceFill(['fusion_status' => RfidScanLog::FUSION_SCAN_ONLY,
+                            'outcome' => RfidIngestResult::IGNORED,
+                            'fusion_note' => 'Stored read is no longer eligible; ignored without a movement.'])->save();
+                    }
 
                     return;
                 }
@@ -269,114 +272,83 @@ class RfidCameraFusionService
      */
     public function applyMovement(RfidScanLog $scan, ?VehicleCrossing $crossing, ?string $toggleNote = null): string
     {
-        return DB::transaction(function () use ($scan, $crossing, $toggleNote): string {
+        return app(PlateProcessingLock::class)->run(function () use ($scan, $crossing, $toggleNote): string {
+            $scan = $scan->fresh();
+            $tag = \App\Models\RfidTag::findUid($scan->tag_uid);
+            if (\App\Models\RfidTag::isUnavailableUid($scan->tag_uid)
+                || ! $tag || $tag->status !== \App\Models\RfidTag::STATUS_ASSIGNED || $tag->vehicle?->status !== 'active'
+                || ($tag->vehicle?->rfid_tag_id && (int) $tag->vehicle->rfid_tag_id !== (int) $tag->id)
+                || (int) $tag->vehicle_id !== (int) $scan->vehicle_id) {
+                return RfidIngestResult::IGNORED;
+            }
+            if ($scan->correlatedVehicleEvent?->event_status === VehicleEvent::STATUS_COMPLETED
+                && $scan->resolved_event_type !== null) {
+                return (string) ($scan->outcome ?: RfidIngestResult::RECORDED);
+            }
             $vehicle = Vehicle::query()->whereKey($scan->vehicle_id)->lockForUpdate()->firstOrFail();
-            $eventTime = $crossing?->crossed_at ?? $scan->scan_time;
-            $currentState = strtoupper((string) $vehicle->current_state) === Vehicle::STATE_INSIDE ? Vehicle::STATE_INSIDE : Vehicle::STATE_OUTSIDE;
-            $cameraDirection = in_array($crossing?->direction, [VehicleCrossing::DIRECTION_IN, VehicleCrossing::DIRECTION_OUT], true)
-                ? $crossing->direction
-                : null;
-            $anomalyReason = null;
-            $source = $cameraDirection !== null ? DirectionSource::CAMERA : DirectionSource::STATE;
+            $crossing = $crossing?->fresh();
+            $record = $crossing ? \App\Models\VisitorRecord::query()->where('vehicle_crossing_id', $crossing->id)->first() : null;
+            $existing = $record ? VehicleEvent::query()->where('visitor_record_id', $record->id)->first() : null;
+            $projector = app(MovementReconciliationService::class);
+            $projector->begin($vehicle);
+            if ($existing && (int) $existing->vehicle_id !== (int) $vehicle->id && (int) $record->vehicle_id !== (int) $vehicle->id) {
+                // Two identities for one occurrence: keep the evidence and use
+                // existing Review, never move either vehicle on a guess.
+                $oldVehicleId = $existing->vehicle_id;
+                $existing->forceFill(['event_status' => VehicleEvent::STATUS_PENDING_DETAILS, 'rfid_scan_log_id' => $scan->id])->save();
+                $record->forceFill(['status' => \App\Models\VisitorRecord::STATUS_ACTIVE, 'registration_status' => 'review',
+                    'registration_reason' => 'Plate evidence conflicts with the linked RFID identity. Check the plate; RFID identity is retained.'])->save();
+                $scan->forceFill(['vehicle_crossing_id' => $crossing->id, 'correlated_vehicle_event_id' => $existing->id,
+                    'fusion_status' => RfidScanLog::FUSION_SCAN_ONLY, 'is_anomaly' => true,
+                    'anomaly_reason' => 'RFID and plate identify different vehicles; check Review.', 'outcome' => RfidIngestResult::ANOMALY])->save();
+                $crossing->forceFill(['rfid_scan_log_id' => $scan->id])->save();
+                $projector->reconcile((int) $oldVehicleId);
 
-            if ($cameraDirection !== null) {
-                $eventType = $cameraDirection === VehicleCrossing::DIRECTION_OUT ? 'EXIT' : 'ENTRY';
-                $fusionStatus = RfidScanLog::FUSION_CAMERA;
-                $note = 'Camera saw '.$cameraDirection.' at '.Gate::labelFor($crossing->gate).'.';
-
-                if ($eventType === 'ENTRY' && $currentState === Vehicle::STATE_INSIDE) {
-                    $anomalyReason = "Camera saw {$vehicle->plate_number} go IN, but it was already inside (an OUT was missed).";
-                } elseif ($eventType === 'EXIT' && $currentState === Vehicle::STATE_OUTSIDE) {
-                    $anomalyReason = "Camera saw {$vehicle->plate_number} go OUT, but it was already outside (an IN was missed).";
+                return RfidIngestResult::ANOMALY;
+            }
+            $time = $crossing?->crossed_at ?? $scan->scan_time;
+            $inside = strtoupper((string) $vehicle->current_state) === Vehicle::STATE_INSIDE;
+            $direction = $crossing ? (in_array($crossing->direction, ['IN', 'OUT'], true) ? $crossing->direction : 'UNKNOWN')
+                : ($vehicle->last_seen_at && $time->lt($vehicle->last_seen_at) ? 'UNKNOWN' : ($inside ? 'OUT' : 'IN'));
+            $eventType = VehicleEvent::eventTypeForDirection($direction);
+            $source = $crossing ? ($direction === 'UNKNOWN' ? null : DirectionSource::CAMERA) : DirectionSource::STATE;
+            $anomaly = ! $existing && (($direction === 'IN' && $inside) || ($direction === 'OUT' && ! $inside))
+                ? "Camera saw {$vehicle->plate_number} go {$direction}, but it was already ".($inside ? 'inside (an OUT was missed).' : 'outside (an IN was missed).') : null;
+            $transition = ['detected_vehicle_type' => $crossing?->vehicle_type, 'event_type' => $eventType, 'event_time' => $time, 'resulting_state' => $vehicle->current_state,
+                'anomaly_reason' => $anomaly, 'direction_source' => $source,
+                'direction_confidence' => $source === DirectionSource::CAMERA ? DirectionSource::confidence(data_get($crossing?->detection_metadata_json, 'direction_confidence')) : null];
+            $scan->forceFill(['resolved_event_type' => $eventType, 'scan_direction' => $direction === 'OUT' ? 'exit' : 'entry',
+                'vehicle_crossing_id' => $crossing?->id, 'fusion_status' => $crossing ? RfidScanLog::FUSION_CAMERA : RfidScanLog::FUSION_TOGGLE,
+                'fusion_note' => $crossing ? 'Camera direction '.$direction.'.' : ($toggleNote ?? 'RFID-only direction from vehicle state.'),
+                'is_anomaly' => $anomaly !== null, 'anomaly_reason' => $anomaly,
+                'outcome' => $anomaly ? RfidIngestResult::ANOMALY : RfidIngestResult::RECORDED])->save();
+            if ($existing) {
+                $oldVehicleId = $existing->vehicle_id;
+                $existing->forceFill(['vehicle_id' => $vehicle->id, 'vehicle_category' => $vehicle->category,
+                    'plate_text' => $record->plate_number, 'plate_number' => $record->plate_number,
+                    'event_origin' => $record->reviewed_at !== null ? 'plate_review' : $existing->event_origin,
+                    'event_status' => VehicleEvent::STATUS_COMPLETED, 'rfid_scan_log_id' => $scan->id,
+                    'event_type' => $eventType, 'direction' => $direction, 'direction_source' => $source,
+                    'anomaly_reason' => $anomaly, 'occupancy_managed' => true])->save();
+                $event = $this->eventService->applyRfidSessionState($existing);
+                app(VehicleTypeEvidenceService::class)->syncEvent($record);
+                if ($oldVehicleId && (int) $oldVehicleId !== (int) $vehicle->id) {
+                    $projector->reconcile((int) $oldVehicleId);
                 }
             } else {
-                $eventType = $currentState === Vehicle::STATE_INSIDE ? 'EXIT' : 'ENTRY';
-                $fusionStatus = RfidScanLog::FUSION_TOGGLE;
-                $note = $crossing
-                    ? 'Camera could not tell IN from OUT ('.($crossing->direction_reason ?: 'unclear').'); vehicle state used ('
-                        .ucfirst(strtolower($currentState)).' -> '.VehicleEvent::directionForEventType($eventType).').'
-                    : ($toggleNote ?? 'Vehicle state used.');
+                $event = $this->eventService->createFromRfidScan($scan, $transition);
+                $event->forceFill(['occupancy_managed' => true, 'visitor_record_id' => $record?->id,
+                    'vehicle_image_path' => $event->vehicle_image_path ?: $record?->snapshot_path,
+                    'plate_image_path' => $event->plate_image_path ?: $record?->plate_image_path])->save();
             }
-
-            $transition = $this->moveVehicle($vehicle, $eventType, $eventTime) + [
-                'anomaly_reason' => $anomalyReason,
-                'event_time' => $eventTime,
-                'direction_source' => $source,
-                'direction_confidence' => $source === DirectionSource::CAMERA
-                    ? DirectionSource::confidence(data_get($crossing?->detection_metadata_json, 'direction_confidence'))
-                    : null,
-            ];
-            $outcome = $anomalyReason ? RfidIngestResult::ANOMALY : RfidIngestResult::RECORDED;
-
-            $scan->forceFill([
-                'resolved_event_type' => $eventType,
-                'scan_direction' => $eventType === 'EXIT' ? 'exit' : 'entry',
-                'resulting_state' => $transition['resulting_state'],
-                'vehicle_crossing_id' => $crossing?->id,
-                'fusion_status' => $fusionStatus,
-                'fusion_note' => $note,
-                'is_anomaly' => $anomalyReason !== null,
-                'anomaly_reason' => $anomalyReason,
-                'outcome' => $outcome,
-            ])->save();
-
+            $scan->forceFill(['correlated_vehicle_event_id' => $event->id])->save();
             $crossing?->forceFill(['rfid_scan_log_id' => $scan->id])->save();
-
-            // Phase 5: a crossing recorded as an Unregistered Visitor had a
-            // registered tag after all (read late).
             if ($crossing) {
                 $this->visitorRecordService->dismissForCrossing($crossing, 'Registered tag read for '.$vehicle->plate_number.'.');
             }
+            $projector->reconcile((int) $vehicle->id);
 
-            $event = $this->eventService->createFromRfidScan($scan, $transition);
-            $scan->forceFill(['correlated_vehicle_event_id' => $event?->id])->save();
-
-            return $outcome;
+            return (string) $scan->outcome;
         });
-    }
-
-    /**
-     * Update the vehicle's state and today's counters.
-     *
-     * @return array{event_type: string, resulting_state: string, daily_entries_count: int, daily_exits_count: int}
-     */
-    public function moveVehicle(Vehicle $vehicle, string $eventType, Carbon $eventTime): array
-    {
-        $date = PhilippineTime::localDateString($eventTime);
-
-        if ($vehicle->daily_count_date?->toDateString() !== $date) {
-            $vehicle->fill([
-                'daily_count_date' => $date,
-                'entries_today_count' => 0,
-                'exits_today_count' => 0,
-                'first_entry_today_at' => null,
-                'last_exit_today_at' => null,
-            ]);
-        }
-
-        $updates = [
-            'current_state' => $eventType === 'ENTRY' ? Vehicle::STATE_INSIDE : Vehicle::STATE_OUTSIDE,
-            'last_seen_at' => $eventTime,
-            'daily_count_date' => $date,
-        ];
-
-        if ($eventType === 'ENTRY') {
-            $updates['entries_today_count'] = ((int) $vehicle->entries_today_count) + 1;
-            $updates['last_entry_at'] = $eventTime;
-            $updates['first_entry_today_at'] = $vehicle->first_entry_today_at ?: $eventTime;
-        } else {
-            $updates['exits_today_count'] = ((int) $vehicle->exits_today_count) + 1;
-            $updates['last_exit_at'] = $eventTime;
-            $updates['last_exit_today_at'] = $eventTime;
-        }
-
-        $vehicle->forceFill($updates)->save();
-
-        return [
-            'event_type' => $eventType,
-            'resulting_state' => $vehicle->current_state,
-            'daily_entries_count' => (int) $vehicle->entries_today_count,
-            'daily_exits_count' => (int) $vehicle->exits_today_count,
-        ];
     }
 }

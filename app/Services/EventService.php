@@ -9,7 +9,6 @@ use App\Models\RfidScanLog;
 use App\Models\VehicleEvent;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class EventService
@@ -36,11 +35,11 @@ class EventService
                 'event_status' => VehicleEvent::STATUS_COMPLETED,
                 'event_origin' => 'manual',
                 'plate_text' => $this->normalizeDisplayPlate($data['plate_text']),
-                'plate_confidence' => $data['plate_confidence'] ?: null,
+                'plate_confidence' => $data['plate_confidence'] ?? null,
                 'vehicle_id' => $linkedVehicle?->id,
-                'vehicle_type' => $data['vehicle_type'],
-                'detected_vehicle_type' => $data['vehicle_type'],
-                'vehicle_color' => $data['vehicle_color'],
+                'vehicle_type' => $this->normalizeVehicleType($data['vehicle_type']),
+                'detected_vehicle_type' => null,
+                'detection_metadata_json' => [VehicleTypeEvidenceService::KEY => ['source' => 'manual']],
                 'vehicle_category' => $linkedVehicle?->category,
                 'camera_id' => $data['camera_id'],
                 'roi_name' => $data['roi_name'],
@@ -62,6 +61,8 @@ class EventService
      */
     public function createDetectedEvent(array $data): VehicleEvent
     {
+        $data = \App\Support\DeprecatedVehicleColor::without($data);
+
         $existing = VehicleEvent::query()
             ->where('external_event_key', $data['external_event_key'])
             ->first();
@@ -73,7 +74,7 @@ class EventService
         return DB::transaction(function () use ($data): VehicleEvent {
             $camera = $this->resolveCamera($data);
             $eventType = VehicleEvent::eventTypeForDirection($data['direction'] ?? data_get($data, 'detection_metadata_json.direction'));
-            $detectedVehicleType = $this->normalizeVehicleType((string) $data['detected_vehicle_type']);
+            $detectedVehicleType = \App\Support\VehicleType::detector($data['detected_vehicle_type'] ?? null);
 
             return VehicleEvent::query()->create([
                 'event_type' => $eventType,
@@ -83,11 +84,11 @@ class EventService
                 'plate_confidence' => null,
                 'vehicle_id' => null,
                 'vehicle_type' => $detectedVehicleType,
-                'detected_vehicle_type' => $detectedVehicleType,
+                'detected_vehicle_type' => $data['detected_vehicle_type'] ?? null,
                 'vehicle_color' => null,
                 'camera_id' => $camera->id,
                 'external_event_key' => $data['external_event_key'],
-                'detection_metadata_json' => $data['detection_metadata_json'] ?? null,
+                'detection_metadata_json' => array_replace((array) ($data['detection_metadata_json'] ?? []), [VehicleTypeEvidenceService::KEY => ['source' => 'detector', 'raw' => $data['detected_vehicle_type'] ?? null]]),
                 'roi_name' => $data['roi_name'] ?? Gate::labelFor($camera->camera_role).' Trigger Line',
                 'event_time' => $data['event_time'],
                 'vehicle_image_path' => $data['vehicle_image_path'],
@@ -117,18 +118,16 @@ class EventService
                 'event_status' => VehicleEvent::STATUS_COMPLETED,
                 'event_origin' => $vehicleEvent->event_origin ?: 'cctv_detected',
                 'plate_text' => $this->normalizeDisplayPlate($data['plate_text']),
-                'plate_confidence' => $data['plate_confidence'] ?: null,
+                'plate_confidence' => $data['plate_confidence'] ?? null,
                 'vehicle_id' => $linkedVehicle?->id,
-                'vehicle_type' => $this->normalizeVehicleType($data['vehicle_type']),
-                'vehicle_color' => $data['vehicle_color'],
+                'vehicle_type' => \App\Support\VehicleType::validated($data['vehicle_type'], $vehicleEvent->vehicle_type),
+                'detection_metadata_json' => array_replace((array) $vehicleEvent->detection_metadata_json, [VehicleTypeEvidenceService::KEY => ['source' => 'manual', 'raw' => $vehicleEvent->detected_vehicle_type]]),
                 'vehicle_category' => $linkedVehicle?->category,
                 'match_status' => $vehicleEvent->event_type === 'ENTRY' ? 'open' : 'unmatched',
                 'details_completed_at' => now(),
             ]);
 
-            if (! $vehicleEvent->detected_vehicle_type) {
-                $vehicleEvent->detected_vehicle_type = $this->normalizeVehicleType($data['vehicle_type']);
-            }
+            // Manual completion never fabricates detector evidence.
 
             if (! empty($data['plate_image'])) {
                 $vehicleEvent->plate_image_path = $this->storeImage($data['plate_image'], 'plate');
@@ -186,7 +185,8 @@ class EventService
                 'vehicle_id' => $vehicle->id,
                 'rfid_scan_log_id' => $scanLog->id,
                 'vehicle_type' => $vehicle->vehicle_type,
-                'detected_vehicle_type' => $vehicle->vehicle_type,
+                'detected_vehicle_type' => $transition['detected_vehicle_type'] ?? null,
+                'detection_metadata_json' => [VehicleTypeEvidenceService::KEY => ['source' => 'registry', 'registry' => $vehicle->vehicle_type, 'vehicle_id' => $vehicle->id, 'raw' => $transition['detected_vehicle_type'] ?? null]],
                 'vehicle_color' => null,
                 'vehicle_category' => $vehicle->category,
                 'camera_id' => $cameraId,
@@ -248,6 +248,8 @@ class EventService
             // its exit was missed. Close the old session so it is not counted twice.
             ActiveSession::query()
                 ->where('status', 'open')
+                ->where('entry_event_id', '!=', $event->id)
+                ->where('entry_time', '<=', $event->event_time)
                 ->whereHas('entryEvent', fn ($query) => $query->where('vehicle_id', $event->vehicle_id))
                 ->update([
                     'status' => 'closed',
@@ -469,9 +471,7 @@ class EventService
      */
     protected function normalizeDisplayPlate(string $plateText): string
     {
-        $normalized = preg_replace('/\s+/', ' ', $plateText) ?? $plateText;
-
-        return Str::upper(trim($normalized));
+        return (string) \App\Support\PlateNumber::normalize($plateText);
     }
 
     /**
@@ -479,16 +479,6 @@ class EventService
      */
     protected function normalizeVehicleType(string $vehicleType): string
     {
-        $normalized = Str::of($vehicleType)
-            ->replace(['_', '-'], ' ')
-            ->trim()
-            ->lower();
-
-        return match ((string) $normalized) {
-            'motorbike' => 'Motorcycle',
-            'pickup truck' => 'Truck',
-            'car van' => 'Car',
-            default => (string) $normalized->title(),
-        };
+        return \App\Support\VehicleType::validated($vehicleType);
     }
 }

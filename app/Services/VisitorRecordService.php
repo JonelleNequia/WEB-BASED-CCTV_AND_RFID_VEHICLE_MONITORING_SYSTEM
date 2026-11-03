@@ -50,7 +50,7 @@ class VisitorRecordService
             return null;
         }
 
-        return DB::transaction(function () use ($crossing, $unknownTag): VisitorRecord {
+        return app(PlateProcessingLock::class)->run(function () use ($crossing, $unknownTag): VisitorRecord {
             $record = VisitorRecord::query()->firstOrNew(['external_event_key' => $crossing->external_event_key]);
             $this->fillDefaults($record);
             $record->fill([
@@ -67,11 +67,13 @@ class VisitorRecordService
             ]);
             // Delete device work: the camera that saw it.
             $record->forceFill(['camera_device_id' => $crossing->camera_device_id, 'camera_device_label' => $crossing->camera_device_label]);
+            app(VehicleTypeEvidenceService::class)->resolve($record, $crossing->vehicle_type, true);
             $record->save();
 
             if ($record->status === VisitorRecord::STATUS_ACTIVE && ! $record->duplicate_of_id) {
                 $this->markDuplicateOfOverlapping($record, $crossing);
             }
+            app(MovementReconciliationService::class)->syncPlate($record);
 
             return $record->fresh();
         });
@@ -86,7 +88,9 @@ class VisitorRecordService
      */
     public function applyPlateReading(array $data, ?UploadedFile $plateImage = null): VisitorRecord
     {
-        return DB::transaction(function () use ($data, $plateImage): VisitorRecord {
+        $data = \App\Support\DeprecatedVehicleColor::without($data);
+
+        return app(PlateProcessingLock::class)->run(function () use ($data, $plateImage): VisitorRecord {
             $record = VisitorRecord::query()->lockForUpdate()->firstOrNew(['external_event_key' => $data['external_event_key']]);
 
             if (! $record->exists) {
@@ -98,6 +102,15 @@ class VisitorRecordService
                     'camera_id' => Camera::query()->forRole($gate)->value('id'),
                     'seen_at' => Carbon::parse((string) $data['event_time']),
                 ]);
+                // OCR can arrive after an RFID-backed crossing, which has no
+                // visitor row yet. Keep its identity and conflict evidence.
+                if ($crossing = VehicleCrossing::query()->where('external_event_key', $data['external_event_key'])->first()) {
+                    $record->fill([
+                        'vehicle_crossing_id' => $crossing->id, 'gate' => $crossing->gate,
+                        'camera_id' => $crossing->camera_id, 'seen_at' => $crossing->crossed_at,
+                        'direction' => $crossing->direction, 'snapshot_path' => $crossing->snapshot_path,
+                    ]);
+                }
             }
 
             $oldProfileId = $record->plate_profile_id;
@@ -105,14 +118,17 @@ class VisitorRecordService
             $read = ($data['plate_status'] ?? null) === VisitorRecord::PLATE_READ && $plate !== null;
 
             $record->fill([
-                'vehicle_type' => $data['detected_vehicle_type'] ?? $record->vehicle_type,
-                'vehicle_color' => $data['vehicle_color'] ?? $record->vehicle_color,
-                'ocr_plate_number' => $read ? $plate : PlateNumber::display($data['best_guess'] ?? null),
-                'ocr_details_json' => $data['ocr_details'] ?? null,
-                'plate_image_path' => $plateImage ? $plateImage->store('visitor_plates', 'public') : $record->plate_image_path,
+                // Effective type is resolved separately from detector evidence below.
+                'ocr_plate_number' => ($record->plate_status === VisitorRecord::PLATE_CORRECTED || $record->reviewed_at !== null) && $record->ocr_plate_number !== null
+                    ? $record->ocr_plate_number : ($read ? $plate : PlateNumber::display($data['best_guess'] ?? null)),
+                'ocr_details_json' => ($record->plate_status === VisitorRecord::PLATE_CORRECTED || $record->reviewed_at !== null) && app(VehicleTypeEvidenceService::class)->hasOcrDetails($record)
+                    ? $record->ocr_details_json : app(VehicleTypeEvidenceService::class)->mergeOcrDetails($record, $data['ocr_details'] ?? null),
+                'plate_image_path' => $plateImage && ($record->reviewed_at === null || ! $record->plate_image_path)
+                    ? $plateImage->store('visitor_plates', 'public') : $record->plate_image_path,
             ]);
 
-            if ($record->plate_status !== VisitorRecord::PLATE_CORRECTED) {
+            if ($record->plate_status !== VisitorRecord::PLATE_CORRECTED && $record->reviewed_at === null) {
+                $originalPlate = $plate;
                 // Gate direction work, Phase C: the plate's profile, also when
                 // the read is one character off a plate already seen.
                 $match = $read ? $this->tieToProfile($record, $plate) : ['plate' => null, 'profile' => null, 'confidence' => null, 'reason' => null, 'suggested' => null];
@@ -120,7 +136,7 @@ class VisitorRecordService
                 $record->fill([
                     'plate_status' => $read ? VisitorRecord::PLATE_READ : VisitorRecord::PLATE_UNREADABLE,
                     'plate_number' => $read ? $plate : null,
-                    'plate_key' => $read ? PlateNumber::key($plate) : null,
+                    'plate_key' => $read && strlen(PlateNumber::key($plate) ?? '') <= 20 ? PlateNumber::key($plate) : null,
                     'plate_confidence' => isset($data['plate_confidence']) ? (float) $data['plate_confidence'] : null,
                     'match_confidence' => $match['confidence'],
                     'match_reason' => $match['reason'],
@@ -129,15 +145,20 @@ class VisitorRecordService
                 $record->plate_profile_id = $profile?->id;
                 $record->vehicle_id = $profile?->vehicle_id;
                 $record->suggested_profile_id = $match['suggested'];
+                $this->classifyPlate($record, $originalPlate, $read && $record->plate_confidence !== null
+                    && $record->plate_confidence >= VisitorRecord::LOW_PLATE_CONFIDENCE && $record->plate_confidence <= 1);
             }
 
+            app(VehicleTypeEvidenceService::class)->resolve($record, $data['detected_vehicle_type'] ?? null, array_key_exists('detected_vehicle_type', $data));
             $record->save();
 
-            if ($read && $record->status === VisitorRecord::STATUS_ACTIVE) {
+            if ($read && $record->status === VisitorRecord::STATUS_ACTIVE && $record->registration_status !== 'review'
+                && $record->plate_status !== VisitorRecord::PLATE_CORRECTED && $record->reviewed_at === null) {
                 $this->markDuplicateOfSamePlate($record);
             }
 
             $this->refreshProfiles([$oldProfileId, $record->plate_profile_id]);
+            app(MovementReconciliationService::class)->syncPlate($record);
 
             return $record->fresh();
         });
@@ -208,11 +229,11 @@ class VisitorRecordService
      * Phase 8: a guard records a vehicle with no registered tag by hand
      * (replaces "Add Guest Observation").
      *
-     * @param  array<string, mixed>  $data  gate, direction, seen_at, plate_number?, vehicle_type?, vehicle_color?, note?
+     * @param  array<string, mixed>  $data  gate, direction, seen_at, plate_number?, vehicle_type?, note?
      */
     public function createManual(array $data, User $user, ?UploadedFile $snapshot = null): VisitorRecord
     {
-        return DB::transaction(function () use ($data, $user, $snapshot): VisitorRecord {
+        return app(PlateProcessingLock::class)->run(function () use ($data, $user, $snapshot): VisitorRecord {
             $plate = PlateNumber::display($data['plate_number'] ?? null);
             $seenAt = Carbon::parse((string) $data['seen_at']);
             $gate = Gate::normalizeCode((string) $data['gate']);
@@ -233,11 +254,14 @@ class VisitorRecordService
                 'plate_key' => PlateNumber::key($plate),
                 'plate_profile_id' => $profile?->id,
                 'vehicle_id' => $profile?->vehicle_id,
-                'vehicle_type' => $data['vehicle_type'] ?? null,
-                'vehicle_color' => $data['vehicle_color'] ?? null,
+                'vehicle_type' => \App\Support\VehicleType::validated($data['vehicle_type'] ?? null, required: false),
                 'corrected_by' => $user->id,
                 'corrected_at' => now(),
             ]);
+
+            $this->classifyPlate($record, $plate, $plate !== null, true);
+            $record->save();
+            app(MovementReconciliationService::class)->syncPlate($record);
 
             $this->refreshProfiles([$record->plate_profile_id]);
 
@@ -248,12 +272,32 @@ class VisitorRecordService
     /**
      * A guard types the right plate, or marks it unreadable (null).
      */
-    public function correctPlate(VisitorRecord $record, ?string $plate, User $user): VisitorRecord
+    public function correctPlate(VisitorRecord $record, ?string $plate, User $user, string $action = 'correct_plate'): VisitorRecord
     {
-        return DB::transaction(function () use ($record, $plate, $user): VisitorRecord {
+        return app(PlateProcessingLock::class)->run(function () use ($record, $plate, $user, $action): VisitorRecord {
+            $record = VisitorRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
             $oldProfileId = $record->plate_profile_id;
+            $before = $record->plate_number
+                ? $record->plate_number.' ('.$record->plate_status.($record->plate_confidence !== null ? ', '.round($record->plate_confidence * 100).'%' : '').')'
+                : $record->plate_status.($record->ocr_plate_number ? ' (guess '.$record->ocr_plate_number.')' : '');
+            if ($plate !== null) {
+                \Illuminate\Support\Facades\Validator::make(['plate' => PlateNumber::normalize($plate)], [
+                    'plate' => ['required', 'string', 'max:30', new \App\Rules\PlateIdentifier(20)],
+                ])->validate();
+            }
             $plate = PlateNumber::display($plate);
             $profile = $plate ? $this->profileFor($plate, $record->seen_at) : null;
+            $previousDecision = $record->only(['registration_status', 'registration_category', 'registration_reason', 'vehicle_id', 'status']);
+            $this->classifyPlate($record, $plate, $plate !== null, true);
+            if ($plate === null) {
+                $record->registration_reason = 'No plate visible (checked by staff).';
+            }
+            if ($record->reviewed_at !== null && $record->plate_number === $plate
+                && $record->plate_profile_id === $profile?->id
+                && $previousDecision === $record->only(array_keys($previousDecision))) {
+                app(MovementReconciliationService::class)->syncPlate($record);
+                return $record->fresh();
+            }
 
             // Gate direction work, Phase C: remember the correction for later reads.
             if ($plate) {
@@ -261,16 +305,15 @@ class VisitorRecordService
             }
 
             $record->fill([
-                'match_confidence' => $plate ? PlateMatchService::MANUAL : null,
+                'match_confidence' => $plate ? ($action === 'confirm' ? ($record->match_confidence === PlateMatchService::LOW || $record->match_confidence === null ? PlateMatchService::CONFIRMED : $record->match_confidence) : PlateMatchService::MANUAL) : null,
                 'match_reason' => null,
                 'suggested_profile_id' => null,
                 // What OCR said stays in ocr_plate_number.
-                'ocr_plate_number' => $record->ocr_plate_number ?? $record->plate_number,
-                'plate_status' => $plate ? VisitorRecord::PLATE_CORRECTED : VisitorRecord::PLATE_UNREADABLE,
+                'ocr_plate_number' => $record->ocr_plate_number ?? ($record->source === VisitorRecord::SOURCE_MANUAL ? null : $record->plate_number),
+                'plate_status' => $plate ? ($action === 'confirm' ? $record->plate_status : VisitorRecord::PLATE_CORRECTED) : VisitorRecord::PLATE_UNREADABLE,
                 'plate_number' => $plate,
                 'plate_key' => PlateNumber::key($plate),
                 'plate_profile_id' => $profile?->id,
-                'vehicle_id' => $profile?->vehicle_id,
                 'corrected_by' => $user->id,
                 'corrected_at' => now(),
                 // Gate direction work, Phase D: a guard looked at the plate.
@@ -279,6 +322,8 @@ class VisitorRecordService
             ])->save();
 
             $this->refreshProfiles([$oldProfileId, $record->plate_profile_id]);
+            app(VisitorReviewService::class)->log($record, $plate === null ? 'no_plate' : $action, $before, $record->plate_number, $user);
+            app(MovementReconciliationService::class)->syncPlate($record);
 
             return $record->fresh();
         });
@@ -290,9 +335,15 @@ class VisitorRecordService
      */
     public function correctType(VisitorRecord $record, string $type, User $user): VisitorRecord
     {
-        return DB::transaction(function () use ($record, $type, $user): VisitorRecord {
+        $type = \App\Support\VehicleType::validated($type);
+        return app(PlateProcessingLock::class)->run(function () use ($record, $type, $user): VisitorRecord {
+            $record = VisitorRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
+            $before = $record->vehicle_type;
+            if ($before === $type && $record->typeCorrections()->latest('id')->first()?->corrected_type === $type) {
+                return $record;
+            }
             // The camera's own answer (the crossing keeps it after a correction).
-            $detected = $record->crossing?->vehicle_type ?? ($record->source === VisitorRecord::SOURCE_MANUAL ? null : $record->vehicle_type);
+            $detected = data_get($record->ocr_details_json, VehicleTypeEvidenceService::KEY.'.raw', $record->crossing?->vehicle_type ?? ($record->source === VisitorRecord::SOURCE_MANUAL ? null : $record->vehicle_type));
 
             \App\Models\VehicleTypeCorrection::query()->create([
                 'visitor_record_id' => $record->id,
@@ -302,7 +353,11 @@ class VisitorRecordService
                 'corrected_type' => $type,
                 'corrected_by' => $user->id,
             ]);
-            $record->forceFill(['vehicle_type' => $type])->save();
+            $record->forceFill(['vehicle_type' => $type]);
+            app(VehicleTypeEvidenceService::class)->resolve($record);
+            $record->save();
+            app(VisitorReviewService::class)->log($record, 'correct_type', $before, $type, $user);
+            app(VehicleTypeEvidenceService::class)->syncEvent($record);
             $this->refreshProfiles([$record->plate_profile_id]);
 
             return $record->fresh();
@@ -311,10 +366,14 @@ class VisitorRecordService
 
     public function dismiss(VisitorRecord $record, string $reason): VisitorRecord
     {
-        $record->forceFill(['status' => VisitorRecord::STATUS_DISMISSED, 'status_note' => mb_substr($reason, 0, 200)])->save();
-        $this->refreshProfiles([$record->plate_profile_id]);
+        return app(PlateProcessingLock::class)->run(function () use ($record, $reason): VisitorRecord {
+            $record = $record->fresh();
+            $record->forceFill(['status' => VisitorRecord::STATUS_DISMISSED, 'status_note' => mb_substr($reason, 0, 200)])->save();
+            $this->refreshProfiles([$record->plate_profile_id]);
+            app(MovementReconciliationService::class)->syncPlate($record);
 
-        return $record;
+            return $record;
+        });
     }
 
     /**
@@ -407,6 +466,12 @@ class VisitorRecordService
     {
         $matcher = app(PlateMatchService::class);
         $key = (string) PlateNumber::key($plate);
+        if ($key === '' || strlen($key) > 20 || mb_strlen(PlateNumber::display($plate)) > 30) {
+            return ['plate' => $plate, 'profile' => null, 'confidence' => PlateMatchService::LOW, 'reason' => 'Invalid plate identifier.', 'suggested' => null];
+        }
+        if (app(VehicleRegistryService::class)->plateMatches($plate, $record->seen_at)->isNotEmpty()) {
+            return ['plate' => $plate, 'profile' => $this->profileFor($plate, $record->seen_at), 'confidence' => PlateMatchService::EXACT, 'reason' => null, 'suggested' => null];
+        }
 
         if ($learned = $matcher->learnedPlateKey($key)) {
             $right = (string) PlateNumber::display($learned);
@@ -435,6 +500,9 @@ class VisitorRecordService
      */
     public function profileFor(string $plate, ?Carbon $seenAt = null): PlateProfile
     {
+        \Illuminate\Support\Facades\Validator::make(['plate' => PlateNumber::normalize($plate)], [
+            'plate' => ['required', 'string', 'max:30', new \App\Rules\PlateIdentifier(20)],
+        ])->validate();
         $key = (string) PlateNumber::key($plate);
         $profile = PlateProfile::query()->firstOrCreate(
             ['plate_key' => $key],
@@ -443,7 +511,7 @@ class VisitorRecordService
                 'first_seen_at' => $seenAt,
                 'last_seen_at' => $seenAt,
                 // Phase 6: a plate already in the Registry (seen with no tag read).
-                'vehicle_id' => $this->vehicleIdForPlateKey($key),
+                'vehicle_id' => $this->vehicleIdForPlateKey($key, $seenAt),
             ]
         );
 
@@ -472,7 +540,12 @@ class VisitorRecordService
             foreach ($profiles as $profile) {
                 $profile->forceFill(['vehicle_id' => $vehicle->id, 'registered_at' => $profile->registered_at ?? now()])->save();
                 PlateProfile::query()->where('merged_into_id', $profile->id)->update(['vehicle_id' => $vehicle->id]);
-                $moved += VisitorRecord::query()->where('plate_profile_id', $profile->id)->whereNull('vehicle_id')->update(['vehicle_id' => $vehicle->id]);
+                // Only the explicit "Register this vehicle" selection moves
+                // earlier relationships. Ordinary registration/editing does
+                // not relink historical passes or rewrite their decisions.
+                if ($plateProfileId !== null) {
+                    $moved += VisitorRecord::query()->where('plate_profile_id', $profile->id)->whereNull('vehicle_id')->update(['vehicle_id' => $vehicle->id]);
+                }
             }
 
             return $moved;
@@ -502,13 +575,52 @@ class VisitorRecordService
             ->get();
     }
 
-    protected function vehicleIdForPlateKey(string $key): ?int
+    protected function vehicleIdForPlateKey(string $key, ?Carbon $seenAt = null): ?int
     {
-        $id = Vehicle::query()
-            ->whereRaw("replace(replace(upper(plate_number), ' ', ''), '-', '') = ?", [$key])
-            ->value('id');
+        $matches = app(VehicleRegistryService::class)->plateMatches($key, $seenAt);
 
-        return $id !== null ? (int) $id : null;
+        return $matches->count() === 1 && $matches->first()->status === 'active' ? $matches->first()->id : null;
+    }
+
+    /** Classify this pass only. Profile aliases/suggestions never prove registration. */
+    protected function classifyPlate(VisitorRecord $record, ?string $plate, bool $reliable, bool $manual = false): void
+    {
+        $matches = app(VehicleRegistryService::class)->plateMatches($plate, $record->seen_at);
+        $valid = $plate !== null && PlateNumber::key($plate) !== null && strlen(PlateNumber::key($plate)) <= 20 && mb_strlen(PlateNumber::display($plate)) <= 30;
+        $reason = match (true) {
+            ! $valid => 'Plate unreadable or invalid. Check the plate.',
+            ! $reliable => 'OCR confidence is missing or below the review threshold.',
+            $matches->count() > 1 => 'Multiple registrations match this plate. Resolve the registry collision before confirming.',
+            $matches->count() === 1 && $matches->first()->status !== 'active' => 'The matching registration is inactive. Check its status in the Registry.',
+            ! $manual && ($record->match_confidence === PlateMatchService::LOW
+                || ($matches->isEmpty() && $record->plateProfile
+                    && app(VehicleRegistryService::class)->plateMatches($record->plateProfile->plate_number, $record->seen_at)->isNotEmpty()))
+                => 'Possible or previously corrected plate match. Confirm the actual plate.',
+            default => null,
+        };
+        $scan = $record->crossing?->rfidScanLog;
+        if ($scan && $scan->verification_status !== 'verified') {
+            $reason = 'The linked RFID evidence is flagged. Plate identification cannot bypass that restriction; check Review.';
+        }
+        if ($scan && $scan->vehicle_id && ($reason !== null || $matches->count() !== 1 || $matches->first()->id !== $scan->vehicle_id)) {
+            $reason = 'Plate evidence conflicts with the linked RFID identity. Check the plate; RFID identity is retained.';
+            if ($scan->verification_status === 'verified' && $record->status === VisitorRecord::STATUS_DISMISSED
+                && (str_starts_with((string) $record->status_note, 'Registered tag read for ')
+                    || str_starts_with((string) $record->status_note, 'Identified by the linked RFID event'))) {
+                $record->status = VisitorRecord::STATUS_ACTIVE;
+            }
+        } elseif ($scan && $scan->vehicle_id && $reason === null) {
+            // The existing RFID event already counts this crossing.
+            $record->status = VisitorRecord::STATUS_DISMISSED;
+            $record->status_note = 'Identified by the linked RFID event; no additional movement.';
+        }
+        $vehicle = $reason === null && $matches->count() === 1 ? $matches->first() : null;
+        $record->forceFill([
+            'registration_status' => $reason !== null ? 'review' : ($vehicle ? 'registered' : 'guest'),
+            'registration_category' => $vehicle ? \App\Support\VehicleCategory::normalize($vehicle->category) : null,
+            'registration_reason' => $reason,
+            'vehicle_id' => $vehicle?->id,
+        ]);
     }
 
     /**

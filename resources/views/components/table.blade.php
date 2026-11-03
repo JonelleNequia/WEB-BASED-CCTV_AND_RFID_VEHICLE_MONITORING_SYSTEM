@@ -26,6 +26,9 @@
         <div class="data-table-filters">{{ $filters }}</div>
     @endisset
 
+    @if ($attributes->has('data-auto-table'))
+        <div data-auto-update="results" data-auto-empty="{{ ($empty || ($paginator && $paginator->isEmpty())) ? 'true' : 'false' }}">
+    @endif
     @if ($empty)
         <x-empty-state :title="$emptyTitle" :text="$emptyText">{{ $emptyAction ?? '' }}</x-empty-state>
     @else
@@ -38,5 +41,8 @@
 
     @if ($paginator && ! $empty)
         @include('layouts.partials.pagination', ['paginator' => $paginator])
+    @endif
+    @if ($attributes->has('data-auto-table'))
+        </div>
     @endif
 </section>

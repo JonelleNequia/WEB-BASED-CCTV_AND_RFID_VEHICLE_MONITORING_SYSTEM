@@ -19,7 +19,7 @@ use App\Services\RfidIngestService;
 use App\Services\SettingsService;
 use App\Support\CameraFiles;
 use App\Support\DeviceFiles;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -45,7 +45,7 @@ class DeviceDeletionTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $this->app->useStoragePath($storage = sys_get_temp_dir().'/device-delete-test-'.uniqid());
         File::ensureDirectoryExists($storage.'/logs');

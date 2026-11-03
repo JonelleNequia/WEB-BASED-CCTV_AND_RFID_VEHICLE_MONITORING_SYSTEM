@@ -43,6 +43,11 @@ class DetectorRfidMatchService
         ?string $eventKey = null,
         ?Carbon $until = null
     ): ?RfidScanLog {
+        return app(PlateProcessingLock::class)->run(fn () => $this->findPresence($cameraRole, $eventTime, $eventKey, $until));
+    }
+
+    protected function findPresence(string $cameraRole, Carbon $eventTime, ?string $eventKey, ?Carbon $until): ?RfidScanLog
+    {
         $presence = $this->tagMatcher->pick($cameraRole, $eventTime, $eventKey, registeredOnly: true, until: $until);
 
         if ($presence === null) {
@@ -51,7 +56,9 @@ class DetectorRfidMatchService
 
         // Callers without an event key (manual checks) only look.
         if (filled($eventKey)) {
-            $this->tagMatcher->claim($cameraRole, $presence, $eventKey, $eventTime);
+            if (! $this->tagMatcher->claim($cameraRole, $presence, $eventKey, $eventTime)) {
+                return null;
+            }
         }
 
         $tag = $presence['tag'];

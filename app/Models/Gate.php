@@ -54,6 +54,7 @@ class Gate extends Model
             'is_active' => 'boolean',
             'reader_manual' => 'boolean',
             'reader_port' => 'integer',
+            'archived_at' => 'datetime',
         ];
     }
 
@@ -64,7 +65,13 @@ class Gate extends Model
 
     public function scopeActive(Builder $query): Builder
     {
-        return $query->where('is_active', true)->orderBy('sort_order')->orderBy('id');
+        return $query->retained()->where('is_active', true)->orderBy('sort_order')->orderBy('id');
+    }
+
+    /** Retained includes inactive gates; history may still query archived gates. */
+    public function scopeRetained(Builder $query): Builder
+    {
+        return $query->whereNull('archived_at');
     }
 
     /**
@@ -95,11 +102,16 @@ class Gate extends Model
         return static::ordered()->pluck('name', 'code')->all();
     }
 
+    public static function historicalOptions(): array
+    {
+        return static::query()->orderBy('sort_order')->orderBy('id')->pluck('name', 'code')->all();
+    }
+
     /**
      * Turn any gate input (code, old "entrance"/"exit") into a gate code.
      * Unknown values return null.
      */
-    public static function resolveCode(?string $value): ?string
+    public static function resolveCode(?string $value, bool $historical = false): ?string
     {
         $value = strtolower(trim((string) $value));
 
@@ -109,7 +121,7 @@ class Gate extends Model
 
         $value = self::LEGACY_CODES[$value] ?? $value;
 
-        return static::query()->where('code', $value)->exists() ? $value : null;
+        return static::query()->when(! $historical, fn ($query) => $query->retained())->where('code', $value)->exists() ? $value : null;
     }
 
     /**
@@ -140,7 +152,17 @@ class Gate extends Model
      */
     public static function nextCode(): string
     {
-        $highest = static::query()->pluck('code')
+        // Repairing an old installation must not adopt an orphan camera or
+        // historical code left by an earlier deletion. Those records stay intact.
+        $codes = static::query()->pluck('code');
+        foreach ([
+            ['cameras', 'camera_role'], ['device_assignments', 'station'],
+            ['vehicle_crossings', 'gate'], ['visitor_records', 'gate'],
+            ['rfid_scan_logs', 'scan_location'], ['guest_vehicle_observations', 'location'],
+        ] as [$table, $column]) {
+            $codes = $codes->concat(\Illuminate\Support\Facades\DB::table($table)->distinct()->pluck($column));
+        }
+        $highest = $codes->filter(fn ($code): bool => is_string($code))
             ->map(fn (string $code): int => (int) preg_replace('/\D+/', '', $code))
             ->max() ?? 0;
 

@@ -1,5 +1,17 @@
+    <section class="health-summary" aria-label="System health summary">
+        @foreach (app(\App\View\Composers\NavigationComposer::class)->health() as $health)
+            <article class="health-summary-item">
+                <strong>{{ $health['label'] }}</strong>
+                <x-badge :tone="$health['ok'] ? 'success' : 'warning'" :label="$health['ok'] ? 'OK' : 'Needs attention'" />
+                <p class="field-help">{{ $health['detail'] }}</p>
+            </article>
+        @endforeach
+    </section>
+    <p class="field-help">The detector is a background service. A running service does not mean every camera or RFID reader is connected; check each gate below.</p>
+    @include('settings.partials.pipeline-metrics')
 
-
+    <details class="settings-diagnostics">
+    <summary>Service details, startup checks and crossing counters</summary>
     {{-- Startup checks: the detector runs the current code; every gate's calibration can be used. --}}
     @if (! empty($startupChecks ?? []))
         <ul class="startup-checks" data-startup-checks>
@@ -21,10 +33,12 @@
             <x-stat :label="$gateName.' Crossings'" :value="$runtime['cameras'][$gateCode]['crossings_logged'] ?? 0" />
         @endforeach
     </x-stat-row>
+    </details>
 
-    @include('settings.partials.pipeline-metrics')
-
+    <details class="settings-diagnostics">
+        <summary>Live-view measurements</summary>
     @include('settings.partials.live-view-status')
+    </details>
 
     {{-- UI Phase 3: per-camera details are diagnostics too. --}}
     <details class="advanced-section">

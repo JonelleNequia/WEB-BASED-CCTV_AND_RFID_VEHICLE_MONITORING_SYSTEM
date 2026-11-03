@@ -36,6 +36,7 @@ class Vehicle extends Model
         'rfid_tag_uid',
         'plate_number',
         'vehicle_owner_name',
+        'registered_by',
         'category',
         'vehicle_type',
     ];

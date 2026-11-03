@@ -31,22 +31,26 @@ class CrossingIntegrationController extends Controller
         SettingsService $settingsService,
         RfidIngestService $rfidIngestService,
         VisitorRecordService $visitorRecordService
-    ): JsonResponse
-    {
+    ): JsonResponse {
         if ($denied = $this->authorizeIntegrationRequest($request, $settingsService)) {
             return $denied;
         }
 
         // Multipart sends the metadata as a JSON string.
         if (is_string($request->input('detection_metadata'))) {
-            $request->merge(['detection_metadata' => json_decode($request->input('detection_metadata'), true) ?: []]);
+            $metadata = json_decode($request->input('detection_metadata'), true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($metadata)) {
+                $request->merge(['detection_metadata' => $metadata]);
+            }
         }
-        $request->merge(['direction' => strtoupper(trim((string) $request->input('direction', '')))]);
+        if (is_string($request->input('direction'))) {
+            $request->merge(['direction' => strtoupper(trim($request->input('direction')))]);
+        }
 
         $validated = $request->validate([
             'external_event_key' => ['required', 'string', 'max:120'],
             'camera_role' => ['required', 'string', new ValidGate],
-            'camera_id' => ['nullable', 'integer', 'exists:cameras,id'],
+            'camera_id' => ['nullable', 'integer', \Illuminate\Validation\Rule::exists('cameras', 'id')->whereIn('camera_role', Gate::query()->retained()->pluck('code')->all()), new \App\Rules\CameraAtGate('camera_role')],
             'direction' => ['required', 'in:'.implode(',', VehicleCrossing::DIRECTIONS)],
             'direction_reason' => ['nullable', 'string', 'max:120'],
             'event_time' => ['required', 'date'],
@@ -57,71 +61,85 @@ class CrossingIntegrationController extends Controller
             'snapshot' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
         ]);
 
-        $existing = VehicleCrossing::query()->where('external_event_key', $validated['external_event_key'])->first();
+        return app(\App\Services\PlateProcessingLock::class)->run(function () use ($request, $validated, $rfidIngestService, $visitorRecordService): JsonResponse {
+            $existing = VehicleCrossing::query()->where('external_event_key', $validated['external_event_key'])->first();
 
-        if ($existing) {
-            // ROI work: the detector updates the SAME record until the vehicle
-            // left the zone (clearer picture, type, how it moved). The
-            // direction, time and RFID link stay as they were recorded.
-            $updates = array_filter([
-                'vehicle_type' => $validated['detected_vehicle_type'] ?? null,
-                'confidence' => $validated['confidence'] ?? null,
-                'detection_metadata_json' => isset($validated['detection_metadata'])
-                    ? array_replace((array) $existing->detection_metadata_json, $validated['detection_metadata'])
-                    : null,
-            ], fn ($value) => $value !== null);
-            if ($request->hasFile('snapshot')) {
-                $updates['snapshot_path'] = $request->file('snapshot')->store('crossing_snapshots', 'public');
-                // The visitor record of this pass shows the clearer picture too.
-                \App\Models\VisitorRecord::query()->where('vehicle_crossing_id', $existing->id)
-                    ->where('snapshot_path', $existing->snapshot_path)->update(['snapshot_path' => $updates['snapshot_path']]);
+            if ($existing) {
+                // ROI work: the detector updates the SAME record until the vehicle
+                // left the zone (clearer picture, type, how it moved). The
+                // direction, time and RFID link stay as they were recorded.
+                $updates = array_filter([
+                    'vehicle_type' => $validated['detected_vehicle_type'] ?? null,
+                    'confidence' => $validated['confidence'] ?? null,
+                    'detection_metadata_json' => isset($validated['detection_metadata'])
+                        ? array_replace((array) $existing->detection_metadata_json, $validated['detection_metadata'])
+                        : null,
+                ], fn ($value) => $value !== null);
+                if ($request->hasFile('snapshot')) {
+                    $updates['snapshot_path'] = $request->file('snapshot')->store('crossing_snapshots', 'public');
+                    // The visitor record of this pass shows the clearer picture too.
+                    \App\Models\VisitorRecord::query()->where('vehicle_crossing_id', $existing->id)
+                        ->where('snapshot_path', $existing->snapshot_path)->update(['snapshot_path' => $updates['snapshot_path']]);
+                    // Reuse that same saved image for its canonical movement.
+                    // No additional capture or unrelated historical image is changed.
+                    \App\Models\VehicleEvent::query()->whereIn('visitor_record_id',
+                        \App\Models\VisitorRecord::query()->where('vehicle_crossing_id', $existing->id)->select('id'))
+                        ->where('vehicle_image_path', $existing->snapshot_path)->update(['vehicle_image_path' => $updates['snapshot_path']]);
+                }
+                $existing->update($updates);
+                if (array_key_exists('detected_vehicle_type', $validated)) {
+                    foreach (\App\Models\VisitorRecord::query()->where('vehicle_crossing_id', $existing->id)->get() as $record) {
+                        app(\App\Services\VehicleTypeEvidenceService::class)->resolve($record, $validated['detected_vehicle_type'], true);
+                        $record->save();
+                        app(\App\Services\VehicleTypeEvidenceService::class)->syncEvent($record);
+                    }
+                }
+
+                return response()->json([
+                    'message' => 'Crossing updated.',
+                    'duplicate' => true,
+                    'crossing' => $this->payload($existing->fresh()),
+                ]);
             }
-            $existing->update($updates);
+
+            $gate = Gate::normalizeCode($validated['camera_role']);
+            $crossing = VehicleCrossing::query()->create([
+                'gate' => $gate,
+                'camera_id' => $validated['camera_id'] ?? Camera::query()->forRole($gate)->value('id'),
+                'direction' => $validated['direction'],
+                'direction_reason' => $validated['direction_reason'] ?? null,
+                'crossed_at' => Carbon::parse($validated['event_time']),
+                'track_id' => $validated['track_id'] ?? null,
+                'confidence' => $validated['confidence'] ?? null,
+                'vehicle_type' => $validated['detected_vehicle_type'] ?? null,
+                'snapshot_path' => $request->hasFile('snapshot') ? $request->file('snapshot')->store('crossing_snapshots', 'public') : null,
+                'external_event_key' => $validated['external_event_key'],
+                'detection_metadata_json' => $validated['detection_metadata'] ?? null,
+            ]);
+
+            // RFID only with a vehicle: this vehicle's tag from the read buffer
+            // makes its one record (registered IN / OUT with this direction).
+            $tagged = $rfidIngestService->forCrossing($crossing);
+            $scan = $tagged['scan'];
+            // Phase 5: no registered tag -> an Unregistered Visitor record (an
+            // unknown tag is kept on it: "Register this tag").
+            $visitor = $scan ? null : $visitorRecordService->createFromCrossing($crossing->fresh(), $tagged['unknown_tag']);
 
             return response()->json([
-                'message' => 'Crossing updated.',
-                'duplicate' => true,
-                'crossing' => $this->payload($existing->fresh()),
-            ]);
-        }
-
-        $gate = Gate::normalizeCode($validated['camera_role']);
-        $crossing = VehicleCrossing::query()->create([
-            'gate' => $gate,
-            'camera_id' => $validated['camera_id'] ?? Camera::query()->forRole($gate)->value('id'),
-            'direction' => $validated['direction'],
-            'direction_reason' => $validated['direction_reason'] ?? null,
-            'crossed_at' => Carbon::parse($validated['event_time']),
-            'track_id' => $validated['track_id'] ?? null,
-            'confidence' => $validated['confidence'] ?? null,
-            'vehicle_type' => $validated['detected_vehicle_type'] ?? null,
-            'snapshot_path' => $request->hasFile('snapshot') ? $request->file('snapshot')->store('crossing_snapshots', 'public') : null,
-            'external_event_key' => $validated['external_event_key'],
-            'detection_metadata_json' => $validated['detection_metadata'] ?? null,
-        ]);
-
-        // RFID only with a vehicle: this vehicle's tag from the read buffer
-        // makes its one record (registered IN / OUT with this direction).
-        $tagged = $rfidIngestService->forCrossing($crossing);
-        $scan = $tagged['scan'];
-        // Phase 5: no registered tag -> an Unregistered Visitor record (an
-        // unknown tag is kept on it: "Register this tag").
-        $visitor = $scan ? null : $visitorRecordService->createFromCrossing($crossing->fresh(), $tagged['unknown_tag']);
-
-        return response()->json([
-            'message' => 'Crossing stored.',
-            'duplicate' => false,
-            'crossing' => $this->payload($crossing->fresh()),
-            'rfid_scan' => $scan ? [
-                'id' => $scan->id,
-                'plate_number' => $scan->vehicle?->plate_number,
-                'event_type' => $scan->resolved_event_type,
-                'resulting_state' => $scan->resulting_state,
-                'anomaly_reason' => $scan->anomaly_reason,
-            ] : null,
-            'visitor_record_id' => $visitor?->id,
-            'unknown_tag' => $tagged['unknown_tag'],
-        ], 201);
+                'message' => 'Crossing stored.',
+                'duplicate' => false,
+                'crossing' => $this->payload($crossing->fresh()),
+                'rfid_scan' => $scan ? [
+                    'id' => $scan->id,
+                    'plate_number' => $scan->vehicle?->plate_number,
+                    'event_type' => $scan->resolved_event_type,
+                    'resulting_state' => $scan->resulting_state,
+                    'anomaly_reason' => $scan->anomaly_reason,
+                ] : null,
+                'visitor_record_id' => $visitor?->id,
+                'unknown_tag' => $tagged['unknown_tag'],
+            ], 201);
+        });
     }
 
     /**

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Admin Login | PHILCST Vehicle Monitoring</title>
+    <title>Sign In | PHILCST Vehicle Monitoring</title>
     <link rel="stylesheet" href="{{ asset('css/app.css') }}">
 </head>
 <body class="auth-page">
@@ -46,7 +46,7 @@
 
                 <article class="auth-feature-card auth-feature-card-orange">
                     <span class="auth-feature-label">Operations</span>
-                    <strong>Single Admin Workflow</strong>
+                    <strong>Individual Admin and Guard Accounts</strong>
                     <p>Manage auto-detected events, manual detail completion, and weighted ENTRY to EXIT matching.</p>
                 </article>
             </div>
@@ -54,10 +54,10 @@
 
         <section class="auth-card auth-login-card" aria-labelledby="login-heading">
             <div class="auth-card-top">
-                <p class="auth-card-eyebrow">Admin Sign In</p>
+                <p class="auth-card-eyebrow">Account Sign In</p>
                 <h2 id="login-heading" class="auth-login-title">Welcome Back</h2>
                 <p class="auth-login-copy">
-                    Sign in with the authorized PHILCST admin account to continue to the monitoring system.
+                    Sign in with your activated PHILCST admin or guard account to continue.
                 </p>
             </div>
 
@@ -73,7 +73,7 @@
                         class="auth-input"
                         type="email"
                         name="email"
-                        value="{{ old('email', 'admin@philcst.local') }}"
+                        value="{{ old('email') }}"
                         autocomplete="email"
                         inputmode="email"
                         required
@@ -94,9 +94,10 @@
                 </div>
 
                 <button type="submit" class="button button-primary button-full auth-submit-button">
-                    Login to Dashboard
+                    Sign In
                 </button>
             </form>
+            <p><a href="{{ route('account.activate.form') }}">Activate an account with a privately delivered code</a></p>
         </section>
     </main>
 </body>

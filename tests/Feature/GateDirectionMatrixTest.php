@@ -11,7 +11,7 @@ use App\Models\VisitorRecord;
 use App\Services\MovementCountService;
 use App\Services\RfidIngestService;
 use App\Support\CameraFiles;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Illuminate\Testing\TestResponse;
@@ -42,8 +42,10 @@ class GateDirectionMatrixTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
-        $this->freezeTime();
+        $this->seed(PortalSeeder::class);
+        // The simulated passes advance time; keep all of them in today's
+        // counting window even when this suite runs near local midnight.
+        $this->travelTo(now()->startOfDay()->addHours(12));
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         Gate::query()->where('code', 'gate-1')->update(['away_direction' => 'IN']);
         Gate::query()->where('code', 'gate-2')->update(['away_direction' => 'OUT']);
@@ -99,7 +101,7 @@ class GateDirectionMatrixTest extends TestCase
         $this->assertSame(['gate-1' => [2, 2], 'gate-2' => [2, 2]], collect($counts['gates'])->map(fn (array $row) => [$row['in'], $row['out']])->all());
     }
 
-    public function test_an_unclear_direction_uses_the_state_when_registered_and_goes_to_review_when_not(): void
+    public function test_an_unclear_camera_direction_does_not_toggle_registered_or_unregistered_state(): void
     {
         foreach (['gate-1', 'gate-2'] as $gate) {
             // Registered, inside: OUT "from vehicle state".
@@ -107,8 +109,8 @@ class GateDirectionMatrixTest extends TestCase
             $this->scan($vehicle->rfid_tag_uid, $gate);
             $this->crossing($gate, 'UNKNOWN', null, 'went up 4% of the zone')->assertCreated();
             $event = VehicleEvent::query()->where('vehicle_id', $vehicle->id)->sole();
-            $this->assertSame(['EXIT', 'state', null], [$event->event_type, $event->direction_source, $event->direction_confidence]);
-            $this->assertSame(Vehicle::STATE_OUTSIDE, $vehicle->fresh()->current_state);
+            $this->assertSame(['UNKNOWN', null, null], [$event->event_type, $event->direction_source, $event->direction_confidence]);
+            $this->assertSame(Vehicle::STATE_INSIDE, $vehicle->fresh()->current_state);
 
             // Unregistered: Direction unknown, not counted, in Review.
             $this->crossing($gate, 'UNKNOWN', null, 'went up 4% of the zone')->assertCreated();
@@ -117,13 +119,13 @@ class GateDirectionMatrixTest extends TestCase
         }
 
         $counts = app(MovementCountService::class)->counts('today');
-        $this->assertSame([0, 2, 2], [$counts['in'], $counts['out'], $counts['unknown']]);
+        $this->assertSame([0, 0, 4], [$counts['in'], $counts['out'], $counts['unknown']]);
 
         $this->actingAs($this->admin)->get(route('visitors.index', ['tab' => 'review']))
-            ->assertOk()->assertSee('Review (2)')->assertSee('Unregistered Visitor');
+            ->assertOk()->assertSee('Review (4)')->assertSee('Unregistered Visitor');
         // Activity Logs marks the state-based direction.
-        $this->actingAs($this->admin)->get(route('logs.index'))->assertOk()->assertSee('from vehicle state');
-        $this->actingAs($this->admin)->get(route('logs.print', ['report' => 'today']))->assertOk()->assertSee('OUT (from vehicle state)');
+        $this->actingAs($this->admin)->get(route('logs.index'))->assertOk()->assertSee('Direction unknown');
+        $this->actingAs($this->admin)->get(route('logs.print', ['report' => 'today']))->assertOk()->assertSee('Direction unknown');
     }
 
     public function test_the_camera_wins_over_a_state_that_does_not_fit_and_the_state_follows(): void

@@ -13,7 +13,7 @@ use App\Services\Go2rtcService;
 use App\Services\SettingsService;
 use App\Support\CameraFiles;
 use App\Support\DeviceFiles;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -37,7 +37,7 @@ class CameraDeviceSourceTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $this->app->useStoragePath($storage = sys_get_temp_dir().'/camera-source-test-'.uniqid());
         File::ensureDirectoryExists($storage.'/logs');

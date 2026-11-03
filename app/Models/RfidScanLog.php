@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\RecordsSourceDevice;
 use App\Models\Concerns\StoresLocalTime;
+use App\Support\VehicleCategory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -90,6 +91,16 @@ class RfidScanLog extends Model
         return $this->belongsTo(Vehicle::class);
     }
 
+    public function getDisplayVehicleTypeAttribute(): string
+    {
+        return \App\Support\VehicleType::display(data_get($this->payload_json, \App\Services\VehicleTypeEvidenceService::KEY.'.registry'));
+    }
+
+    public function getVehicleTypeSourceLabelAttribute(): string
+    {
+        return \App\Services\VehicleTypeEvidenceService::sourceLabel(data_get($this->payload_json, \App\Services\VehicleTypeEvidenceService::KEY.'.source'));
+    }
+
     /**
      * RFID tag used during the scan.
      */
@@ -140,6 +151,20 @@ class RfidScanLog extends Model
             || ($this->verification_status === 'guest' && $this->vehicle_rfid_tag_id === null && $this->vehicle_id === null);
     }
 
+    /** Registration evidence for display; never a substitute for access checks. */
+    public function hasRecordedRegistration(): bool
+    {
+        if ($this->isUnknownTag() || $this->verification_status === 'unassigned_tag') {
+            return false;
+        }
+
+        // A verified historical receipt with its category snapshot survives
+        // removal of the former vehicle relation. "verified" alone is also
+        // the schema default, so it cannot prove registration by itself.
+        return $this->vehicle !== null || ($this->verification_status === 'verified'
+            && in_array(VehicleCategory::normalize($this->vehicle_category), VehicleCategory::REGISTRY, true));
+    }
+
     /**
      * Guest observation created when a guest tag needs CCTV review.
      */
@@ -162,7 +187,7 @@ class RfidScanLog extends Model
     public function getVerificationLabelAttribute(): string
     {
         if ($this->verification_status === 'verified') {
-            return 'Registered';
+            return $this->hasRecordedRegistration() ? 'Registered' : 'Registration unknown';
         }
 
         if ($this->isUnknownTag()) {
@@ -185,6 +210,7 @@ class RfidScanLog extends Model
         // UI Phase 3: red only for a real problem (anomaly, lost / disabled tag,
         // inactive vehicle); yellow for an unknown or unassigned tag.
         return match (true) {
+            $this->verification_status === 'verified' && ! $this->hasRecordedRegistration() => 'manual-review',
             $this->isUnknownTag(), in_array($this->verification_status, ['unassigned_tag', 'guest', 'non_recurring_category'], true) => 'manual-review',
             (bool) $this->is_anomaly, in_array($this->verification_status, ['inactive_tag', 'inactive_vehicle'], true) => 'unmatched',
             $this->verification_status === 'verified' => 'matched',

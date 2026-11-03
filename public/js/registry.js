@@ -150,7 +150,7 @@
         }
 
         picker.closest('form')?.addEventListener('submit', function (event) {
-            if (!hidden.value && !select.value) {
+            if (!hidden.value && !select.value && (!picker.hasAttribute('data-tag-optional') || scan.value.trim() !== '')) {
                 event.preventDefault();
                 setResult(picker, 'Scan a tag or choose an available one first.', 'error');
                 scan?.focus();
@@ -211,9 +211,10 @@
         const details = el('dl', 'vehicle-panel-details');
         [
             ['Owner', vehicle.vehicle_owner_name || '—'],
+            ['Registered by', vehicle.registered_by || 'Not recorded'],
             ['Category', vehicle.category_label],
             ['Vehicle type', vehicle.vehicle_type],
-            ['RFID tag', vehicle.tag ? `#${vehicle.tag.tag_number ?? '—'} · ${vehicle.tag.uid}` : 'No tag'],
+            ['RFID tag', vehicle.tag ? `#${vehicle.tag.tag_number ?? '—'} · ${vehicle.tag.uid} · ${vehicle.tag.status_label || vehicle.tag.status}` : 'No RFID assigned'],
             ['Last seen', vehicle.last_seen],
             ['Today', `${vehicle.entries_today} in · ${vehicle.exits_today} out`],
         ].forEach(function ([label, value]) {
@@ -237,7 +238,7 @@
         if (vehicle.previous_tags?.length) {
             details.append(
                 el('dt', null, 'Old tags'),
-                el('dd', null, vehicle.previous_tags.map((tag) => `#${tag.tag_number ?? '—'} · ${tag.uid} (${tag.status})`).join(', '))
+                el('dd', null, vehicle.previous_tags.map((tag) => `#${tag.tag_number ?? '—'} · ${tag.uid} (${tag.status_label || tag.status})`).join(', '))
             );
         }
 
@@ -293,7 +294,7 @@
         form.querySelectorAll('[data-other-select]').forEach(syncOther);
         form.querySelector('[data-edit-tag-note]').textContent = vehicle.tag
             ? `Tag #${vehicle.tag.tag_number ?? '—'} (${vehicle.tag.uid}). Change it with Replace Tag.`
-            : 'This vehicle has no tag. Use Assign Tag first.';
+            : 'No RFID assigned. Plate registration remains active; use Assign Tag when a tag is available.';
 
         window.ui.closeDrawer('vehicle-panel');
         window.ui.openDrawer('edit-vehicle-drawer');
@@ -302,10 +303,12 @@
     function openReplace(vehicle) {
         const form = document.querySelector('[data-vehicle-form="replace"]');
         form.action = vehicle.urls.replace_tag;
+        setField(form, 'expected_tag_id', vehicle.tag?.id || 0);
         setField(form, 'id', vehicle.id);
         form.querySelector('[data-replace-current]').textContent = `${vehicle.plate_number} · current tag ${vehicle.tag ? `#${vehicle.tag.tag_number ?? '—'} · ${vehicle.tag.uid}` : 'none'}`;
         form.querySelector('[data-old-tag-fieldset]').hidden = !vehicle.tag;
         document.getElementById('replace-tag-drawer-title').textContent = vehicle.tag ? 'Replace Tag' : 'Assign Tag';
+        form.querySelector('button[type="submit"]').textContent = vehicle.tag ? 'Replace Tag' : 'Assign Tag';
         resetPicker(form.querySelector('[data-tag-picker]'), vehicle.id);
 
         window.ui.closeDrawer('vehicle-panel');
@@ -320,40 +323,38 @@
         }
     }
 
-    document.querySelectorAll('[data-vehicle-row]').forEach(function (row) {
-        function open(event) {
-            if (event.target.closest('button, a, form, input, select, summary, details')) {
-                return;
-            }
-            const panel = document.querySelector('[data-vehicle-panel]');
-            const loading = document.createElement('p');
-            loading.className = 'text-muted skeleton-line';
-            loading.textContent = 'Loading…';
-            panel.replaceChildren(loading);
-            window.ui.openDrawer('vehicle-panel');
-            withVehicle(row.dataset.vehicleUrl, renderPanel);
-        }
+    function openRow(row) {
+        const panel = document.querySelector('[data-vehicle-panel]');
+        const loading = document.createElement('p');
+        loading.className = 'text-muted skeleton-line';
+        loading.textContent = 'Loading…';
+        panel.replaceChildren(loading);
+        window.ui.openDrawer('vehicle-panel');
+        withVehicle(row.dataset.vehicleUrl, renderPanel);
+    }
 
-        row.addEventListener('click', open);
-        row.addEventListener('keydown', function (event) {
-            if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                open(event);
-            }
-        });
-    });
-
-    document.querySelectorAll('[data-vehicle-action]').forEach(function (button) {
-        button.addEventListener('click', async function () {
-            // UI Phase 3: close the row "⋯" menu the action came from.
+    // Delegation keeps row actions working after server-rendered results change.
+    document.addEventListener('click', async function (event) {
+        if (event.defaultPrevented) return;
+        const button = event.target.closest('[data-vehicle-action]');
+        if (button) {
             button.closest('details')?.removeAttribute('open');
-            // UI Phase 5: show that the drawer is loading.
             button.disabled = true;
             button.setAttribute('aria-busy', 'true');
             await withVehicle(button.dataset.vehicleUrl, button.dataset.vehicleAction === 'edit' ? openEdit : openReplace);
             button.disabled = false;
             button.removeAttribute('aria-busy');
-        });
+            return;
+        }
+        const row = event.target.closest('[data-vehicle-row]');
+        if (row && !event.target.closest('button, a, form, input, select, summary, details')) openRow(row);
+    });
+
+    document.addEventListener('keydown', function (event) {
+        const row = event.target.closest('[data-vehicle-row]');
+        if (!row || event.target !== row || !['Enter', ' '].includes(event.key)) return;
+        event.preventDefault();
+        openRow(row);
     });
 
     // Focus the scan field whenever a tag picker drawer opens.

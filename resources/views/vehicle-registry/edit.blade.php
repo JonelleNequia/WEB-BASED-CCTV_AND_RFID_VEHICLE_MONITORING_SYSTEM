@@ -10,12 +10,14 @@
         @php($selectedCategory = old('category', $vehicle->category))
         @php($categorySelectValue = \App\Support\VehicleCategory::normalize($selectedCategory))
         @php($selectedVehicleType = old('vehicle_type', $vehicle->vehicle_type))
-        @php($vehicleTypeOtherValue = old('vehicle_type_other', ! in_array($selectedVehicleType, $vehicleTypes, true) && $selectedVehicleType !== 'Others' ? $selectedVehicleType : ''))
+        @php($vehicleTypeOtherValue = old('vehicle_type_other', ! in_array($selectedVehicleType, $vehicleTypes, true) && $selectedVehicleType !== 'Others' ? $selectedVehicleType : '') ?? '')
         @php($vehicleTypeSelectValue = $vehicleTypeOtherValue !== '' ? 'Others' : $selectedVehicleType)
         @php($selectedRfidTagId = (string) old('rfid_tag_id', $vehicle->rfid_tag_id))
         <form method="POST" action="{{ route('vehicle-registry.update', ['vehicle' => $vehicle->getKey()]) }}" class="stack-form" data-rfid-registration-form>
             @csrf
             @method('PUT')
+
+            <p class="field-help">Registered by: {{ $vehicle->registered_by ?: 'Not recorded' }}</p>
 
             @error('vehicle')
                 <div class="alert alert-danger">{{ $message }}</div>
@@ -24,8 +26,8 @@
             <div class="form-grid">
                 <div class="field">
                     <label for="rfid_tag_id">RFID Tag</label>
-                    <select id="rfid_tag_id" name="rfid_tag_id" required>
-                        <option value="">Choose RFID tag number</option>
+                    <select id="rfid_tag_id" name="rfid_tag_id">
+                        <option value="">{{ $vehicle->rfid_tag_id ? 'Keep current RFID assignment' : 'No RFID assigned' }}</option>
                         @foreach ($assignableTags as $tag)
                             <option value="{{ $tag->id }}" @selected($selectedRfidTagId === (string) $tag->id)>
                                 RFID #{{ $tag->tag_number ?: 'N/A' }} - {{ $tag->uid }}
@@ -46,7 +48,7 @@
 
                 <div class="field">
                     <label for="plate_number">Plate Number</label>
-                    <input id="plate_number" type="text" name="plate_number" value="{{ old('plate_number', $vehicle->plate_number) }}" required>
+                    <input id="plate_number" type="text" name="plate_number" value="{{ old('plate_number', $vehicle->plate_number) }}" required maxlength="50" data-normalize-plate>
                     @error('plate_number')
                         <span class="field-error">{{ $message }}</span>
                     @enderror
@@ -55,6 +57,7 @@
                 <div class="field">
                     <label for="vehicle_owner_name">Vehicle Owner Name</label>
                     <input id="vehicle_owner_name" type="text" name="vehicle_owner_name" value="{{ old('vehicle_owner_name', $vehicle->vehicle_owner_name) }}">
+                    <span class="field-help">Optional. New names may use letters, spaces, apostrophes, hyphens and periods (up to 100 characters). An existing organization name can be kept unchanged.</span>
                     @error('vehicle_owner_name')
                         <span class="field-error">{{ $message }}</span>
                     @enderror
@@ -89,6 +92,7 @@
                         name="vehicle_type_other"
                         value="{{ $vehicleTypeOtherValue }}"
                         placeholder="Enter custom vehicle type"
+                        maxlength="50"
                         data-other-field
                         @if ($vehicleTypeSelectValue !== 'Others') hidden @endif
                     >

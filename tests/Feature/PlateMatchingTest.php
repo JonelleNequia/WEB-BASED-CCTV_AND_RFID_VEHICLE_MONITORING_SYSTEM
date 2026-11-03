@@ -10,7 +10,7 @@ use App\Services\MovementCountService;
 use App\Services\PlateMatchService;
 use App\Services\VisitorPresenceService;
 use Carbon\Carbon;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -31,7 +31,7 @@ class PlateMatchingTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         Storage::fake('public');
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $this->travelTo(Carbon::parse('2026-10-14 09:15:00', 'Asia/Manila'));
@@ -70,7 +70,7 @@ class PlateMatchingTest extends TestCase
             ->assertSee('25 min inside');
     }
 
-    public function test_one_character_off_at_the_other_gate_is_tied_high_or_medium_when_type_colour_and_time_agree(): void
+    public function test_legacy_records_keep_their_existing_matching_evidence_and_thresholds(): void
     {
         $this->pass('in-a', 'gate-1', 'IN', 'read', 'ABC-1234');
         $this->pass('in-b', 'gate-1', 'IN', 'read', 'NAB-5678');
@@ -82,7 +82,7 @@ class PlateMatchingTest extends TestCase
         $abc = PlateProfile::query()->where('plate_key', 'ABC1234')->sole();
         // The record keeps what was read; the profile ties it to ABC 1234.
         $this->assertSame([$abc->id, PlateMatchService::HIGH, 'A8C-1234'], [$high->plate_profile_id, $high->match_confidence, $high->plate_number]);
-        $this->assertStringContainsString('ABC 1234 with B read as 8; same type; same colour; IN at Gate 1 20 min before', $high->match_reason);
+        $this->assertStringContainsString('ABC 1234 with B read as 8; same type; IN at Gate 1 20 min before', $high->match_reason);
         $this->assertFalse(PlateProfile::query()->where('plate_key', 'A8C1234')->exists());
 
         // 7 read as 1 (not an easy mix-up), same type and colour: medium.
@@ -163,6 +163,10 @@ class PlateMatchingTest extends TestCase
             'detected_vehicle_type' => 'Car',
             'detection_metadata' => ['rfid_status' => 'no_pass', 'direction_confidence' => 'high'],
         ])->assertCreated();
+
+        // Historical fixture only: new detector input no longer records color.
+        // Preserve coverage of the existing matching rules for legacy data.
+        VisitorRecord::query()->where('external_event_key', $key)->update(['vehicle_color' => $color]);
 
         $this->withHeaders(['X-Api-Key' => 'test-detector-key'])->postJson(route('api.integration.visitor-plates'), array_filter([
             'external_event_key' => $key,

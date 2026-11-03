@@ -267,8 +267,9 @@
 
         /* Sharp on high-density screens: the canvas has device pixels, drawing uses CSS pixels. */
         resizeCanvas() {
-            const width = this.stage.clientWidth;
-            const height = this.stage.clientHeight;
+            // Use the same CSS-pixel bounds as pointer coordinates. Grid
+            // widths can be fractional, especially at browser zoom levels.
+            const { width, height } = this.canvas.getBoundingClientRect();
             const ratio = window.devicePixelRatio || 1;
 
             if (!width || !height) {

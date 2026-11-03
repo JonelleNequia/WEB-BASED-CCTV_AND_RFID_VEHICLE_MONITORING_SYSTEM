@@ -71,7 +71,7 @@ class GuestObservationController extends Controller
             'filters' => $request->only(['plate_text', 'location', 'date_from', 'date_to']),
             'observations' => $guestObservationService->paginated($request->all(), 10),
             'guestCountToday' => $guestObservationService->countToday(),
-            'cameras' => Camera::query()->orderBy('camera_name')->get(),
+            'cameras' => Camera::query()->operational()->orderBy('camera_name')->get(),
             'latestUnregisteredCapture' => GuestVehicleObservation::query()
                 ->with('camera')
                 ->where('observation_source', 'cctv')
@@ -131,15 +131,16 @@ class GuestObservationController extends Controller
         $updates = [
             'plate_number' => $plateNumber,
             'plate_text' => $plateNumber,
-            'vehicle_type' => $validated['vehicle_type'] ?? null,
-            'vehicle_color' => $this->normalizeVehicleColor($validated['vehicle_color'] ?? null),
+            'vehicle_type' => \App\Support\VehicleType::validated($validated['vehicle_type'] ?? null, $guestVehicleObservation->vehicle_type, required: false),
             'location' => Gate::normalizeCode($validated['location']),
             'observed_at' => $validated['observed_at'],
             'status' => $validated['status'],
             'notes' => $validated['notes'] ?? null,
         ];
 
-        DB::transaction(function () use ($guestVehicleObservation, $updates): void {
+        app(\App\Services\PlateProcessingLock::class)->run(function () use ($guestVehicleObservation, $updates): void {
+            $guestVehicleObservation->refresh();
+            $updates['detection_metadata_json'] = \App\Services\VehicleTypeEvidenceService::manualMetadata($guestVehicleObservation->detection_metadata_json, $guestVehicleObservation->vehicle_type, $updates['vehicle_type']);
             $guestVehicleObservation->update($updates);
 
             if (filled($guestVehicleObservation->external_event_key)) {
@@ -156,9 +157,8 @@ class GuestObservationController extends Controller
     public function verify(Request $request, GuestVehicleObservation $guestVehicleObservation): RedirectResponse
     {
         $validated = $request->validate([
-            'plate_number' => ['nullable', 'string', 'max:50'],
-            'vehicle_type' => ['nullable', 'string', 'max:50'],
-            'vehicle_color' => ['nullable', 'string', 'max:50'],
+            'plate_number' => ['nullable', 'string', 'max:50', new \App\Rules\PlateIdentifier(20, $guestVehicleObservation->plate_number)],
+            'vehicle_type' => ['nullable', 'string', 'max:50', new \App\Rules\ValidVehicleType($guestVehicleObservation->vehicle_type)],
             'location' => ['required', new ValidGate],
             'observed_at' => ['required', 'date'],
             'notes' => ['nullable', 'string', 'max:1000'],
@@ -169,15 +169,16 @@ class GuestObservationController extends Controller
         $updates = [
             'plate_number' => $plateNumber,
             'plate_text' => $plateNumber,
-            'vehicle_type' => $validated['vehicle_type'] ?? null,
-            'vehicle_color' => $this->normalizeVehicleColor($validated['vehicle_color'] ?? null),
+            'vehicle_type' => \App\Support\VehicleType::validated($validated['vehicle_type'] ?? null, $guestVehicleObservation->vehicle_type, required: false),
             'location' => Gate::normalizeCode($validated['location']),
             'observed_at' => Carbon::parse($validated['observed_at']),
             'status' => 'verified',
             'notes' => $validated['notes'] ?? null,
         ];
 
-        DB::transaction(function () use ($guestVehicleObservation, $updates): void {
+        app(\App\Services\PlateProcessingLock::class)->run(function () use ($guestVehicleObservation, $updates): void {
+            $guestVehicleObservation->refresh();
+            $updates['detection_metadata_json'] = \App\Services\VehicleTypeEvidenceService::manualMetadata($guestVehicleObservation->detection_metadata_json, $guestVehicleObservation->vehicle_type, $updates['vehicle_type']);
             $guestVehicleObservation->update($updates);
 
             if (filled($guestVehicleObservation->external_event_key)) {
@@ -191,15 +192,6 @@ class GuestObservationController extends Controller
     protected function normalizePlate(?string $plate): ?string
     {
         return PlateNumber::normalize($plate);
-    }
-
-    protected function normalizeVehicleColor(?string $color): ?string
-    {
-        if (blank($color)) {
-            return null;
-        }
-
-        return Str::title(trim((string) $color));
     }
 
     protected function isDetectorGuestObservationRequest(Request $request): bool
@@ -236,16 +228,14 @@ class GuestObservationController extends Controller
             $validated = $request->validate([
                 'external_event_key' => ['required', 'string', 'max:120'],
                 'camera_role' => ['required', 'string', new ValidGate],
-                'camera_id' => ['nullable', 'integer', 'exists:cameras,id'],
+                'camera_id' => ['nullable', 'integer', \Illuminate\Validation\Rule::exists('cameras', 'id')->whereIn('camera_role', Gate::query()->retained()->pluck('code')->all()), new \App\Rules\CameraAtGate('camera_role')],
                 'detected_vehicle_type' => ['nullable', 'string', 'max:50'],
                 'event_time' => ['required', 'date'],
                 'vehicle_image_path' => ['nullable', 'string', 'max:255'],
                 'snapshot' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
                 'snapshot_image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
-                'plate_number' => ['nullable', 'string', 'max:50'],
-                'plate_text' => ['nullable', 'string', 'max:50'],
-                'vehicle_color' => ['nullable', 'string', 'max:50'],
-                'detected_vehicle_color' => ['nullable', 'string', 'max:50'],
+                'plate_number' => ['nullable', 'string', 'max:50', new \App\Rules\PlateIdentifier(20)],
+                'plate_text' => ['nullable', 'string', 'max:50', new \App\Rules\PlateIdentifier(20)],
                 'detection_metadata' => ['nullable', 'array'],
             ]);
 
@@ -268,7 +258,7 @@ class GuestObservationController extends Controller
                     $existing
                 );
 
-                DB::transaction(function () use ($existing, $validated, $snapshotPath): void {
+                app(\App\Services\PlateProcessingLock::class)->run(function () use ($existing, $validated, $snapshotPath): void {
                     $this->updateDetectorGuestObservationDetails($existing, $validated, $snapshotPath);
                     $this->syncDetectorGuestVehicleEvent($existing, $validated);
                 });
@@ -334,7 +324,7 @@ class GuestObservationController extends Controller
                     $recentDuplicate
                 );
 
-                DB::transaction(function () use ($recentDuplicate, $validated, $snapshotPath): void {
+                app(\App\Services\PlateProcessingLock::class)->run(function () use ($recentDuplicate, $validated, $snapshotPath): void {
                     $this->updateDetectorGuestObservationDetails($recentDuplicate, $validated, $snapshotPath);
                     $this->syncDetectorGuestVehicleEvent($recentDuplicate, $validated);
                 });
@@ -371,20 +361,18 @@ class GuestObservationController extends Controller
 
             $observation = DB::transaction(function () use ($validated, $cameraId, $snapshotPath): GuestVehicleObservation {
                 $plateNumber = $this->normalizePlate($validated['plate_number'] ?? $validated['plate_text'] ?? null);
-                $vehicleColor = $this->normalizeVehicleColor($validated['vehicle_color'] ?? $validated['detected_vehicle_color'] ?? null);
 
                 $observation = GuestVehicleObservation::query()->create([
                     'plate_text' => $plateNumber,
                     'plate_number' => $plateNumber,
-                    'vehicle_type' => $validated['detected_vehicle_type'] ?? 'Vehicle',
-                    'vehicle_color' => $vehicleColor,
+                    'vehicle_type' => \App\Support\VehicleType::detector($validated['detected_vehicle_type'] ?? null),
                     'location' => Gate::normalizeCode($validated['camera_role']),
                     'observation_source' => 'cctv',
                     'status' => 'pending_review',
                     'observed_at' => Carbon::parse($validated['event_time']),
                     'camera_id' => $cameraId,
                     'external_event_key' => $validated['external_event_key'],
-                    'detection_metadata_json' => $validated['detection_metadata'] ?? null,
+                    'detection_metadata_json' => \App\Services\VehicleTypeEvidenceService::detectorMetadata($validated['detected_vehicle_type'] ?? null, $validated['detection_metadata'] ?? null),
                     'snapshot_path' => $snapshotPath,
                     'notes' => self::NO_PASS_NOTE,
                     'created_by' => null,
@@ -484,12 +472,8 @@ class GuestObservationController extends Controller
                 ?: $observation->plate_text
                 ?: ($validated['plate_number'] ?? $validated['plate_text'] ?? null)
         );
-        $vehicleColor = $this->normalizeVehicleColor(
-            $observation->vehicle_color
-                ?: ($validated['vehicle_color'] ?? $validated['detected_vehicle_color'] ?? null)
-        );
         $vehicleType = $observation->vehicle_type
-            ?: ($validated['detected_vehicle_type'] ?? 'Vehicle');
+            ?: \App\Support\VehicleType::detector($validated['detected_vehicle_type'] ?? null);
 
         $resolved = $observation->status === GuestVehicleObservation::STATUS_RESOLVED;
 
@@ -506,8 +490,7 @@ class GuestObservationController extends Controller
                 'vehicle_id' => null,
                 'rfid_scan_log_id' => null,
                 'vehicle_type' => $vehicleType,
-                'detected_vehicle_type' => $vehicleType,
-                'vehicle_color' => $vehicleColor,
+                'detected_vehicle_type' => data_get($observation->detection_metadata_json, \App\Services\VehicleTypeEvidenceService::KEY.'.raw', $vehicleType),
                 'vehicle_category' => null,
                 'camera_id' => $observation->camera_id,
                 'detection_metadata_json' => $observation->detection_metadata_json,
@@ -530,7 +513,7 @@ class GuestObservationController extends Controller
     }
 
     /**
-     * Merge late OCR/color results into the existing record created at timeout.
+     * Merge late OCR results into the existing record created at timeout.
      *
      * @param  array<string, mixed>  $validated
      */
@@ -558,12 +541,6 @@ class GuestObservationController extends Controller
         if ($plateNumber !== null && (blank($observation->plate_number) || ($sameExternalEvent && $analysisComplete))) {
             $updates['plate_number'] = $plateNumber;
             $updates['plate_text'] = $plateNumber;
-        }
-
-        $vehicleColor = $this->normalizeVehicleColor($validated['vehicle_color'] ?? $validated['detected_vehicle_color'] ?? null);
-
-        if ($vehicleColor !== null && (blank($observation->vehicle_color) || ($sameExternalEvent && $analysisComplete))) {
-            $updates['vehicle_color'] = $vehicleColor;
         }
 
         if ($this->shouldMergeDetectorMetadata($observation, $validated)) {
@@ -641,6 +618,7 @@ class GuestObservationController extends Controller
         $incoming = (! empty($validated['detection_metadata']) && is_array($validated['detection_metadata']))
             ? $validated['detection_metadata']
             : [];
+        unset($incoming[\App\Services\VehicleTypeEvidenceService::KEY]);
         $isMergedKey = $this->isMergedDetectorExternalKey($observation, $validated);
 
         if ($isMergedKey) {
@@ -1106,14 +1084,13 @@ class GuestObservationController extends Controller
     protected function manualGuestObservationRules(): array
     {
         return [
-            'plate_number' => ['nullable', 'string', 'max:50'],
-            'plate_text' => ['nullable', 'string', 'max:50'],
-            'vehicle_type' => ['required', 'string', 'max:50'],
-            'vehicle_color' => ['nullable', 'string', 'max:50'],
+            'plate_number' => ['nullable', 'string', 'max:50', new \App\Rules\PlateIdentifier(20)],
+            'plate_text' => ['nullable', 'string', 'max:50', new \App\Rules\PlateIdentifier(20)],
+            'vehicle_type' => ['required', 'string', 'max:50', new \App\Rules\ValidVehicleType],
             'location' => ['required', new ValidGate],
             'observation_source' => ['nullable', 'in:manual,cctv'],
             'observed_at' => ['required', 'date'],
-            'camera_id' => ['nullable', 'integer', 'exists:cameras,id'],
+            'camera_id' => ['nullable', 'integer', \Illuminate\Validation\Rule::exists('cameras', 'id')->whereIn('camera_role', Gate::query()->retained()->pluck('code')->all()), new \App\Rules\CameraAtGate('location')],
             'snapshot_image' => ['nullable', 'image', 'max:5120'],
             'snapshot' => ['nullable', 'image', 'max:5120'],
             'notes' => ['nullable', 'string', 'max:1000'],

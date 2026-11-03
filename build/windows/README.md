@@ -54,7 +54,7 @@ GitHub Releases.
 | Web port | 80, or 8080/8081/8090 when 80 is taken (said at the end) |
 | Config | `config\php.ini`, `config\Caddyfile` from the templates |
 | `.env` | new APP_KEY and API key, `APP_ENV=production`, `APP_DEBUG=false`, Asia/Manila; kept on a reinstall |
-| Database | migrations; on a new database the gates and settings (`InstallSeeder`) and the first admin with a **random** password (`system:first-admin`) |
+| Database | migrations; fresh databases get gates/settings (`InstallSeeder`) and a protected, expiring first-admin setup code (`system:first-admin`); accounts are created only after personal password setup |
 | Caches | `storage:link`, detector settings, `go2rtc.yaml`, config/route/view cache |
 | Services (NSSM) | PHILCST-PHP1..4 (php-cgi 9001-9004), PHILCST-Web (Caddy), PHILCST-LiveView (go2rtc), PHILCST-Devices, PHILCST-Detector: automatic start, restart when they stop, rotated logs |
 | Task Scheduler | `schedule:run` every minute, `backup:run` daily at 02:00 (as SYSTEM) |
@@ -62,7 +62,7 @@ GitHub Releases.
 | Power | no sleep/hibernate while plugged in |
 | Optional | network set to Private; computer renamed to PHILCST-VMS (`http://philcst-vms.local`) |
 
-The last page shows the addresses to open and the first sign-in
+The last page shows the addresses to open and the location of the protected setup delivery file (never its code)
 (`config\install-result.txt`, `config\install.json`). There is no queue
 worker: the app has no queued jobs (`QUEUE_CONNECTION=sync`).
 

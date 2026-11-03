@@ -7,7 +7,7 @@ use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidScanLog;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\TestCase;
@@ -21,7 +21,7 @@ class DashboardRankingTest extends TestCase
      */
     public function test_dashboard_displays_frequent_entry_ranking(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $vehicle = Vehicle::query()->create([
@@ -54,7 +54,7 @@ class DashboardRankingTest extends TestCase
 
     public function test_dashboard_live_state_counts_registered_and_guest_traffic_today(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         // A Wednesday mid-month: "yesterday" is in the same week, month and year.
@@ -137,7 +137,7 @@ class DashboardRankingTest extends TestCase
 
     public function test_dashboard_recent_events_do_not_duplicate_mirrored_guest_observations(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $eventTime = now();

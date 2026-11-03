@@ -9,9 +9,10 @@
 @endphp
 
 @section('content')
+    @include('partials.filter-errors')
     <x-page-header title="Activity Logs">
-        @if ($tab === 'events' && (int) request('page', 1) === 1)
-            <x-slot:meta><x-live-indicator /></x-slot:meta>
+        @if ($tab === 'events')
+            <x-slot:meta><span data-auto-live @if ((int) request('page', 1) !== 1) hidden @endif>@if ((int) request('page', 1) === 1)<x-live-indicator />@endif</span></x-slot:meta>
         @endif
         <x-slot:actions>
             @if ($tab === 'events')
@@ -22,5 +23,9 @@
 
     <x-tabs :tabs="$logTabs" :active="$tab" />
 
-    @include('logs.tabs.'.$tab)
+    <div data-auto-list="logs-{{ $tab }}" data-auto-default-tab="events" @if ($tab === 'events') data-auto-poll="4000" @endif>
+        @include('partials.auto-filter-status')
+        @include('logs.tabs.'.$tab)
+    </div>
+    @include('partials.auto-filter-assets')
 @endsection

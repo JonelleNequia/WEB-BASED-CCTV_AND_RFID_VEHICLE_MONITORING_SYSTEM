@@ -49,7 +49,7 @@ class DryRunClient:
 
     def submit_guest_observation(self, payload, image_bytes=None, filename=None):
         with self.lock:
-            self.alerts.append({"event_key": payload.get("external_event_key"), **{key: payload.get(key) for key in ("camera_role", "detected_vehicle_type", "plate_number", "vehicle_color")}})
+            self.alerts.append({"event_key": payload.get("external_event_key"), **{key: payload.get(key) for key in ("camera_role", "detected_vehicle_type", "plate_number")}})
         return {"accepted": True, "created": True, "duplicate": False, "message": "Dry run.", "body": {}, "overlay": None}
 
     def submit_crossing(self, payload, image_bytes=None, filename=None):
@@ -226,7 +226,7 @@ def run(args):
         # Phase 5: plate vote of each vehicle with no pass.
         "visitor_plates": getattr(client, "visitor_plates", None) if not args.post else "sent to Laravel",
         "rfid_checks": getattr(client, "rfid_checks", None),
-        # One alert per vehicle (sent as snapshot, then color, then plate updates).
+        # One alert per vehicle (sent as snapshot, then plate updates).
         "no_pass_vehicles": len({item["event_key"] for item in getattr(client, "alerts", [])}) if not args.post else "sent to Laravel",
         "no_pass_api_calls": len(getattr(client, "alerts", [])) if not args.post else None,
         "windows_finished": state["crossings_logged"],

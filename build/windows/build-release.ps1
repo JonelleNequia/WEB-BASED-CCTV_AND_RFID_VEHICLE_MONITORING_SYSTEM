@@ -122,6 +122,17 @@ New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
 git -C $Repo archive --format=zip -o $archive HEAD
 Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $Stage 'app') -Force
 
+# Fail closed if tracked local installation data ever enters the source export.
+$appStage = Join-Path $Stage 'app'
+$unsafe = @(Get-ChildItem -LiteralPath $appStage -Recurse -File -Force | Where-Object {
+    $relative = $_.FullName.Substring($appStage.Length + 1).Replace('\', '/')
+    ($_.Name -like '.env*' -and $_.Name -ne '.env.example') -or
+    ($_.Extension -in '.sqlite', '.db', '.sql', '.log') -or
+    ($_.Name -in 'first-admin.txt', 'install-result.txt', 'install.json', 'config.php') -or
+    ($relative.StartsWith('storage/') -and $_.Name -ne '.gitignore')
+})
+if ($unsafe.Count -gt 0) { throw 'Release blocked: installation-specific data in the app export. No file contents were printed.' }
+
 Step 'Composer packages (no dev packages)'
 $env:COMPOSER_CACHE_DIR = Join-Path $CacheDir 'composer'
 composer install --working-dir (Join-Path $Stage 'app') --no-dev --optimize-autoloader --no-interaction --no-progress --no-scripts
@@ -197,6 +208,8 @@ if ($OnWindows -and -not $SkipSelfCheck) {
         if ($modules -notmatch [regex]::Escape($module)) { throw "PHP is missing the $module extension." }
     }
     Write-Host '    PHP extensions: ok'
+    $algorithms = (& $php -c (Join-Path $Stage 'runtime/php/php.ini') -r 'echo json_encode(password_algos());') -join ''
+    if ($algorithms -notmatch 'argon2id') { throw 'Bundled PHP must support Argon2id for personal passwords.' }
     & $php -c (Join-Path $Stage 'runtime/php/php.ini') (Join-Path $Stage 'app/artisan') --version
     if ($LASTEXITCODE -ne 0) { throw 'php artisan does not run.' }
 

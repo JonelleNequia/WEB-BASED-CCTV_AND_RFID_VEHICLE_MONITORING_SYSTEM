@@ -21,6 +21,8 @@
 
     const config = JSON.parse(dataNode.textContent || '{}');
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const footer = document.querySelector('[data-add-device-footer]');
+    const modal = document.getElementById('add-device-modal');
     const title = document.getElementById('add-device-modal-title');
     const KIND = { camera: 'camera', reader: 'rfid_reader' };
     const MAYBE = { camera: 'maybe_camera', reader: 'maybe_reader' };
@@ -40,6 +42,7 @@
     function button(label, className, onClick) {
         const node = el('button', className, label);
         node.type = 'button';
+        node.dataset.deviceAction = label;
         node.addEventListener('click', onClick);
         return node;
     }
@@ -60,7 +63,27 @@
     }
 
     function render(...nodes) {
+        const focused = document.activeElement;
+        const hadFocus = box.contains(focused) || footer?.contains(focused);
         box.replaceChildren(...nodes.filter(Boolean));
+        if (footer) {
+            footer.replaceChildren();
+            box.querySelectorAll('.add-device-actions').forEach((row) => {
+                const form = row.closest('form');
+                if (form) {
+                    form.id = 'add-device-credentials';
+                    row.querySelectorAll('button[type="submit"], button:not([type])').forEach((submit) => submit.setAttribute('form', form.id));
+                }
+                footer.append(row);
+            });
+        }
+        if (hadFocus) {
+            const replacement = [...modal.querySelectorAll('input, button')].find((node) => !node.disabled && (
+                (focused.name && node.name === focused.name && node.value === focused.value)
+                || (focused.dataset.deviceAction && node.dataset.deviceAction === focused.dataset.deviceAction)
+            ));
+            (replacement || modal.querySelector('.drawer-panel')).focus({ preventScroll: true });
+        }
     }
 
     function actions(...buttons) {
@@ -71,17 +94,27 @@
 
     /* ---------- 1. scan and list ---------- */
 
-    async function start(gate, role) {
+    async function start(gate, role, trigger) {
         stopTimers();
-        flow = { gate, role, devices: [], chosen: null, scanStartedAt: Date.now(), sawScan: false, timers: [] };
+        const chosen = flow?.gate === gate && flow?.role === role ? flow.chosen : null;
+        flow = { gate, role, devices: [], chosen, scanStartedAt: Date.now(), sawScan: false, timers: [] };
+        const current = flow;
         title.textContent = `Add ${thing()} to ${gateName()}`;
         renderList(null);
-        window.ui.openDrawer('add-device-modal');
-        try {
-            await fetch(config.scanUrl, { method: 'POST', headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf } });
-        } catch (error) {
-            // The list below still polls; the scan may already be running.
+        if (modal.hidden) {
+            window.ui.openDrawer('add-device-modal', trigger);
         }
+        try {
+            const response = await fetch(config.scanUrl, { method: 'POST', headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf } });
+            if (!response.ok) {
+                throw new Error('Scan request failed.');
+            }
+        } catch (error) {
+            if (flow === current) {
+                flow.scanError = 'The scan could not be started. You can select a listed device or try Scan again.';
+            }
+        }
+        if (flow !== current || modal.hidden) return;
         poll();
         flow.timers.push(window.setInterval(poll, 2000));
     }
@@ -91,24 +124,32 @@
             stopTimers();
             return;
         }
+        const current = flow;
         try {
             const response = await fetch(config.indexUrl, { headers: { Accept: 'application/json' } });
+            if (!response.ok) throw new Error('Device list request failed.');
             const payload = await response.json();
+            if (flow !== current || modal.hidden) return;
             if (flow.step && flow.step !== 'list') {
                 return;
             }
             // Redrawn only when something changed: a redraw under the pointer lost the click on Add.
             const signature = listSignature(payload);
-            if (signature !== flow.signature) {
+            if (signature !== flow.signature || flow.pollError) {
                 flow.signature = signature;
+                flow.pollError = false;
                 renderList(payload);
             }
         } catch (error) {
-            // Try again on the next poll.
+            if (flow !== current || flow.step !== 'list' || modal.hidden) return;
+            flow.pollError = true;
+            const status = box.querySelector('[data-device-refresh-status]');
+            if (status) status.textContent = 'Device list could not be refreshed. Your selection is kept; retrying…';
         }
     }
 
     function scanning(payload) {
+        if (flow.scanError) return false;
         if (!payload) {
             return true;
         }
@@ -121,7 +162,8 @@
     function listSignature(payload) {
         const devices = (payload?.devices || []).filter((device) => device.kind === KIND[flow.role] || device[MAYBE[flow.role]]);
         return JSON.stringify([scanning(payload), payload?.service?.state, devices.map((device) => [
-            device.id, device.status, device.kind, device.friendly_name || device.name, (device.assigned || []).map((item) => item.label), !!device.network_warning,
+            device.id, device.status, device.kind, device.friendly_name || device.name, device.ip, device.mac,
+            (device.assigned || []).map((item) => item.label), device.network_warning, device.guidance,
         ])]);
     }
 
@@ -132,11 +174,22 @@
         const maybe = (payload?.devices || []).filter((device) => device.kind !== KIND[flow.role] && device[MAYBE[flow.role]]);
         const looking = scanning(payload);
         const nodes = [];
+        if (payload && flow.chosen) {
+            flow.chosen = [...devices, ...maybe].find((device) => device.id === flow.chosen.id) || null;
+        }
+        const refreshStatus = el('p', 'field-help');
+        refreshStatus.setAttribute('data-device-refresh-status', '');
+        refreshStatus.setAttribute('role', 'status');
+        if (flow.scanError) nodes.push(el('p', 'add-device-error', flow.scanError));
+        nodes.push(refreshStatus);
 
         if (looking) {
             const status = el('p', 'add-device-scanning');
             status.append(el('span', 'add-device-spinner'), document.createTextNode(`Looking for ${flow.role === 'camera' ? 'cameras' : 'RFID readers'} on your network…`));
+            status.setAttribute('role', 'status');
             nodes.push(status);
+        } else if (payload && !flow.scanError) {
+            nodes.push(el('p', 'field-help', 'Scan complete. Choose a device below, or scan again.'));
         }
         if (payload?.service?.state === 'waiting_for_lan') {
             nodes.push(el('p', 'add-device-note', 'Only Wi-Fi is connected on this PC. Plug in the LAN cable from the cameras and readers.'));
@@ -145,6 +198,7 @@
         if (devices.length || maybe.length) {
             const list = el('div', 'add-device-list');
             list.setAttribute('role', 'radiogroup');
+            list.setAttribute('aria-label', flow.role === 'camera' ? 'Available cameras' : 'Available RFID readers');
             devices.forEach((device) => list.append(deviceOption(device)));
             if (maybe.length) {
                 list.append(el('p', 'add-device-subheading', 'Not identified yet'));
@@ -159,6 +213,8 @@
             nodes.push(actions(button('Scan again', 'button button-secondary', () => start(flow.gate, flow.role)), addButton));
         } else if (!looking) {
             nodes.push(nothingFound());
+        } else {
+            nodes.push(actions(button('Scan again', 'button button-secondary', () => start(flow.gate, flow.role)), Object.assign(button('Add', 'button button-primary', () => add(false)), { disabled: true })));
         }
 
         render(...nodes);
@@ -173,18 +229,29 @@
         radio.checked = flow.chosen?.id === device.id;
         radio.addEventListener('change', function () {
             flow.chosen = device;
-            box.querySelector('.add-device-actions .button-primary').disabled = false;
+            (footer || box).querySelector('.add-device-actions .button-primary').disabled = false;
+            box.querySelectorAll('[data-device-selected]').forEach((badge) => {
+                badge.hidden = badge.dataset.deviceSelected !== String(device.id);
+            });
         });
 
         const icon = el('span', `add-device-icon is-${flow.role}`);
         icon.setAttribute('aria-hidden', 'true');
         const text = el('span', 'add-device-text');
         text.append(el('strong', null, device.friendly_name || device.name));
+        text.append(el('span', 'add-device-address', device.ip || device.mac || `Device ${device.id}`));
+        if (device.ip && device.mac) text.append(el('small', 'add-device-address', device.mac));
+        const selected = el('span', 'add-device-selected', 'Selected');
+        selected.dataset.deviceSelected = String(device.id);
+        selected.hidden = !radio.checked;
+        text.append(selected);
 
         const online = device.status === 'online';
         const line = el('span', 'status-line');
         const dot = el('span', `status-dot${online ? ' is-online' : ''}`);
-        line.append(dot, document.createTextNode(online ? 'Online' : 'Not answering'));
+        dot.setAttribute('aria-hidden', 'true');
+        line.append(dot, document.createTextNode(online ? 'Online' : (device.status === 'offline' ? 'Offline · not answering' : 'Unconfirmed connection')));
+        if (device.kind !== KIND[flow.role]) line.append(document.createTextNode(' · identity unconfirmed'));
         text.append(line);
 
         const usedBy = (device.assigned || []).filter((item) => item.station !== flow.gate || item.role !== (flow.role === 'camera' ? 'camera' : 'reader'));
@@ -233,7 +300,9 @@
     /* ---------- 2. add ---------- */
 
     async function add(withLogin, choice) {
+        if (!flow?.chosen) return;
         stopTimers();
+        const current = flow;
         flow.step = 'adding';
         const device = flow.chosen;
         // A "move" / "share" answer is kept for the login step that may follow.
@@ -268,6 +337,7 @@
         } catch (error) {
             result = { ok: false, message: 'This PC could not reach the system. Check the connection and try again.' };
         }
+        if (flow !== current || modal.hidden) return;
 
         if (result.needs_credentials) {
             return loginStep(result.message);
@@ -403,6 +473,10 @@
             return;
         }
         event.preventDefault();
-        start(trigger.dataset.gate, trigger.dataset.addDevice);
+        start(trigger.dataset.gate, trigger.dataset.addDevice, trigger);
     }, true);  // capture: before ui.js starts the page-loading bar for a link
+    modal.addEventListener('drawer:close', () => {
+        stopTimers();
+        flow = null;
+    });
 })();

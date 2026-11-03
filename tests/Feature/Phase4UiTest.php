@@ -9,7 +9,7 @@ use App\Models\SystemSetting;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Services\RfidIngestService;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -27,7 +27,7 @@ class Phase4UiTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
 
@@ -53,7 +53,7 @@ class Phase4UiTest extends TestCase
     public function test_rfid_desk_explains_station_rules_and_lists_attention_items(): void
     {
         // A tag marked lost is flagged when it is read at a gate.
-        RfidTag::query()->create(['uid' => 'SPARE-DESK-1', 'status' => RfidTag::STATUS_LOST]);
+        RfidTag::query()->create(['uid' => 'SPARE-DESK-1', 'status' => RfidTag::STATUS_DISABLED]);
         app(RfidIngestService::class)->ingest(['tag_uid' => 'SPARE-DESK-1', 'scan_location' => 'gate-2']);
 
         $this->actingAs($this->admin)
@@ -62,7 +62,7 @@ class Phase4UiTest extends TestCase
             ->assertDontSee('Same station scan can become ENTRY or EXIT')
             ->assertSee('Preview only. Nothing is recorded.')
             ->assertDontSee('Guest Pass')
-            ->assertSee('is LOST but was scanned')
+            ->assertSee('is DISABLED but was scanned')
             ->assertSee('SPARE-DESK-1');
 
         $this->actingAs($this->admin)

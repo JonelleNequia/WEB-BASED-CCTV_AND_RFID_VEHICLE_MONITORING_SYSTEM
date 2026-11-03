@@ -14,6 +14,16 @@ class GuestVehicleObservation extends Model
     use HasFactory;
     use StoresLocalTime;
 
+    public function getDisplayVehicleTypeAttribute(): string
+    {
+        return \App\Support\VehicleType::display($this->vehicle_type);
+    }
+
+    public function getVehicleTypeSourceLabelAttribute(): string
+    {
+        return \App\Services\VehicleTypeEvidenceService::sourceLabel(data_get($this->detection_metadata_json, \App\Services\VehicleTypeEvidenceService::KEY.'.source'));
+    }
+
     /** Phase 5: a no-pass alert closed (a registered tag was read after all). */
     public const STATUS_RESOLVED = 'resolved';
 

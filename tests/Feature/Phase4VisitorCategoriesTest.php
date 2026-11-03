@@ -8,7 +8,7 @@ use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Services\RfidIngestService;
 use App\Support\VehicleCategory;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -26,7 +26,7 @@ class Phase4VisitorCategoriesTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
 
@@ -71,7 +71,7 @@ class Phase4VisitorCategoriesTest extends TestCase
             ->assertSee('Unregistered Visitor is set by the system');
 
         $tag = RfidTag::query()->create(['uid' => 'CAT-TAG-1', 'status' => RfidTag::STATUS_AVAILABLE]);
-        $form = ['rfid_tag_id' => $tag->id, 'plate_number' => 'CAT 1001', 'vehicle_owner_name' => 'Visitor', 'vehicle_type' => 'Car'];
+        $form = ['registered_by' => 'Test Registrar', 'rfid_tag_id' => $tag->id, 'plate_number' => 'CAT 1001', 'vehicle_owner_name' => 'Visitor', 'vehicle_type' => 'Car'];
 
         $this->actingAs($this->admin)->post(route('vehicle-registry.store'), $form + ['category' => 'unregistered_visitor'])
             ->assertSessionHasErrors(['category' => 'Unregistered Visitor cannot be picked here: the system sets it for vehicles the camera sees without a registered tag. Choose Faculty & Staff or Registered Visitor.']);

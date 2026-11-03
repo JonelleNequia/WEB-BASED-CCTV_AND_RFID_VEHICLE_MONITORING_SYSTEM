@@ -5,7 +5,7 @@ namespace Tests\Feature;
 use App\Models\Camera;
 use App\Models\User;
 use App\Support\CameraFiles;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
@@ -24,7 +24,7 @@ class SettingsPolishTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
 
@@ -40,7 +40,7 @@ class SettingsPolishTest extends TestCase
         Camera::query()->forRole('gate-1')->first()->forceFill(['source_type' => 'rtsp', 'source_value' => 'rtsp://camera.test:554/stream1'])->save();
         $this->writeStatus(['camera_running' => false, 'error_code' => 'unreachable', 'last_error' => 'The camera is not reachable from this PC (Host is down). Check its cable and power, or scan again in Settings › Devices.']);
 
-        foreach (['gates', 'general'] as $tab) {
+        foreach (['gates'] as $tab) {
             $html = $this->actingAs($this->admin)->get(route('settings.index', ['tab' => $tab]))->assertOk()->getContent();
             // What a user reads: the page text without scripts.
             $main = strip_tags(preg_replace('#<script\b.*?</script>#s', '', substr($html, strpos($html, 'settings-page'))));
@@ -80,8 +80,8 @@ class SettingsPolishTest extends TestCase
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'timing']))->assertOk()->assertSee('data-confirm-label="Restore defaults"', false);
 
         $this->actingAs($this->admin)->put(route('settings.update'), ['section' => 'general', 'gates' => ['gate-1' => ['name' => 'Gate 1', 'is_active' => '1']]])
-            ->assertSessionHas('status', 'General settings saved.');
-        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'general']))->assertSee('data-initial-toasts', false);
+            ->assertSessionHas('status', 'Gate settings saved.');
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'gates']))->assertSee('data-initial-toasts', false);
     }
 
     protected function writeStatus(array $gate1): void

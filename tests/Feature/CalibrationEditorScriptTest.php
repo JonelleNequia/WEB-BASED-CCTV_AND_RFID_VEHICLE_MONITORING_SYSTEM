@@ -31,7 +31,7 @@ class CalibrationEditorScriptTest extends TestCase
 
     public function test_the_page_loads_the_editor_before_the_page_script(): void
     {
-        $this->seed(\Database\Seeders\DatabaseSeeder::class);
+        $this->seed(\Tests\fixtures\PortalSeeder::class);
         $admin = \App\Models\User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         \App\Models\Camera::query()->forRole('gate-1')->update(['source_type' => 'rtsp', 'source_value' => 'rtsp://198.51.100.20:554/stream2']);
 
@@ -48,7 +48,7 @@ class CalibrationEditorScriptTest extends TestCase
 
     public function test_the_page_has_the_controls_steps_and_detection_toggle(): void
     {
-        $this->seed(\Database\Seeders\DatabaseSeeder::class);
+        $this->seed(\Tests\fixtures\PortalSeeder::class);
         $admin = \App\Models\User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         \App\Models\Camera::query()->forRole('gate-1')->update(['source_type' => 'rtsp', 'source_value' => 'rtsp://198.51.100.20:554/stream2']);
         \App\Models\VehicleCrossing::query()->create([
@@ -73,7 +73,7 @@ class CalibrationEditorScriptTest extends TestCase
 
     public function test_the_heartbeat_has_the_saved_calibration_for_reset_to_saved(): void
     {
-        $this->seed(\Database\Seeders\DatabaseSeeder::class);
+        $this->seed(\Tests\fixtures\PortalSeeder::class);
         $admin = \App\Models\User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $camera = \App\Models\Camera::query()->forRole('gate-1')->firstOrFail();
         $mask = [['x' => 0.1, 'y' => 0.1], ['x' => 0.9, 'y' => 0.1], ['x' => 0.5, 'y' => 0.9]];

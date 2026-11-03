@@ -6,7 +6,7 @@ use App\Models\ActiveSession;
 use App\Models\GuestVehicleObservation;
 use App\Models\User;
 use App\Models\VehicleEvent;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -18,7 +18,7 @@ class GuestObservationReviewTest extends TestCase
 
     public function test_admin_can_verify_and_correct_guest_observation_details(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -49,14 +49,14 @@ class GuestObservationReviewTest extends TestCase
         $this->assertSame('ABC 1234', $observation->plate_number);
         $this->assertSame('ABC 1234', $observation->plate_text);
         $this->assertSame('SUV', $observation->vehicle_type);
-        $this->assertSame('White', $observation->vehicle_color);
+        $this->assertNull($observation->vehicle_color);
         $this->assertSame('verified', $observation->status);
     }
 
     public function test_verifying_detector_no_pass_alert_syncs_event_details(): void
     {
         Storage::fake('public');
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -96,7 +96,7 @@ class GuestObservationReviewTest extends TestCase
 
         $this->assertSame('SYNC 123', $event->plate_text);
         $this->assertSame('SYNC 123', $event->plate_number);
-        $this->assertSame('Black', $event->vehicle_color);
+        $this->assertNull($event->vehicle_color);
         // Phase 5: a no-pass alert never opens a guest session.
         $this->assertSame(0, ActiveSession::query()->count());
     }

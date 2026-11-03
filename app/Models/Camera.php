@@ -81,6 +81,11 @@ class Camera extends Model
         return $this->belongsTo(Gate::class, 'camera_role', 'code');
     }
 
+    public function scopeOperational(Builder $query): Builder
+    {
+        return $query->whereIn('camera_role', Gate::codes());
+    }
+
     /**
      * Get the ROI records attached to this camera.
      */

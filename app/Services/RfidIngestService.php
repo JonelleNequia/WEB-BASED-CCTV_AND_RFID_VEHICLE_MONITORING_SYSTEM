@@ -21,7 +21,8 @@ use Illuminate\Validation\ValidationException;
  * - Phase 1 (gates): every gate records IN and OUT.
  * - Phase 3 (visitor model): a registered read takes its direction from the
  *   camera's crossing (RfidCameraFusionService); the vehicle's state decides
- *   only when the camera cannot.
+ *   only for the existing camera-offline fallback. Unknown camera direction
+ *   remains UNKNOWN until staff corrects it.
  * - Cooldown per tag + gate (setting rfid_cooldown_seconds, default 60, at
  *   least 10): also one "Unknown tag" event per cooldown.
  * - An unknown tag is never a visitor record: it is flagged with "Register
@@ -69,6 +70,11 @@ class RfidIngestService
         string $sourceMode = 'station_reader',
         string $directionMode = self::DIRECTION_STATION
     ): RfidIngestResult {
+        return app(PlateProcessingLock::class)->run(fn () => $this->ingestRead($data, $sourceMode, $directionMode));
+    }
+
+    protected function ingestRead(array $data, string $sourceMode, string $directionMode): RfidIngestResult
+    {
         $this->localStorageService->ensureBaseDirectories();
 
         $scanLocation = $this->normalizeLocation((string) ($data['scan_location'] ?? ''));
@@ -79,6 +85,9 @@ class RfidIngestService
             throw ValidationException::withMessages([
                 'tag_uid' => 'Scan or select an RFID tag first.',
             ]);
+        }
+        if (RfidTag::isUnavailableUid($requestedUid)) {
+            return $this->ignored($requestedUid, $scanLocation, $scanTime);
         }
 
         // Every read joins the buffer (the detector's window may still claim
@@ -138,13 +147,19 @@ class RfidIngestService
     /**
      * The camera's crossing: the tag of this vehicle from the buffer, and the
      * one record for it. A registered tag -> its IN / OUT with the camera's
-     * direction; a lost, disabled or unassigned tag -> a flagged read linked
+     * direction; a disabled or unassigned tag -> a flagged read linked
      * to the crossing; an unknown tag or none -> null (the caller makes the
-     * Unregistered Visitor record, with 'unknown_tag' as a note).
+     * Unregistered Visitor record, with 'unknown_tag' as a note). Lost UIDs
+     * are excluded from selection and consumption, without any new scan.
      *
      * @return array{scan: ?RfidScanLog, unknown_tag: ?string}
      */
     public function forCrossing(VehicleCrossing $crossing): array
+    {
+        return app(PlateProcessingLock::class)->run(fn () => $this->matchCrossing($crossing));
+    }
+
+    protected function matchCrossing(VehicleCrossing $crossing): array
     {
         // ROI work, Phase 3: the whole pass, from Detected (crossed_at) until it was Recorded.
         $recordedAt = data_get($crossing->detection_metadata_json, 'pass.recorded_at');
@@ -159,7 +174,9 @@ class RfidIngestService
             return ['scan' => null, 'unknown_tag' => null];
         }
 
-        $this->tagMatcher->claim($crossing->gate, $presence, $crossing->external_event_key, $crossing->crossed_at);
+        if (! $this->tagMatcher->claim($crossing->gate, $presence, $crossing->external_event_key, $crossing->crossed_at)) {
+            return ['scan' => null, 'unknown_tag' => null];
+        }
 
         // Already recorded (RFID only while the camera was offline, or this
         // vehicle's earlier crossing with a new track ID).
@@ -177,6 +194,9 @@ class RfidIngestService
     protected function recordPresence(VehicleCrossing $crossing, array $presence): array
     {
         return DB::transaction(function () use ($crossing, $presence): array {
+            if (RfidTag::isUnavailableUid($presence['epc'])) {
+                return ['scan' => null, 'unknown_tag' => null];
+            }
             $data = [
                 'tag_uid' => $presence['epc'],
                 'scan_location' => $crossing->gate,
@@ -256,6 +276,9 @@ class RfidIngestService
             }
 
             $scan = $recorded['scan'];
+            if (! $scan) {
+                return $this->ignored($uid, $gate, $scanTime);
+            }
 
             return $this->result($scan, (string) $scan->outcome, $scan->vehicle
                 ? "{$scan->resolved_event_type} recorded for {$scan->vehicle->plate_number}."
@@ -296,6 +319,9 @@ class RfidIngestService
 
         if ($uid === '') {
             throw ValidationException::withMessages(['tag_uid' => 'Scan or select an RFID tag first.']);
+        }
+        if (RfidTag::isUnavailableUid($uid)) {
+            return $this->ignored($uid, $scanLocation, now());
         }
 
         $tag = $this->resolveTag($data);
@@ -444,6 +470,7 @@ class RfidIngestService
         $category = $resolved['vehicle_category'] ?? $vehicle?->category;
 
         $payload = [
+            VehicleTypeEvidenceService::KEY => ['source' => $vehicle ? 'registry' : null, 'registry' => $vehicle?->vehicle_type],
             'tag_uid' => $tagUid,
             'scan_location' => $scanLocation,
             'scan_direction' => $scanDirection,
@@ -550,11 +577,10 @@ class RfidIngestService
             return null;
         }
 
-        $tag = RfidTag::query()
-            ->with('vehicle')
-            ->where('uid', $uid)
-            ->orWhere('tag_uid', $uid)
-            ->first();
+        if (RfidTag::isUnavailableUid($uid)) {
+            return null;
+        }
+        $tag = RfidTag::findUid($uid);
 
         if ($tag) {
             return $this->ensureVehicleTagConnection($tag);
@@ -603,6 +629,9 @@ class RfidIngestService
      */
     protected function createTagFromVehicleLegacyUid(string $uid): ?RfidTag
     {
+        if (RfidTag::isUnavailableUid($uid)) {
+            return null;
+        }
         $vehicle = Vehicle::query()->where('rfid_tag_uid', $uid)->first();
 
         if (! $vehicle) {
@@ -619,6 +648,14 @@ class RfidIngestService
         $this->syncVehicleTagColumns($vehicle, $tag);
 
         return $tag->fresh('vehicle');
+    }
+
+    protected function ignored(string $uid, string $gate, Carbon $time): RfidIngestResult
+    {
+        return new RfidIngestResult(new RfidScanLog([
+            'tag_uid' => $uid, 'scan_location' => $gate, 'scan_time' => $time,
+            'verification_status' => 'inactive_tag', 'is_anomaly' => false,
+        ]), RfidIngestResult::IGNORED, 'Unavailable tag ignored.');
     }
 
     protected function syncVehicleTagColumns(Vehicle $vehicle, RfidTag $tag): void
@@ -645,6 +682,9 @@ class RfidIngestService
         }
 
         if ($tag->status !== RfidTag::STATUS_ASSIGNED) {
+            return 'unassigned_tag';
+        }
+        if ($vehicle->rfid_tag_id && (int) $vehicle->rfid_tag_id !== (int) $tag->id) {
             return 'unassigned_tag';
         }
 

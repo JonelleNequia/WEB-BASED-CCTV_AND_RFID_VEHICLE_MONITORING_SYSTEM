@@ -12,7 +12,7 @@ use App\Models\Vehicle;
 use App\Services\RfidIngestService;
 use App\Support\CameraFiles;
 use App\Support\DeviceFiles;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -31,7 +31,7 @@ class Phase1GatesTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         File::deleteDirectory(DeviceFiles::directory());
     }
@@ -67,6 +67,8 @@ class Phase1GatesTest extends TestCase
         }
 
         $migration->up();
+        // This test recreates the old gate table; apply the later archive column.
+        \Illuminate\Support\Facades\Schema::table('gates', fn ($table) => $table->timestamp('archived_at')->nullable());
 
         $gates = Gate::query()->orderBy('sort_order')->get();
         $this->assertSame(['gate-1', 'gate-2'], $gates->pluck('code')->all());
@@ -157,10 +159,10 @@ class Phase1GatesTest extends TestCase
 
         $this->actingAs($this->admin)->get(route('logs.index', ['tab' => 'scans']))
             ->assertOk()->assertSee('Main Gate')->assertSee('<th>Gate</th>', false);
-        // B1: gate cards on Gates, gate names on General.
+        // Gate cards and names are together on Gates.
         $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'gates']))
             ->assertOk()->assertSee('Main Gate')->assertSee('+ Add gate');
-        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'general']))
+        $this->actingAs($this->admin)->get(route('settings.index', ['tab' => 'gates']))
             ->assertOk()->assertSee('Gate names')->assertSee('gates[gate-1][name]', false);
         $this->actingAs($this->admin)->get(route('gates.kiosk', 'gate-1'))
             ->assertOk()->assertSee('Main Gate')->assertSee('IN and OUT');

@@ -33,6 +33,7 @@ class VehicleRegistryController extends Controller
             'tab' => 'vehicles',
             'filters' => $filters,
             'vehicles' => $vehicleRegistryService->registeredVehicles($filters),
+            'registrationStaffName' => $vehicleRegistryService->rememberedStaffName(),
             'availableTags' => $vehicleRegistryService->availableTags(),
             'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
             'vehicleCategories' => $vehicleRegistryService->vehicleCategories(),
@@ -208,13 +209,14 @@ class VehicleRegistryController extends Controller
             'rfid_tag_id' => ['nullable', 'required_without:rfid_uid', 'integer', 'exists:vehicle_rfid_tags,id'],
             'rfid_uid' => ['nullable', 'string', 'max:100'],
             'old_tag_status' => ['required', Rule::in([RfidTag::STATUS_LOST, RfidTag::STATUS_DISABLED])],
+            'expected_tag_id' => ['nullable', 'integer', 'min:0'],
         ]);
 
         $oldTag = $vehicle->rfidTag;
         $vehicle = $vehicleRegistryService->replaceTag($vehicle, $validated);
 
         return back()->with('status', $vehicle->plate_number.' now uses '.$vehicle->rfidTag->label
-            .($oldTag ? '. '.$oldTag->label.' was marked '.strtoupper($validated['old_tag_status']).'.' : '.'));
+            .($oldTag ? '. '.$oldTag->label.' is '.$oldTag->fresh()->status_label.'.' : '.'));
     }
 
     /**
@@ -231,7 +233,7 @@ class VehicleRegistryController extends Controller
     }
 
     /**
-     * UI Phase 3: mark a tag lost or disabled, or enable it again.
+     * Mark a tag permanently lost, disable it, or enable a non-lost tag.
      */
     public function updateTagStatus(Request $request, RfidTag $rfidTag, VehicleRegistryService $vehicleRegistryService): RedirectResponse
     {
@@ -241,7 +243,7 @@ class VehicleRegistryController extends Controller
 
         $tag = $vehicleRegistryService->setTagStatus($rfidTag, $validated['status']);
 
-        return back()->with('status', $tag->label.' is now '.strtoupper($tag->status).'.');
+        return back()->with('status', $tag->label.' is now '.$tag->status_label.'.');
     }
 
     /**

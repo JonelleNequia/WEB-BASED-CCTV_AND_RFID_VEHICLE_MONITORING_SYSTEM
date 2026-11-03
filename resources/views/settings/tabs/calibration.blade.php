@@ -1,5 +1,11 @@
-
-
+    <div class="calibration-context">
+        <div>
+            <h2>{{ collect($cameras)->pluck('role_label')->join(' · ') }} · Detection zone</h2>
+            <p class="field-help">Draw the zone on the preview, choose the direction, then save to apply your changes.</p>
+        </div>
+    </div>
+    <details class="settings-help">
+        <summary>Help: drawing the zone, counting and keyboard shortcuts</summary>
     {{-- Calibration editor: one line per step. --}}
     <ol class="calibration-steps">
         <li><strong>Zone:</strong> with <em>Zone (ROI)</em>, click around the road where vehicles pass; click point 1 or press Done to close it.</li>
@@ -8,8 +14,11 @@
         <li><strong>How it counts:</strong> a vehicle is <em>Detected</em> when it enters the zone (the RFID check starts), <em>Recorded</em> once it clearly moves away from the camera or toward it (IN or OUT), and the record is finished when it has <em>Left zone</em>. There is no line to cross.</li>
         <li><strong>Save</strong>, then drive through once and check "Recent records" below the video. Undo: Ctrl/⌘+Z · Redo: Ctrl/⌘+Shift+Z.</li>
     </ol>
+    </details>
 
     {{-- Detector debug view: raw detections, the zone as used, track IDs, counters. --}}
+    <details class="settings-diagnostics calibration-diagnostics">
+    <summary>Detector diagnostics · debug view {{ ($debugOverlay ?? false) ? 'ON' : 'OFF' }}</summary>
     <form method="POST" action="{{ route('calibration.debug') }}" class="calibration-debug-toggle">
         @csrf
         <input type="hidden" name="enabled" value="{{ ($debugOverlay ?? false) ? '0' : '1' }}">
@@ -21,8 +30,9 @@
             {{ ($debugOverlay ?? false) ? 'Debug view is ON · Turn off' : 'Turn on debug view' }}
         </button>
     </form>
+    </details>
 
-    <div class="camera-grid">
+    <div class="camera-grid calibration-grid">
         @foreach ($cameras as $role => $camera)
             @php($connection = $camera['connection'])
             <article class="camera-card camera-card-calibration" data-calibration-camera data-role="{{ $role }}" data-has-camera="{{ $camera['has_camera'] ? '1' : '0' }}">
@@ -48,7 +58,6 @@
                             </span>
                             <button type="button" class="button button-secondary button-sm" data-reset title="Load the calibration the detector uses now">Reset to saved</button>
                             <button type="button" class="button button-secondary button-sm" data-clear>Clear</button>
-                            <button type="button" class="button button-primary button-sm" data-save>Save Calibration</button>
                         </div>
                         {{-- Gate direction work, Phase A: which way is IN at this gate (both IN and OUT are recorded here). --}}
                         @php($away = $camera['away_direction'])
@@ -82,8 +91,11 @@
                                     <text x="150" y="108" text-anchor="middle" class="diagram-caption">camera</text>
                                 </svg>
                             </div>
+                            <div class="calibration-save-actions">
+                                <button type="button" class="button button-primary" data-save>Save Calibration</button>
+                            </div>
                         </fieldset>
-                        <div class="calibration-unsaved" data-unsaved hidden>
+                        <div class="calibration-unsaved" data-unsaved role="status" aria-live="polite" hidden>
                             <span>Unsaved changes: the detector still uses the saved zone and direction.</span>
                             <button type="button" class="link-button" data-discard>Discard changes</button>
                         </div>
@@ -92,7 +104,7 @@
                             <input type="checkbox" data-overlay-toggle data-overlay-key="calibration.overlay" data-overlay-default="off">
                             Show detection (vehicle boxes and IN/OUT on the live video)
                         </label>
-                        <ul class="calibration-problems" data-problems hidden></ul>
+                        <ul class="calibration-problems" data-problems role="alert" hidden></ul>
                     </div>
                 @endif
 

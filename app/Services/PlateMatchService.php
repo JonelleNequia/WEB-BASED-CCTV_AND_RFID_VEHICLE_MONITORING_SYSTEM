@@ -212,7 +212,6 @@ class PlateMatchService
         $parts = [
             $profile->plate_number.' with '.$difference['text'],
             $sameType ? 'same type' : 'type differs',
-            $sameColor ? 'same colour' : 'colour differs',
             $timeText,
         ];
 

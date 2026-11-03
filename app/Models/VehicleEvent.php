@@ -53,6 +53,8 @@ class VehicleEvent extends Model
         'plate_confidence',
         'vehicle_id',
         'rfid_scan_log_id',
+        'visitor_record_id',
+        'occupancy_managed',
         'vehicle_type',
         'detected_vehicle_type',
         'vehicle_color',
@@ -106,6 +108,7 @@ class VehicleEvent extends Model
     protected function casts(): array
     {
         return [
+            'occupancy_managed' => 'boolean',
             'event_time' => 'datetime',
             'plate_confidence' => 'decimal:2',
             'match_score' => 'integer',
@@ -138,6 +141,11 @@ class VehicleEvent extends Model
     public function rfidScanLog(): BelongsTo
     {
         return $this->belongsTo(RfidScanLog::class);
+    }
+
+    public function visitorRecord(): BelongsTo
+    {
+        return $this->belongsTo(VisitorRecord::class);
     }
 
     /**
@@ -326,7 +334,14 @@ class VehicleEvent extends Model
      */
     public function getDisplayVehicleTypeAttribute(): string
     {
-        return $this->detected_vehicle_type ?: $this->vehicle_type ?: 'N/A';
+        $evidence = data_get($this->detection_metadata_json, \App\Services\VehicleTypeEvidenceService::KEY);
+        return $evidence !== null ? \App\Support\VehicleType::display($this->vehicle_type)
+            : ($this->detected_vehicle_type ?: $this->vehicle_type ?: 'Unknown');
+    }
+
+    public function getVehicleTypeSourceLabelAttribute(): string
+    {
+        return \App\Services\VehicleTypeEvidenceService::sourceLabel(data_get($this->detection_metadata_json, \App\Services\VehicleTypeEvidenceService::KEY.'.source'));
     }
 
     /**
@@ -334,7 +349,7 @@ class VehicleEvent extends Model
      */
     public function getIsRfidEventAttribute(): bool
     {
-        return in_array($this->event_origin, ['rfid_simulated', 'rfid_hardware'], true);
+        return $this->rfid_scan_log_id !== null || in_array($this->event_origin, ['rfid_simulated', 'rfid_hardware'], true);
     }
 
     /**
@@ -353,6 +368,9 @@ class VehicleEvent extends Model
     {
         if ($this->event_status === self::STATUS_PENDING_DETAILS) {
             return 'Pending';
+        }
+        if ($this->visitor_record_id && ! $this->rfid_scan_log_id) {
+            return 'Registered by plate';
         }
 
         if ($this->event_origin === 'guest_cctv' || $this->vehicle_category === 'guest' || $this->event_origin === 'guest_manual') {
@@ -376,6 +394,8 @@ class VehicleEvent extends Model
     public function getEventOriginLabelAttribute(): string
     {
         return match ($this->event_origin) {
+            'plate_ocr' => 'OCR plate'.($this->rfid_scan_log_id ? ' · RFID confirmed' : ''),
+            'plate_review' => 'Staff-confirmed plate'.($this->rfid_scan_log_id ? ' · RFID confirmed' : ''),
             'cctv_detected' => 'CCTV Observation',
             'guest_manual' => 'Manual · no registered tag',
             'guest_cctv' => 'Camera · no registered tag',

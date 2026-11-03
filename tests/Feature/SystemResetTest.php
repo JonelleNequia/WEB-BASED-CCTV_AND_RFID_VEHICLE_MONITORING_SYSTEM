@@ -10,7 +10,7 @@ use App\Models\Vehicle;
 use App\Models\VisitorRecord;
 use App\Services\RfidIngestService;
 use App\Support\CameraFiles;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -40,7 +40,7 @@ class SystemResetTest extends TestCase
         Storage::fake('public');
         Storage::fake('local');
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $this->activity();
     }
@@ -97,6 +97,8 @@ class SystemResetTest extends TestCase
 
     public function test_full_reset_also_removes_vehicles_and_tags_but_keeps_users_settings_gates_and_cameras(): void
     {
+        $tag = RfidTag::query()->where('uid', 'RST-TAG')->sole();
+        app(\App\Services\VehicleRegistryService::class)->setTagStatus($tag, 'lost');
         $this->artisan('system:reset', ['--full' => true, '--force' => true])->assertSuccessful();
 
         $this->assertSame([0, 0], [Vehicle::query()->count(), RfidTag::query()->count()]);
@@ -104,6 +106,9 @@ class SystemResetTest extends TestCase
         $this->assertSame(['gate-1', 'gate-2'], Gate::codes());
         $this->assertSame(2, DB::table('cameras')->count());
         $this->assertGreaterThan(0, DB::table('system_settings')->count());
+        $this->assertDatabaseHas('unavailable_rfid_uids', ['uid' => 'RST-TAG', 'tag_id' => null]);
+        $this->assertTrue(RfidTag::isUnavailableUid('rst-tag'));
+        $this->assertFalse(app(\App\Services\VehicleRegistryService::class)->lookupTagForVehicle('RST-TAG')['ok']);
     }
 
     public function test_devices_option_removes_saved_devices_and_assignments_the_unassign_way(): void

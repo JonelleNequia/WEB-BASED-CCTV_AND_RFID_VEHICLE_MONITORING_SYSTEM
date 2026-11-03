@@ -19,7 +19,10 @@ param(
     [string]$Root = '',
     [string]$ComputerName = '',
     [switch]$SetNetworkPrivate,
-    [string]$AdminEmail = 'admin@philcst.local'
+    [string]$AdminEmail = 'admin@philcst.local',
+    [string]$AdminName = 'Administrator',
+    [switch]$InitializeSetup,
+    [switch]$ReplaceSetupCode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,7 +50,7 @@ $result = [ordered]@{
     error        = $null
     log          = $logFile
 }
-$adminPassword = $null
+$setupIssued = $false
 
 function Install-VmsVcRedist {
     # PHP and torch need the Microsoft Visual C++ 2015-2022 runtime (x64).
@@ -175,15 +178,19 @@ try {
         Write-VmsStep 'Database: gates and default settings'
         Invoke-VmsArtisan $paths @('db:seed', '--class=Database\Seeders\InstallSeeder', '--force') | Out-Null
     }
-    $admin = (Invoke-VmsArtisan $paths @('system:first-admin', "--email=$AdminEmail", '--json') -Quiet | Select-Object -Last 1) | ConvertFrom-Json
-    $result.admin_email = $admin.email
-    $result.admin_created = [bool]$admin.created
-    if ($admin.created) {
-        $adminPassword = $admin.password
-        [IO.File]::WriteAllText($paths.FirstAdmin, "PHILCST VMS first sign-in`r`nEmail: $($admin.email)`r`nPassword: $adminPassword`r`nChange the password after signing in, then delete this file.`r`n")
-        # Administrators and SYSTEM only.
-        Invoke-VmsQuiet -Exe 'icacls.exe' -Arguments @($paths.FirstAdmin, '/inheritance:r', '/grant:r', '*S-1-5-32-544:F', '*S-1-5-18:F')
+    # Existing installs never auto-initialize or replace setup. Interrupted
+    # provisioning requires explicit local installer switches.
+    if ($newDatabase -or $InitializeSetup -or $ReplaceSetupCode) {
+        $setupDir = Split-Path -Parent $paths.FirstAdmin
+        New-Item -ItemType Directory -Force -Path $setupDir | Out-Null
+        # Restrict BEFORE PHP writes the delivery file; children inherit this ACL.
+        Invoke-VmsQuiet -Exe 'icacls.exe' -Arguments @($setupDir, '/inheritance:r', '/grant:r', '*S-1-5-32-544:(OI)(CI)F', '*S-1-5-18:(OI)(CI)F')
+        $setupArguments = @('system:first-admin', "--email=$AdminEmail", "--name=$AdminName", '--initialize', "--output-file=$($paths.FirstAdmin)", '--json')
+        if ($ReplaceSetupCode) { $setupArguments += '--replace' }
+        $setup = (Invoke-VmsArtisan $paths $setupArguments -Quiet | Select-Object -Last 1) | ConvertFrom-Json
+        $setupIssued = [bool]$setup.issued
     }
+    $result.admin_email = $AdminEmail
 
     Write-VmsStep 'Public files, detector settings, live view config, caches'
     Invoke-VmsArtisan $paths @('storage:link') -Quiet | Out-Null
@@ -288,12 +295,11 @@ try {
         foreach ($url in $result.urls) { [void]$lines.Add("    $url") }
         [void]$lines.Add("On this PC: $($result.local_url)")
         [void]$lines.Add('(The number address can change when the router changes; the .local name does not.)')
-        if ($adminPassword) {
+        if ($setupIssued) {
             [void]$lines.Add('')
-            [void]$lines.Add('First sign-in:')
-            [void]$lines.Add("    Email:    $($result.admin_email)")
-            [void]$lines.Add("    Password: $adminPassword")
-            [void]$lines.Add("Change the password after signing in. It is also in $($paths.FirstAdmin) - delete that file afterwards.")
+            [void]$lines.Add('Complete first-admin setup at /setup with a personal password.')
+            [void]$lines.Add("The setup code is in the protected local file $($paths.FirstAdmin).")
+            [void]$lines.Add('An administrator must deliver it privately and delete the delivery file. It expires in 24 hours.')
         }
     } else {
         [void]$lines.Add('The setup did not finish:')

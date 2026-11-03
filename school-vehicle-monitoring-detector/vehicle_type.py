@@ -1,47 +1,29 @@
-"""
-A2 (detection): one vehicle type per vehicle, decided from all its frames.
-
-The gate camera films vehicles from behind (for the plate). From behind, an
-SUV, AUV (Innova, Avanza), pickup or van looks like a box, and the COCO model
-often calls it "truck". So the type is decided like this:
-
-1. Three types only: Car (sedan, hatchback, SUV, AUV, pickup, van),
-   Motorcycle (motorcycle, e-bike, tricycle) and Truck/Bus (truck, bus,
-   jeepney). Bicycles are never counted.
-2. Every frame of the same track votes, weighted by its confidence and by
-   how big the vehicle is in that frame (a close, large view is surer).
-3. A second check on the best full-resolution crop of the vehicle, with a
-   larger input size, counts as much as all the frames together.
-4. Size and shape: "Truck/Bus" is kept only when the vehicle's back is
-   BOTH tall in the gate's zone and narrow like a truck's, bus's or
-   jeepney's back (about as tall as it is wide); otherwise it is a Car.
-   A4: measured on the first real crossings (rear pictures of a pickup):
-   the pickup's box was 1.19-1.63 wide per 1 high and the model said
-   "truck" in 4 of 6; trucks, buses and jeepneys are about 0.7-0.9.
-   Both limits are settings (Settings › Cameras, later Advanced).
-"""
+"""Confidence/frame votes over real model labels; no box-shape subtype inference."""
 
 CAR = "Car"
 MOTORCYCLE = "Motorcycle"
 TRUCK_BUS = "Truck/Bus"
-TYPES = (CAR, MOTORCYCLE, TRUCK_BUS)
+TRUCK = "Truck"
+BUS = "Bus"
+TYPES = (CAR, MOTORCYCLE, TRUCK, BUS, TRUCK_BUS, "E-bike", "E-trike", "E-car", "Tricycle",
+         "Van", "SUV", "AUV", "MPV", "Pickup", "Jeepney", "Sedan", "Hatchback", "Scooter", "Electric scooter")
 
-# Detector label -> type. Anything else (bicycle, person...) is not a vehicle here.
-LABEL_TYPES = {
-    "car": CAR, "suv": CAR, "van": CAR, "pickup": CAR, "pickup truck": CAR,
-    "motorcycle": MOTORCYCLE, "motorbike": MOTORCYCLE, "motor cycle": MOTORCYCLE, "scooter": MOTORCYCLE,
-    "electric scooter": MOTORCYCLE, "ebike": MOTORCYCLE, "e bike": MOTORCYCLE, "tricycle": MOTORCYCLE,
-    "auto rickshaw": MOTORCYCLE,
-    "truck": TRUCK_BUS, "bus": TRUCK_BUS, "jeepney": TRUCK_BUS, "jeep": TRUCK_BUS,  # PH "jeep" = jeepney
-}
+# A label is used only when advertised by the loaded model's names metadata.
+LABEL_TYPES = {label.lower().replace("-", " "): label for label in TYPES}
+LABEL_TYPES.update({
+    "pickup truck": "Pickup", "motorbike": MOTORCYCLE, "motor cycle": MOTORCYCLE,
+    "ebike": "E-bike", "electric bicycle": "E-bike", "electric bike": "E-bike",
+    "etrike": "E-trike", "electric tricycle": "E-trike", "electric trike": "E-trike",
+    "ecar": "E-car", "electric car": "E-car", "auto rickshaw": "Tricycle", "jeep": "Jeepney",
+})
 
 # Settings › Cameras (exported as system_settings.performance).
 DEFAULTS = {
     "type_second_pass": 1,          # second check on the best full-resolution crop
     "type_model": "yolov8s.pt",     # model for the second check (once per vehicle; bigger, surer)
     "type_second_pass_imgsz": 960,  # input size of the second check
-    "type_truck_min_height": 0.35,  # a truck's back is at least this share of the zone's height...
-    "type_car_min_aspect": 1.05,    # ...and narrower (width / height) than this; else it is a Car
+    "type_truck_min_height": 0.35,  # legacy configuration retained; no geometric relabelling
+    "type_car_min_aspect": 1.05,    # legacy configuration retained; not a type decision
 }
 
 # The second check weighs as much as all the frame votes together.
@@ -88,19 +70,6 @@ def _normalized(scores):
     return {key: value / total for key, value in scores.items()} if total > 0 else {}
 
 
-def looks_like_a_car(xyxy, zone_height, settings):
-    """
-    The size/shape rule: a truck's, bus's or jeepney's back is tall in the
-    zone AND about as tall as it is wide. Anything wider (SUV, AUV, pickup,
-    van) or small in the zone is a car.
-    """
-    width = max(1.0, float(xyxy[2]) - float(xyxy[0]))
-    height = max(1.0, float(xyxy[3]) - float(xyxy[1]))
-    tall_in_zone = zone_height <= 0 or height / zone_height >= float(settings["type_truck_min_height"])
-    narrow_like_a_truck = width / height < float(settings["type_car_min_aspect"])
-    return not (tall_in_zone and narrow_like_a_truck)
-
-
 def decide(vote, second_pass=None, zone_height=0.0, settings=None, fallback=None):
     """
     The final type and why: {"type", "scores", "second_pass", "rule", "frames"}.
@@ -120,12 +89,12 @@ def decide(vote, second_pass=None, zone_height=0.0, settings=None, fallback=None
         chosen = fallback if fallback in TYPES else None
         return {"type": chosen, "scores": {}, "second_pass": second_pass, "rule": "trigger frame only", "frames": vote.frames}
 
-    chosen = max(TYPES, key=lambda key: (combined.get(key, 0.0), key == CAR))
+    leaders = [key for key, value in combined.items() if abs(value - max(combined.values())) < 1e-9]
+    chosen = leaders[0] if len(leaders) == 1 else None
     rule = "votes" + (" + second check" if second_pass and second_pass.get("type") in TYPES else "")
 
-    best = vote.best_box()
-    if chosen == TRUCK_BUS and best is not None and looks_like_a_car(best, zone_height, settings):
-        chosen, rule = CAR, rule + " + size/shape (car-sized back)"
+    if chosen is None:
+        rule = "uncertain model votes"
 
     return {
         "type": chosen,

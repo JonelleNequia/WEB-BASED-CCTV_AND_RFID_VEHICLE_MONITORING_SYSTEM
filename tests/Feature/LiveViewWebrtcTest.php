@@ -10,7 +10,7 @@ use App\Services\DeviceRegistryService;
 use App\Services\Go2rtcService;
 use App\Support\CameraFiles;
 use App\Support\DeviceFiles;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
@@ -33,7 +33,7 @@ class LiveViewWebrtcTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         // Never touch the real go2rtc folder.
         $this->storage = sys_get_temp_dir().'/live-view-test-'.uniqid();

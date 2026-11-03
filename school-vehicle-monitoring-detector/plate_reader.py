@@ -11,7 +11,7 @@ Gate direction work, Phase B: the plate of one pass, from many frames.
    (fast-plate-ocr, models/plate_ocr/, a few milliseconds a crop, much
    better on motion blur than EasyOCR; EasyOCR when it is missing), the
    mirrored crop too when nothing valid was read (a mirrored picture), into
-   PH plate layouts with position-safe corrections (anpr.py).
+   PH plate layouts with literal normalization, without character substitutions (anpr.py).
 4. Vote character by character over the crops (plate_voting.vote_plate).
 
 The sharpest plate crop is kept for the record and the guard, even when the

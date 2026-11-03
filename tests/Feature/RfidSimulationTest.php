@@ -7,7 +7,7 @@ use App\Models\RfidScanLog;
 use App\Models\RfidTag;
 use App\Models\User;
 use App\Models\Vehicle;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -20,7 +20,7 @@ class RfidSimulationTest extends TestCase
      */
     public function test_rfid_scan_page_renders_simulation_workspace(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -37,7 +37,7 @@ class RfidSimulationTest extends TestCase
      */
     public function test_test_scan_is_a_preview_and_saves_nothing(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -118,7 +118,7 @@ class RfidSimulationTest extends TestCase
     {
         // Phase 3 (visitor model): an unknown tag no longer creates a guest
         // observation (one tag used to create a new record on every read).
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 

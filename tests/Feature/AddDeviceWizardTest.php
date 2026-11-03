@@ -5,7 +5,7 @@ namespace Tests\Feature;
 use App\Models\NetworkDevice;
 use App\Models\User;
 use App\Services\DeviceRegistryService;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -20,7 +20,7 @@ class AddDeviceWizardTest extends TestCase
 
     public function test_the_gates_tab_has_the_wizard_and_its_links(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
         $html = $this->actingAs($admin)->get(route('settings.index', ['tab' => 'gates']))->assertOk()->getContent();

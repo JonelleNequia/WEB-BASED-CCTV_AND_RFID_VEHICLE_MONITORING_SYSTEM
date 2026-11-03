@@ -105,7 +105,7 @@ class StationController extends Controller
             return response()->json([
                 ...$this->stationScanPayload($result->scanLog, $result->isDuplicate()),
                 ...$result->toArray(),
-            ], $result->isDuplicate() ? 200 : 201);
+            ], $result->isDuplicate() || $result->outcome === \App\Support\RfidIngestResult::IGNORED ? 200 : 201);
         } catch (ValidationException $exception) {
             throw $exception;
         } catch (Throwable $exception) {

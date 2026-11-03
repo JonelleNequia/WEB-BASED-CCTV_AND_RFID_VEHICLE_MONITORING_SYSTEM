@@ -11,8 +11,8 @@
             <div><span>Visits</span><strong>{{ $profile->visit_count }}</strong></div>
             <div><span>First seen</span><strong><x-datetime :value="$profile->first_seen_at" /></strong></div>
             <div><span>Last seen</span><strong><x-datetime :value="$profile->last_seen_at" /></strong></div>
-            <div><span>Vehicle</span><strong>{{ collect([$profile->vehicle_color, $profile->vehicle_type])->filter()->implode(' ') ?: '—' }}</strong></div>
-            <div><span>Category</span><strong>{{ \App\Support\VehicleCategory::label(\App\Models\VisitorRecord::CATEGORY) }}</strong></div>
+            <div><span>Vehicle</span><strong>{{ $profile->vehicle_type ?: '—' }}</strong></div>
+            <div><span>Current registration</span><strong>{{ $profile->vehicle ? \App\Support\VehicleCategory::label($profile->vehicle->category) : \App\Support\VehicleCategory::label(\App\Models\VisitorRecord::CATEGORY) }}</strong><span class="field-help">Each visit keeps its classification at occurrence.</span></div>
             <div><span>Registry</span><strong>@include('visitors.partials.registry-link', ['profile' => $profile])</strong></div>
             @if ($profile->aliases->isNotEmpty())
                 <div><span>Merged plates</span><strong>{{ $profile->aliases->pluck('plate_number')->implode(', ') }}</strong></div>

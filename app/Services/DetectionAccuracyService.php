@@ -30,7 +30,7 @@ class DetectionAccuracyService
     public function report(CarbonInterface $since, ?string $gate = null, ?CarbonInterface $until = null): array
     {
         $until ??= now();
-        $matrix = array_fill_keys(VehicleType::TYPES, array_fill_keys(VehicleType::TYPES, 0));
+        $matrix = array_fill_keys(VehicleType::COMPARISON_GROUPS, array_fill_keys(VehicleType::COMPARISON_GROUPS, 0));
         $unchecked = 0;
 
         VehicleCrossing::query()
@@ -40,8 +40,8 @@ class DetectionAccuracyService
             ->when($gate, fn ($query) => $query->where('gate', $gate))
             ->get()
             ->each(function (VehicleCrossing $crossing) use (&$matrix, &$unchecked): void {
-                $actual = VehicleType::category($crossing->rfidScanLog?->vehicle?->vehicle_type);
-                $detected = VehicleType::category($crossing->vehicle_type);
+                $actual = VehicleType::comparisonGroup($crossing->rfidScanLog?->vehicle?->vehicle_type);
+                $detected = VehicleType::comparisonGroup($crossing->vehicle_type);
                 if ($actual === null || $detected === null) {
                     $unchecked++;
 
@@ -51,7 +51,7 @@ class DetectionAccuracyService
             });
 
         $registered = array_sum(array_map('array_sum', $matrix));
-        $registeredCorrect = array_sum(array_map(fn (string $type): int => $matrix[$type][$type], VehicleType::TYPES));
+        $registeredCorrect = array_sum(array_map(fn (string $type): int => $matrix[$type][$type], VehicleType::COMPARISON_GROUPS));
 
         $visitorRecords = VisitorRecord::query()
             ->where('source', VisitorRecord::SOURCE_CAMERA)
@@ -66,8 +66,8 @@ class DetectionAccuracyService
             ->orderBy('id')
             ->get()
             ->keyBy('visitor_record_id');
-        $wrong = $corrections->filter(fn (VehicleTypeCorrection $item): bool => VehicleType::category($item->detected_type) !== $item->corrected_type);
-        $pair = fn (string $from, string $to): int => $wrong->filter(fn (VehicleTypeCorrection $item): bool => VehicleType::category($item->detected_type) === $from && $item->corrected_type === $to)->count();
+        $wrong = $corrections->filter(fn (VehicleTypeCorrection $item): bool => VehicleType::comparisonGroup($item->detected_type) !== VehicleType::comparisonGroup($item->corrected_type));
+        $pair = fn (string $from, string $to): int => $wrong->filter(fn (VehicleTypeCorrection $item): bool => VehicleType::comparisonGroup($item->detected_type) === $from && VehicleType::comparisonGroup($item->corrected_type) === $to)->count();
 
         return [
             'since' => $since,
@@ -147,8 +147,8 @@ class DetectionAccuracyService
             ->get()
             ->each(function (VehicleCrossing $crossing) use ($add): void {
                 $vehicle = $crossing->rfidScanLog?->vehicle;
-                $actual = VehicleType::category($vehicle?->vehicle_type);
-                $detected = VehicleType::category($crossing->vehicle_type);
+                $actual = VehicleType::comparisonGroup($vehicle?->vehicle_type);
+                $detected = VehicleType::comparisonGroup($crossing->vehicle_type);
                 if ($actual && $detected && $actual !== $detected) {
                     $add($crossing->crossed_at, $crossing->gate, 'wrong type', "{$vehicle->plate_number}: camera {$detected}, Registry {$actual}", $crossing->snapshot_url);
                 }
@@ -157,7 +157,7 @@ class DetectionAccuracyService
         VehicleTypeCorrection::query()->with('visitorRecord.crossing')
             ->whereBetween('created_at', [$since, $until])->when($gate, fn ($query) => $query->where('gate', $gate))
             ->get()
-            ->filter(fn (VehicleTypeCorrection $item): bool => VehicleType::category($item->detected_type) !== $item->corrected_type)
+            ->filter(fn (VehicleTypeCorrection $item): bool => VehicleType::comparisonGroup($item->detected_type) !== VehicleType::comparisonGroup($item->corrected_type))
             ->each(fn (VehicleTypeCorrection $item) => $add($item->visitorRecord?->seen_at ?? $item->created_at, $item->gate, 'wrong type',
                 'record #'.$item->visitor_record_id.': camera '.($item->detected_type ?: '—').', guard '.$item->corrected_type, $item->visitorRecord?->crossing?->snapshot_url));
 

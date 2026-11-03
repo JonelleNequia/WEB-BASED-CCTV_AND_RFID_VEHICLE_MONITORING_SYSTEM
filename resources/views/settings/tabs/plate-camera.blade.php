@@ -28,12 +28,12 @@
     </div>
 </section>
 
-<section class="card settings-section">
-    <h3>Recommended camera settings (TP-Link VIGI)</h3>
+<details class="card settings-section settings-help">
+    <summary>Recommended camera settings (TP-Link VIGI)</summary>
     <p class="field-help">For clear plates on moving vehicles. Change them in the camera's web page or the VIGI app, then check the numbers above after a few vehicles.</p>
     <dl class="plate-report-settings">
         @foreach (\App\Services\PlateReadabilityService::RECOMMENDED as [$setting, $value])
             <div><dt>{{ $setting }}</dt><dd>{{ $value }}</dd></div>
         @endforeach
     </dl>
-</section>
+</details>

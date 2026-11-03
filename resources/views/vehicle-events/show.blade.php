@@ -25,7 +25,9 @@
                 <div><span>Status</span><strong>{{ $vehicleEvent->display_status_label }}</strong></div>
                 <div><span>Source</span><strong>{{ $vehicleEvent->event_origin_label }}</strong></div>
                 <div><span>Plate</span><strong>{{ $vehicleEvent->plate_text ?: $vehicleEvent->vehicle?->plate_number ?: 'GUEST' }}</strong></div>
-                <div><span>Vehicle</span><strong>{{ $vehicleEvent->vehicle_color ?: 'Pending color' }} {{ $vehicleEvent->display_vehicle_type }}</strong></div>
+                <div><span>Vehicle</span><strong>{{ $vehicleEvent->display_vehicle_type }}</strong></div>
+                <div><span>Type source</span><strong>{{ $vehicleEvent->vehicle_type_source_label }}</strong></div>
+                <div><span>Detector type</span><strong>{{ $vehicleEvent->detected_vehicle_type ?: 'Not recorded' }}</strong></div>
                 <div><span>Category</span><strong>{{ \App\Support\VehicleCategory::label($vehicleEvent->vehicle_category) }}</strong></div>
                 <div><span>Station / Camera</span><strong>{{ $vehicleEvent->camera_label }}</strong></div>
                 <div><span>RFID Match</span><strong>{{ $vehicleEvent->rfidScanLog ? '#'.$vehicleEvent->rfidScanLog->id.' • '.$vehicleEvent->rfidScanLog->verificationLabel : 'No RFID scan linked' }}</strong></div>
@@ -34,6 +36,25 @@
                 <div><span>Match</span><strong>{{ $vehicleEvent->match_display }}</strong></div>
                 <div><span>Plate Confidence</span><strong>{{ $vehicleEvent->plate_confidence ?? 'N/A' }}</strong></div>
             </div>
+
+            @if ($vehicleEvent->visitor_record_id)
+                <form method="POST" action="{{ route('visitors.records.type', $vehicleEvent->visitor_record_id) }}" class="stack-form">
+                    @csrf
+                    @method('PATCH')
+                    <div class="field">
+                        <label for="occurrence_vehicle_type">Correct vehicle type for this occurrence</label>
+                        <select id="occurrence_vehicle_type" name="vehicle_type" required>
+                            <option value="">Choose a vehicle type</option>
+                            @foreach (\App\Support\VehicleType::TYPES as $type)
+                                <option value="{{ $type }}" @selected(\App\Support\VehicleType::canonical(old('vehicle_type', $vehicleEvent->display_vehicle_type)) === $type)>{{ $type }}</option>
+                            @endforeach
+                        </select>
+                        @error('vehicle_type')<span class="field-error">{{ $message }}</span>@enderror
+                        <span class="field-help">Changes this occurrence only. The registered type and camera evidence are retained.</span>
+                    </div>
+                    <button type="submit" class="button button-secondary">Save type</button>
+                </form>
+            @endif
 
             @if ($vehicleEvent->event_type === 'ENTRY')
                 <div class="mini-note">
@@ -66,7 +87,7 @@
             @else
                 <div class="empty-state empty-state-inline">
                     <h4>No visual evidence attached</h4>
-                    <p>This record currently relies on RFID and registry data.</p>
+                    <p>{{ $vehicleEvent->visitor_record_id && !$vehicleEvent->rfid_scan_log_id ? 'This record relies on its confirmed plate and registry data.' : 'This record currently relies on RFID and registry data.' }}</p>
                 </div>
             @endif
         </section>
@@ -153,7 +174,7 @@
                 <div class="form-grid">
                     <div class="field">
                         <label for="plate_text">Plate</label>
-                        <input id="plate_text" type="text" name="plate_text" value="{{ old('plate_text', $vehicleEvent->plate_text) }}" placeholder="ABC-1234" required>
+                        <input id="plate_text" type="text" name="plate_text" value="{{ old('plate_text', $vehicleEvent->plate_text) }}" placeholder="ABC-1234" required data-normalize-plate>
                     </div>
 
                     <div class="field">
@@ -166,16 +187,6 @@
                         <select id="vehicle_type" name="vehicle_type" required>
                             @foreach ($vehicleTypes as $vehicleType)
                                 <option value="{{ $vehicleType }}" @selected(old('vehicle_type', $vehicleEvent->detected_vehicle_type ?: $vehicleEvent->vehicle_type) === $vehicleType)>{{ $vehicleType }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-
-                    <div class="field">
-                        <label for="vehicle_color">Vehicle Color</label>
-                        <select id="vehicle_color" name="vehicle_color" required>
-                            <option value="">Select color</option>
-                            @foreach ($vehicleColors as $vehicleColor)
-                                <option value="{{ $vehicleColor }}" @selected(old('vehicle_color', $vehicleEvent->vehicle_color) === $vehicleColor)>{{ $vehicleColor }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -207,7 +218,7 @@
             <div class="detail-list">
                 <div><span>Entry Log</span><strong>#{{ $vehicleEvent->matchedEntry->id }}</strong></div>
                 <div><span>Plate</span><strong>{{ $vehicleEvent->matchedEntry->plate_text }}</strong></div>
-                <div><span>Vehicle</span><strong>{{ $vehicleEvent->matchedEntry->vehicle_color }} {{ $vehicleEvent->matchedEntry->display_vehicle_type }}</strong></div>
+                <div><span>Vehicle</span><strong>{{ $vehicleEvent->matchedEntry->display_vehicle_type }}</strong></div>
                 <div><span>Camera</span><strong>{{ $vehicleEvent->matchedEntry->camera_label }}</strong></div>
                 <div><span>Time</span><strong><x-datetime :value="$vehicleEvent->matchedEntry->event_time" /></strong></div>
             </div>

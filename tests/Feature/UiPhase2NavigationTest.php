@@ -7,7 +7,7 @@ use App\Models\RfidTag;
 use App\Models\SystemSetting;
 use App\Models\User;
 use App\Services\RfidIngestService;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -27,7 +27,7 @@ class UiPhase2NavigationTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $this->guard = User::query()->create([
             'name' => 'Gate Guard',
@@ -159,7 +159,7 @@ RfidScanLog::query()->create([ // saved before "RFID only with a vehicle"
 
     public function test_sidebar_shows_the_alert_count(): void
     {
-        RfidTag::query()->create(['uid' => 'LOST-TAG-1', 'status' => RfidTag::STATUS_LOST]);
+        RfidTag::query()->create(['uid' => 'LOST-TAG-1', 'status' => RfidTag::STATUS_DISABLED]);
         app(RfidIngestService::class)->ingest(['tag_uid' => 'LOST-TAG-1', 'scan_location' => 'gate-1'], 'station_reader');
 
         $this->actingAs($this->admin)

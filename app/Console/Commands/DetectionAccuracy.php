@@ -62,13 +62,13 @@ class DetectionAccuracy extends Command
         );
         $this->line('  Missed = a registered tag read while the camera was online, but no vehicle crossing seen.');
         $this->newLine();
-        $this->line('<options=bold>Registered vehicles</> (camera type vs Registry type)');
+        $this->line('<options=bold>Registered vehicles</> (broad model-family comparison; not subtype recognition)');
         if ($registered['checked'] === 0) {
             $this->line('  No registered vehicle crossing with a type yet.');
         } else {
             $this->line(sprintf('  %d of %d correct (%.1f%%)', $registered['correct'], $registered['checked'], $registered['accuracy']));
             $this->table(
-                ['Registry \\ camera', ...VehicleType::TYPES],
+                ['Registry \\ camera', ...VehicleType::COMPARISON_GROUPS],
                 collect($registered['matrix'])->map(fn (array $row, string $type): array => [$type, ...array_values($row)])->values()->all()
             );
         }
@@ -85,7 +85,7 @@ class DetectionAccuracy extends Command
 
         $this->newLine();
         $this->line(sprintf('<options=bold>Car vs Truck/Bus</>: %d car(s) saved as Truck/Bus, %d Truck/Bus saved as Car.', $report['car_as_truck'], $report['truck_as_car']));
-        $this->line('Tune it in Settings › Cameras › Vehicle type and Counting.');
+        $this->line('Broad model-family agreement only; this does not measure electric or exact-subtype recognition.');
 
         if ($this->option('mistakes')) {
             $this->newLine();

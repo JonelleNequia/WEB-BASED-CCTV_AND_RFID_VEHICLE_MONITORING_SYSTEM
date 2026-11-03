@@ -16,7 +16,7 @@ use App\Services\RfidTagMatcher;
 use App\Support\CameraFiles;
 use App\Support\DeviceFiles;
 use App\Support\RfidIngestResult;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Illuminate\Testing\TestResponse;
@@ -38,7 +38,7 @@ class RfidOnlyWithVehicleTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         File::deleteDirectory(DeviceFiles::directory());
         // Buffer times are seconds with decimals: keep them exact.

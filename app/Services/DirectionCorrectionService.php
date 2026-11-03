@@ -11,7 +11,6 @@ use App\Models\VehicleEvent;
 use App\Models\VisitorRecord;
 use App\Support\DirectionSource;
 use App\Support\RfidIngestResult;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -39,14 +38,14 @@ class DirectionCorrectionService
     {
         $direction = $this->direction($direction);
 
-        return DB::transaction(function () use ($event, $direction, $user): VehicleEvent {
+        return app(PlateProcessingLock::class)->run(function () use ($event, $direction, $user): VehicleEvent {
             $event = VehicleEvent::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
             if ($event->event_type !== VehicleEvent::TYPE_UNKNOWN) {
                 throw ValidationException::withMessages(['direction' => 'This record already has a direction.']);
             }
 
             $scan = $event->rfid_scan_log_id ? RfidScanLog::query()->find($event->rfid_scan_log_id) : null;
-            $crossing = $scan?->vehicle_crossing_id ? VehicleCrossing::query()->find($scan->vehicle_crossing_id) : null;
+            $crossing = $scan?->vehicle_crossing_id ? VehicleCrossing::query()->find($scan->vehicle_crossing_id) : $event->visitorRecord?->crossing;
             $eventType = $direction === 'IN' ? 'ENTRY' : 'EXIT';
             $anomalyReason = null;
             $transition = [];
@@ -59,13 +58,14 @@ class DirectionCorrectionService
                 } elseif ($eventType === 'EXIT' && ! $inside) {
                     $anomalyReason = "{$vehicle->plate_number} set OUT, but it was already outside (an IN was missed).";
                 }
-                $transition = $this->fusionService->moveVehicle($vehicle, $eventType, $event->event_time ?? now());
+                app(MovementReconciliationService::class)->begin($vehicle);
             }
 
             $this->remember($event->id, null, $crossing, $event->rfidScanLog?->scan_location ?? $crossing?->gate, $direction, $user);
 
             $event->forceFill([
                 'event_type' => $eventType,
+                'occupancy_managed' => true,
                 'direction' => $direction,
                 'direction_source' => DirectionSource::MANUAL,
                 'match_status' => $eventType === 'ENTRY' ? 'open' : 'closed',
@@ -74,7 +74,9 @@ class DirectionCorrectionService
                 'daily_exits_count' => $transition['daily_exits_count'] ?? $event->daily_exits_count,
                 'anomaly_reason' => $anomalyReason,
             ])->save();
-            $event = $this->eventService->applyRfidSessionState($event);
+            if ($scan) {
+                $event = $this->eventService->applyRfidSessionState($event);
+            }
 
             $scan?->forceFill([
                 'resolved_event_type' => $eventType,
@@ -87,6 +89,12 @@ class DirectionCorrectionService
                 'outcome' => $anomalyReason ? RfidIngestResult::ANOMALY : RfidIngestResult::RECORDED,
             ])->save();
             $this->setCrossing($crossing, $direction, $user);
+            if ($event->visitor_record_id) {
+                VisitorRecord::query()->whereKey($event->visitor_record_id)->update(['direction' => $direction, 'direction_source' => DirectionSource::MANUAL]);
+            }
+            if ($event->vehicle_id) {
+                app(MovementReconciliationService::class)->reconcile((int) $event->vehicle_id);
+            }
 
             return $event->fresh();
         });
@@ -96,7 +104,7 @@ class DirectionCorrectionService
     {
         $direction = $this->direction($direction);
 
-        return DB::transaction(function () use ($record, $direction, $user): VisitorRecord {
+        return app(PlateProcessingLock::class)->run(function () use ($record, $direction, $user): VisitorRecord {
             $record = VisitorRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
             if ($record->direction !== 'UNKNOWN') {
                 throw ValidationException::withMessages(['direction' => 'This record already has a direction.']);
@@ -114,6 +122,7 @@ class DirectionCorrectionService
                 ->where('event_type', VehicleEvent::TYPE_UNKNOWN)
                 ->update(['event_type' => $direction === 'IN' ? 'ENTRY' : 'EXIT', 'direction' => $direction, 'direction_source' => DirectionSource::MANUAL]);
             $this->visitorRecordService->refreshProfiles([$record->plate_profile_id]);
+            app(MovementReconciliationService::class)->syncPlate($record);
 
             return $record->fresh();
         });

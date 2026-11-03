@@ -93,17 +93,16 @@ class FutureIntegrationController extends Controller
             $validated = $request->validate([
                 'external_event_key' => ['required', 'string', 'max:120'],
                 'camera_role' => ['required_without:camera_id', 'string', new ValidGate],
-                'camera_id' => ['nullable', 'integer', 'exists:cameras,id'],
+                'camera_id' => ['nullable', 'integer', \Illuminate\Validation\Rule::exists('cameras', 'id')->whereIn('camera_role', Gate::query()->retained()->pluck('code')->all()), new \App\Rules\CameraAtGate('camera_role')],
                 'detected_vehicle_type' => ['required', 'string', 'max:50'],
                 'event_time' => ['required', 'date'],
                 'vehicle_image_path' => ['nullable', 'required_if:unregistered_capture,true', 'string', 'max:255'],
-                'plate_number' => ['nullable', 'string', 'max:50'],
-                'vehicle_color' => ['nullable', 'string', 'max:50'],
-                'detected_vehicle_color' => ['nullable', 'string', 'max:50'],
+                'plate_number' => ['nullable', 'string', 'max:50', new \App\Rules\PlateIdentifier(20)],
                 'roi_name' => ['nullable', 'string', 'max:100'],
                 'detection_metadata' => ['nullable', 'array'],
                 'unregistered_capture' => ['sometimes', 'boolean'],
             ]);
+            $validated['camera_role'] ??= Camera::query()->whereKey($validated['camera_id'])->value('camera_role');
 
             $existingGuestObservation = GuestVehicleObservation::query()
                 ->where('external_event_key', $validated['external_event_key'])
@@ -195,17 +194,15 @@ class FutureIntegrationController extends Controller
         }
 
         $validated = $request->validate([
-            'camera_id' => ['required', 'integer', 'exists:cameras,id'],
+            'camera_id' => ['required', 'integer', \Illuminate\Validation\Rule::exists('cameras', 'id')->whereIn('camera_role', Gate::query()->retained()->pluck('code')->all()), new \App\Rules\CameraAtGate('camera_role')],
             'direction' => ['required', 'string', 'in:IN,OUT'],
             'plate_number' => ['nullable', 'string', 'max:20'],
-            'vehicle_color' => ['nullable', 'string', 'max:50'],
             'image_path' => ['required', 'string', 'max:255'],
         ]);
 
         $cameraId = $validated['camera_id'];
         $direction = $validated['direction'];
         $plateNumber = PlateNumber::normalize($validated['plate_number'] ?? null);
-        $vehicleColor = $this->normalizeVehicleColor($validated['vehicle_color'] ?? null);
         $imagePath = $validated['image_path'];
 
         if ($direction === 'IN') {
@@ -213,7 +210,6 @@ class FutureIntegrationController extends Controller
                 $cameraId,
                 $direction,
                 $plateNumber,
-                $vehicleColor,
                 $imagePath
             );
 
@@ -287,7 +283,6 @@ class FutureIntegrationController extends Controller
             $cameraId,
             $direction,
             $plateNumber,
-            $vehicleColor,
             $imagePath
         );
 
@@ -321,15 +316,14 @@ class FutureIntegrationController extends Controller
         return GuestVehicleObservation::query()->create([
             'plate_text' => $plateNumber,
             'plate_number' => $plateNumber,
-            'vehicle_type' => $validated['detected_vehicle_type'] ?? 'Vehicle',
-            'vehicle_color' => $this->normalizeVehicleColor($validated['vehicle_color'] ?? $validated['detected_vehicle_color'] ?? null),
+            'vehicle_type' => \App\Support\VehicleType::detector($validated['detected_vehicle_type'] ?? null),
             'location' => Gate::normalizeCode($validated['camera_role']),
             'observation_source' => 'cctv',
             'status' => 'pending_review',
             'observed_at' => Carbon::parse($validated['event_time']),
             'camera_id' => $cameraId,
             'external_event_key' => $validated['external_event_key'],
-            'detection_metadata_json' => $validated['detection_metadata'] ?? null,
+            'detection_metadata_json' => \App\Services\VehicleTypeEvidenceService::detectorMetadata($validated['detected_vehicle_type'] ?? null, $validated['detection_metadata'] ?? null),
             'snapshot_path' => $validated['vehicle_image_path'],
             'notes' => 'No successful RFID scan was recorded for this detector capture.',
             'created_by' => null,
@@ -340,7 +334,6 @@ class FutureIntegrationController extends Controller
         int $cameraId,
         string $direction,
         ?string $plateNumber,
-        ?string $vehicleColor,
         string $imagePath
     ): GuestVehicleObservation {
         $camera = Camera::query()->find($cameraId);
@@ -351,7 +344,6 @@ class FutureIntegrationController extends Controller
             'plate_text' => $plateNumber,
             'plate_number' => $plateNumber,
             'vehicle_type' => 'Vehicle',
-            'vehicle_color' => $vehicleColor,
             'location' => $location,
             'observation_source' => 'cctv',
             'status' => 'pending_review',
@@ -468,15 +460,13 @@ class FutureIntegrationController extends Controller
         $validated = $request->validate([
             'external_event_key' => ['required', 'string', 'max:120'],
             'camera_role' => ['required', 'string', new ValidGate],
-            'camera_id' => ['nullable', 'integer', 'exists:cameras,id'],
+            'camera_id' => ['nullable', 'integer', \Illuminate\Validation\Rule::exists('cameras', 'id')->whereIn('camera_role', Gate::query()->retained()->pluck('code')->all()), new \App\Rules\CameraAtGate('camera_role')],
             'detected_vehicle_type' => ['nullable', 'string', 'max:50'],
             'event_time' => ['required', 'date'],
             'vehicle_image_path' => ['nullable', 'string', 'max:255'],
             'snapshot' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
             'snapshot_image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
-            'plate_number' => ['nullable', 'string', 'max:50'],
-            'vehicle_color' => ['nullable', 'string', 'max:50'],
-            'detected_vehicle_color' => ['nullable', 'string', 'max:50'],
+            'plate_number' => ['nullable', 'string', 'max:50', new \App\Rules\PlateIdentifier(20)],
             'detection_metadata' => ['nullable', 'array'],
         ]);
         $snapshotFile = $request->file('snapshot')
@@ -519,15 +509,14 @@ class FutureIntegrationController extends Controller
         $observation = GuestVehicleObservation::query()->create([
             'plate_text' => $plateNumber,
             'plate_number' => $plateNumber,
-            'vehicle_type' => $validated['detected_vehicle_type'] ?? 'Vehicle',
-            'vehicle_color' => $this->normalizeVehicleColor($validated['vehicle_color'] ?? $validated['detected_vehicle_color'] ?? null),
+            'vehicle_type' => \App\Support\VehicleType::detector($validated['detected_vehicle_type'] ?? null),
             'location' => Gate::normalizeCode($validated['camera_role']),
             'observation_source' => 'cctv',
             'status' => 'pending_review',
             'observed_at' => Carbon::parse($validated['event_time']),
             'camera_id' => $cameraId,
             'external_event_key' => $validated['external_event_key'],
-            'detection_metadata_json' => $validated['detection_metadata'] ?? null,
+            'detection_metadata_json' => \App\Services\VehicleTypeEvidenceService::detectorMetadata($validated['detected_vehicle_type'] ?? null, $validated['detection_metadata'] ?? null),
             'snapshot_path' => $snapshotPath,
             'notes' => 'No successful RFID scan was recorded within the detector confirmation window.',
             'created_by' => null,
@@ -602,7 +591,7 @@ class FutureIntegrationController extends Controller
             return response()->json([
                 ...$this->rfidScanResponsePayload($scanLog),
                 ...$result->toArray(),
-            ], $result->isDuplicate() ? 200 : 201);
+            ], $result->isDuplicate() || $result->outcome === \App\Support\RfidIngestResult::IGNORED ? 200 : 201);
         } catch (ValidationException $exception) {
             throw $exception;
         } catch (Throwable $exception) {
@@ -777,15 +766,6 @@ class FutureIntegrationController extends Controller
     protected function normalizeDetectorEventTime(Carbon $eventTime): Carbon
     {
         return $eventTime->copy()->setTimezone(config('app.timezone', 'UTC'));
-    }
-
-    protected function normalizeVehicleColor(?string $color): ?string
-    {
-        if (blank($color)) {
-            return null;
-        }
-
-        return str((string) $color)->trim()->title()->value();
     }
 
     /**

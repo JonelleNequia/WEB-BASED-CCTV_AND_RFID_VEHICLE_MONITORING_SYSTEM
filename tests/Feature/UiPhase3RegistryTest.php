@@ -6,7 +6,7 @@ use App\Models\RfidTag;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Services\RfidIngestService;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -25,7 +25,7 @@ class UiPhase3RegistryTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
 
@@ -199,8 +199,8 @@ class UiPhase3RegistryTest extends TestCase
         $this->assertSame(RfidTag::STATUS_LOST, $tag->fresh()->status);
 
         // Found again: it is still this vehicle's tag, so it goes back to assigned.
-        $this->actingAs($this->admin)->post(route('registry.tags.status', $tag), ['status' => 'available'])->assertSessionHasNoErrors();
-        $this->assertSame(RfidTag::STATUS_ASSIGNED, $tag->fresh()->status);
+        $this->actingAs($this->admin)->post(route('registry.tags.status', $tag), ['status' => 'available'])->assertSessionHasErrors('status');
+        $this->assertSame(RfidTag::STATUS_LOST, $tag->fresh()->status);
     }
 
     public function test_registry_pages_render_new_actions(): void
@@ -238,10 +238,11 @@ class UiPhase3RegistryTest extends TestCase
     protected function vehiclePayload(string $plate, array $overrides = []): array
     {
         return array_merge([
+            'registered_by' => 'Test Registrar',
             '_form' => 'add',
             'auto_register_tag' => '1',
             'plate_number' => $plate,
-            'vehicle_owner_name' => 'Owner '.$plate,
+            'vehicle_owner_name' => 'Vehicle Owner',
             'category' => 'faculty_staff',
             'vehicle_type' => 'Car',
         ], $overrides);

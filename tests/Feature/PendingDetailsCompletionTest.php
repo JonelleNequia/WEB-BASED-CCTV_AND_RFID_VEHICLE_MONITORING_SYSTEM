@@ -6,7 +6,7 @@ use App\Models\ActiveSession;
 use App\Models\User;
 use App\Models\VehicleEvent;
 use App\Services\EventService;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -19,7 +19,7 @@ class PendingDetailsCompletionTest extends TestCase
      */
     public function test_completing_a_pending_entry_opens_an_active_session(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -63,7 +63,7 @@ class PendingDetailsCompletionTest extends TestCase
      */
     public function test_completing_a_pending_exit_runs_automatic_matching(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 

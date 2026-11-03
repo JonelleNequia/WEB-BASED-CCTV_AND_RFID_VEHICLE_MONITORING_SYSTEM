@@ -5,7 +5,7 @@ namespace Tests\Feature;
 use App\Models\Camera;
 use App\Models\User;
 use App\Services\DetectorRuntimeService;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Database\Seeders\InstallSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
@@ -26,7 +26,7 @@ class WindowsInstallerTest extends TestCase
 
     public function test_with_the_proxy_every_page_uses_the_same_origin_detector_path(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         config(['monitoring.stream.proxy' => true]);
         $runtime = app(DetectorRuntimeService::class);
@@ -48,7 +48,7 @@ class WindowsInstallerTest extends TestCase
     {
         $this->get(route('live.proxy-auth'))->assertRedirect(route('login'));
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $this->actingAs($admin)->get(route('live.proxy-auth'))->assertNoContent();
 
@@ -66,29 +66,30 @@ class WindowsInstallerTest extends TestCase
         $this->assertSame(0, User::query()->count());
         $this->assertTrue(Camera::query()->forRole('gate-1')->exists());
 
-        $this->artisan('system:first-admin', ['--email' => 'admin@school.test', '--json' => true])->assertSuccessful();
-        $admin = User::query()->sole();
-        $this->assertSame(User::ROLE_ADMIN, $admin->role);
-        $this->assertFalse(Hash::check('password', $admin->password));
-
         Artisan::call('system:first-admin', ['--json' => true]);
-        $this->assertSame(['created' => false, 'email' => 'admin@school.test'], json_decode(trim(Artisan::output()), true));
-        $this->assertSame(1, User::query()->count());
+        $this->assertSame(['issued' => false], json_decode(trim(Artisan::output()), true));
+        $this->assertSame(0, User::query()->count());
     }
 
-    public function test_the_first_admin_password_is_random_and_printed_once(): void
+    public function test_first_admin_uses_a_protected_delivery_file_and_no_console_secret(): void
     {
-        Artisan::call('system:first-admin', ['--json' => true]);
-        $result = json_decode(trim(Artisan::output()), true);
-
-        $this->assertTrue($result['created']);
-        $this->assertMatchesRegularExpression('/^[A-Za-z0-9]{16}$/', $result['password']);
-        $this->assertTrue(Hash::check($result['password'], User::query()->sole()->password));
+        $directory = sys_get_temp_dir().'/vms-setup-test-'.uniqid();
+        File::makeDirectory($directory, 0700);
+        try {
+            Artisan::call('system:first-admin', ['--initialize' => true, '--output-file' => $directory.'/delivery.txt', '--json' => true]);
+            $this->assertSame(['issued' => true], json_decode(trim(Artisan::output()), true));
+            preg_match('/Code: ([a-f0-9]{64})/', File::get($directory.'/delivery.txt'), $match);
+            $this->assertCount(2, $match);
+            $this->assertSame(hash('sha256', $match[1]), \Illuminate\Support\Facades\DB::table('account_security_state')->value('setup_hash'));
+            $this->assertSame(0, User::query()->count());
+        } finally {
+            File::deleteDirectory($directory);
+        }
     }
 
     public function test_gates_list_gives_the_kiosk_page_of_each_gate(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         Artisan::call('gates:list', ['--json' => true]);
         $gates = json_decode(trim(Artisan::output()), true);
 

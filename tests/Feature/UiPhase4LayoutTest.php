@@ -8,7 +8,7 @@ use App\Models\Vehicle;
 use App\Services\RfidIngestService;
 use App\Services\VisitorRecordService;
 use App\Support\CameraFiles;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
@@ -27,7 +27,7 @@ class UiPhase4LayoutTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
 
@@ -117,7 +117,7 @@ class UiPhase4LayoutTest extends TestCase
         $this->assertMatchesRegularExpression('/data-gate="gate-2".*?class="gate-feed is-offline"/s', $html);
 
         // Guards get the placeholder without the Settings link.
-        $guard = User::query()->create(['name' => 'Guard', 'email' => 'guard.u4@philcst.local', 'password' => bcrypt('password'), 'role' => 'guard']);
+        $guard = User::query()->create(['name' => 'Guard', 'email' => 'guard.u4@philcst.local', 'password' => \Illuminate\Support\Facades\Hash::make('password'), 'role' => 'guard']);
         $this->actingAs($guard)->get(route('gates.kiosk', 'gate-2'))->assertOk()
             ->assertSee('data-frame-message', false)
             ->assertDontSee('Check connection');

@@ -211,6 +211,7 @@ class RecordingClient(FakeClient):
         self.crossings = []
         self.matched = matched
         self.plates = []
+        self.guest_observations = []
 
     def check_rfid_match(self, *args, **kwargs):
         return {"matched": self.matched, "body": {"vehicle": {"plate_number": "ABC 123"}}}
@@ -222,6 +223,40 @@ class RecordingClient(FakeClient):
     def submit_visitor_plate(self, payload, image_bytes=None, filename=None):
         self.plates.append(payload)
         return {"accepted": True}
+
+    def submit_guest_observation(self, payload, image_bytes=None, filename=None):
+        self.guest_observations.append(payload)
+        return super().submit_guest_observation(payload, image_bytes, filename)
+
+
+class PlateAnalysisTests(unittest.TestCase):
+    def test_fallback_reader_keeps_the_vote_crop_and_plate_evidence_without_color(self):
+        frame = np.zeros((80, 120, 3), dtype=np.uint8)
+        frames = [(frame, (0, 0, 120, 80))] * 2
+        with mock.patch.object(detector.plate_reader, 'available', return_value=False), \
+             mock.patch.object(detector, 'ocr_runtime_status', return_value={"ready": True}), \
+             mock.patch.object(detector, 'read_license_plate_details', return_value={"plate": "ABC-1234", "score": 0.99, "crop": frame}):
+            vote, runtime, details, crop = detector.analyze_guest_vehicle_details(frames, 'Car')
+        self.assertIsNotNone(vote["plate"])
+        self.assertEqual(runtime, {"ready": True})
+        self.assertIs(crop, frame)
+        self.assertEqual(details["frames_checked"], 2)
+        self.assertTrue(all(result["plate_number"] == "ABC-1234" for result in details["frame_results"]))
+        self.assertTrue(all("vehicle_color" not in result and "color_error" not in result for result in details["frame_results"]))
+
+    def test_plate_detector_keeps_its_crop_and_candidates_without_running_a_color_pass(self):
+        frame = np.zeros((80, 120, 3), dtype=np.uint8)
+        vote = {"plate": "ABC1234", "candidates": [{"plate": "ABC1234", "votes": 2}]}
+        with mock.patch.object(detector.plate_reader, 'available', return_value=True), \
+             mock.patch.object(detector.plate_reader, 'read_pass', return_value=(vote, frame, {"frames_checked": 2})), \
+             mock.patch.object(detector, 'ocr_runtime_status', return_value={"ready": True}):
+            result, runtime, details, crop = detector.analyze_guest_vehicle_details([(frame, (0, 0, 120, 80))], 'Car')
+        self.assertEqual(result, vote)
+        self.assertEqual(runtime, {"ready": True})
+        self.assertIs(crop, frame)
+        self.assertEqual(details["candidates"], vote["candidates"])
+        self.assertNotIn("vehicle_color", details)
+        self.assertNotIn("color_analysis", details)
 
 
 class PassWorkerTests(Gate):
@@ -236,10 +271,24 @@ class PassWorkerTests(Gate):
 
     def run_worker(self, client):
         with mock.patch("detector_service.analyze_guest_vehicle_details",
-                        return_value=({"plate": None, "status": "unreadable", "confidence": 0, "best_guess": None, "reason": ""}, None, {}, {"frames_checked": 0, "elapsed_seconds": 0}, None)), \
-             mock.patch("detector_service.analyze_guest_vehicle_color", return_value=(None, {})), \
+                        return_value=({"plate": None, "status": "unreadable", "confidence": 0, "best_guess": None, "reason": ""}, {}, {"frames_checked": 0, "elapsed_seconds": 0}, None)), \
              mock.patch("detector_service.second_pass_type", return_value=None):
             detector.pass_worker("gate-1", self.state, FIRST_PASS, client)
+
+    def test_unregistered_pass_sends_snapshot_and_plate_updates_without_color_fields(self):
+        self.drive([200, 230, 260, 290, 320])
+        for _ in range(LOST):
+            self.seen(None)
+        client = RecordingClient()
+        self.run_worker(client)
+        self.assertEqual(len(client.guest_observations), 2)  # snapshot, then completed OCR; no color-only request
+        self.assertEqual(len(client.plates), 1)
+        self.assertEqual(client.guest_observations[-1]["detection_metadata"]["analysis_status"], "complete")
+        for payload in client.guest_observations + client.plates:
+            self.assertNotIn("vehicle_color", payload)
+            self.assertNotIn("detected_vehicle_color", payload)
+            self.assertNotIn("vehicle_color", payload.get("detection_metadata", {}))
+            self.assertNotIn("color_analysis", payload.get("detection_metadata", {}))
 
     def test_recorded_with_its_direction_then_updated_at_left_zone_with_a_clearer_picture(self):
         window = self.drive([200, 230, 260, 290, 320])

@@ -11,7 +11,7 @@ use App\Services\DeviceRegistryService;
 use App\Services\Go2rtcService;
 use App\Support\CameraFiles;
 use App\Support\DeviceFiles;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\File;
@@ -41,7 +41,7 @@ class SharedCameraTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $this->storage = sys_get_temp_dir().'/shared-camera-test-'.uniqid();
         File::ensureDirectoryExists($this->storage.'/logs');

@@ -38,6 +38,9 @@ class CameraStreams
      */
     public function forGate(string $gate): array
     {
+        if (\App\Models\Gate::query()->where('code', $gate)->whereNotNull('archived_at')->exists()) {
+            return ['source' => self::SOURCE_NONE, 'live' => null, 'main' => null, 'sub' => null, 'snapshot' => null, 'stream' => 'sub', 'device' => null];
+        }
         // Testing: the webcam wins over the CCTV until it is switched off
         // (the CCTV assignment is kept).
         $webcam = Camera::query()->forRole($gate)->value('test_webcam_index');

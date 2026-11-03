@@ -72,4 +72,41 @@ class BackupRestoreTest extends TestCase
         $this->artisan('backup:restore', ['file' => __FILE__, '--force' => true])->assertFailed();
     }
 
+    public function test_backups_retain_deprecated_color_columns_and_historical_relationships(): void
+    {
+        $event = \App\Models\VehicleEvent::query()->create([
+            'event_type' => 'ENTRY', 'event_time' => now(), 'vehicle_type' => 'Car', 'vehicle_color' => 'Legacy event color',
+            'detection_metadata_json' => ['vehicle_color' => 'Legacy metadata color'],
+        ]);
+        $session = \App\Models\ActiveSession::query()->create([
+            'entry_event_id' => $event->id, 'entry_time' => now(), 'status' => 'open', 'vehicle_color' => 'Legacy session color',
+        ]);
+        $profile = \App\Models\PlateProfile::query()->create([
+            'plate_key' => 'LEG1234', 'plate_number' => 'LEG 1234', 'vehicle_color' => 'Legacy profile color',
+        ]);
+        $record = \App\Models\VisitorRecord::query()->create([
+            'external_event_key' => 'legacy-color-backup', 'gate' => 'gate-1', 'direction' => 'IN', 'seen_at' => now(),
+            'plate_profile_id' => $profile->id, 'vehicle_color' => 'Legacy visitor color',
+        ]);
+        $observation = \App\Models\GuestVehicleObservation::query()->create([
+            'location' => 'gate-1', 'observed_at' => now(), 'visitor_record_id' => $record->id,
+            'vehicle_color' => 'Legacy observation color',
+        ]);
+        $models = [$event, $session, $profile, $record, $observation];
+        $colors = array_map(fn ($model) => $model->vehicle_color, $models);
+        $zip = app(BackupService::class)->create($this->work.'/backups');
+        foreach ($models as $model) {
+            $model->forceFill(['vehicle_color' => null])->save();
+        }
+        app(BackupService::class)->restore($zip);
+        DB::purge('sqlite');
+        foreach ($models as $index => $model) {
+            $this->assertSame($colors[$index], $model->fresh()->vehicle_color);
+        }
+        $this->assertSame(['vehicle_color' => 'Legacy metadata color'], $event->fresh()->detection_metadata_json);
+        $this->assertSame($event->id, $session->fresh()->entryEvent->id);
+        $this->assertSame($profile->id, $record->fresh()->plateProfile->id);
+        $this->assertSame($record->id, $observation->fresh()->visitor_record_id);
+    }
+
 }

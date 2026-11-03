@@ -70,7 +70,7 @@ from tracking import (
     point_in_polygon,
     zone_height,
 )
-from anpr import detect_vehicle_color, ocr_runtime_status, read_license_plate_details
+from anpr import ocr_runtime_status, read_license_plate_details
 from plate_voting import frames_agree, vote_plate
 import plate_reader
 from camera_health import ReconnectBackoff, RtspDiagnosis, rtsp_play_check, short_reason, strip_credentials, take_over_stale_detector
@@ -137,7 +137,6 @@ MAX_GUEST_ANALYSIS_FRAMES = 5
 MAX_GUEST_OCR_ANALYSIS_FRAMES = 4
 # Phase 5: OCR of one vehicle stops after this long (it runs after the alert is sent).
 PLATE_OCR_BUDGET_SECONDS = 12.0
-MAX_GUEST_COLOR_ANALYSIS_FRAMES = 3
 GUEST_ANALYSIS_FRAME_INTERVAL_SECONDS = 0.45
 # Gate direction work, Phase B: a burst for the plate, a frame every 0.15 s
 # while the vehicle is in the zone (the main stream's when it is open); the
@@ -633,7 +632,7 @@ def resolve_allowed_vehicle_classes(model):
         if normalized_name not in ALLOWED_VEHICLE_CLASS_NAMES:
             continue
 
-        # A2: Car / Motorcycle / Truck/Bus (vehicle_type.py), never "Pickup" or "Truck".
+        # Preserve the named model class; numeric IDs come only from model.names.
         vehicle_type = vtype.type_for_label(normalized_name)
         if vehicle_type:
             supported[int(class_id)] = vehicle_type
@@ -2375,7 +2374,7 @@ def best_vehicle_crop(window, hires_frame):
 
 
 def final_vehicle_type(window, hires_frame):
-    """A2: votes of every frame + second check + size/shape rule (vehicle_type.decide)."""
+    """Vote over actual model classes; no geometric subtype or propulsion inference."""
     settings = {**vtype.DEFAULTS, **performance_settings(load_runtime_config())}
     second = None
     if int(settings.get("type_second_pass") or 0):
@@ -2531,7 +2530,7 @@ def record_pass(role, state, track_id, window, rfid_status, laravel_client):
     type_decision = final_vehicle_type(window, hires_frame)
 
     with state["lock"]:
-        window["detected_vehicle_type"] = type_decision["type"] or window.get("detected_vehicle_type")
+        window["detected_vehicle_type"] = type_decision["type"] or "Unknown"
         window["recorded_at"] = datetime.now().astimezone().isoformat()
         window["recorded_area"] = float(window.get("best_area") or 0.0)
         window["recorded_score"] = float(window.get("best_score") or 0.0)
@@ -2580,7 +2579,7 @@ def update_record_after_left_zone(role, state, track_id, window, matched, larave
     hires_frame = (window.get("best_hires") or (None, None))[0]
     type_decision = final_vehicle_type(window, hires_frame)
     with state["lock"]:
-        window["detected_vehicle_type"] = type_decision["type"] or window.get("detected_vehicle_type")
+        window["detected_vehicle_type"] = type_decision["type"] or "Unknown"
         payload = crossing_payload_locked(role, track_id, window, "matched" if matched else "no_pass", type_decision, picture_xyxy)
         payload["detection_metadata"]["snapshot_box"] = [round(float(value), 1) for value in snapshot_box]
         payload["detection_metadata"]["picture"] = picture_details(window, snapshot_frame, snapshot_box)
@@ -2602,7 +2601,7 @@ def update_record_after_left_zone(role, state, track_id, window, matched, larave
     if matched or submit_visitor_plate is None:
         return
     # Phase 5: the plate again, from every sharp frame of the whole pass.
-    vote, vehicle_color, _, analysis_details, plate_crop = analyze_guest_vehicle_details(hires_frames + analysis_frames, payload["detected_vehicle_type"], plate_frames)
+    vote, _, analysis_details, plate_crop = analyze_guest_vehicle_details(hires_frames + analysis_frames, payload["detected_vehicle_type"], plate_frames)
     plate_image = encode_frame_snapshot(role, plate_crop, f"plate-{window['event_key']}") if plate_crop is not None else None
     submit_visitor_plate(
         {
@@ -2613,7 +2612,6 @@ def update_record_after_left_zone(role, state, track_id, window, matched, larave
             "plate_status": vote["status"],
             "plate_confidence": vote["confidence"],
             "best_guess": vote["best_guess"],
-            "vehicle_color": vehicle_color,
             "detected_vehicle_type": payload["detected_vehicle_type"],
             "ocr_details": analysis_details,
         },
@@ -2638,82 +2636,11 @@ def most_common_value(values):
         return None
 
     return sorted(counts, key=lambda value: (counts[value], len(value)), reverse=True)[0]
-
-
-def most_common_color(values):
-    """
-    Pick the most repeated color without favoring longer color names on ties.
-    """
-    counts = {}
-    first_seen = {}
-
-    for index, value in enumerate(values):
-        if not value:
-            continue
-
-        counts[value] = counts.get(value, 0) + 1
-        first_seen.setdefault(value, index)
-
-    if not counts:
-        return None
-
-    return sorted(
-        counts,
-        key=lambda value: (counts[value], -first_seen[value]),
-        reverse=True,
-    )[0]
-
-
-def reconcile_guest_vehicle_color(initial_color, final_color):
-    """
-    Keep the wider fast color consensus when a later smaller OCR pass disagrees.
-    """
-    if initial_color and final_color and initial_color != final_color:
-        return initial_color
-
-    return final_color or initial_color
-
-
-def analyze_guest_vehicle_color(analysis_frames):
-    """
-    Run the fast color classifier before the slower OCR pass so the Guest record
-    gets useful visible-vehicle data even if OCR takes too long.
-    """
-    vehicle_colors = []
-    frame_results = []
-    started_at = time.monotonic()
-
-    for index, (frame, xyxy) in enumerate(analysis_frames[:MAX_GUEST_COLOR_ANALYSIS_FRAMES]):
-        color_error = None
-
-        try:
-            vehicle_color = detect_vehicle_color(frame, xyxy)
-        except Exception as error:
-            vehicle_color = None
-            color_error = str(error)
-
-        if vehicle_color:
-            vehicle_colors.append(vehicle_color)
-
-        frame_results.append({
-            "index": index,
-            "bbox_xyxy": [float(value) for value in xyxy],
-            "vehicle_color": vehicle_color,
-            "color_error": color_error,
-        })
-
-    return most_common_color(vehicle_colors), {
-        "frames_checked": len(frame_results),
-        "elapsed_seconds": round(time.monotonic() - started_at, 3),
-        "frame_results": frame_results,
-    }
-
-
 def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None, plate_frames=None):
     """
     Phase 5 (visitor model): read the plate on up to MAX_GUEST_OCR_ANALYSIS_FRAMES
     frames (full-resolution first) and vote (plate_voting.vote_plate); stop
-    early once two frames agree. Returns (vote, color, ocr runtime, details,
+    early once two frames agree. Returns (vote, ocr runtime, details,
     plate crop image or None).
 
     Gate direction work, Phase B: with the plate detector (plate_reader), the
@@ -2728,16 +2655,9 @@ def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None, plate_fram
             result = None
         if result is not None:
             vote, crop, details = result
-            colors = []
-            for frame, xyxy in analysis_frames[:MAX_GUEST_COLOR_ANALYSIS_FRAMES]:
-                try:
-                    colors.append(detect_vehicle_color(frame, xyxy))
-                except Exception:
-                    pass
             details.update(vote={key: value for key, value in vote.items() if key != "candidates"}, candidates=vote["candidates"])
-            return vote, most_common_color([color for color in colors if color]), ocr_runtime_status(), details, crop
+            return vote, ocr_runtime_status(), details, crop
 
-    vehicle_colors = []
     frame_reads = []
     crops = {}
     runtime_status = ocr_runtime_status()
@@ -2749,7 +2669,6 @@ def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None, plate_fram
             break
 
         plate_error = None
-        color_error = None
 
         try:
             read = read_license_plate_details(frame, xyxy)
@@ -2757,18 +2676,9 @@ def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None, plate_fram
             read = {"plate": None, "score": 0.0, "crop": None}
             plate_error = str(error)
 
-        try:
-            vehicle_color = detect_vehicle_color(frame, xyxy)
-        except Exception as error:
-            vehicle_color = None
-            color_error = str(error)
-
         if read["plate"] and read.get("crop") is not None:
             if read["score"] > crops.get(read["plate"], (-1.0, None))[0]:
                 crops[read["plate"]] = (read["score"], read["crop"])
-
-        if vehicle_color:
-            vehicle_colors.append(vehicle_color)
 
         frame_reads.append({"plate": read["plate"], "score": read["score"]})
         frame_results.append({
@@ -2777,9 +2687,7 @@ def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None, plate_fram
             "bbox_xyxy": [float(value) for value in xyxy],
             "plate_number": read["plate"],
             "plate_score": read["score"],
-            "vehicle_color": vehicle_color,
             "plate_error": plate_error,
-            "color_error": color_error,
         })
 
         if frames_agree(frame_reads):
@@ -2790,7 +2698,6 @@ def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None, plate_fram
 
     return (
         vote,
-        most_common_color(vehicle_colors),
         runtime_status,
         {
             "frames_checked": len(frame_results),
@@ -2805,7 +2712,7 @@ def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None, plate_fram
 
 def submit_guest_observation_for_window(role, state, track_id, laravel_client):
     """
-    Send one Unregistered Visitor camera record (snapshot, then color/plate) after
+    Send one Unregistered Visitor camera record (snapshot, then plate) after
     the RFID window expires without blocking video. Laravel no longer turns
     this into a guest record or an INSIDE guest session.
     """
@@ -2929,37 +2836,12 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
     if not analysis_frames:
         analysis_frames = [(snapshot_frame, window_payload["xyxy"])]
 
-    vehicle_color, color_analysis = analyze_guest_vehicle_color(analysis_frames)
-
-    if vehicle_color:
-        color_payload = {
-            **base_payload,
-            "vehicle_image_path": (initial_result.get("body") or {}).get("snapshot_path"),
-            "vehicle_color": vehicle_color,
-            "detection_metadata": {
-                **base_metadata,
-                "analysis_status": "color_ready",
-                "vehicle_color": vehicle_color,
-                "color_analysis": color_analysis,
-            },
-        }
-        color_result = laravel_client.submit_guest_observation(color_payload)
-
-        with state["lock"]:
-            state["track_overlays"][track_id] = color_result.get("overlay") or state["track_overlays"].get(track_id) or default_overlay()
-            remember_recent_resolution_locked(state, track_id, window_payload.get("live_xyxy", window_payload["xyxy"]), state["track_overlays"][track_id], time.monotonic())
-
-            if not color_result.get("accepted"):
-                state["last_error"] = color_result.get("message", "Guest vehicle color could not be saved.")
-
-    vote, detailed_vehicle_color, ocr_status, analysis_details, plate_crop = analyze_guest_vehicle_details(analysis_frames, window_payload["detected_vehicle_type"], plate_frames)
+    vote, ocr_status, analysis_details, plate_crop = analyze_guest_vehicle_details(analysis_frames, window_payload["detected_vehicle_type"], plate_frames)
     plate_number = vote["plate"]
-    vehicle_color = reconcile_guest_vehicle_color(vehicle_color, detailed_vehicle_color)
 
     print(
         f"{role.capitalize()} unregistered visitor analysis {window_payload['event_key']}: "
         f"plate={plate_number or 'unreadable'} (best guess {vote['best_guess'] or '-'}, {vote['reason']}) "
-        f"color={vehicle_color or 'None'} "
         f"ocr_frames={analysis_details['frames_checked']} "
         f"ocr_elapsed={analysis_details['elapsed_seconds']}s",
         flush=True,
@@ -2979,7 +2861,6 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
                 "plate_status": vote["status"],
                 "plate_confidence": vote["confidence"],
                 "best_guess": vote["best_guess"],
-                "vehicle_color": vehicle_color,
                 "detected_vehicle_type": window_payload["detected_vehicle_type"],
                 "ocr_details": analysis_details,
             },
@@ -2993,15 +2874,12 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
     guest_payload = {
         **base_payload,
         "vehicle_image_path": (initial_result.get("body") or {}).get("snapshot_path"),
-        "vehicle_color": vehicle_color,
         "plate_number": plate_number,
         "detection_metadata": {
             **base_metadata,
             "analysis_status": "complete",
             "plate_number": plate_number,
-            "vehicle_color": vehicle_color,
             "ocr_runtime": ocr_status,
-            "color_analysis": color_analysis,
             "analysis_details": analysis_details,
         },
     }

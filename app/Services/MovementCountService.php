@@ -23,8 +23,9 @@ use Illuminate\Support\Collection;
  *   not in the Registry is an Unregistered Visitor);
  * - Unregistered Visitor records (camera, no registered tag read). A record
  *   of a plate that was already in the Registry at that moment is a
- *   registered movement with the plate only (tag not read): counted for the
- *   vehicle's category, but it never changes "inside";
+ *   registered movement with the plate only (tag not read). Newly processed
+ *   matches have one canonical ENTRY/EXIT event and update occupancy; old
+ *   occurrences retain their recorded behavior without an automatic replay;
  * - older camera guest records from before the visitor records (Phase 8
  *   converts them); a guest record that has a visitor record is not counted
  *   twice.
@@ -78,22 +79,24 @@ class MovementCountService
                     ? VehicleCategory::normalize($event->vehicle_category ?: $event->vehicle?->category)
                     : VehicleCategory::UNREGISTERED_VISITOR,
                 'gate' => $this->gate($event->rfidScanLog?->scan_location ?? $event->camera?->camera_role),
-                'source' => $event->rfid_scan_log_id ? self::SOURCE_RFID : self::SOURCE_MANUAL,
+                'source' => $event->rfid_scan_log_id ? self::SOURCE_RFID : ($event->visitor_record_id ? ($event->event_origin === 'plate_review' ? 'plate_review' : self::SOURCE_PLATE_ONLY) : self::SOURCE_MANUAL),
             ]);
 
         $visitors = VisitorRecord::query()
             ->with('vehicle:id,category,created_at')
             ->active()
+            ->withoutMovementEvent()
+            ->whereDoesntHave('crossing.rfidScanLog.correlatedVehicleEvent', fn ($query) => $query->where('event_status', VehicleEvent::STATUS_COMPLETED))
             ->where('seen_at', '>=', $from)
             ->where('seen_at', '<', $until)
             ->get()
             ->map(function (VisitorRecord $record): array {
-                $plateOnly = $record->vehicle && $record->vehicle->created_at && $record->vehicle->created_at->lte($record->seen_at);
+                $plateOnly = $record->isRegisteredAtOccurrence();
 
                 return [
                     'time' => $record->seen_at,
                     'direction' => in_array($record->direction, ['IN', 'OUT'], true) ? $record->direction : 'UNKNOWN',
-                    'category' => $plateOnly ? VehicleCategory::normalize($record->vehicle->category) : VehicleCategory::UNREGISTERED_VISITOR,
+                    'category' => $record->classificationCategory(),
                     'gate' => $this->gate($record->gate),
                     'source' => match (true) {
                         $record->source === VisitorRecord::SOURCE_MANUAL => self::SOURCE_MANUAL,

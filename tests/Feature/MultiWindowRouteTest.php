@@ -9,7 +9,7 @@ use App\Models\User;
 use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Services\DetectorRuntimeService;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -19,7 +19,7 @@ class MultiWindowRouteTest extends TestCase
 
     public function test_admin_dashboard_is_available_at_admin_route(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -33,7 +33,7 @@ class MultiWindowRouteTest extends TestCase
 
     public function test_station_kiosk_windows_render_dedicated_camera_and_log_views(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -72,7 +72,7 @@ class MultiWindowRouteTest extends TestCase
 
     public function test_station_state_endpoint_returns_station_identity_and_shared_logs(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -96,7 +96,7 @@ class MultiWindowRouteTest extends TestCase
 
     public function test_station_state_endpoint_attempts_detector_restart_when_polled(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -133,7 +133,7 @@ class MultiWindowRouteTest extends TestCase
 
     public function test_station_state_endpoint_includes_guest_observations_for_sidebar(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
 
@@ -185,7 +185,7 @@ class MultiWindowRouteTest extends TestCase
 
     public function test_station_rfid_scan_endpoint_records_registered_reader_scan(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $vehicle = Vehicle::query()->create([
@@ -268,7 +268,7 @@ class MultiWindowRouteTest extends TestCase
 
     public function test_station_rfid_scan_links_vehicle_by_legacy_rfid_tag_uid(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $vehicle = Vehicle::query()->create([
@@ -308,7 +308,7 @@ class MultiWindowRouteTest extends TestCase
     public function test_station_rfid_scan_for_old_guest_category_is_flagged_without_a_guest_record(): void
     {
         // Phase 8 (visitor model): no guest record from a tag read any more.
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $vehicle = Vehicle::query()->create([
@@ -334,7 +334,7 @@ class MultiWindowRouteTest extends TestCase
 
     public function test_station_rfid_scan_ignores_immediate_duplicate_reads(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         [$vehicle, $tag] = $this->createStationVehicleWithTag('DUP-1003', 'RFID-DUP-1003');
@@ -369,7 +369,7 @@ class MultiWindowRouteTest extends TestCase
 
     public function test_station_state_returns_latest_station_activity_first_with_daily_counts(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
 
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         [$vehicle, $tag] = $this->createStationVehicleWithTag('CNT-1004', 'RFID-CNT-1004');

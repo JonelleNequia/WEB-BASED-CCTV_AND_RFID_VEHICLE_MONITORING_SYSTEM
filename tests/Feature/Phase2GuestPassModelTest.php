@@ -8,7 +8,7 @@ use App\Models\User;
 use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Services\VehicleRegistryService;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
@@ -37,13 +37,14 @@ class Phase2GuestPassModelTest extends TestCase
 
     public function test_registry_rejects_guest_category(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         $admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $tag = app(VehicleRegistryService::class)->registerRfidTag(['uid' => 'VT-UID-7', 'tag_number' => 7]);
 
         $this->actingAs($admin)
             ->from(route('registry.index'))
             ->post(route('vehicle-registry.store'), [
+                'registered_by' => 'Test Registrar',
                 'rfid_tag_id' => $tag->id,
                 'plate_number' => 'GST 777',
                 'vehicle_type' => 'Car',

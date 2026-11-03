@@ -95,7 +95,10 @@ class VisitorReviewService
             throw ValidationException::withMessages(['action' => 'Choose an action.']);
         }
 
-        $message = DB::transaction(fn (): string => match ($action) {
+        $message = app(PlateProcessingLock::class)->run(function () use ($record, $action, $input, $user): string {
+            $record = VisitorRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
+
+            return match ($action) {
             'confirm' => $this->confirm($record, $user),
             'correct_plate' => $this->correctPlate($record, (string) ($input['plate'] ?? ''), $user, 'correct_plate'),
             'pick_match' => $this->pickMatch($record, (int) ($input['profile_id'] ?? 0), $user),
@@ -103,6 +106,7 @@ class VisitorReviewService
             'set_direction' => $this->setDirection($record, (string) ($input['direction'] ?? ''), $user),
             'set_name' => $this->setName($record, (string) ($input['name'] ?? ''), $user),
             'dismiss' => $this->dismiss($record, (string) ($input['reason'] ?? ''), $user),
+            };
         });
 
         $record->refresh();
@@ -114,6 +118,9 @@ class VisitorReviewService
                 'direction' => $record->status === VisitorRecord::STATUS_ACTIVE && $record->direction === 'UNKNOWN',
             ],
             'remaining' => $this->count(),
+            'registration_status' => $record->registration_status,
+            'registration_reason' => $record->registration_reason,
+            'plate_number' => $record->plate_number,
         ];
     }
 
@@ -145,33 +152,14 @@ class VisitorReviewService
             throw ValidationException::withMessages(['plate' => 'There is no plate to confirm: type it, or press "No plate visible".']);
         }
 
-        $before = $this->describe($record);
-        $oldProfileId = $record->plate_profile_id;
-        $profile = $record->plateProfile ?? $this->visitorRecordService->profileFor($plate, $record->seen_at);
-        $record->forceFill([
-            'plate_profile_id' => $profile->id,
-            'vehicle_id' => $profile->vehicle_id,
-            'suggested_profile_id' => null,
-            'match_confidence' => $record->match_confidence === PlateMatchService::LOW || $record->match_confidence === null ? PlateMatchService::CONFIRMED : $record->match_confidence,
-            'reviewed_at' => now(),
-            'reviewed_by' => $user->id,
-        ])->save();
-        $this->visitorRecordService->refreshProfiles([$oldProfileId, $profile->id]);
-        $this->log($record, 'confirm', $before, $plate, $user, $profile->id);
+        $this->visitorRecordService->correctPlate($record, $plate, $user, 'confirm');
 
         return "Record #{$record->id}: plate {$plate} confirmed.";
     }
 
     protected function correctPlate(VisitorRecord $record, string $plate, User $user, string $action): string
     {
-        $plate = trim($plate);
-        if ($plate === '' || preg_match('/^[A-Za-z0-9 -]{2,30}$/', $plate) !== 1) {
-            throw ValidationException::withMessages(['plate' => 'Type the plate: letters, digits, spaces or a dash.']);
-        }
-
-        $before = $this->describe($record);
-        $record = $this->visitorRecordService->correctPlate($record, $plate, $user);
-        $this->log($record, $action, $before, $record->plate_number, $user);
+        $record = $this->visitorRecordService->correctPlate($record, $plate, $user, $action);
 
         return "Record #{$record->id}: plate set to {$record->plate_number}.";
     }
@@ -188,9 +176,7 @@ class VisitorReviewService
 
     protected function noPlate(VisitorRecord $record, User $user): string
     {
-        $before = $this->describe($record);
         $record = $this->visitorRecordService->correctPlate($record, null, $user);
-        $this->log($record, 'no_plate', $before, null, $user);
 
         return "Record #{$record->id}: no plate visible (still counted).";
     }
@@ -209,8 +195,13 @@ class VisitorReviewService
         if (! $profile) {
             throw ValidationException::withMessages(['name' => 'Save the plate first: the name is kept with the plate.']);
         }
-        $name = trim($name);
-        if (mb_strlen($name) > 120) {
+        $blank = ($name !== '' && \App\Rules\PersonalName::normalize($name) === '')
+            || in_array('name', request()->attributes->get('blank_name_fields', []), true);
+        $name = \App\Rules\PersonalName::normalize($name);
+        \Illuminate\Support\Facades\Validator::make(['name' => $name !== '' ? $name : null], [
+            'name' => [new \App\Rules\PersonalName($profile->owner_name, $blank)],
+        ])->validate();
+        if (mb_strlen($name) > 120 && $name !== \App\Rules\PersonalName::normalize($profile->owner_name ?? '')) {
             throw ValidationException::withMessages(['name' => 'At most 120 characters.']);
         }
 

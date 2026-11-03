@@ -9,7 +9,7 @@ use App\Models\Vehicle;
 use App\Models\VisitorRecord;
 use App\Services\RfidIngestService;
 use App\Support\CameraFiles;
-use Database\Seeders\DatabaseSeeder;
+use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
@@ -33,7 +33,7 @@ class Phase5VisitorRecordsTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(DatabaseSeeder::class);
+        $this->seed(PortalSeeder::class);
         Storage::fake('public');
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $this->guard = User::query()->create([

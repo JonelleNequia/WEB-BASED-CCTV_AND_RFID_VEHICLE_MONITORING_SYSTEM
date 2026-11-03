@@ -82,8 +82,8 @@ PERFORMANCE_DEFAULTS = {
     "type_second_pass": 1,          # second check on the best full-resolution crop
     "type_model": "yolov8s.pt",     # model of the second check (once per vehicle; yolov8n.pt when missing)
     "type_second_pass_imgsz": 960,  # input size of the second check
-    "type_truck_min_height": 0.35,  # Truck/Bus needs a back at least this share of the zone's height...
-    "type_car_min_aspect": 1.05,    # ...and narrower (width / height) than this; otherwise it is a Car
+    "type_truck_min_height": 0.35,  # legacy setting; no geometric type relabelling
+    "type_car_min_aspect": 1.05,    # legacy setting; not used to assert a subtype
     # ROI work: one vehicle = one pass through the zone (tracking.VehiclePass).
     "pass_min_frames": 2,           # detection frames in the zone before it is Detected (Phase 4: 2 at 15/s)
     "pass_lost_seconds": 0.75,      # not seen in the zone this long (at the busy rate) before it Left zone
@@ -153,7 +153,7 @@ ALLOWED_VEHICLE_CLASS_NAMES = {
     "tricycle",
     "truck",
     "van",
-    "ebike",
+    "ebike", "e bike", "e trike", "e car", "electric bicycle", "electric tricycle", "electric car",
 }
 
 

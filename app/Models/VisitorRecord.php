@@ -84,6 +84,9 @@ class VisitorRecord extends Model
         'vehicle_id',
         'vehicle_type',
         'vehicle_color',
+        'registration_status',
+        'registration_category',
+        'registration_reason',
         'corrected_by',
         'corrected_at',
     ];
@@ -95,7 +98,6 @@ class VisitorRecord extends Model
     public function scopePlateToCheck(Builder $query): Builder
     {
         return $query->where('status', self::STATUS_ACTIVE)
-            ->whereNull('reviewed_at')
             ->where(fn ($inner) => self::plateNeedsLook($inner));
     }
 
@@ -106,24 +108,48 @@ class VisitorRecord extends Model
     public function scopeNeedsReview(Builder $query): Builder
     {
         return $query->where('status', self::STATUS_ACTIVE)
+            // A registered UNKNOWN occurrence has one direction card on its
+            // canonical event; its evidence row must not add a second card.
+            ->where(fn ($evidence) => $evidence->where('registration_status', 'review')->orWhere(fn ($unrepresented) => $unrepresented->withoutMovementEvent()))
             ->where(fn ($inner) => $inner->where('direction', 'UNKNOWN')
-                ->orWhere(fn ($plate) => $plate->whereNull('reviewed_at')->where(fn ($look) => self::plateNeedsLook($look))));
+                ->orWhere(fn ($look) => self::plateNeedsLook($look)));
     }
 
     /** Unreadable, read with a low confidence, or only a low match to a known plate (Phase C). */
     protected static function plateNeedsLook($query)
     {
-        return $query->where('plate_status', self::PLATE_UNREADABLE)
+        return $query->where(fn ($decision) => $decision->where('registration_status', 'review')
+                ->where(fn ($reason) => $reason->whereNull('registration_reason')->orWhere('registration_reason', '!=', 'No plate visible (checked by staff).')))
+            ->orWhere(fn ($legacy) => $legacy->whereNull('reviewed_at')->where(fn ($look) => $look->where('plate_status', self::PLATE_UNREADABLE)
             ->orWhere(fn ($low) => $low->where('plate_status', self::PLATE_READ)->where('plate_confidence', '<', self::LOW_PLATE_CONFIDENCE))
-            ->orWhere('match_confidence', \App\Services\PlateMatchService::LOW);
+            ->orWhere('match_confidence', \App\Services\PlateMatchService::LOW)));
     }
 
     public function plateNeedsReview(): bool
     {
-        return $this->status === self::STATUS_ACTIVE && $this->reviewed_at === null
-            && ($this->plate_status === self::PLATE_UNREADABLE
+        return $this->status === self::STATUS_ACTIVE
+            && (($this->registration_status === 'review' && $this->registration_reason !== 'No plate visible (checked by staff).')
+            || ($this->reviewed_at === null && ($this->plate_status === self::PLATE_UNREADABLE
                 || ($this->plate_status === self::PLATE_READ && $this->plate_confidence !== null && (float) $this->plate_confidence < self::LOW_PLATE_CONFIDENCE)
-                || $this->match_confidence === \App\Services\PlateMatchService::LOW);
+                || $this->match_confidence === \App\Services\PlateMatchService::LOW)));
+    }
+
+    /** A persisted decision never changes just because someone registers later. */
+    public function isRegisteredAtOccurrence(): bool
+    {
+        if ($this->registration_status !== null) {
+            return $this->registration_status === 'registered';
+        }
+
+        return ! $this->plateNeedsReview() && $this->vehicle && $this->vehicle->created_at
+            && $this->vehicle->created_at->lte($this->seen_at);
+    }
+
+    public function classificationCategory(): string
+    {
+        return $this->isRegisteredAtOccurrence()
+            ? VehicleCategory::normalize($this->registration_category ?: $this->vehicle?->category)
+            : (($this->registration_status === 'review' || $this->plateNeedsReview()) ? 'review' : VehicleCategory::UNREGISTERED_VISITOR);
     }
 
     /** Phase C: the known plate this record probably is (a low match, waiting in Review). */
@@ -167,6 +193,31 @@ class VisitorRecord extends Model
     public function crossing(): BelongsTo
     {
         return $this->belongsTo(VehicleCrossing::class, 'vehicle_crossing_id');
+    }
+
+    public function movementEvent(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(VehicleEvent::class);
+    }
+
+    public function typeCorrections(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(VehicleTypeCorrection::class);
+    }
+
+    public function getDisplayVehicleTypeAttribute(): string
+    {
+        return \App\Support\VehicleType::display($this->vehicle_type);
+    }
+
+    public function getVehicleTypeSourceLabelAttribute(): string
+    {
+        return \App\Services\VehicleTypeEvidenceService::sourceLabel(data_get($this->ocr_details_json, \App\Services\VehicleTypeEvidenceService::KEY.'.source'));
+    }
+
+    public function scopeWithoutMovementEvent(Builder $query): Builder
+    {
+        return $query->whereDoesntHave('movementEvent', fn ($event) => $event->where('event_status', VehicleEvent::STATUS_COMPLETED)->whereNotNull('vehicle_id'));
     }
 
     public function plateProfile(): BelongsTo

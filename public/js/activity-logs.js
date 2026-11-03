@@ -13,11 +13,18 @@
     const realtime = realtimeNode ? JSON.parse(realtimeNode.textContent || '{}') : {};
     let logs = dataNode ? JSON.parse(dataNode.textContent || '[]') : [];
     let activeLog = null;
+    // Automatic filtering owns refresh requests and pagination on this list.
+    document.addEventListener('auto-list:updated', function (event) {
+        if (event.detail.id === 'logs-events') {
+            logs = JSON.parse(document.getElementById('event-log-modal-data').textContent || '[]');
+        }
+    });
 
     const detailFields = [
         ['Owner', 'owner_name'],
         ['Vehicle', 'vehicle_type'],
-        ['Color', 'vehicle_color'],
+        ['Type source', 'vehicle_type_source'],
+        ['Detector type', 'detected_vehicle_type'],
         ['Category', 'category_label'],
         ['Log type', 'log_type_label'],
         ['Source', 'source_label'],
@@ -78,7 +85,9 @@
         }
         tr.append(plate);
 
-        tr.append(el('td', null, `${log.vehicle_type || ''}${log.vehicle_color && log.vehicle_color !== 'N/A' ? ' · ' + log.vehicle_color : ''}`));
+        const vehicleTypeCell = el('td', null, log.vehicle_type || '');
+        if (log.vehicle_type_source) vehicleTypeCell.append(el('div', 'table-subtext', log.vehicle_type_source));
+        tr.append(vehicleTypeCell);
 
         const movement = el('td');
         movement.append(el('span', `badge badge-tone-${tone[String(log.event_type).toLowerCase()] || 'neutral'}`, log.movement_label || log.event_type));
@@ -326,6 +335,8 @@
         }
     }
 
-    refresh();
-    window.setInterval(refresh, 4000);
+    if (!document.querySelector('[data-auto-list="logs-events"]')) {
+        refresh();
+        window.setInterval(refresh, 4000);
+    }
 })();

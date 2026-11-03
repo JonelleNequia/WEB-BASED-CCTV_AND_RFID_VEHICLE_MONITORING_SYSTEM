@@ -70,7 +70,7 @@ function Get-VmsPaths {
         PhpIni       = Join-VmsPath $Root 'config' 'php.ini'
         Caddyfile    = Join-VmsPath $Root 'config' 'Caddyfile'
         InstallInfo  = Join-VmsPath $Root 'config' 'install.json'
-        FirstAdmin   = Join-VmsPath $Root 'config' 'first-admin.txt'
+        FirstAdmin   = Join-VmsPath $Root 'config' 'setup' 'first-admin.txt'
         Logs         = Join-VmsPath $Root 'logs'
         OpenUrl      = Join-VmsPath $Root 'Open PHILCST VMS.url'
         BuildInfo    = Join-VmsPath $Root 'BUILD-INFO.json'

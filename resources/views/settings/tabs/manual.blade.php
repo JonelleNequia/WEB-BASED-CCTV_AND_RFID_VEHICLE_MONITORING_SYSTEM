@@ -13,7 +13,10 @@
             <section class="subpanel">
                 <div class="panel-title-row">
                     <h4>Camera Sources</h4>
-                    <p class="field-help">Network cameras are added from the <a href="{{ route('settings.index', ['tab' => 'gates']) }}">Gates</a> tab and found automatically by their MAC address, on any network. A source typed here is only for a camera that cannot be found automatically.</p>
+                    <details class="settings-help">
+                        <summary>When to use manual camera setup</summary>
+                        <p class="field-help">Network cameras are added from the <a href="{{ route('settings.index', ['tab' => 'gates']) }}">Gates</a> tab and found automatically by their MAC address, on any network. A source typed here is only for a camera that cannot be found automatically.</p>
+                    </details>
                 </div>
 
                 <div class="camera-grid">
@@ -161,7 +164,7 @@
                                             placeholder="rtsp://camera-address:554/stream-path"
                                             autocomplete="off"
                                         >
-                                        <span class="field-help">The full rtsp:// address of the camera stream, without the login (the login is below).</span>
+                                        <span class="field-help">The full rtsp:// address of the camera stream, without the login (the login is below). New or changed addresses must fit within 255 characters; a saved legacy address may be kept unchanged.</span>
                                         @error("camera_configs.$role.source_value")
                                             <span class="field-error">{{ $message }}</span>
                                         @enderror
@@ -185,7 +188,10 @@
             <section class="subpanel">
                 <div class="panel-title-row">
                     <h4>RFID readers</h4>
-                    <p class="field-help">Readers added from the Gates tab need nothing here. Use a manual address only when the reader cannot be found on the network.</p>
+                    <details class="settings-help">
+                        <summary>When to use a manual RFID reader address</summary>
+                        <p class="field-help">Readers added from the Gates tab need nothing here. Use a manual address only when the reader cannot be found on the network.</p>
+                    </details>
                 </div>
                 <div class="camera-grid">
                     @foreach ($gates as $gate)
