@@ -8,7 +8,7 @@
 @php($prefillUid = $useOld ? null : ($prefillUid ?? null))
 <fieldset class="tag-picker" data-tag-picker @if($prefix === 'add') data-tag-optional @endif @if ($prefillUid) data-prefill="1" @endif data-lookup-url="{{ route('registry.tags.lookup') }}" @isset($vehicleId) data-vehicle-id="{{ $vehicleId }}" @endisset>
     <legend>{{ $legend ?? 'RFID Tag' }}</legend>
-    @if($prefix === 'add')<p class="field-help">Optional. Leave RFID blank to register by plate. You can assign an available tag later.</p>@endif
+    @if($prefix === 'add')<p class="field-help">Leave RFID blank to register by plate. You can assign an available tag later.</p>@endif
 
     <div class="field">
         <label for="{{ $prefix }}_scan">Scan tag</label>
@@ -28,7 +28,7 @@
     <div class="field">
         <label for="{{ $prefix }}_available">Or choose an available tag</label>
         <select id="{{ $prefix }}_available" name="rfid_tag_id" data-tag-select>
-            <option value="">{{ $prefix === 'add' ? 'No RFID assigned (optional)' : ($availableTags->isEmpty() ? 'No available tags — scan a new one' : 'Choose a tag') }}</option>
+            <option value="">{{ $prefix === 'add' ? 'No RFID assigned' : ($availableTags->isEmpty() ? 'No available tags — scan a new one' : 'Choose a tag') }}</option>
             @foreach ($availableTags as $tag)
                 <option value="{{ $tag->id }}" @selected($useOld && (string) old('rfid_tag_id') === (string) $tag->id)>#{{ $tag->tag_number ?: 'N/A' }} · {{ $tag->uid }}</option>
             @endforeach

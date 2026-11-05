@@ -124,7 +124,7 @@ class Phase1BugFixTest extends TestCase
                 ->get($url)
                 ->assertOk()
                 ->assertSee('Registered vehicles')
-                ->assertDontSee('guests');
+                ->assertDontSee('data-dashboard-metric="guests_inside"', false);
         }
 
         $this->actingAs($admin)

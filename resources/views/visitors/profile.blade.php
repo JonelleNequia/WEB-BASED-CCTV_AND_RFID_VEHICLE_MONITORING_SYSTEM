@@ -1,7 +1,7 @@
 {{-- Phase 5 (visitor model): one plate profile: visits, note, merge. --}}
 @extends('layouts.app')
 
-@section('title', $profile->plate_number.' | Visitors')
+@section('title', $profile->plate_number.' | Guests')
 
 @section('content')
     <x-page-header :title="$profile->plate_number" :back="route('visitors.index', ['tab' => 'plates'])" back-label="Plate profiles" />
@@ -56,7 +56,7 @@
             @csrf
             @method('PATCH')
             <div class="field">
-                <label for="profile_note">Visitor note (optional)</label>
+                <label for="profile_note">Guest note (optional)</label>
                 <textarea id="profile_note" name="note" rows="3" maxlength="1000" placeholder="e.g. School supplies delivery, every Monday">{{ old('note', $profile->note) }}</textarea>
                 @if ($profile->noteAuthor)
                     <span class="field-help">Last edited by {{ $profile->noteAuthor->name }}.</span>

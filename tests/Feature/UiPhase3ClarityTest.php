@@ -78,7 +78,7 @@ RfidScanLog::query()->create([ // saved before "RFID only with a vehicle"
         $this->assertNotNull($vehicle);
     }
 
-    public function test_registry_shows_one_status_and_a_confirmed_actions_menu(): void
+    public function test_registry_separates_registration_and_campus_state_with_confirmed_actions(): void
     {
         $vehicle = $this->registeredVehicle('OFF 3003', 'OFF-TAG');
         $vehicle->forceFill(['status' => 'inactive', 'current_state' => Vehicle::STATE_INSIDE])->save();
@@ -87,7 +87,7 @@ RfidScanLog::query()->create([ // saved before "RFID only with a vehicle"
         $html = $this->actingAs($this->admin)->get(route('registry.index', ['tab' => 'vehicles']))->assertOk()->getContent();
         $row = substr($html, strpos($html, 'OFF 3003'), 3000);
         $this->assertStringContainsString('>Inactive<', $row);
-        $this->assertStringNotContainsString('>Inside<', $row);
+        $this->assertStringContainsString('>Inside<', $row);
         $this->assertStringContainsString('Activate vehicle…', $row);
         $this->assertStringContainsString('data-confirm="Activate OFF 3003 again?', $row);
 

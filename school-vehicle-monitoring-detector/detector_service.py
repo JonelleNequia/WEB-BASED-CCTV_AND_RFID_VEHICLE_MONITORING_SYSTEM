@@ -2112,6 +2112,7 @@ def detect_pass(role, frame, state, track_id, class_id, confidence, xyxy, camera
             "best_xyxy": tuple(xyxy),
             "best_area": float((x2 - x1) * (y2 - y1)),
             "best_at": now_monotonic,
+            "best_selected_at": event_time,
             "last_snapshot_refresh_at": now_monotonic,
             "analysis_frames": [(frame.copy(), tuple(xyxy))],
             "last_analysis_frame_at": now_monotonic,
@@ -2463,6 +2464,8 @@ def picture_details(window, frame, box):
         "sharpness": round(vehicle_sharpness(frame, box), 1),
         "whole": bool(box[0] > mx and box[1] > my and box[2] < width - mx and box[3] < height - my),
         "score": round(float(window.get("best_score") or 0.0), 4),
+        # Host frame-selection time, not sensor exposure time or upload time.
+        "selected_at": window.get("best_selected_at"),
     }
 
 
@@ -2495,7 +2498,7 @@ def crossing_payload_locked(role, track_id, window, rfid_status, type_decision, 
         "external_event_key": window["event_key"],
         "camera_role": role,
         "camera_id": window.get("camera_id"),
-        "direction": window.get("direction") if window.get("direction") in {"IN", "OUT"} else "UNKNOWN",
+        "direction": window.get("recorded_direction") or (window.get("direction") if window.get("direction") in {"IN", "OUT"} else "UNKNOWN"),
         "direction_reason": (window.get("direction_reason") or "")[:120] or None,
         "event_time": window["event_time"],
         "track_id": window.get("track_id", track_id),
@@ -2541,6 +2544,7 @@ def record_pass(role, state, track_id, window, rfid_status, laravel_client):
         payload["detection_metadata"]["snapshot_box"] = [round(float(value), 1) for value in snapshot_box]
         payload["detection_metadata"]["picture"] = picture_details(window, snapshot_frame, snapshot_box)
         direction = payload["direction"]
+        window["recorded_direction"] = direction
         state["direction_counts"][direction] = state["direction_counts"].get(direction, 0) + 1
         state["recent_records"].append({"track_id": window.get("track_id", track_id), "direction": direction, "at": time.monotonic()})
         del state["recent_records"][:-5]
@@ -2559,6 +2563,9 @@ def record_pass(role, state, track_id, window, rfid_status, laravel_client):
     if not result.get("accepted"):
         with state["lock"]:
             state["last_error"] = result.get("message", "Vehicle record could not be saved.")
+    elif (result.get("body") or {}).get("image_update") == "failed":
+        with state["lock"]:
+            state["last_error"] = "Vehicle record saved, but its occurrence image could not be stored."
 
 
 def update_record_after_left_zone(role, state, track_id, window, matched, laravel_client):
@@ -2594,8 +2601,12 @@ def update_record_after_left_zone(role, state, track_id, window, matched, larave
     snapshot = encode_frame_snapshot(role, snapshot_frame, f"crossing-{window['event_key']}-left") if snapshot_frame is not None else None
     submit = getattr(laravel_client, "submit_crossing", None)
     if submit is not None:
-        submit(payload, snapshot["bytes"] if snapshot else None, snapshot["filename"] if snapshot else None)
-    print(f"{role} pass track {track_id}: Left zone, record updated with a clearer picture", flush=True)
+        result = submit(payload, snapshot["bytes"] if snapshot else None, snapshot["filename"] if snapshot else None)
+        if not result.get("accepted") or (result.get("body") or {}).get("image_update") == "failed":
+            with state["lock"]:
+                state["last_error"] = "The occurrence image update was not saved; the existing record is retained."
+        else:
+            print(f"{role} pass track {track_id}: Left zone, occurrence evidence accepted", flush=True)
 
     submit_visitor_plate = getattr(laravel_client, "submit_visitor_plate", None)
     if matched or submit_visitor_plate is None:
@@ -2932,7 +2943,8 @@ def update_detection_windows(role, frame, results, state, laravel_client):
             window["last_box_at"] = (tuple(visible_box["xyxy"]), now_monotonic)
             if score > float(window.get("best_score") or 0.0):
                 window.update(best_frame=frame.copy(), best_xyxy=tuple(visible_box["xyxy"]), best_area=area,
-                              best_score=score, best_at=now_monotonic)
+                              best_score=score, best_at=now_monotonic,
+                              best_selected_at=datetime.now().astimezone().isoformat())
                 # The full-resolution frame of this very moment, taken now (the
                 # ring buffer only keeps the last second).
                 window["best_hires"] = sharpest_hires_frame(role, now_monotonic, visible_box["xyxy"], frame.shape, window.get("velocity", (0.0, 0.0)))

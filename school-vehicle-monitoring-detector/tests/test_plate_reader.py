@@ -135,7 +135,7 @@ class PlateReaderTests(unittest.TestCase):
         # Every crop is read (it is fast), "1234ABC" is the plate ABC-1234 read right to left.
         self.assertEqual((engine.calls, details["crops_read"], details["ocr"]), (3, 3, plate_reader.PLATE_OCR_MODEL))
         self.assertEqual((vote["plate"], vote["status"]), ("ABC-1234", "read"))
-        self.assertEqual([crop["read"] for crop in details["crops"]], ["ABC-1234"] * 3)
+        self.assertEqual([crop["read"] for crop in details["crops"]], ["1234ABC", "ABC-1234", "ABC-1234"])
         # The weakest character pulls a read's confidence down (0.5 x mean + 0.5 x min).
         self.assertAlmostEqual(details["crops"][1]["score"], round(0.5 * (0.95 * 6 + 0.5) / 7 + 0.25, 3), places=3)
 

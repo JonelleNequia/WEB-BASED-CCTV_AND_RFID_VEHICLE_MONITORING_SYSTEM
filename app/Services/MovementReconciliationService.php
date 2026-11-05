@@ -33,7 +33,7 @@ class MovementReconciliationService
             $record = $record->fresh(['crossing', 'vehicle']);
             app(VehicleTypeEvidenceService::class)->resolve($record);
             if ($record->isDirty()) $record->save();
-            $event = VehicleEvent::query()->where('visitor_record_id', $record->id)->first();
+            $event = app(CanonicalMovementEventService::class)->resolve($record);
             if ($event?->rfid_scan_log_id && $event->event_status === VehicleEvent::STATUS_PENDING_DETAILS
                 && $record->registration_status === 'registered'
                 && (int) $record->vehicle_id === (int) $record->crossing?->rfidScanLog?->vehicle_id) {
@@ -49,7 +49,9 @@ class MovementReconciliationService
             $eligible = $record->status === VisitorRecord::STATUS_ACTIVE && $record->isRegisteredAtOccurrence() && $record->vehicle;
             if (! $eligible) {
                 if ($event) {
-                    $event->forceFill(['event_status' => VehicleEvent::STATUS_PENDING_DETAILS])->save();
+                    $event->forceFill(['event_status' => VehicleEvent::STATUS_PENDING_DETAILS,
+                        'plate_text' => $record->plate_number, 'plate_number' => $record->plate_number,
+                        'vehicle_id' => null, 'vehicle_category' => $record->classificationCategory()])->save();
                     if ($oldVehicleId) {
                         $this->reconcile((int) $oldVehicleId);
                     }
@@ -58,6 +60,16 @@ class MovementReconciliationService
                 return $event;
             }
             $this->begin($record->vehicle);
+            // The legacy Guest writer uses this classification marker in the
+            // anomaly column. It is not a movement anomaly, and must not become
+            // one when this same occurrence is promoted to a registered plate.
+            // Preserve all genuine reasons and the separate RFID path above.
+            $anomalyReason = $event?->anomaly_reason;
+            if ($event?->event_origin === 'guest_cctv'
+                && $event->match_status === VehicleEvent::MATCH_NO_PASS_ALERT
+                && $anomalyReason === 'Unregistered guest') {
+                $anomalyReason = null;
+            }
             $event ??= new VehicleEvent(['visitor_record_id' => $record->id, 'external_event_key' => $record->external_event_key]);
             $event->forceFill([
                 'occupancy_managed' => true, 'vehicle_id' => $record->vehicle_id,
@@ -71,9 +83,10 @@ class MovementReconciliationService
                 'detection_metadata_json' => array_replace((array) $event->detection_metadata_json, [VehicleTypeEvidenceService::KEY => data_get($record->ocr_details_json, VehicleTypeEvidenceService::KEY)]),
                 'camera_id' => $record->camera_id, 'event_time' => $record->seen_at,
                 'camera_device_id' => $record->camera_device_id, 'camera_device_label' => $record->camera_device_label,
-                'vehicle_image_path' => $record->snapshot_path, 'plate_image_path' => $record->plate_image_path,
+                'vehicle_image_path' => $event->vehicle_image_path ?: $record->snapshot_path, 'plate_image_path' => $event->plate_image_path ?: $record->plate_image_path,
                 'direction' => $record->direction, 'direction_source' => $record->direction_source,
                 'direction_confidence' => $record->direction_confidence,
+                'anomaly_reason' => $anomalyReason,
                 'match_status' => $record->direction === 'IN' ? 'open' : ($record->direction === 'OUT' ? 'closed' : 'manual_review'),
                 'details_completed_at' => $event->details_completed_at ?: now(),
             ])->save();

@@ -203,10 +203,8 @@
         document.getElementById('vehicle-panel-title').textContent = vehicle.plate_number;
 
         const head = el('div', 'vehicle-panel-head');
-        // One status: Inactive, otherwise Inside / Outside.
-        head.append(vehicle.status !== 'active'
-            ? badge('inactive', 'Inactive')
-            : badge(vehicle.current_state, vehicle.current_state === 'inside' ? 'Inside' : 'Outside'));
+        head.append(badge(vehicle.status, `Registration: ${vehicle.status === 'active' ? 'Active' : 'Inactive'}`),
+            badge(vehicle.current_state, `Campus: ${String(vehicle.current_state).toLowerCase() === 'inside' ? 'Inside' : 'Outside'}`));
 
         const details = el('dl', 'vehicle-panel-details');
         [
@@ -224,7 +222,7 @@
         // Phase 6: visits the camera recorded with no tag read (e.g. before registration).
         if (vehicle.camera_visits > 0) {
             const visits = el('dd');
-            const text = `${vehicle.camera_visits} as an unregistered visitor`;
+            const text = `${vehicle.camera_visits} as an unregistered guest`;
             if (vehicle.plate_profile_url) {
                 const link = el('a', null, text);
                 link.href = vehicle.plate_profile_url;
@@ -341,7 +339,9 @@
             button.closest('details')?.removeAttribute('open');
             button.disabled = true;
             button.setAttribute('aria-busy', 'true');
-            await withVehicle(button.dataset.vehicleUrl, button.dataset.vehicleAction === 'edit' ? openEdit : openReplace);
+            await withVehicle(button.dataset.vehicleUrl, function (vehicle) {
+                if (button.isConnected) (button.dataset.vehicleAction === 'edit' ? openEdit : openReplace)(vehicle);
+            });
             button.disabled = false;
             button.removeAttribute('aria-busy');
             return;

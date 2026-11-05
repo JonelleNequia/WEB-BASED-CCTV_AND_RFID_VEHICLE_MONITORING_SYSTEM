@@ -6,6 +6,7 @@ use App\Models\RfidTag;
 use App\Models\SystemSetting;
 use App\Models\Vehicle;
 use App\Rules\RegistrationStaffName;
+use App\Rules\RegistrationOwnerName;
 use App\Support\DisplayTime;
 use App\Support\PlateNumber;
 use App\Support\VehicleCategory;
@@ -29,6 +30,8 @@ class VehicleRegistryService
     public function register(array $data): Vehicle
     {
         $data['registered_by'] = RegistrationStaffName::validated($data['registered_by'] ?? null);
+        // Validate before inventory writes, including direct service callers.
+        $data['vehicle_owner_name'] = RegistrationOwnerName::validated($data['vehicle_owner_name'] ?? $data['owner_name'] ?? null);
 
         return app(PlateProcessingLock::class)->run(function () use ($data): Vehicle {
             $this->assertUniquePlate((string) $data['plate_number']);

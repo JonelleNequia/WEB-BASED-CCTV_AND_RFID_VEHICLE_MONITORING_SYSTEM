@@ -233,7 +233,7 @@ class Phase3RfidCameraFusionTest extends TestCase
         $record = app(\App\Services\VisitorRecordService::class)->createFromCrossing($crossing->fresh());
         $this->assertSame('UNKNOWN', $record->direction);
 
-        $this->actingAs($guard)->get(route('visitors.index', ['tab' => 'review']))->assertOk()->assertSee('Unregistered Visitor');
+        $this->actingAs($guard)->get(route('visitors.index', ['tab' => 'review']))->assertOk()->assertSee('Unregistered Guest');
         $this->actingAs($guard)->patch(route('visitors.records.direction', $record), ['direction' => 'IN'])
             ->assertSessionHas('status', "Record #{$record->id} set to IN.");
 

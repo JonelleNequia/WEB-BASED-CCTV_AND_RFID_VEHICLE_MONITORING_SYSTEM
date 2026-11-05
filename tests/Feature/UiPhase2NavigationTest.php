@@ -45,11 +45,11 @@ class UiPhase2NavigationTest extends TestCase
         preg_match_all('/class="nav-link[^"]*"/', $html, $links);
         $this->assertCount(6, $links[0]);
 
-        foreach (['Dashboard', 'Gate Monitor', 'Visitors', 'Registry', 'Activity Logs', 'Settings'] as $label) {
+        foreach (['Dashboard', 'Gate Monitor', 'Guests', 'Registry', 'Activity Logs', 'Settings'] as $label) {
             $this->assertStringContainsString('<span class="nav-label">'.$label.'</span>', $html);
         }
 
-        foreach (['Guests', 'Entrance Station', 'Exit Station', 'RFID Desk', 'Camera Calibration', 'System Status', 'Vehicle Registry'] as $old) {
+        foreach (['Visitors', 'Entrance Station', 'Exit Station', 'RFID Desk', 'Camera Calibration', 'System Status', 'Vehicle Registry'] as $old) {
             $this->assertStringNotContainsString('<span class="nav-label">'.$old.'</span>', $html);
         }
 
@@ -66,7 +66,7 @@ class UiPhase2NavigationTest extends TestCase
         preg_match_all('/class="nav-link[^"]*"/', $html, $links);
         // Phase 5 (visitor model): guards correct visitor plates too.
         $this->assertCount(2, $links[0]);
-        $this->assertStringContainsString('<span class="nav-label">Visitors</span>', $html);
+        $this->assertStringContainsString('<span class="nav-label">Guests</span>', $html);
 
         $this->actingAs($this->guard)->get(route('registry.index'))->assertForbidden();
     }

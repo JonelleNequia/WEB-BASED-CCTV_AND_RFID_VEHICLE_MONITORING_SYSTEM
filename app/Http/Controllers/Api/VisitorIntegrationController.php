@@ -36,6 +36,7 @@ class VisitorIntegrationController extends Controller
         $validated = $request->validate([
             'external_event_key' => ['required', 'string', 'max:120'],
             'camera_role' => ['required', 'string', new ValidGate],
+            'camera_id' => ['nullable', 'integer', \Illuminate\Validation\Rule::exists('cameras', 'id'), new \App\Rules\CameraAtGate('camera_role')],
             'event_time' => ['required', 'date'],
             'plate_status' => ['required', 'in:read,unreadable'],
             // Invalid OCR is evidence to review, not a sanitized registered key.
@@ -44,13 +45,25 @@ class VisitorIntegrationController extends Controller
             'best_guess' => ['nullable', 'string', 'max:30'],
             'detected_vehicle_type' => ['nullable', 'string', 'max:50'],
             'ocr_details' => ['nullable', 'array'],
-            'plate_image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:5120'],
+            'plate_image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:5120', 'dimensions:max_width=8192,max_height=8192'],
+            'plate_image_path' => ['prohibited'],
+            'snapshot_path' => ['prohibited'],
         ]);
 
-        $record = $visitorRecordService->applyPlateReading($validated, $request->file('plate_image'));
+        try {
+            $record = $visitorRecordService->applyPlateReading($validated, $request->file('plate_image'));
+        } catch (\App\Exceptions\OccurrenceConflict $exception) {
+            return response()->json(['message' => 'Occurrence context conflicts with existing evidence.'], 409);
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            throw $exception;
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return response()->json(['message' => 'Plate evidence could not be saved. Retry this occurrence.'], 500);
+        }
 
         return response()->json([
-            'message' => 'Visitor plate stored.',
+            'message' => 'Guest plate stored.',
             'visitor_record' => [
                 'id' => $record->id,
                 'status' => $record->status,
@@ -64,6 +77,8 @@ class VisitorIntegrationController extends Controller
                 'vehicle_type' => $record->display_vehicle_type,
                 'vehicle_type_source' => $record->vehicle_type_source_label,
                 'detected_vehicle_type' => data_get($record->ocr_details_json, \App\Services\VehicleTypeEvidenceService::KEY.'.raw'),
+                'snapshot_url' => $record->snapshot_url,
+                'plate_image_url' => $record->plate_image_url,
             ],
         ]);
     }

@@ -712,7 +712,7 @@ class RfidIngestService
             'unassigned_tag' => ($tag?->label ?? 'Tag')." is not assigned to any vehicle but was scanned at the {$station}.",
             'inactive_vehicle' => "The vehicle for this tag is inactive but was scanned at the {$station}.",
             // Phase 8: no guest record any more; the Registry entry needs a category.
-            'guest', 'non_recurring_category' => "The vehicle for this tag has the old Guest category; set Faculty & Staff or Registered Visitor in the Registry.",
+            'guest', 'non_recurring_category' => 'The vehicle for this tag has the old Guest category; set Faculty & Staff or Registered Guest in the Registry.',
             default => null,
         };
     }

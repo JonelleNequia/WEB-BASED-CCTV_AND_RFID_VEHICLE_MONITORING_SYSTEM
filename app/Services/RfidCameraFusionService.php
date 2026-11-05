@@ -288,10 +288,10 @@ class RfidCameraFusionService
             $vehicle = Vehicle::query()->whereKey($scan->vehicle_id)->lockForUpdate()->firstOrFail();
             $crossing = $crossing?->fresh();
             $record = $crossing ? \App\Models\VisitorRecord::query()->where('vehicle_crossing_id', $crossing->id)->first() : null;
-            $existing = $record ? VehicleEvent::query()->where('visitor_record_id', $record->id)->first() : null;
+            $existing = $record ? app(CanonicalMovementEventService::class)->resolve($record) : null;
             $projector = app(MovementReconciliationService::class);
             $projector->begin($vehicle);
-            if ($existing && (int) $existing->vehicle_id !== (int) $vehicle->id && (int) $record->vehicle_id !== (int) $vehicle->id) {
+            if ($existing?->vehicle_id && (int) $existing->vehicle_id !== (int) $vehicle->id && (int) $record->vehicle_id !== (int) $vehicle->id) {
                 // Two identities for one occurrence: keep the evidence and use
                 // existing Review, never move either vehicle on a guess.
                 $oldVehicleId = $existing->vehicle_id;
@@ -312,7 +312,9 @@ class RfidCameraFusionService
                 : ($vehicle->last_seen_at && $time->lt($vehicle->last_seen_at) ? 'UNKNOWN' : ($inside ? 'OUT' : 'IN'));
             $eventType = VehicleEvent::eventTypeForDirection($direction);
             $source = $crossing ? ($direction === 'UNKNOWN' ? null : DirectionSource::CAMERA) : DirectionSource::STATE;
-            $anomaly = ! $existing && (($direction === 'IN' && $inside) || ($direction === 'OUT' && ! $inside))
+            $alreadyApplied = $existing && $existing->occupancy_managed
+                && $existing->event_status === VehicleEvent::STATUS_COMPLETED && (int) $existing->vehicle_id === (int) $vehicle->id;
+            $anomaly = ! $alreadyApplied && (($direction === 'IN' && $inside) || ($direction === 'OUT' && ! $inside))
                 ? "Camera saw {$vehicle->plate_number} go {$direction}, but it was already ".($inside ? 'inside (an OUT was missed).' : 'outside (an IN was missed).') : null;
             $transition = ['detected_vehicle_type' => $crossing?->vehicle_type, 'event_type' => $eventType, 'event_time' => $time, 'resulting_state' => $vehicle->current_state,
                 'anomaly_reason' => $anomaly, 'direction_source' => $source,
@@ -326,7 +328,7 @@ class RfidCameraFusionService
                 $oldVehicleId = $existing->vehicle_id;
                 $existing->forceFill(['vehicle_id' => $vehicle->id, 'vehicle_category' => $vehicle->category,
                     'plate_text' => $record->plate_number, 'plate_number' => $record->plate_number,
-                    'event_origin' => $record->reviewed_at !== null ? 'plate_review' : $existing->event_origin,
+                    'event_origin' => $record->reviewed_at !== null ? 'plate_review' : ($existing->event_origin === 'guest_cctv' ? 'plate_ocr' : $existing->event_origin),
                     'event_status' => VehicleEvent::STATUS_COMPLETED, 'rfid_scan_log_id' => $scan->id,
                     'event_type' => $eventType, 'direction' => $direction, 'direction_source' => $source,
                     'anomaly_reason' => $anomaly, 'occupancy_managed' => true])->save();
@@ -347,6 +349,9 @@ class RfidCameraFusionService
                 $this->visitorRecordService->dismissForCrossing($crossing, 'Registered tag read for '.$vehicle->plate_number.'.');
             }
             $projector->reconcile((int) $vehicle->id);
+            if ($crossing) {
+                app(CrossingSnapshotService::class)->synchronize($crossing->fresh());
+            }
 
             return (string) $scan->outcome;
         });

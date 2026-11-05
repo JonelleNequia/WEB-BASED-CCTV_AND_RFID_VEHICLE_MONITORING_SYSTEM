@@ -82,7 +82,7 @@ try {
     check(byId(items, 'rfid_scan', ids.unassigned).status_label === 'Unassigned tag', 'Unassigned-tag distinction remains visible');
     const readable = byId(items, 'visitor_record', ids.readable);
     check(readable.plate_number.includes('0403') && readable.log_type === 'unregistered_visitor'
-        && readable.category_label === 'Unregistered Visitor', 'A readable plate without a Registry relation remains unregistered');
+        && readable.category_label === 'Unregistered Guest', 'A readable plate without a Registry relation remains unregistered');
     check(byId(items, 'visitor_record', ids.unreadable).log_type === 'review', 'Unreadable plates remain in Review');
     check(byId(items, 'visitor_record', ids.plate_only).log_type === 'registered'
         && byId(items, 'visitor_record', ids.plate_only).status_label === 'Inside', 'An authoritative plate-only relation updates registered occupancy');
@@ -93,7 +93,7 @@ try {
     await chip('Registered');
     items = await rows();
     check(items.length === 3 && items.every((row) => row.log_type === 'registered'), 'Registered chip excludes unknown, unassigned and unregistered records');
-    check(ids.registered_scans.every((id) => byId(items, 'rfid_scan', id)), 'Both Faculty and Registered Visitor scans remain registered');
+    check(ids.registered_scans.every((id) => byId(items, 'rfid_scan', id)), 'Both Faculty and Registered Guest scans remain registered');
     const registeredCSV = await page.request.get(await page.locator('[data-auto-link="csv"]').getAttribute('href'));
     const registeredText = await registeredCSV.text();
     check(registeredText.trim().split('\n').length === 4 && !registeredText.includes('P4-UNKNOWN') && !registeredText.includes('P4-UNASSIGNED'), 'Registered export has exactly the same three records');
@@ -105,7 +105,7 @@ try {
     await report.close();
     await page.bringToFront();
 
-    await chip('Unregistered Visitors');
+    await chip('Unregistered Guests');
     items = await rows();
     check(items.length === 2 && items.every((row) => row.log_type === 'unregistered_visitor'), 'Unregistered chip includes readable and pre-registration history; unreadable stays Review');
     await reset();
@@ -122,7 +122,7 @@ try {
     await page.locator('[data-event-log-view]').click();
     await page.locator('#log-details').waitFor({ state: 'visible' });
     const details = await page.locator('[data-log-details-grid]').innerText();
-    check(details.includes('Unregistered Visitor') && !details.includes('Registered vehicle'), 'Details modal shows the same unregistered classification');
+    check(details.includes('Unregistered Guest') && !details.includes('Registered vehicle'), 'Details modal shows the same unregistered classification');
     await page.waitForFunction(() => document.querySelector('#log-details').classList.contains('is-open'));
     await page.keyboard.press('Escape');
     await page.locator('#log-details').waitFor({ state: 'hidden' });

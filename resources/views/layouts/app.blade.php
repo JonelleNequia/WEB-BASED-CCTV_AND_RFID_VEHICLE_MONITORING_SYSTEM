@@ -7,6 +7,7 @@
     <title>@yield('title', 'PHILCST Vehicle Monitoring')</title>
     <link rel="stylesheet" href="{{ asset('css/app.css') }}">
     <link rel="stylesheet" href="{{ asset('css/layout-settings.css') }}?v={{ filemtime(public_path('css/layout-settings.css')) }}">
+    <link rel="stylesheet" href="{{ asset('css/row-menus.css') }}?v={{ filemtime(public_path('css/row-menus.css')) }}">
     {{-- UI Phase 5: restore the collapsed sidebar before first paint (per browser). --}}
     <script>
         try {
@@ -45,6 +46,7 @@
     </div>
 
     <script src="{{ asset('js/ui.js') }}?v={{ filemtime(public_path('js/ui.js')) }}"></script>
+    <script src="{{ asset('js/row-menus.js') }}?v={{ filemtime(public_path('js/row-menus.js')) }}"></script>
     @stack('scripts')
     <script src="{{ asset('js/plate-input.js') }}?v={{ filemtime(public_path('js/plate-input.js')) }}"></script>
 </body>

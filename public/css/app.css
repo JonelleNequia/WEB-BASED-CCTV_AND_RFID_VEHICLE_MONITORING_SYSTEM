@@ -8338,3 +8338,51 @@ img.thumb-plate {
     color: var(--text-muted);
     font-size: 0.82rem;
 }
+
+/* Occurrence evidence in existing monitoring results and recent rows. */
+.occurrence-thumb { display: inline-flex; vertical-align: middle; margin-inline-end: .5rem; flex-shrink: 0; }
+.occurrence-thumb:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+
+@media (max-width: 600px) {
+    /* Leave room for plate text when recent rows contain occurrence photos. */
+    .gate-logs li { grid-template-columns: 4.2rem minmax(0, 1fr) auto; }
+    .gate-logs li > strong { grid-column: 2; grid-row: 1; display: flex; align-items: center; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+    .gate-logs li > .text-muted { grid-column: 2; grid-row: 2; }
+    .gate-logs li > time { grid-column: 3; grid-row: 1; }
+    .gate-logs .occurrence-thumb .thumb-xs { width: 40px; height: 30px; }
+}
+
+/* Registry: registration permission and last recorded campus state are separate. */
+.registry-vehicles-table .registration-status-cell {
+    width: 32px;
+    padding-inline: 10px;
+    text-align: center;
+}
+.registry-vehicles-table .registration-status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    vertical-align: middle;
+}
+.registry-vehicles-table .registration-status-dot.is-active {
+    background: var(--purple);
+}
+.registry-vehicles-table table { min-width: 1000px; }
+.registry-vehicles-table,
+.registry-vehicles-table [data-auto-update="results"] { min-width: 0; }
+.registry-vehicles-table .table-responsive { width: 100%; }
+@media (max-width: 900px) {
+    .registry-vehicles-table .data-table-tools { width: 100%; }
+    .registry-vehicles-table .toolbar-search {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        width: 100%;
+    }
+    .registry-vehicles-table .toolbar-search input,
+    .registry-vehicles-table .toolbar-search select { width: 100%; }
+}
+@media (max-width: 600px) {
+    .registry-vehicles-table .toolbar-search { grid-template-columns: minmax(0, 1fr); }
+}

@@ -29,7 +29,7 @@
 
     <div class="settings-preview-notice" role="note">
         <strong>Test Scan · Preview only</strong>
-        <p class="field-help">Check a tag without creating a vehicle event, RFID scan or visitor record. Activity totals below describe existing records.</p>
+        <p class="field-help">Check a tag without creating a vehicle event, RFID scan or guest record. Activity totals below describe existing records.</p>
     </div>
     <x-stat-row>
         <x-stat label="Registered Vehicles" :value="$rfidStats['registered_vehicles'] ?? 0" />

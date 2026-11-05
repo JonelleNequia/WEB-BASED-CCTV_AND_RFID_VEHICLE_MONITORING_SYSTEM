@@ -7,7 +7,6 @@ use App\Models\Concerns\StoresLocalTime;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * Phase 2 (visitor model): one vehicle the camera saw cross a gate's trigger
@@ -84,11 +83,7 @@ class VehicleCrossing extends Model
 
     public function getSnapshotUrlAttribute(): ?string
     {
-        if ($this->snapshot_path && Storage::disk('public')->exists($this->snapshot_path)) {
-            return Storage::disk('public')->url($this->snapshot_path);
-        }
-
-        return null;
+        return \App\Support\OccurrenceMedia::url($this->snapshot_path);
     }
 
     public function sourceDeviceGate(): ?string

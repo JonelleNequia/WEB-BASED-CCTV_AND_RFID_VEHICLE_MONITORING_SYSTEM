@@ -113,7 +113,7 @@ class EventLogReportIntegrationTest extends TestCase
             ->assertSee('GST-LOG-01')
             ->assertDontSee('White')
             ->assertSee('/storage/guest_snapshots/event-log-guest.jpg', false)
-            ->assertSee('Unregistered Visitor #'.$observation->id)
+            ->assertSee('Unregistered Guest #'.$observation->id)
             ->assertDontSee('Guest Observation');
     }
 
@@ -222,6 +222,6 @@ class EventLogReportIntegrationTest extends TestCase
         $this->assertSame(0, GuestVehicleObservation::query()->count());
         $this->actingAs($admin)->get(route('logs.index', ['tab' => 'alerts']))
             ->assertOk()
-            ->assertSee('set Faculty &amp; Staff or Registered Visitor in the Registry', false);
+            ->assertSee('set Faculty &amp; Staff or Registered Guest in the Registry', false);
     }
 }

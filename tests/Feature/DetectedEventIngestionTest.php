@@ -359,15 +359,15 @@ class DetectedEventIngestionTest extends TestCase
         $this->assertSame('guest_cctv', $event->event_origin);
         $this->assertNull($event->vehicle_category);
         $this->assertSame('ABC1234', $event->plate_number);
-        // Phase 5: an Unregistered Visitor camera record, not a guest INSIDE session.
+        // Phase 5: an Unregistered Guest camera record, not a guest INSIDE session.
         $this->assertSame(VehicleEvent::MATCH_NO_PASS_ALERT, $event->match_status);
         $this->assertNull($event->resulting_state);
-        $this->assertSame('Unregistered visitor', $event->anomaly_reason);
+        $this->assertSame('Unregistered guest', $event->anomaly_reason);
         $this->assertSame($observation->snapshot_path, $event->vehicle_image_path);
         $this->assertSame(0, ActiveSession::query()->count());
     }
 
-    public function test_detector_guest_observation_saves_number_first_ocr_as_letter_first_plate(): void
+    public function test_detector_guest_observation_preserves_literal_number_first_ocr(): void
     {
         Storage::fake('public');
         $this->seed(PortalSeeder::class);
@@ -393,15 +393,15 @@ class DetectedEventIngestionTest extends TestCase
             ->where('external_event_key', 'guest-window-number-first-ocr-001')
             ->firstOrFail();
 
-        $this->assertSame('DPF-233', $observation->plate_number);
-        $this->assertSame('DPF-233', $observation->plate_text);
+        $this->assertSame('233DPF', $observation->plate_number);
+        $this->assertSame('233DPF', $observation->plate_text);
 
         $event = VehicleEvent::query()
             ->where('external_event_key', 'guest-window-number-first-ocr-001')
             ->firstOrFail();
 
-        $this->assertSame('DPF-233', $event->plate_number);
-        $this->assertSame('DPF-233', $event->plate_text);
+        $this->assertSame('233DPF', $event->plate_number);
+        $this->assertSame('233DPF', $event->plate_text);
         $this->assertSame(0, ActiveSession::query()->count());
     }
 

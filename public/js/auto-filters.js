@@ -95,6 +95,14 @@
         const oldFocus = document.activeElement;
         if (options.sync) syncControls(next);
         for (const [current, incoming] of regions) {
+            // Gate controls can change shape when entering/leaving an archived
+            // bookmark. Keep a normal select mounted while its options agree,
+            // so ordinary filtering/polling preserves keyboard focus.
+            if (current.hasAttribute('data-gate-filter') && !current.querySelector('[data-archived-gate-context]')
+                && !incoming.querySelector('[data-archived-gate-context]')) {
+                const choices = (node) => JSON.stringify(Array.from(node.querySelectorAll('option'), (option) => [option.value, option.textContent]));
+                if (choices(current) === choices(incoming)) continue;
+            }
             current.replaceChildren(...Array.from(incoming.childNodes, (node) => node.cloneNode(true)));
             if (incoming.hasAttribute('data-auto-empty')) current.dataset.autoEmpty = incoming.dataset.autoEmpty;
         }

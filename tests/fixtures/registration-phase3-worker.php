@@ -23,7 +23,7 @@ if (str_starts_with($mode, 'initialize')) {
     $user = App\Models\User::factory()->create(['role' => 'admin']);
     auth()->setUser($user);
     foreach ([1, 2] as $index) {
-        $service->register(['plate_number' => 'RCE-000'.$index, 'registered_by' => 'Concurrency Registrar', 'vehicle_type' => 'Car']);
+        $service->register(['plate_number' => 'RCE-000'.$index, 'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Concurrency Registrar', 'vehicle_type' => 'Car']);
     }
     foreach ([1, 2, 3] as $index) {
         App\Models\RfidTag::query()->create(['uid' => 'RACE-TAG-'.$index]);

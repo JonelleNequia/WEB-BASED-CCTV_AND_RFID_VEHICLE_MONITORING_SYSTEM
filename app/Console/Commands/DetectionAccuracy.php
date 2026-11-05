@@ -77,7 +77,7 @@ class DetectionAccuracy extends Command
         }
 
         $this->newLine();
-        $this->line('<options=bold>Unregistered visitors</> (types corrected by guards)');
+        $this->line('<options=bold>Unregistered guests</> (types corrected by guards)');
         $visitors = $report['visitors'];
         $this->line($visitors['records']
             ? sprintf('  %d of %d camera record(s) corrected (%.1f%%)', $visitors['corrected'], $visitors['records'], $visitors['wrong_rate'])

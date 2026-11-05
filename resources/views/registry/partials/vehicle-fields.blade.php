@@ -9,7 +9,7 @@
     $prefill = $useOld ? [] : ($prefill ?? []);
     $value = fn (string $field, $default = '') => $useOld ? old($field, $default) : ($prefill[$field] ?? $default);
 
-    // Phase 4 (visitor model): Faculty & Staff or Registered Visitor only.
+    // Phase 4 (visitor model): Faculty & Staff or Registered Guest only.
     $categorySelectValue = \App\Support\VehicleCategory::normalize($value('category', 'faculty_staff'));
     $selectedVehicleType = $value('vehicle_type', '');
     $vehicleTypeOtherValue = $value('vehicle_type_other', ! in_array($selectedVehicleType, $vehicleTypes, true) && $selectedVehicleType !== 'Others' ? $selectedVehicleType : '') ?? '';
@@ -25,12 +25,10 @@
 </div>
 
 <div class="field">
-    <label for="{{ $prefix }}_owner">Owner Name <span class="text-muted">(optional)</span></label>
-    <input id="{{ $prefix }}_owner" type="text" name="vehicle_owner_name" value="{{ $value('vehicle_owner_name') }}" placeholder="Ma. José Dela Cruz" autocomplete="off" data-field="vehicle_owner_name" aria-describedby="{{ $prefix }}_owner_help" @if($useOld && $errors->has('vehicle_owner_name')) aria-invalid="true" @endif>
-    <span class="field-help" id="{{ $prefix }}_owner_help">New names may use letters, spaces, apostrophes, hyphens and periods (up to 100 characters). An existing organization name can be kept unchanged.</span>
-    @if ($useOld)
-        @error('vehicle_owner_name')<span class="field-error">{{ $message }}</span>@enderror
-    @endif
+    <label for="{{ $prefix }}_owner">Owner Name</label>
+    <input id="{{ $prefix }}_owner" type="text" name="vehicle_owner_name" value="{{ $value('vehicle_owner_name') }}" placeholder="Ma. José Dela Cruz" autocomplete="off" data-field="vehicle_owner_name" aria-describedby="{{ $prefix }}_owner_help {{ $prefix }}_owner_error" @if($prefix === 'add') required data-registration-owner @endif aria-invalid="{{ $useOld && $errors->has('vehicle_owner_name') ? 'true' : 'false' }}">
+    <span class="field-help" id="{{ $prefix }}_owner_help">{{ $prefix === 'add' ? 'Enter the vehicle owner’s name.' : 'An existing blank or unchanged organization name can be kept.' }} Names may use letters, spaces, apostrophes, hyphens and periods (up to 100 characters).</span>
+    <span class="field-error" id="{{ $prefix }}_owner_error" aria-live="polite" aria-atomic="true" @if(!$useOld || !$errors->has('vehicle_owner_name')) hidden @endif>{{ $useOld ? $errors->first('vehicle_owner_name') : '' }}</span>
 </div>
 
 <div class="field">
@@ -40,7 +38,7 @@
             <option value="{{ $category }}" @selected($categorySelectValue === $category)>{{ \App\Support\VehicleCategory::label($category) }}</option>
         @endforeach
     </select>
-    <span class="field-help">Unregistered Visitor is set by the system for vehicles the camera sees without a registered tag.</span>
+    <span class="field-help">Unregistered Guest is set by the system for vehicles the camera sees without a registered tag.</span>
     @if ($useOld)
         @error('category')<span class="field-error">{{ $message }}</span>@enderror
     @endif

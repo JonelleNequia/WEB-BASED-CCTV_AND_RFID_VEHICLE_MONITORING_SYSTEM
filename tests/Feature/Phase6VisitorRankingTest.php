@@ -80,7 +80,7 @@ class Phase6VisitorRankingTest extends TestCase
                 'vehicle_type' => 'Car',
                 'plate_profile_id' => $profile->id,
             ])
-            ->assertSessionHas('status', 'VIS 4321 was saved to the local vehicle registry. 4 earlier visits as an unregistered visitor moved to this vehicle.');
+            ->assertSessionHas('status', 'VIS 4321 was saved to the local vehicle registry. 4 earlier visits as an unregistered guest moved to this vehicle.');
 
         $vehicle = Vehicle::query()->where('plate_number', 'VIS 4321')->sole();
         $this->assertSame($vehicle->id, $profile->fresh()->vehicle_id);
@@ -114,7 +114,7 @@ class Phase6VisitorRankingTest extends TestCase
         $this->assertSame($vehicle->id, $record->vehicle_id);
         $this->assertSame($vehicle->id, PlateProfile::query()->sole()->vehicle_id);
         $this->assertSame([], app(\App\Services\VisitorRecordService::class)->unregisteredRanking()->all());
-        $this->actingAs($this->admin)->get(route('visitors.index'))->assertOk()->assertSee('Registered vehicle · tag not read');
+        $this->actingAs($this->admin)->get(route('visitors.index'))->assertOk()->assertSee('Registered vehicle · plate identified');
     }
 
     public function test_ordinary_registration_or_plate_edit_does_not_relink_earlier_passes(): void
@@ -125,7 +125,7 @@ class Phase6VisitorRankingTest extends TestCase
         // Plain Add Vehicle with the same plate (typed differently).
         $tag = RfidTag::query()->create(['uid' => 'PLAIN-TAG', 'status' => RfidTag::STATUS_AVAILABLE]);
         $this->actingAs($this->admin)->post(route('vehicle-registry.store'), [
-            'registered_by' => 'Test Registrar',
+            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Test Registrar',
             'rfid_tag_id' => $tag->id, 'plate_number' => 'abc1234', 'category' => 'faculty_staff', 'vehicle_type' => 'Car',
         ])->assertSessionHasNoErrors();
         $vehicle = Vehicle::query()->where('plate_number', 'ABC1234')->sole();

@@ -17,7 +17,7 @@
     <x-stat label="Available RFID Tags" :value="$rfidStats['available_tags'] ?? 0" :href="route('registry.index', ['tab' => 'tags', 'status' => 'available'])" />
 </x-stat-row>
 
-<x-table data-auto-table :empty="$vehicles->isEmpty()"
+<x-table data-auto-table class="registry-vehicles-table" :empty="$vehicles->isEmpty()"
          :empty-title="array_filter($filters ?? [], fn ($value) => filled($value)) ? 'No vehicles match these filters.' : 'No registered vehicles yet.'"
          empty-text="Add a vehicle by plate, with or without an RFID tag.">
     <x-slot:toolbar>
@@ -32,13 +32,13 @@
                     <option value="{{ $category }}" @selected(($filters['category'] ?? '') === $category)>{{ $categoryLabel($category) }}</option>
                 @endforeach
             </select>
-            <label class="sr-only" for="vehicle_state_filter">State</label>
+            <label class="sr-only" for="vehicle_state_filter">Campus State</label>
             <select id="vehicle_state_filter" name="state">
                 <option value="">Inside + outside</option>
                 <option value="inside" @selected(($filters['state'] ?? '') === 'inside')>Inside</option>
                 <option value="outside" @selected(($filters['state'] ?? '') === 'outside')>Outside</option>
             </select>
-            <label class="sr-only" for="vehicle_status_filter">Status</label>
+            <label class="sr-only" for="vehicle_status_filter">Registration Status</label>
             <select id="vehicle_status_filter" name="status">
                 <option value="">Active + inactive</option>
                 <option value="active" @selected(($filters['status'] ?? '') === 'active')>Active</option>
@@ -58,12 +58,13 @@
 
     <thead>
         <tr>
+            <th class="registration-status-cell"><span class="sr-only">Status</span></th>
             <th>Plate</th>
             <th>Owner</th>
             <th>Category</th>
             <th>Type</th>
             <th>Tag No.</th>
-            <th>State</th>
+            <th>Campus State</th>
             <th>Last Seen</th>
             <th><span class="sr-only">Actions</span></th>
         </tr>
@@ -71,6 +72,7 @@
     <tbody>
         @foreach ($vehicles as $vehicle)
             <tr class="is-clickable" tabindex="0" data-vehicle-row data-vehicle-url="{{ route('registry.vehicles.show', $vehicle) }}" aria-label="Open details for {{ $vehicle->plate_number }}">
+                <td class="registration-status-cell"><x-vehicle-registration-status :vehicle="$vehicle" /></td>
                 <td><strong>{{ $vehicle->plate_number }}</strong></td>
                 <td>{{ $vehicle->vehicle_owner_name ?: '—' }}</td>
                 <td>{{ $categoryLabel($vehicle->category) }}</td>
@@ -85,14 +87,7 @@
                         <x-badge status="no_tag" label="No RFID assigned" />
                     @endif
                 </td>
-                <td>
-                    {{-- One status: an inactive vehicle is not "Inside" (its tag is flagged). --}}
-                    @if ($vehicle->status !== 'active')
-                        <x-badge status="inactive" label="Inactive" />
-                    @else
-                        <x-badge :status="strtolower($vehicle->current_state ?? 'outside')" />
-                    @endif
-                </td>
+                <td><x-badge :status="strtolower($vehicle->current_state ?? 'outside')" /></td>
                 <td><x-datetime :value="$vehicle->last_seen_at" fallback="Never" /></td>
                 <td class="row-actions">
                     {{-- One menu per vehicle; deactivating asks first. --}}
@@ -123,7 +118,7 @@
 {{-- Add Vehicle: 1. scan tag, 2. details, 3. save. --}}
 {{-- Phase 3: "Register this tag" from an unknown-tag read opens this with the UID. --}}
 @php($registerTag = $failedForm === 'add' ? null : (string) request('register_tag', ''))
-{{-- Phase 6: "Register this vehicle" (Visitor Ranking) opens this with the plate's details. --}}
+{{-- Phase 6: "Register this vehicle" (Guest Ranking) opens this with the plate's details. --}}
 @php($registerPlate = $failedForm === 'add' ? null : ($registerPlate ?? null))
 @php($registerPlateId = $failedForm === 'add' ? old('plate_profile_id') : $registerPlate?->id)
 <x-drawer id="add-vehicle-drawer" title="Add Vehicle" :open="$failedForm === 'add' || $registerTag !== '' || (bool) $registerPlate">
@@ -135,7 +130,7 @@
             <input type="hidden" name="plate_profile_id" value="{{ $registerPlateId }}">
         @endif
         @if ($registerPlate)
-            <p class="field-help" data-register-plate>Registering <strong>{{ $registerPlate->plate_number }}</strong>, seen {{ $registerPlate->visit_count }} {{ \Illuminate\Support\Str::plural('time', $registerPlate->visit_count) }} as an unregistered visitor. Those visits move to this vehicle when you save. RFID is optional and can be assigned later.</p>
+            <p class="field-help" data-register-plate>Registering <strong>{{ $registerPlate->plate_number }}</strong>, seen {{ $registerPlate->visit_count }} {{ \Illuminate\Support\Str::plural('time', $registerPlate->visit_count) }} as an unregistered guest. Those visits move to this vehicle when you save. RFID is optional and can be assigned later.</p>
         @endif
 
         @error('vehicle')

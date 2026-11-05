@@ -69,6 +69,8 @@ try {
         await page.locator('[data-drawer-open="add-vehicle-drawer"]').first().click();
         await page.waitForFunction(() => document.getElementById('add-vehicle-drawer').classList.contains('is-open'));
         await page.locator('#add_vehicle_type').selectOption('Car');
+        await page.locator('#add_plate_number').fill('STF-7999');
+        await page.locator('#add_owner').fill('Fixture Owner');
     };
     const closeAdd = async () => {
         await page.locator('#add-vehicle-drawer [data-drawer-close]').filter({ hasText: 'Cancel' }).click();
@@ -92,7 +94,7 @@ try {
     await page.goto(base + '/registry?tab=vehicles');
     await openAdd();
     check(await staff.inputValue() === '', 'No remembered default means an initially blank staff field');
-    check(await error.isHidden() && await save.isEnabled(), 'Untouched blank form has no immediate required error');
+    check(await error.isHidden() && await save.isDisabled(), 'Untouched blank staff has no immediate error while required inputs prevent submission');
     await staff.focus();
     await page.locator('#add_plate_number').focus();
     check((await error.innerText()).includes('Enter the name of the staff member'), 'Blur shows a specific required message');
@@ -173,7 +175,7 @@ try {
     await staff.fill('Open Form Editor');
     const secondTag = await tag('STAFF-BROWSER-003');
     const secondResponse = await page.request.post(base + '/vehicle-registry', { headers, data: {
-        rfid_tag_id: secondTag, plate_number: 'STF-7003', category: 'faculty_staff', vehicle_type: 'Car', registered_by: '李',
+        vehicle_owner_name: 'Fixture Owner', rfid_tag_id: secondTag, plate_number: 'STF-7003', category: 'faculty_staff', vehicle_type: 'Car', registered_by: '李',
     } });
     check(secondResponse.status() === 201, 'Another valid registration can update the installation-wide default');
     check(await staff.inputValue() === 'Open Form Editor', 'An open edited form is not overwritten by another registration');

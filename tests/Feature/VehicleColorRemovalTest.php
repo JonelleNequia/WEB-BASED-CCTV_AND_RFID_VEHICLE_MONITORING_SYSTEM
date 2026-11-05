@@ -179,7 +179,8 @@ class VehicleColorRemovalTest extends TestCase
         ]))->assertCreated();
         $crossing = \App\Models\VehicleCrossing::query()->sole();
         $this->assertSame('IN', $crossing->direction);
-        $this->assertSame(['confidence' => 0.9, 'rfid_status' => 'no_pass'], $crossing->detection_metadata_json);
+        $this->assertSame(['confidence' => 0.9, 'rfid_status' => 'no_pass'], \Illuminate\Support\Arr::except($crossing->detection_metadata_json, [\App\Services\CrossingSnapshotService::KEY]));
+        $this->assertSame('unavailable', data_get($crossing->detection_metadata_json, \App\Services\CrossingSnapshotService::KEY.'.status'));
         $this->assertSame('IN', VisitorRecord::query()->sole()->direction);
     }
 

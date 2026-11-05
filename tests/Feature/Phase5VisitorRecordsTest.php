@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\VehicleCrossing;
+
 use App\Models\PlateProfile;
 use App\Models\RfidTag;
 use App\Models\User;
@@ -9,17 +11,17 @@ use App\Models\Vehicle;
 use App\Models\VisitorRecord;
 use App\Services\RfidIngestService;
 use App\Support\CameraFiles;
-use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\TestResponse;
+use Tests\fixtures\PortalSeeder;
 use Tests\TestCase;
 
 /**
- * Phase 5 (visitor model): Unregistered Visitor records and plate profiles.
+ * Phase 5 (visitor model): Unregistered Guest records and plate profiles.
  */
 class Phase5VisitorRecordsTest extends TestCase
 {
@@ -61,7 +63,7 @@ class Phase5VisitorRecordsTest extends TestCase
         $record->refresh();
         $profile = PlateProfile::query()->sole();
         $this->assertSame(['ABC 1234', 'ABC1234', 0.82, $profile->id], [$record->plate_number, $record->plate_key, $record->plate_confidence, $record->plate_profile_id]);
-        Storage::disk('public')->assertExists($record->plate_image_path);
+        $this->assertTrue(\App\Support\OccurrenceMedia::exists($record->plate_image_path));
         $this->assertSame([1, 'ABC1234'], [$profile->visit_count, $profile->plate_key]);
 
         // The same plate leaves two hours later through the same gate: second visit.
@@ -205,7 +207,7 @@ class Phase5VisitorRecordsTest extends TestCase
         return $this->withHeaders(['X-Api-Key' => 'test-detector-key'])->post(route('api.integration.visitor-plates'), array_filter([
             'external_event_key' => $key,
             'camera_role' => 'gate-1',
-            'event_time' => now()->toIso8601String(),
+            'event_time' => VehicleCrossing::where('external_event_key', $key)->first()?->crossed_at?->toIso8601String() ?? now()->toIso8601String(),
             'plate_status' => $status,
             'plate_number' => $plate,
             'plate_confidence' => $confidence,

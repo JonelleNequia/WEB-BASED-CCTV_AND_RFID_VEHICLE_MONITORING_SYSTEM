@@ -283,7 +283,7 @@ class RealtimeLogController extends Controller
             'observed_at' => $observation->observed_at?->format('Y-m-d\TH:i'),
             'display_time' => DisplayTime::datetime($observation->observed_at),
             'status' => $observation->status,
-            'status_label' => 'Unregistered Visitor',
+            'status_label' => 'Unregistered Guest',
             'status_badge_class' => 'badge-secondary',
             'notes' => $observation->notes,
             'snapshot_url' => $observation->snapshot_url,
@@ -312,6 +312,8 @@ class RealtimeLogController extends Controller
             'id' => $event->id,
             'record_type' => 'vehicle_event',
             'visitor_record_id' => $event->visitor_record_id,
+            'snapshot_url' => \App\Support\OccurrenceMedia::url($event->vehicle_image_path),
+            'image_url' => \App\Support\OccurrenceMedia::url($event->vehicle_image_path),
             'event_type' => $event->event_type,
             // ROI work, Phase 3: the kiosk's "Registered: plate" result, and
             // the detector pass this record finished ("checking RFID" ends).
@@ -325,7 +327,7 @@ class RealtimeLogController extends Controller
             'camera_role' => $event->camera?->camera_role,
             'scan_location' => $scanLog?->scan_location,
             'verification_label' => $scanLog?->verificationLabel
-                ?? ($event->vehicle_id ? 'Registered' : 'Unregistered Visitor'),
+                ?? ($event->vehicle_id ? 'Registered' : 'Unregistered Guest'),
             // UI Phase 4: short form (category, IN / OUT).
             'category_label' => MovementRow::eventCategory($event),
             'direction' => MovementRow::eventDirection($event),
@@ -360,7 +362,7 @@ class RealtimeLogController extends Controller
             'vehicle_type_source' => $observation->vehicle_type_source_label,
             'camera_role' => $observation->camera?->camera_role,
             'scan_location' => $observation->location,
-            'verification_label' => 'Unregistered Visitor',
+            'verification_label' => 'Unregistered Guest',
             'category_label' => VehicleCategory::label(VehicleCategory::UNREGISTERED_VISITOR),
             'direction' => MovementRow::direction(data_get($observation->detection_metadata_json, 'direction')),
             'resulting_state' => 'Not tracked',
@@ -368,7 +370,7 @@ class RealtimeLogController extends Controller
             'exits_today_count' => 0,
             'event_time' => $observation->observed_at?->toIso8601String(),
             'display_time' => DisplayTime::datetimeSeconds($observation->observed_at),
-            'status' => 'Unregistered Visitor',
+            'status' => 'Unregistered Guest',
             'snapshot_url' => $observation->snapshot_url,
             'sort_time' => $this->sortTimestamp($observation->created_at, $observation->observed_at),
         ];
@@ -421,9 +423,10 @@ class RealtimeLogController extends Controller
     protected function guestEventLogPayload(GuestVehicleObservation $observation): array
     {
         $time = $observation->observed_at;
+
         return [
             'record_type' => 'guest_observation',
-            'record_type_label' => 'Unregistered Visitor',
+            'record_type_label' => 'Unregistered Guest',
             'id' => $observation->id,
             'detail_url' => route('logs.index', ['tab' => 'alerts', 'plate_text' => $observation->plate_number ?: $observation->plate_text]),
             'export_url' => route('vehicle-events.export.csv', [
@@ -440,9 +443,9 @@ class RealtimeLogController extends Controller
             'station_label' => Gate::labelFor($observation->location),
             'state_label' => 'Not tracked',
             'display_time' => DisplayTime::datetime($time, 'No time'),
-            'summary_label' => 'Unregistered Visitor #'.$observation->id.' • '.(DisplayTime::datetime($time, 'No time')),
+            'summary_label' => 'Unregistered Guest #'.$observation->id.' • '.(DisplayTime::datetime($time, 'No time')),
             'event_time_export' => $time?->toDateTimeString(),
-            'status_label' => 'Unregistered Visitor',
+            'status_label' => 'Unregistered Guest',
             'status_badge_class' => 'secondary',
             'match_label' => 'Unregistered',
             'rfid_tag_uid' => 'N/A',

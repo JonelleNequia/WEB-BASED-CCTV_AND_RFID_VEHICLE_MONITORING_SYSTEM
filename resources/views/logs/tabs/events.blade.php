@@ -76,15 +76,7 @@
                 <input id="plate_text" type="search" name="plate_text" value="{{ $filters['plate_text'] ?? '' }}" placeholder="ABC 1234">
             </div>
             {{-- Phase 7 (visitor model): gate filter, also used by CSV and Print. --}}
-            <div class="field">
-                <label for="gate">Gate</label>
-                <select id="gate" name="gate">
-                    <option value="">All gates</option>
-                    @foreach ($gateOptions as $code => $name)
-                        <option value="{{ $code }}" @selected(($filters['gate'] ?? '') === $code)>{{ $name }}</option>
-                    @endforeach
-                </select>
-            </div>
+            <x-gate-filter :value="$filters['gate'] ?? ''" :options="$gateOptions" />
             <div class="field">
                 <label for="date_from">From</label>
                 <input id="date_from" type="date" name="date_from" value="{{ $filters['date_from'] ?? '' }}">

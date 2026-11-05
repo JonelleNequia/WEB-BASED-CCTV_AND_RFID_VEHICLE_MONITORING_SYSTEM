@@ -91,7 +91,7 @@ try {
     check(await plate.inputValue() === 'AB', 'IME completion normalizes the committed ASCII letters');
     await plate.fill(' 00001 ab ');
     await page.locator('#add_registered_by').focus();
-    check(await plate.inputValue() === 'AB-00001', 'Blur uses the existing supported number-first layout');
+    check(await plate.inputValue() === '00001 AB', 'Blur preserves literal number-first order');
     await plate.fill('ab/00001');
     check(await plate.inputValue() === 'AB/00001', 'Unsupported symbols are retained for validation instead of stripped');
     check(await page.locator('#add_registered_by').inputValue() === 'Fixture Registrar', 'Phase 1 remembered staff default remains intact');
@@ -132,7 +132,7 @@ try {
     await page.goto(base + '/logs');
     items = await rows();
     check(items.length === 3 && occurrence(ids.review).log_type === 'registered', 'Correction reclassifies the existing log without duplicating the crossing');
-    check(occurrence(ids.unmatched).log_type === 'unregistered_visitor', 'Unmatched manual correction is consistently an Unregistered Visitor');
+    check(occurrence(ids.unmatched).log_type === 'unregistered_visitor', 'Unmatched manual correction is consistently an Unregistered Guest');
     await page.locator('[aria-label="Log type"]').getByRole('link', { name: 'Registered', exact: true }).click();
     await ready();
     check((await rows()).length === 2, 'Automatic registration filter uses the corrected classification');
@@ -153,7 +153,7 @@ try {
     check(retry.status() === 200, 'Retrying the same correction succeeds idempotently');
     await page.goto(base + '/visitors');
     const correctedRow = page.locator('#visitor-record-' + ids.review);
-    check((await correctedRow.innerText()).includes('Registered vehicle · tag not read'), 'Visitor history shows the registered classification');
+    check((await correctedRow.innerText()).includes('Registered vehicle · plate identified'), 'Visitor history shows the registered classification');
     check((await correctedRow.innerText()).includes('camera read A8-00001'), 'Original OCR evidence remains visible after correction');
     const feed = await (await page.request.get(base + '/api/recent-station-logs')).json();
     check(feed.logs.filter((row) => row.record_type === 'visitor_record' || row.visitor_record_id).length === 3

@@ -57,7 +57,7 @@
             <section class="scan-result is-{{ $look }}" data-scan-result aria-live="assertive" aria-atomic="true">
                 <strong class="scan-result-word" data-scan-word>{{ $latest ? $latest['direction_label'] : 'READY' }}</strong>
                 <div class="scan-result-body">
-                    <span class="scan-result-title" data-scan-title>{{ $latest ? ($latest['result_title'] ?? $latest['plate_number']) : 'Waiting for the next vehicle' }}</span>
+                    <span class="scan-result-title" data-scan-title><x-occurrence-thumbnail :url="$latest['snapshot_url'] ?? $latest['image_url'] ?? null" />{{ $latest ? ($latest['result_title'] ?? $latest['plate_number']) : 'Waiting for the next vehicle' }}</span>
                     <span class="scan-result-detail" data-scan-detail>{{ $latest['result_detail'] ?? ($latest['category_label'] ?? '') }}</span>
                 </div>
                 <time class="scan-result-time" data-scan-time>{{ $latest ? \App\Support\DisplayTime::time($latest['event_time'] ?? null) : '' }}</time>
@@ -72,7 +72,7 @@
                 @forelse ($logs as $log)
                     <article @class(['station-log-item', 'station-log-compact', 'is-alert' => ($log['tone'] ?? '') === 'critical'])>
                         <span class="station-log-badge tone-{{ $log['tone'] ?? 'neutral' }}">{{ $log['direction_label'] }}</span>
-                        <strong>{{ $log['plate_number'] }}</strong>
+                        <strong><x-occurrence-thumbnail :url="$log['snapshot_url'] ?? $log['image_url'] ?? null" />{{ $log['plate_number'] }}</strong>
                         <span class="station-log-type">{{ $log['category_label'] ?? '' }}</span>
                         <time class="station-log-time">{{ \App\Support\DisplayTime::time($log['event_time'] ?? null) }}</time>
                     </article>

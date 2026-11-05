@@ -55,7 +55,7 @@ class Phase2CrossingDirectionTest extends TestCase
         $this->assertSame(['gate-1', 'OUT', 7, 0.83, 'Car'], [$crossing->gate, $crossing->direction, $crossing->track_id, $crossing->confidence, $crossing->vehicle_type]);
         $this->assertSame(Camera::query()->forRole('gate-1')->value('id'), $crossing->camera_id);
         $this->assertSame('no_pass', $crossing->detection_metadata_json['rfid_status']);
-        Storage::disk('public')->assertExists($crossing->snapshot_path);
+        $this->assertTrue(\App\Support\OccurrenceMedia::exists($crossing->snapshot_path));
 
         // A retry with the same key is not a second crossing.
         $this->withHeaders(['X-Api-Key' => 'test-detector-key'])

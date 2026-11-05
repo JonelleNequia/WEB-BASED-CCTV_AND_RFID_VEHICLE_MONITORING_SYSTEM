@@ -13,15 +13,7 @@
                 </div>
             </div>
 
-            <div class="field">
-                <label for="history_scan_location">Gate</label>
-                <select id="history_scan_location" name="scan_location">
-                    <option value="">All</option>
-                    @foreach (\App\Models\Gate::historicalOptions() as $gateCode => $gateName)
-                        <option value="{{ $gateCode }}" @selected(($filters['scan_location'] ?? '') === $gateCode)>{{ $gateName }}</option>
-                    @endforeach
-                </select>
-            </div>
+            <x-gate-filter name="scan_location" id="history_scan_location" :value="$filters['scan_location'] ?? ''" all="All" />
 
             <div class="field">
                 <label for="verification_status">Result</label>
@@ -60,7 +52,7 @@
                             <td><strong>{{ $scan->tag_uid }}</strong></td>
                             <td>
                                 @if ($scan->isUnknownTag())
-                                    {{-- Phase 3: unknown tags are never visitor records. --}}
+                                    {{-- Phase 3: unknown tags are never guest records. --}}
                                     <strong>Unknown tag</strong>
                                     @if (auth()->user()?->isAdmin())
                                         <div class="table-subtext"><a href="{{ route('registry.index', ['tab' => 'vehicles', 'register_tag' => $scan->tag_uid]) }}">Register this tag</a></div>

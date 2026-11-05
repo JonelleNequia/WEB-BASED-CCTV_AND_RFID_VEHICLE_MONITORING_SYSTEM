@@ -6,7 +6,7 @@
 @section('content')
     <x-page-header :title="'Vehicle Log #'.$vehicleEvent->id" :back="route('logs.index')" back-label="Back to logs">
         <x-slot:meta>
-            <span class="badge badge-{{ $vehicleEvent->status_badge_class }}">{{ $vehicleEvent->display_status_label }}</span>
+            <span class="badge badge-{{ $activityLog['status_badge_class'] }}">{{ $activityLog['status_label'] }}</span>
         </x-slot:meta>
     </x-page-header>
 
@@ -22,16 +22,26 @@
 
             <div class="detail-list">
                 <div><span>Log Type</span><strong>{{ $vehicleEvent->event_type }}</strong></div>
-                <div><span>Status</span><strong>{{ $vehicleEvent->display_status_label }}</strong></div>
+                <div><span>Status</span><strong>{{ $activityLog['status_label'] }}</strong></div>
+                @if ($activityLog['is_alert'] && filled($activityLog['alert_reason']))
+                    <div><span>Alert reason</span><strong>{{ $activityLog['alert_reason'] }}</strong></div>
+                @endif
                 <div><span>Source</span><strong>{{ $vehicleEvent->event_origin_label }}</strong></div>
                 <div><span>Plate</span><strong>{{ $vehicleEvent->plate_text ?: $vehicleEvent->vehicle?->plate_number ?: 'GUEST' }}</strong></div>
                 <div><span>Vehicle</span><strong>{{ $vehicleEvent->display_vehicle_type }}</strong></div>
                 <div><span>Type source</span><strong>{{ $vehicleEvent->vehicle_type_source_label }}</strong></div>
                 <div><span>Detector type</span><strong>{{ $vehicleEvent->detected_vehicle_type ?: 'Not recorded' }}</strong></div>
-                <div><span>Category</span><strong>{{ \App\Support\VehicleCategory::label($vehicleEvent->vehicle_category) }}</strong></div>
+                <div><span>Category</span><strong>{{ $activityLog['category_label'] }}</strong></div>
                 <div><span>Station / Camera</span><strong>{{ $vehicleEvent->camera_label }}</strong></div>
                 <div><span>RFID Match</span><strong>{{ $vehicleEvent->rfidScanLog ? '#'.$vehicleEvent->rfidScanLog->id.' • '.$vehicleEvent->rfidScanLog->verificationLabel : 'No RFID scan linked' }}</strong></div>
                 <div><span>Current State</span><strong>{{ $vehicleEvent->resulting_state_label }}</strong></div>
+                <div><span>Vehicle snapshot</span><strong>{{ $activityLog['image_status'] }}</strong></div>
+                @if ($activityLog['image_selected_at'])
+                    <div><span>Frame selected</span><strong><x-datetime :value="$activityLog['image_selected_at']" /></strong></div>
+                @endif
+                @if ($activityLog['image_uploaded_at'])
+                    <div><span>Image stored</span><strong><x-datetime :value="$activityLog['image_uploaded_at']" /></strong></div>
+                @endif
                 <div><span>Time</span><strong><x-datetime :value="$vehicleEvent->event_time" /></strong></div>
                 <div><span>Match</span><strong>{{ $vehicleEvent->match_display }}</strong></div>
                 <div><span>Plate Confidence</span><strong>{{ $vehicleEvent->plate_confidence ?? 'N/A' }}</strong></div>

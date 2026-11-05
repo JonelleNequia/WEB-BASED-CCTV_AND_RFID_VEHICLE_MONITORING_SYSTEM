@@ -77,6 +77,7 @@ try {
     await verifyChoices('#add_vehicle_type');
     await page.locator('[data-drawer-open="add-vehicle-drawer"]').first().click();
     await page.waitForFunction(() => document.getElementById('add-vehicle-drawer').classList.contains('is-open'));
+    await page.locator('#add_owner').fill('Fixture Owner');
     await page.locator('#add_plate_number').fill('pc 00001');
     await page.locator('#add_registered_by').fill('Phase Four Registrar');
     await page.locator('#add_vehicle_type').selectOption('E-bike');
@@ -107,7 +108,7 @@ try {
     await page.getByText('Staff confirmed', { exact: true }).waitFor();
     check((await vehicle()).vehicle_type === 'E-bike' && (await vehicle()).entries_today === 1, 'Occurrence correction leaves registry and occupancy unchanged');
     const late = await page.request.post(base + '/api/v1/integration/crossings', { headers: integration, data: {
-        external_event_key: 'phase4-type-pass', camera_role: 'gate-1', direction: 'OUT', event_time: at, detected_vehicle_type: 'Car',
+        external_event_key: 'phase4-type-pass', camera_role: 'gate-1', direction: 'IN', event_time: at, detected_vehicle_type: 'Car',
     } });
     check(late.status() === 200, 'Late generic detector update reuses the occurrence');
     await page.reload();

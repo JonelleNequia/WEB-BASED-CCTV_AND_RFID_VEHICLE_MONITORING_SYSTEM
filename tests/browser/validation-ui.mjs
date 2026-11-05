@@ -106,10 +106,7 @@ try {
     await page.locator('#add_plate_number').fill('UIV-0002');
     await page.locator('#add_vehicle_type').selectOption('Car');
     await page.locator('#add_owner').fill('Drawer 123');
-    await Promise.all([
-        page.waitForResponse((response) => response.request().method() === 'POST' && response.url() === base + '/vehicle-registry'),
-        page.getByRole('button', { name: 'Save Vehicle', exact: true }).click(),
-    ]);
+    check(await page.getByRole('button', { name: 'Save Vehicle', exact: true }).isDisabled(), 'Invalid owner disables the new-registration submit control');
     await page.locator('#add-vehicle-drawer .field-error').filter({ hasText: 'Digits, emojis' }).waitFor();
     check(await page.locator('#add_vehicle_type').inputValue() === 'Car', 'Drawer retains valid vehicle type');
     check(await page.locator('#add_vehicle_type_other').isHidden(), 'Drawer does not require a blank custom type');

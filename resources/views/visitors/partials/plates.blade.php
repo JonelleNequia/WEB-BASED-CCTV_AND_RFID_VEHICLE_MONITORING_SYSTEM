@@ -1,6 +1,6 @@
 {{-- Phase 5: plate profiles (every visit of one plate). UI Phase 4: most entries first, "Register this vehicle" and "Merge". --}}
 @php($ranked = ($filters['sort'] ?? '') !== 'recent')
-<x-table data-auto-table title="Plate Profiles" :paginator="$profiles" :empty="$profiles->isEmpty()" :empty-title="array_filter($filters, fn ($value) => filled($value)) ? 'No plate profiles match these filters.' : 'No plate profiles yet'" empty-text="A profile starts the first time a visitor's plate is read or typed.">
+<x-table data-auto-table title="Plate Profiles" :paginator="$profiles" :empty="$profiles->isEmpty()" :empty-title="array_filter($filters, fn ($value) => filled($value)) ? 'No plate profiles match these filters.' : 'No plate profiles yet'" empty-text="A profile starts the first time a guest's plate is read or typed.">
     <x-slot:filters>
         <form method="GET" action="{{ route('visitors.index') }}" class="log-filter-form" data-auto-filter>
             <input type="hidden" name="tab" value="plates">

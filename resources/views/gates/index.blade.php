@@ -41,7 +41,7 @@
                     @if ($latest)
                         <span class="gate-latest-direction">{{ $latest['direction_label'] }}</span>
                         <div class="gate-latest-text">
-                            <strong>{{ $latest['result_title'] ?? $latest['plate_number'] }}</strong>
+                            <strong><x-occurrence-thumbnail :url="$latest['snapshot_url'] ?? $latest['image_url'] ?? null" />{{ $latest['result_title'] ?? $latest['plate_number'] }}</strong>
                             <span>{{ $latest['result_detail'] ?? ($latest['category_label'] ?? '') }}</span>
                         </div>
                         <time>{{ \App\Support\DisplayTime::time($latest['event_time'] ?? null) }}</time>
@@ -56,7 +56,7 @@
                         @forelse ($gate['logs'] as $log)
                             <li>
                                 <span class="badge badge-tone-{{ $log['tone'] }}">{{ $log['direction_label'] }}</span>
-                                <strong>{{ $log['plate_number'] }}</strong>
+                                <strong><x-occurrence-thumbnail :url="$log['snapshot_url'] ?? $log['image_url'] ?? null" />{{ $log['plate_number'] }}</strong>
                                 <span class="text-muted">{{ $log['category_label'] ?? '' }}</span>
                                 <time>{{ \App\Support\DisplayTime::time($log['event_time']) }}</time>
                             </li>

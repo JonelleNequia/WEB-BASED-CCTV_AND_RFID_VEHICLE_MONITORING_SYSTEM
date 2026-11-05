@@ -78,7 +78,7 @@
                             </tbody>
                         </table>
                     </div>
-                    <p class="field-help">Direction unknown (not counted): <strong data-movement="{{ $period }}.unknown">{{ $counts['unknown'] }}</strong> · Unregistered visitors count IN/OUT, never as inside.</p>
+                    <p class="field-help">Direction unknown (not counted): <strong data-movement="{{ $period }}.unknown">{{ $counts['unknown'] }}</strong> · Unregistered guests count IN/OUT, never as inside.</p>
                 </div>
             @endforeach
         </section>
@@ -140,7 +140,7 @@
                 <h2 class="panel-title">Most Entries</h2>
                 <div class="segmented" role="tablist" aria-label="Ranking">
                     <button type="button" role="tab" class="segmented-option is-active" data-segment="registered" aria-selected="true">Registered Vehicles</button>
-                    <button type="button" role="tab" class="segmented-option" data-segment="visitors" aria-selected="false">Unregistered Visitors</button>
+                    <button type="button" role="tab" class="segmented-option" data-segment="visitors" aria-selected="false">Unregistered Guests</button>
                 </div>
             </div>
 
@@ -187,7 +187,7 @@
                             @endforeach
                         </tbody>
                     </table>
-                    <p class="empty-inline" data-dashboard-visitor-ranking-empty @if ($frequentUnregisteredVisitors->isNotEmpty()) hidden @endif>No unregistered visitor with a readable plate yet.</p>
+                    <p class="empty-inline" data-dashboard-visitor-ranking-empty @if ($frequentUnregisteredVisitors->isNotEmpty()) hidden @endif>No unregistered guest with a readable plate yet.</p>
                 </div>
                 <div class="panel-footer-link"><a href="{{ route('visitors.index', ['tab' => 'plates']) }}">All plates</a></div>
             </div>

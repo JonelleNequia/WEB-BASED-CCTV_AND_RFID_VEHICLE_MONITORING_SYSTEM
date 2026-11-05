@@ -10,14 +10,14 @@ use App\Models\VehicleEvent;
 use App\Models\VisitorRecord;
 use App\Services\MovementCountService;
 use Carbon\Carbon;
-use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Tests\fixtures\PortalSeeder;
 use Tests\TestCase;
 
 /**
  * Phase 8 (visitor model): archive repeated unknown-tag guest records,
- * convert camera guest records into Unregistered Visitor records, Guests
+ * convert camera guest records into Unregistered Guest records, Guests
  * becomes Visitors.
  */
 class Phase8CleanupTest extends TestCase
@@ -59,10 +59,11 @@ class Phase8CleanupTest extends TestCase
         // Converted: one visitor record each, linked; the dual-written one keeps its record.
         $legacy = VisitorRecord::query()->where('source', VisitorRecord::SOURCE_LEGACY)->orderBy('id')->get();
         $this->assertCount(3, $legacy);
-        $this->assertSame([['DPF 233', 'IN', 'active'], ['DPF 233', 'OUT', 'active'], ['NBC 123', 'IN', 'dismissed']],
+        $this->assertSame([['DPF 233', 'IN', 'active'], ['233DPF', 'OUT', 'active'], ['NBC 123', 'IN', 'dismissed']],
             $legacy->map(fn (VisitorRecord $record): array => [$record->plate_number, $record->direction, $record->status])->all());
         $this->assertSame($data['existing_record'], GuestVehicleObservation::query()->find($data['dual'])->visitor_record_id);
-        $this->assertSame(2, PlateProfile::query()->where('plate_key', 'DPF233')->value('visit_count'));
+        $this->assertSame(1, PlateProfile::query()->where('plate_key', 'DPF233')->value('visit_count'));
+        $this->assertSame(1, PlateProfile::query()->where('plate_key', '233DPF')->value('visit_count'));
 
         // Running it again changes nothing.
         $this->artisan('visitors:cleanup')
@@ -100,7 +101,7 @@ class Phase8CleanupTest extends TestCase
         $this->actingAs($guard)->get('/guests')->assertRedirect(route('visitors.index'));
         $this->actingAs($this->admin)->get(route('logs.index', ['tab' => 'alerts']))
             ->assertOk()->assertDontSee('Add Guest Observation');
-        $this->actingAs($guard)->get(route('visitors.index', ['add' => 1]))->assertOk()->assertSee('Save visitor');
+        $this->actingAs($guard)->get(route('visitors.index', ['add' => 1]))->assertOk()->assertSee('Save guest');
 
         $this->actingAs($guard)->post(route('visitors.records.store'), [
             'gate' => 'gate-2', 'direction' => 'IN', 'seen_at' => now()->subMinutes(5)->format('Y-m-d\TH:i'),

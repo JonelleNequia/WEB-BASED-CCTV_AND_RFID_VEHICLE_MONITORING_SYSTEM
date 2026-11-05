@@ -153,7 +153,7 @@
         <div class="panel-header panel-header-modern">
             <div>
                 <h2 class="panel-title">Reset activity data</h2>
-                <p class="field-help">Removes vehicle logs, RFID scans, visitor records, plate profiles, alerts, snapshots and logs, and sets every registered vehicle to Outside. Keeps users, settings, gates, calibration, cameras, devices, registered vehicles and RFID tags. A backup is saved first.</p>
+                <p class="field-help">Removes vehicle logs, RFID scans, guest records, plate profiles, alerts, snapshots and logs, and sets every registered vehicle to Outside. Keeps users, settings, gates, calibration, cameras, devices, registered vehicles and RFID tags. A backup is saved first.</p>
             </div>
             <button type="button" class="button button-secondary button-sm" data-drawer-open="reset-activity-modal">Reset activity data</button>
         </div>
@@ -163,7 +163,7 @@
     <x-modal id="reset-activity-modal" title="Reset activity data" :open="$errors->has('confirm')">
         <form method="POST" action="{{ route('settings.system.reset-activity') }}" class="stack-form" data-reset-form>
             @csrf
-            <p>This removes all activity (logs, scans, visitor records, snapshots) and cannot be undone here. The database and snapshots are backed up first to <code>storage/backups/reset-…</code>.</p>
+            <p>This removes all activity (logs, scans, guest records, snapshots) and cannot be undone here. The database and snapshots are backed up first to <code>storage/backups/reset-…</code>.</p>
             <div class="field">
                 <label for="reset_confirm">Type <strong>RESET</strong> to confirm</label>
                 <input id="reset_confirm" type="text" name="confirm" autocomplete="off" required pattern="RESET" data-reset-confirm>

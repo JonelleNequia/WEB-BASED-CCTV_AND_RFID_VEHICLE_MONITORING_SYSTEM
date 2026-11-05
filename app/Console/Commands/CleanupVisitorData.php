@@ -27,7 +27,7 @@ class CleanupVisitorData extends Command
 {
     protected $signature = 'visitors:cleanup {--dry-run : Show what would change without saving anything}';
 
-    protected $description = 'Archive repeated unknown-tag guest records and convert camera guest records into Unregistered Visitor records';
+    protected $description = 'Archive repeated unknown-tag guest records and convert camera guest records into Unregistered Guest records';
 
     public function handle(VisitorRecordService $visitorRecordService): int
     {
@@ -50,7 +50,7 @@ class CleanupVisitorData extends Command
 
         $this->newLine();
         $this->line(sprintf(
-            '%s %d unknown-tag guest record(s); %s %d camera guest record(s) into Unregistered Visitor records.',
+            '%s %d unknown-tag guest record(s); %s %d camera guest record(s) into Unregistered Guest records.',
             $dryRun ? 'Would archive' : 'Archived',
             $archived,
             $dryRun ? 'would convert' : 'converted',
@@ -133,7 +133,7 @@ class CleanupVisitorData extends Command
         $fresh = VisitorRecord::query()->whereIn('id', $records->pluck('id'))->get();
 
         $this->newLine();
-        $this->line('Camera guest records converted into Unregistered Visitor records:');
+        $this->line('Camera guest records converted into Unregistered Guest records:');
         $this->table(['', 'Count'], [
             ['Records', $fresh->count()],
             ['Plate read', $fresh->whereNotNull('plate_number')->count()],

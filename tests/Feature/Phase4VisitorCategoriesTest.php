@@ -8,13 +8,13 @@ use App\Models\Vehicle;
 use App\Models\VehicleEvent;
 use App\Services\RfidIngestService;
 use App\Support\VehicleCategory;
-use Tests\fixtures\PortalSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\fixtures\PortalSeeder;
 use Tests\TestCase;
 
 /**
- * Phase 4 (visitor model): Faculty & Staff, Registered Visitor, Unregistered Visitor.
+ * Phase 4 (visitor model): Faculty & Staff, Registered Guest, Unregistered Guest.
  */
 class Phase4VisitorCategoriesTest extends TestCase
 {
@@ -68,15 +68,15 @@ class Phase4VisitorCategoriesTest extends TestCase
             ->assertDontSee('<option value="unregistered_visitor"', false)
             ->assertDontSee('<option value="student"', false)
             ->assertDontSee('<option value="others"', false)
-            ->assertSee('Unregistered Visitor is set by the system');
+            ->assertSee('Unregistered Guest is set by the system');
 
         $tag = RfidTag::query()->create(['uid' => 'CAT-TAG-1', 'status' => RfidTag::STATUS_AVAILABLE]);
         $form = ['registered_by' => 'Test Registrar', 'rfid_tag_id' => $tag->id, 'plate_number' => 'CAT 1001', 'vehicle_owner_name' => 'Visitor', 'vehicle_type' => 'Car'];
 
         $this->actingAs($this->admin)->post(route('vehicle-registry.store'), $form + ['category' => 'unregistered_visitor'])
-            ->assertSessionHasErrors(['category' => 'Unregistered Visitor cannot be picked here: the system sets it for vehicles the camera sees without a registered tag. Choose Faculty & Staff or Registered Visitor.']);
+            ->assertSessionHasErrors(['category' => 'Unregistered Guest cannot be picked here: the system sets it for vehicles the camera sees without a registered tag. Choose Faculty & Staff or Registered Guest.']);
 
-        // An old client sending "student" gets a Registered Visitor.
+        // An old client sending "student" gets a Registered Guest.
         $this->actingAs($this->admin)->post(route('vehicle-registry.store'), $form + ['category' => 'student'])->assertRedirect();
         $this->assertSame('registered_visitor', Vehicle::query()->where('plate_number', 'CAT 1001')->value('category'));
     }
@@ -97,7 +97,7 @@ class Phase4VisitorCategoriesTest extends TestCase
     public function test_labels_and_filters_use_the_new_names_also_for_old_history(): void
     {
         $this->assertSame(
-            ['Faculty & Staff', 'Registered Visitor', 'Registered Visitor', 'Unregistered Visitor', 'Unregistered Visitor', 'N/A'],
+            ['Faculty & Staff', 'Registered Guest', 'Registered Guest', 'Unregistered Guest', 'Unregistered Guest', 'N/A'],
             array_map([VehicleCategory::class, 'label'], ['faculty_staff', 'registered_visitor', 'student', 'unregistered_visitor', 'guest', null])
         );
 

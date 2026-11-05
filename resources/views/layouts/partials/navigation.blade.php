@@ -21,9 +21,9 @@
             'active' => request()->routeIs('registry.*', 'vehicle-registry.*'),
             'icon' => 'vehicle',
         ] : null,
-        // Phase 5 (visitor model): Unregistered Visitors and plate profiles (guards too).
+        // Phase 5 (visitor model): Unregistered Guests and plate profiles (guards too).
         [
-            'label' => 'Visitors',
+            'label' => 'Guests',
             'route' => route('visitors.index'),
             'active' => request()->routeIs('visitors.*'),
             'icon' => 'guest',

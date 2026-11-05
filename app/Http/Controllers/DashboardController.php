@@ -278,7 +278,7 @@ class DashboardController extends Controller
 
                 return [
                     'title' => $plate,
-                    'summary' => 'Unregistered Visitor • '.Gate::labelFor($observation->location),
+                    'summary' => 'Unregistered Guest • '.Gate::labelFor($observation->location),
                     'display_time' => DisplayTime::datetime($time, 'No time'),
                     'badge_label' => 'Unregistered',
                     'badge_class' => 'secondary',
@@ -340,7 +340,7 @@ class DashboardController extends Controller
                         'UNKNOWN' => 'Direction unknown',
                         default => VehicleEvent::directionForEventType($eventType),
                     }.' • '.$this->guestDisplayPlate($observation),
-                    'summary' => 'Unregistered Visitor • '.Gate::labelFor($observation->location),
+                    'summary' => 'Unregistered Guest • '.Gate::labelFor($observation->location),
                     'display_time' => DisplayTime::datetime($time, 'No time'),
                     'badge_label' => 'Unregistered',
                     'badge_class' => 'secondary',

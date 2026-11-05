@@ -45,7 +45,10 @@ class BackupRestoreTest extends TestCase
     public function test_a_backup_restores_the_database_snapshots_and_app_key(): void
     {
         $work = $this->work;
-        VehicleCrossing::query()->create(['gate' => 'gate-1', 'direction' => 'IN', 'crossed_at' => now(), 'external_event_key' => 'kept-1']);
+        $privateFile = '11111111-1111-4111-8111-111111111111.jpg';
+        \Illuminate\Support\Facades\Storage::disk('occurrences')->put($privateFile, 'private occurrence picture');
+        VehicleCrossing::query()->create(['gate' => 'gate-1', 'direction' => 'IN', 'crossed_at' => now(), 'external_event_key' => 'kept-1',
+            'snapshot_path' => \App\Support\OccurrenceMedia::PREFIX.$privateFile]);
         File::ensureDirectoryExists(CameraFiles::path('frames'));
         File::put(CameraFiles::path('frames/gate-1_latest_frame.jpg'), 'picture');
         config(['app.key' => 'base64:from-the-backup']);
@@ -56,6 +59,7 @@ class BackupRestoreTest extends TestCase
 
         // Things change (or a new PC with a new key), then the backup comes back.
         VehicleCrossing::query()->delete();
+        \Illuminate\Support\Facades\Storage::disk('occurrences')->put($privateFile, 'changed');
         File::put(CameraFiles::path('frames/gate-1_latest_frame.jpg'), 'changed');
         config(['app.key' => 'base64:current']);
 
@@ -66,6 +70,7 @@ class BackupRestoreTest extends TestCase
         DB::purge('sqlite');
         $this->assertSame(['kept-1'], VehicleCrossing::query()->pluck('external_event_key')->all());
         $this->assertSame('picture', File::get(CameraFiles::path('frames/gate-1_latest_frame.jpg')));
+        $this->assertSame('private occurrence picture', \Illuminate\Support\Facades\Storage::disk('occurrences')->get($privateFile));
         $this->assertStringContainsString('APP_KEY=base64:from-the-backup', File::get($work.'/.env'));
         $this->assertStringContainsString('APP_NAME=x', File::get($work.'/.env'));
 

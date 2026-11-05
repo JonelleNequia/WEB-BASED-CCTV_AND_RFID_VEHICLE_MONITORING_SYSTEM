@@ -118,6 +118,25 @@
             log.result_detail ?? (log.category_label || ''),
             window.ui && log.event_time ? window.ui.formatTime(log.event_time) : ''
         );
+        addOccurrenceThumb(resultBox?.querySelector('[data-scan-title]'), log);
+    }
+
+    function addOccurrenceThumb(node, log) {
+        const url = log.snapshot_url || log.image_url;
+        if (!node || !url) return;
+        const link = document.createElement('a');
+        link.className = 'occurrence-thumb';
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.setAttribute('aria-label', 'View occurrence snapshot');
+        const img = document.createElement('img');
+        img.className = 'thumb thumb-xs';
+        img.src = url;
+        img.alt = 'Vehicle occurrence snapshot';
+        img.loading = 'lazy';
+        link.append(img);
+        node.prepend(link);
     }
 
     /*
@@ -259,6 +278,7 @@
         badge.className = `station-log-badge tone-${log.tone || 'neutral'}`;
         badge.textContent = log.direction_label || '—';
         plate.textContent = log.plate_number || '—';
+        addOccurrenceThumb(plate, log);
         type.className = 'station-log-type';
         type.textContent = log.category_label || '';
         time.className = 'station-log-time';
@@ -288,13 +308,14 @@
     function updateLatest(logs) {
         const latest = latestHere(logs);
         const key = latest ? stationLogKey(latest) : null;
-        const text = latest ? [latest.direction_label, latest.result_title, latest.result_detail].join('|') : null;
+        const text = latest ? [latest.direction_label, latest.result_title, latest.result_detail, latest.snapshot_url, latest.image_url].join('|') : null;
         if (key && key !== latestKey) {
             showLatest(latest);
         } else if (key && resultBox && text !== latestText && !checkingKey) {
             // Same record, more known now (the plate was read): update it quietly.
             setResultText(latest.direction_label || '—', latest.result_title || latest.plate_number || '—',
                 latest.result_detail || '', resultBox.querySelector('[data-scan-time]').textContent);
+            addOccurrenceThumb(resultBox.querySelector('[data-scan-title]'), latest);
         }
         latestKey = key;
         latestText = text;

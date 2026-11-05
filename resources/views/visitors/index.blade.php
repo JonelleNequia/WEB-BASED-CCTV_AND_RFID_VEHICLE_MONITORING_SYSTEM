@@ -1,13 +1,13 @@
-{{-- Phase 5 (visitor model): Unregistered Visitor records and plate profiles. --}}
+{{-- Phase 5 (visitor model): Unregistered Guest records and plate profiles. --}}
 @extends('layouts.app')
 
-@section('title', 'Visitors | PHILCST Vehicle Monitoring')
+@section('title', 'Guests | PHILCST Vehicle Monitoring')
 
 @section('content')
     @include('partials.filter-errors')
-    <x-page-header title="Visitors">
+    <x-page-header title="Guests">
         <x-slot:actions>
-            <button type="button" class="button button-primary" data-drawer-open="add-visitor-drawer">Add visitor manually</button>
+            <button type="button" class="button button-primary" data-drawer-open="add-visitor-drawer">Add guest manually</button>
         </x-slot:actions>
     </x-page-header>
 
@@ -43,7 +43,7 @@
             </section>
         @endif
 
-        <x-table data-auto-table title="Unregistered Visitors" :paginator="$records" :empty="$records->isEmpty()" :empty-title="array_filter($filters, fn ($value) => filled($value)) ? 'No visitors match these filters.' : 'No unregistered visitors yet'" empty-text="Vehicles that cross a gate without a registered tag appear here.">
+        <x-table data-auto-table title="Unregistered Guests" :paginator="$records" :empty="$records->isEmpty()" :empty-title="array_filter($filters, fn ($value) => filled($value)) ? 'No guests match these filters.' : 'No unregistered guests yet'" empty-text="Vehicles that cross a gate without a registered tag appear here.">
             <x-slot:filters>
                 <form method="GET" action="{{ route('visitors.index') }}" class="log-filter-form" data-auto-filter>
                     <input type="hidden" name="tab" value="records">
@@ -51,15 +51,7 @@
                         <label for="visitor_q">Plate</label>
                         <input id="visitor_q" type="search" name="q" value="{{ $filters['q'] ?? '' }}" placeholder="ABC 1234">
                     </div>
-                    <div class="field">
-                        <label for="visitor_gate">Gate</label>
-                        <select id="visitor_gate" name="gate">
-                            <option value="">All</option>
-                            @foreach ($historicalGates as $code => $name)
-                                <option value="{{ $code }}" @selected(($filters['gate'] ?? '') === $code)>{{ $name }}</option>
-                            @endforeach
-                        </select>
-                    </div>
+                    <x-gate-filter id="visitor_gate" :value="$filters['gate'] ?? ''" :options="$historicalGates" all="All" />
                     <div class="field">
                         <label for="visitor_plate_status">Plate result</label>
                         <select id="visitor_plate_status" name="plate_status">
@@ -94,10 +86,10 @@
     @include('visitors.partials.record-dialogs')
 
     {{-- Phase 8 (visitor model): replaces "Add Guest Observation" (Activity Logs › Alerts). --}}
-    <x-drawer id="add-visitor-drawer" title="Add visitor manually" :open="request()->boolean('add') || $errors->hasAny(['gate', 'direction', 'seen_at', 'plate_number', 'snapshot'])">
+    <x-drawer id="add-visitor-drawer" title="Add guest manually" :open="request()->boolean('add') || $errors->hasAny(['gate', 'direction', 'seen_at', 'plate_number', 'snapshot'])">
         <form method="POST" action="{{ route('visitors.records.store') }}" enctype="multipart/form-data" class="stack-form">
             @csrf
-            <p class="field-help">For a vehicle without a registered tag that the camera did not record (camera offline, missed). It is counted as an Unregistered Visitor.</p>
+            <p class="field-help">For a vehicle without a registered tag that the camera did not record (camera offline, missed). It is counted as an Unregistered Guest.</p>
             <div class="field">
                 <label for="manual_gate">Gate</label>
                 <select id="manual_gate" name="gate" required>
@@ -145,7 +137,7 @@
             </div>
             <div class="button-row">
                 <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
-                <button type="submit" class="button button-primary">Save visitor</button>
+                <button type="submit" class="button button-primary">Save guest</button>
             </div>
         </form>
     </x-drawer>

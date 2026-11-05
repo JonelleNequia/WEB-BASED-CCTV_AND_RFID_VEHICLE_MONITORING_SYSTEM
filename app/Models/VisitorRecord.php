@@ -8,7 +8,6 @@ use App\Support\VehicleCategory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * Phase 5 (visitor model): an Unregistered Visitor record, i.e. a vehicle the
@@ -272,7 +271,7 @@ class VisitorRecord extends Model
 
     protected function publicUrl(?string $path): ?string
     {
-        return $path && Storage::disk('public')->exists($path) ? Storage::disk('public')->url($path) : null;
+        return \App\Support\OccurrenceMedia::url($path);
     }
 
     public function sourceDeviceGate(): ?string

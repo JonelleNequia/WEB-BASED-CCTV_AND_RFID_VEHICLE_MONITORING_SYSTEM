@@ -91,7 +91,7 @@ class VehicleRegistryTest extends TestCase
             'vehicle_type_other' => 'Tricycle',
         ];
 
-        // Phase 4 (visitor model): only Faculty & Staff and Registered Visitor.
+        // Phase 4 (visitor model): only Faculty & Staff and Registered Guest.
         $this->actingAs($user)
             ->post(route('vehicle-registry.store'), $form + ['category' => 'others', 'category_other' => 'Alumni'])
             ->assertSessionHasErrors('category');

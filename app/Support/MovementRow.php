@@ -88,7 +88,7 @@ final class MovementRow
         return match (true) {
             ($log['category_label'] ?? null) === 'Review' => ['Review', (string) ($log['alert_reason'] ?? 'Check the plate.')],
             (bool) ($log['registered'] ?? false) => ['Registered: '.($hasPlate ? $plate : 'no plate'), implode(' · ', array_filter([$owner, $log['category_label'] ?? null]))],
-            $unregistered => ['Unregistered Visitor', $hasPlate ? 'Plate '.$plate : 'Plate not read yet'],
+            $unregistered => ['Unregistered Guest', $hasPlate ? 'Plate '.$plate : 'Plate not read yet'],
             default => [$hasPlate ? $plate : '—', (string) ($log['category_label'] ?? '')],
         };
     }

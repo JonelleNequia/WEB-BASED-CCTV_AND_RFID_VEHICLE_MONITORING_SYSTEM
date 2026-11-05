@@ -38,7 +38,7 @@ class RegistrationVehicleTypesTest extends TestCase
 
     private function register(string $type = 'E-bike'): Vehicle
     {
-        return app(VehicleRegistryService::class)->register(['registered_by' => 'Original Registrar',
+        return app(VehicleRegistryService::class)->register(['vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Original Registrar',
             'plate_number' => 'TYP-'.str_pad((string) ++$this->sequence, 4, '0', STR_PAD_LEFT), 'vehicle_type' => $type])->fresh();
     }
 
@@ -79,7 +79,7 @@ class RegistrationVehicleTypesTest extends TestCase
             $this->assertSame($type, $this->register($alias)->vehicle_type);
         }
         foreach (['Hovercraft', 'Spaceship', '---', 'Unknown'] as $invalid) {
-            $this->postJson(route('vehicle-registry.store'), ['registered_by' => 'Registrar', 'plate_number' => 'BAD-1234',
+            $this->postJson(route('vehicle-registry.store'), ['vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Registrar', 'plate_number' => 'BAD-1234',
                 'vehicle_type' => $invalid])->assertUnprocessable()->assertJsonValidationErrors('vehicle_type');
         }
         $this->assertSame('Original Registrar', app(VehicleRegistryService::class)->rememberedStaffName());
@@ -144,7 +144,7 @@ class RegistrationVehicleTypesTest extends TestCase
         $this->assertDatabaseHas('review_actions', ['action' => 'correct_type', 'from_value' => 'E-bike', 'to_value' => 'E-trike', 'user_id' => $this->admin->id]);
         $this->withHeader('X-Api-Key', 'test-detector-key')->postJson(route('api.integration.crossings'), [
             'external_event_key' => $record->external_event_key, 'camera_role' => 'gate-1', 'event_time' => $record->seen_at->toIso8601String(),
-            'direction' => 'OUT', 'detected_vehicle_type' => 'Car',
+            'direction' => $record->direction, 'detected_vehicle_type' => 'Car',
         ])->assertOk();
         $this->assertSame('E-trike', $event->fresh()->display_vehicle_type);
         $this->assertSame('Car', $event->fresh()->detected_vehicle_type);

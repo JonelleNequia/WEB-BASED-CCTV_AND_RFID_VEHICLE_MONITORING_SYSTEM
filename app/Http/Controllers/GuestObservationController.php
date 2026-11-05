@@ -19,7 +19,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -52,7 +51,7 @@ class GuestObservationController extends Controller
     /** Phase 5: a pass read this long after the crossing still cancels the alert. */
     protected const DETECTOR_LATE_SCAN_SECONDS = 8;
 
-    public const NO_PASS_NOTE = 'Unregistered visitor: no registered RFID tag was read within the detector window.';
+    public const NO_PASS_NOTE = 'Unregistered guest: no registered RFID tag was read within the detector window.';
 
     /**
      * Show guest monitoring form and log history.
@@ -132,7 +131,7 @@ class GuestObservationController extends Controller
             'plate_number' => $plateNumber,
             'plate_text' => $plateNumber,
             'vehicle_type' => \App\Support\VehicleType::validated($validated['vehicle_type'] ?? null, $guestVehicleObservation->vehicle_type, required: false),
-            'location' => Gate::normalizeCode($validated['location']),
+            'location' => Gate::resolveCode($validated['location'], historical: true),
             'observed_at' => $validated['observed_at'],
             'status' => $validated['status'],
             'notes' => $validated['notes'] ?? null,
@@ -159,7 +158,7 @@ class GuestObservationController extends Controller
         $validated = $request->validate([
             'plate_number' => ['nullable', 'string', 'max:50', new \App\Rules\PlateIdentifier(20, $guestVehicleObservation->plate_number)],
             'vehicle_type' => ['nullable', 'string', 'max:50', new \App\Rules\ValidVehicleType($guestVehicleObservation->vehicle_type)],
-            'location' => ['required', new ValidGate],
+            'location' => ['required', new ValidGate(original: $guestVehicleObservation->location)],
             'observed_at' => ['required', 'date'],
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
@@ -170,7 +169,7 @@ class GuestObservationController extends Controller
             'plate_number' => $plateNumber,
             'plate_text' => $plateNumber,
             'vehicle_type' => \App\Support\VehicleType::validated($validated['vehicle_type'] ?? null, $guestVehicleObservation->vehicle_type, required: false),
-            'location' => Gate::normalizeCode($validated['location']),
+            'location' => Gate::resolveCode($validated['location'], historical: true),
             'observed_at' => Carbon::parse($validated['observed_at']),
             'status' => 'verified',
             'notes' => $validated['notes'] ?? null,
@@ -231,13 +230,24 @@ class GuestObservationController extends Controller
                 'camera_id' => ['nullable', 'integer', \Illuminate\Validation\Rule::exists('cameras', 'id')->whereIn('camera_role', Gate::query()->retained()->pluck('code')->all()), new \App\Rules\CameraAtGate('camera_role')],
                 'detected_vehicle_type' => ['nullable', 'string', 'max:50'],
                 'event_time' => ['required', 'date'],
-                'vehicle_image_path' => ['nullable', 'string', 'max:255'],
+                'vehicle_image_path' => ['nullable', 'string', 'max:255', 'not_regex:~(?:\A[/\\\\]|\.\.|:)~'],
                 'snapshot' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
                 'snapshot_image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
                 'plate_number' => ['nullable', 'string', 'max:50', new \App\Rules\PlateIdentifier(20)],
                 'plate_text' => ['nullable', 'string', 'max:50', new \App\Rules\PlateIdentifier(20)],
                 'detection_metadata' => ['nullable', 'array'],
             ]);
+
+            $ownership = app(\App\Services\OccurrenceOwnership::class);
+            if ($crossing = \App\Models\VehicleCrossing::where('external_event_key', $validated['external_event_key'])->first()) {
+                $ownership->crossing($crossing, $validated);
+            }
+            if ($record = \App\Models\VisitorRecord::where('external_event_key', $validated['external_event_key'])->first()) {
+                $ownership->record($record, $validated);
+            }
+            if ($previousGuest = GuestVehicleObservation::where('external_event_key', $validated['external_event_key'])->first()) {
+                $ownership->guest($previousGuest, $validated);
+            }
 
             $snapshotFile = $request->hasFile('snapshot')
                 ? $request->file('snapshot')
@@ -301,7 +311,7 @@ class GuestObservationController extends Controller
                 ]);
 
                 return response()->json([
-                    'message' => 'Not an unregistered visitor: an RFID scan matched this detector window.',
+                    'message' => 'Not an unregistered guest: an RFID scan matched this detector window.',
                     'duplicate' => true,
                     'suppressed' => true,
                     'rfid_scan_id' => $recentVerifiedScan->id,
@@ -359,7 +369,7 @@ class GuestObservationController extends Controller
                 ]);
             }
 
-            $observation = DB::transaction(function () use ($validated, $cameraId, $snapshotPath): GuestVehicleObservation {
+            $observation = app(\App\Services\PlateProcessingLock::class)->run(function () use ($validated, $cameraId, $snapshotPath): GuestVehicleObservation {
                 $plateNumber = $this->normalizePlate($validated['plate_number'] ?? $validated['plate_text'] ?? null);
 
                 $observation = GuestVehicleObservation::query()->create([
@@ -415,6 +425,10 @@ class GuestObservationController extends Controller
                 'message' => 'Camera record payload is invalid.',
                 'errors' => $exception->errors(),
             ], 422);
+        } catch (\App\Exceptions\OccurrenceConflict $exception) {
+            report($exception);
+            return response()->json(['ok' => false, 'error_code' => 'occurrence_conflict',
+                'message' => \App\Exceptions\OccurrenceConflict::PUBLIC_MESSAGE], 409);
         } catch (Throwable $exception) {
             Log::error('Detector guest observation save failed.', [
                 'message' => $exception->getMessage(),
@@ -454,62 +468,82 @@ class GuestObservationController extends Controller
         GuestVehicleObservation $observation,
         array $validated
     ): VehicleEvent {
-        $observation->refresh();
+        return app(\App\Services\PlateProcessingLock::class)->run(function () use ($observation, $validated): VehicleEvent {
+            $observation->refresh();
 
-        $externalEventKey = $observation->external_event_key ?: ($validated['external_event_key'] ?? null);
+            $externalEventKey = $observation->external_event_key ?: ($validated['external_event_key'] ?? null);
 
-        if (blank($externalEventKey)) {
-            throw ValidationException::withMessages([
-                'external_event_key' => 'A detector guest observation needs an external event key before syncing to event logs.',
-            ]);
-        }
+            if (blank($externalEventKey)) {
+                throw ValidationException::withMessages([
+                    'external_event_key' => 'A detector guest observation needs an external event key before syncing to event logs.',
+                ]);
+            }
 
-        $eventType = VehicleEvent::eventTypeForDirection(
-            data_get($observation->detection_metadata_json, 'direction') ?? data_get($validated, 'detection_metadata.direction')
-        );
-        $plateNumber = $this->normalizePlate(
-            $observation->plate_number
-                ?: $observation->plate_text
-                ?: ($validated['plate_number'] ?? $validated['plate_text'] ?? null)
-        );
-        $vehicleType = $observation->vehicle_type
-            ?: \App\Support\VehicleType::detector($validated['detected_vehicle_type'] ?? null);
+            $eventType = VehicleEvent::eventTypeForDirection(
+                data_get($observation->detection_metadata_json, 'direction') ?? data_get($validated, 'detection_metadata.direction')
+            );
+            $plateNumber = $this->normalizePlate(
+                $observation->plate_number
+                    ?: $observation->plate_text
+                    ?: ($validated['plate_number'] ?? $validated['plate_text'] ?? null)
+            );
+            $vehicleType = $observation->vehicle_type
+                ?: \App\Support\VehicleType::detector($validated['detected_vehicle_type'] ?? null);
 
-        $resolved = $observation->status === GuestVehicleObservation::STATUS_RESOLVED;
+            $resolved = $observation->status === GuestVehicleObservation::STATUS_RESOLVED;
 
-        $event = VehicleEvent::query()->updateOrCreate(
-            ['external_event_key' => (string) $externalEventKey],
-            [
-                'event_type' => $eventType,
-                'event_status' => VehicleEvent::STATUS_COMPLETED,
-                'event_origin' => 'guest_cctv',
-                'direction' => VehicleEvent::directionForEventType($eventType),
-                'plate_text' => $plateNumber,
-                'plate_number' => $plateNumber !== null ? substr($plateNumber, 0, 20) : null,
-                'plate_confidence' => null,
-                'vehicle_id' => null,
-                'rfid_scan_log_id' => null,
-                'vehicle_type' => $vehicleType,
-                'detected_vehicle_type' => data_get($observation->detection_metadata_json, \App\Services\VehicleTypeEvidenceService::KEY.'.raw', $vehicleType),
-                'vehicle_category' => null,
-                'camera_id' => $observation->camera_id,
-                'detection_metadata_json' => $observation->detection_metadata_json,
-                'details_completed_at' => now(),
-                'roi_name' => Gate::labelFor($observation->location).' Camera',
-                'event_time' => $observation->observed_at,
-                'vehicle_image_path' => $observation->snapshot_path,
-                'plate_image_path' => null,
-                'matched_entry_id' => null,
-                'match_score' => null,
-                'match_status' => $resolved ? VehicleEvent::MATCH_NO_PASS_RESOLVED : VehicleEvent::MATCH_NO_PASS_ALERT,
-                'resulting_state' => null,
-                'anomaly_reason' => $resolved ? $observation->notes : 'Unregistered visitor',
-                'daily_entries_count' => null,
-                'daily_exits_count' => null,
-            ]
-        );
+            // Late legacy detector messages must not reset an already canonical
+            // plate/RFID event to a guest or erase staff-confirmed evidence.
+            $record = \App\Models\VisitorRecord::query()->where('external_event_key', $externalEventKey)->lockForUpdate()->first();
+            $existing = VehicleEvent::query()->where('external_event_key', $externalEventKey)->lockForUpdate()->first();
+            if ($record && ($canonical = app(\App\Services\CanonicalMovementEventService::class)->resolve($record))) {
+                if ((int) $record->camera_id !== (int) $observation->camera_id || ! $record->seen_at?->equalTo($observation->observed_at)
+                    || Gate::resolveCode($record->gate, historical: true) !== Gate::resolveCode($observation->location, historical: true)
+                    || ($eventType !== VehicleEvent::TYPE_UNKNOWN && VehicleEvent::directionForEventType($eventType) !== $record->direction)) {
+                    throw new \App\Exceptions\OccurrenceConflict('Legacy detector evidence disagrees with the canonical occurrence.');
+                }
+                return $canonical->fresh(['camera']);
+            }
+            if ($existing && ($existing->event_origin !== 'guest_cctv' || $existing->vehicle_id || $existing->rfid_scan_log_id
+                || (int) $existing->camera_id !== (int) $observation->camera_id || ! $existing->event_time?->equalTo($observation->observed_at))) {
+                throw new \App\Exceptions\OccurrenceConflict('Legacy detector key is already owned by incompatible evidence.');
+            }
 
-        return $event->fresh(['camera']);
+            $event = VehicleEvent::query()->updateOrCreate(
+                ['external_event_key' => (string) $externalEventKey],
+                [
+                    'event_type' => $eventType,
+                    'event_status' => VehicleEvent::STATUS_COMPLETED,
+                    'event_origin' => 'guest_cctv',
+                    'direction' => VehicleEvent::directionForEventType($eventType),
+                    'plate_text' => $plateNumber,
+                    'plate_number' => $plateNumber !== null ? substr($plateNumber, 0, 20) : null,
+                    'plate_confidence' => null,
+                    'vehicle_id' => null,
+                    'rfid_scan_log_id' => null,
+                    'vehicle_type' => $vehicleType,
+                    'detected_vehicle_type' => data_get($observation->detection_metadata_json, \App\Services\VehicleTypeEvidenceService::KEY.'.raw', $vehicleType),
+                    'vehicle_category' => null,
+                    'camera_id' => $observation->camera_id,
+                    'detection_metadata_json' => $observation->detection_metadata_json,
+                    'details_completed_at' => now(),
+                    'roi_name' => Gate::labelFor($observation->location).' Camera',
+                    'event_time' => $observation->observed_at,
+                    'vehicle_image_path' => $observation->snapshot_path,
+                    'plate_image_path' => null,
+                    'matched_entry_id' => null,
+                    'match_score' => null,
+                    'match_status' => $resolved ? VehicleEvent::MATCH_NO_PASS_RESOLVED : VehicleEvent::MATCH_NO_PASS_ALERT,
+                    'resulting_state' => null,
+                    'anomaly_reason' => $resolved ? $observation->notes : 'Unregistered guest',
+                    'daily_entries_count' => null,
+                    'daily_exits_count' => null,
+                ]
+            );
+
+            if ($record) app(\App\Services\MovementReconciliationService::class)->syncPlate($record);
+            return $event->fresh(['camera']);
+        });
     }
 
     /**
@@ -573,6 +607,15 @@ class GuestObservationController extends Controller
      */
     protected function storeDetectorGuestSnapshot(mixed $snapshotFile, array $validated): ?string
     {
+        // The modern detector already submitted this pass's frame. Share it
+        // with the legacy evidence copy instead of writing a second public file.
+        $crossing = \App\Models\VehicleCrossing::where('external_event_key', $validated['external_event_key'])->first();
+        if ($crossing && \App\Support\OccurrenceMedia::privateFile($crossing->snapshot_path)
+            && \App\Support\OccurrenceMedia::exists($crossing->snapshot_path)) {
+            app(\App\Services\OccurrenceOwnership::class)->crossing($crossing, $validated);
+
+            return $crossing->snapshot_path;
+        }
         if ($snapshotFile) {
             if (method_exists($snapshotFile, 'isValid') && ! $snapshotFile->isValid()) {
                 throw ValidationException::withMessages([
@@ -593,7 +636,7 @@ class GuestObservationController extends Controller
     protected function shouldReplaceGuestSnapshot(GuestVehicleObservation $observation): bool
     {
         return blank($observation->snapshot_path)
-            || ! Storage::disk('public')->exists($observation->snapshot_path);
+            || ! \App\Support\OccurrenceMedia::exists($observation->snapshot_path);
     }
 
     protected function findExistingDetectorGuestObservation(string $externalEventKey): ?GuestVehicleObservation

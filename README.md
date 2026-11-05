@@ -66,9 +66,10 @@ At least two non-archived gates are retained; inactive gates count toward
 this minimum. An admin can remove a gate when more than two remain, after
 confirmation. Removal archives the gate, stops its monitoring and releases
 its device assignments. Devices, calibration, camera IDs, snapshots and
-historical records are kept. Archived gates remain in historical report
-filters but cannot be selected for new records. Gate codes and IDs are never
-renumbered or reused.
+historical records are kept. Normal filters exclude archived choices; All gates
+still includes their history, and supported old gate-filter bookmarks remain
+available as read-only historical queries with Reset. Archived gates cannot be
+selected for new records. Gate codes and IDs are never renumbered or reused.
 
 The gate-management migration adds missing gates to installations with fewer
 than two. These added gates are inactive and unconfigured; existing names,
@@ -305,7 +306,7 @@ exports. Older detector color fields are accepted and ignored. Stored historical
 values and backup/restore schemas are retained; no database migration is needed.
 See [PHASE2-VEHICLE-COLOR.md](PHASE2-VEHICLE-COLOR.md) for compatibility and checks.
 
-Existing Registry, Visitors and Activity Logs list filters now update automatically
+Existing Registry, Guests and Activity Logs list filters now update automatically
 using local server requests. Search waits about 300 ms after typing; selected
 filters, pagination, history and matching export links are retained. See
 [PHASE3-AUTO-FILTERS.md](PHASE3-AUTO-FILTERS.md) for behavior and verification.
@@ -348,3 +349,28 @@ There is no Phase 4 migration. See [REGISTRATION-PHASE4.md](REGISTRATION-PHASE4.
 
 Normal parking workflow pages remain usable even when Python services are not running.
 
+
+Registration Phase 5 hides archived gates from normal filter choices while keeping
+historical records and bookmarked historical queries available. Active user labels
+now say Guest/Guests; integration codes and existing URLs are retained. Table row
+menus use local overlays without enlarging table scroll areas. See
+[REGISTRATION-PHASE5.md](REGISTRATION-PHASE5.md) for compatibility, verification,
+Windows update steps and the Phase 6 handoff. No Phase 5 migration is required.
+
+A targeted plate-review regression fix supersedes the older Phase 2 transposition
+rule: `395ISX` stays literal and differs from `ISX395`. Corrections verify and
+reuse the same occurrence event, preserve genuine RFID/history, and show safe
+errors while retaining staff input. Historical plates are not rewritten. See
+[REGRESSION-LITERAL-PLATE-RECONCILIATION.md](REGRESSION-LITERAL-PLATE-RECONCILIATION.md)
+for incident evidence, compatibility, verification and update notes. No new
+migration is required.
+
+Registration Phase 6 attaches each camera occurrence's own snapshot to registered
+RFID events as well as plate/Guest/Review records, without another Guest record
+or movement. New crossing images and OCR crops use private occurrence storage and
+authenticated image URLs. Matching retries share evidence; ordered clearer-image
+updates preserve event identity and occupancy. Legacy/public-media and durable
+detector-delivery limitations remain explicitly documented. See
+[REGISTRATION-PHASE6.md](REGISTRATION-PHASE6.md) for ownership checks, failure
+behavior, verification and pending Windows update steps. No Phase 6 migration or
+historical image backfill is required.

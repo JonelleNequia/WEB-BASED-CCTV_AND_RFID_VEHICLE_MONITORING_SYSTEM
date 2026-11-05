@@ -64,6 +64,9 @@ Route::middleware('auth')->group(function (): void {
 
 // Phase 6: camera frames and detector status are no longer public files.
 Route::middleware('auth')->group(function (): void {
+    Route::get('/evidence/occurrences/{file}', \App\Http\Controllers\OccurrenceMediaController::class)
+        ->withoutMiddleware(\App\Http\Middleware\FinalizePendingScans::class)
+        ->where('file', '[a-f0-9-]{36}\.(?:jpg|png)')->name('evidence.occurrence');
     Route::get('/camera/{role}/frame/{kind?}', [CameraFileController::class, 'frame'])
         ->where('role', '[a-z0-9-]+')
         ->whereIn('kind', CameraFiles::KINDS)

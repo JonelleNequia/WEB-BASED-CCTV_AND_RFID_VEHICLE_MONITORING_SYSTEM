@@ -56,6 +56,7 @@
             return;
         }
         const form = card.querySelector('[data-review-form]');
+        say(''); // Do not leave a previous card's success beside a failed save.
         const data = new FormData(form);
         data.set('action', submitter.value);
         const error = card.querySelector('[data-review-error]');
@@ -70,8 +71,12 @@
                 body: data,
             });
             const result = await response.json().catch(() => ({}));
-            if (!response.ok) {
-                const message = result.message || (response.status === 419 ? 'This page was open too long. Reload it.' : `Could not save (error ${response.status}).`);
+            if (!response.ok || result.ok !== true) {
+                const message = response.status === 409 && result.error_code === 'occurrence_conflict'
+                    ? 'This record conflicts with existing crossing evidence. Your correction was not saved. Reload Review and ask an admin to check the event history.'
+                    : response.status === 422 ? Object.values(result.errors || {}).flat().join(' ') || 'Check the plate and try again.'
+                    : response.status === 419 ? 'This page was open too long. Reload it.'
+                    : 'Could not save this correction. Your input is kept. Try again; if it continues, ask an admin to check the system logs.';
                 error.textContent = message;
                 error.hidden = false;
                 return;
@@ -160,6 +165,7 @@
     if (cards.length) {
         nav.hidden = false;
         keys.hidden = false;
-        show(0);
+        const retry = cards.findIndex(card => card.hasAttribute('data-review-retry'));
+        show(retry >= 0 ? retry : 0);
     }
 })();

@@ -24,6 +24,22 @@
         return el('span', `badge badge-tone-${tone}`, label);
     }
 
+    function occurrenceThumb(log) {
+        const url = log.snapshot_url || log.image_url;
+        if (!url) return null;
+        const link = el('a', 'occurrence-thumb');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.setAttribute('aria-label', 'View occurrence snapshot');
+        const img = el('img', 'thumb thumb-xs');
+        img.src = url;
+        img.alt = 'Vehicle occurrence snapshot';
+        img.loading = 'lazy';
+        link.append(img);
+        return link;
+    }
+
     function time(value) {
         return window.ui && value ? window.ui.formatTime(value) : '';
     }
@@ -54,6 +70,8 @@
         // "Registered: plate" (owner) or "Unregistered Visitor" (plate).
         const text = el('div', 'gate-latest-text');
         text.append(el('strong', null, log.result_title || log.plate_number || '—'), el('span', null, log.result_detail ?? (log.category_label || '')));
+        const photo = occurrenceThumb(log);
+        if (photo) text.querySelector('strong').prepend(photo);
         box.replaceChildren(el('span', 'gate-latest-direction', log.direction_label || '—'), text, el('time', null, time(log.event_time)));
     }
 
@@ -76,6 +94,8 @@
                 el('span', 'text-muted', log.category_label || ''),
                 el('time', null, time(log.event_time))
             );
+            const photo = occurrenceThumb(log);
+            if (photo) item.querySelector('strong').prepend(photo);
             return item;
         }));
     }

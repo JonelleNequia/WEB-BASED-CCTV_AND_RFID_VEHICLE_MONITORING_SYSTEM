@@ -232,6 +232,13 @@ class SaveSettingsRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
+            foreach (['pass_min_move', 'camera_streams'] as $map) {
+                foreach (array_keys(is_array($this->input($map)) ? $this->input($map) : []) as $code) {
+                    if (Gate::resolveCode((string) $code) === null) {
+                        $validator->errors()->add($map, 'This gate is no longer available. Reload Gates and try again.');
+                    }
+                }
+            }
             $gates = $this->input('gates', []);
             $gates = is_array($gates) ? $gates : [];
             foreach (array_keys($gates) as $code) {

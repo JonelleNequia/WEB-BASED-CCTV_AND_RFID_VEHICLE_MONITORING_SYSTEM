@@ -73,12 +73,12 @@ class ExistingFieldValidationTest extends TestCase
         $this->patchJson(route('visitors.records.review', $this->visitor()), ['action' => 'set_name', 'name' => $name])->assertOk();
     }
 
-    public function test_optional_names_can_be_omitted_or_intentionally_cleared_but_spaces_are_rejected(): void
+    public function test_new_registration_requires_owner_while_review_names_can_still_be_cleared(): void
     {
         $data = $this->registration();
         unset($data['vehicle_owner_name']);
-        $this->actingAs($this->admin)->postJson(route('vehicle-registry.store'), $data)->assertCreated();
-        $this->assertNull(Vehicle::query()->sole()->vehicle_owner_name);
+        $this->actingAs($this->admin)->postJson(route('vehicle-registry.store'), $data)->assertUnprocessable()->assertJsonValidationErrors('vehicle_owner_name');
+        $this->assertDatabaseCount('vehicles', 0);
         $record = $this->visitor('Known Owner');
         $this->patchJson(route('visitors.records.review', $record), ['action' => 'set_name', 'name' => ''])->assertOk();
         $this->assertNull($record->plateProfile->fresh()->owner_name);
@@ -89,7 +89,7 @@ class ExistingFieldValidationTest extends TestCase
     public function test_unchanged_legacy_organizations_survive_edits_but_new_invalid_names_do_not(): void
     {
         $data = $this->registration(['vehicle_owner_name' => '3M & Sons, Inc.']);
-        $vehicle = app(VehicleRegistryService::class)->register($data);
+        $vehicle = Vehicle::query()->create($data); // Existing legacy fixture, not a new registration.
         $this->actingAs($this->admin)->putJson(route('vehicle-registry.update', $vehicle), $data + ['vehicle_type_other' => null])->assertOk();
         $this->assertSame('3M & Sons, Inc.', $vehicle->fresh()->vehicle_owner_name);
         $this->putJson(route('vehicle-registry.update', $vehicle), array_replace($data, ['vehicle_owner_name' => '4M & Sons, Inc.']))
@@ -113,7 +113,7 @@ class ExistingFieldValidationTest extends TestCase
         $this->actingAs($this->admin)->postJson(route('vehicle-registry.store'), $this->registration(['vehicle_owner_name' => str_repeat('A', 101)]))
             ->assertUnprocessable()->assertJsonValidationErrors('vehicle_owner_name');
         $data = $this->registration(['vehicle_owner_name' => 'Legacy '.str_repeat('A', 110)]);
-        $vehicle = app(VehicleRegistryService::class)->register($data);
+        $vehicle = Vehicle::query()->create($data); // Existing legacy fixture, not a new registration.
         $this->putJson(route('vehicle-registry.update', $vehicle), $data)->assertOk();
         $this->assertSame($data['vehicle_owner_name'], $vehicle->fresh()->vehicle_owner_name);
         $record = $this->visitor();

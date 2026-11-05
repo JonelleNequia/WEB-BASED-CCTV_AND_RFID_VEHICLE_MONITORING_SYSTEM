@@ -74,6 +74,7 @@ try {
     await page.locator('[data-drawer-open="add-vehicle-drawer"]').first().click();
     await page.waitForFunction(() => document.getElementById('add-vehicle-drawer').classList.contains('is-open'));
     check(await page.locator('#add_registered_by').inputValue() === '', 'Fresh installation staff default remains blank');
+    await page.locator('#add_owner').fill('Fixture Owner');
     await page.locator('#add_plate_number').fill('ab 00001');
     await page.locator('#add_registered_by').fill('First Registrar');
     await page.locator('#add_vehicle_type').selectOption('Car');
@@ -89,14 +90,20 @@ try {
     await page.goto(base + '/registry?tab=tags');
     check(await page.getByText('No RFID tags registered yet.', { exact: true }).isVisible(), 'Untagged registration does not create inventory entries');
 
+    const occurrenceTime = new Date().toISOString();
     const crossing = await page.request.post(base + '/api/v1/integration/crossings', { headers: integration, data: {
         external_event_key: 'phase3-browser-pass', camera_role: 'gate-1', direction: 'IN',
-        event_time: new Date().toISOString(), detection_metadata: { rfid_status: 'no_pass' },
+        event_time: occurrenceTime, detection_metadata: { rfid_status: 'no_pass' },
     } });
     check(crossing.status() === 201, 'Simulated camera crossing is accepted');
     const crossingBody = await crossing.json();
+    const guestCopy = await page.request.post(base + '/api/guest-observation', { headers: integration, data: {
+        external_event_key: 'phase3-browser-pass', camera_role: 'gate-1', event_time: occurrenceTime,
+        detected_vehicle_type: 'Car', vehicle_image_path: 'fixture/guest.jpg', detection_metadata: { direction: 'IN' },
+    } });
+    check(guestCopy.status() === 201, 'Legacy Guest evidence is accepted before plate identification');
     const plateResponse = await page.request.post(base + '/api/v1/integration/visitor-plates', { headers: integration, data: {
-        external_event_key: 'phase3-browser-pass', camera_role: 'gate-1', event_time: new Date().toISOString(),
+        external_event_key: 'phase3-browser-pass', camera_role: 'gate-1', event_time: occurrenceTime,
         plate_status: 'read', plate_number: 'ab-00001', plate_confidence: 0.95,
     } });
     check(plateResponse.status() === 200, 'Simulated reliable plate vote is accepted');
@@ -106,7 +113,7 @@ try {
     vehicle = await getVehicle();
     check(vehicle.current_state === 'inside' && vehicle.entries_today === 1, 'Plate IN updates actual occupancy once');
     const duplicateVote = await page.request.post(base + '/api/v1/integration/visitor-plates', { headers: integration, data: {
-        external_event_key: 'phase3-browser-pass', camera_role: 'gate-1', event_time: new Date().toISOString(),
+        external_event_key: 'phase3-browser-pass', camera_role: 'gate-1', event_time: occurrenceTime,
         plate_status: 'read', plate_number: 'AB00001', plate_confidence: 0.95,
     } });
     check(duplicateVote.status() === 200 && (await duplicateVote.json()).visitor_record.vehicle_event_id === eventId, 'Repeated OCR keeps the same movement event');
@@ -115,10 +122,16 @@ try {
     await page.goto(base + '/logs?tab=events&log_type=registered');
     let logs = await page.locator('#event-log-modal-data').evaluate((node) => JSON.parse(node.textContent));
     check(logs.length === 1 && logs[0].source_label === 'OCR plate' && logs[0].rfid_tag_uid === 'N/A', 'Activity Logs preserves real plate provenance without fake RFID');
+    check(!logs[0].is_alert && logs[0].status_label === 'Inside' && !logs[0].alert_reason, 'Adopted Guest copy has no stale classification anomaly');
+    check(!(await page.locator('[data-event-log-list]').innerText()).includes('Unregistered guest'), 'Rendered Registered row has no stale Guest subtitle');
+    await page.locator('[data-event-log-view]').first().click();
+    check(!(await page.locator('#log-details').innerText()).includes('Tag not read'), 'Details does not warn solely because no RFID was assigned');
+    await page.locator('#log-details button[data-drawer-close]').click();
     const csv = await page.request.get(base + '/vehicle-events/export/csv?all=1&log_type=registered');
     check(csv.status() === 200 && (await csv.text()).includes('OCR plate'), 'Registered export includes the plate movement once');
     await page.goto(base + '/vehicle-events/' + eventId);
     check((await page.locator('body').innerText()).includes('No RFID scan linked'), 'Movement details support an absent RFID relationship');
+    check(!(await page.locator('body').innerText()).includes('Unregistered guest'), 'Full details uses the corrected occurrence classification');
 
     const createTag = async (uid) => {
         const response = await page.request.post(base + '/rfid-inventory', { headers, data: { uid, auto_number: 1 } });
@@ -186,7 +199,7 @@ try {
     logs = await page.locator('#event-log-modal-data').evaluate((node) => JSON.parse(node.textContent));
     check(logs.length === 2 && logs.some((row) => row.source_label === 'OCR plate') && logs.some((row) => row.rfid_tag_uid === 'BROWSER-REPLACEMENT-2'), 'Logs contain one plate IN and one actual RFID OUT, without a lost-read record');
     const duplicateCrossing = await page.request.post(base + '/api/v1/integration/crossings', { headers: integration, data: {
-        external_event_key: 'phase3-browser-pass', camera_role: 'gate-1', direction: 'IN', event_time: new Date().toISOString(),
+        external_event_key: 'phase3-browser-pass', camera_role: 'gate-1', direction: 'IN', event_time: occurrenceTime,
     } });
     check(duplicateCrossing.status() === 200 && (await duplicateCrossing.json()).crossing.id === crossingBody.crossing.id, 'A retried crossing keeps its original identity');
     await page.goto(base + '/registry?state=outside');

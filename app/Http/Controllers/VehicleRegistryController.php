@@ -164,7 +164,7 @@ class VehicleRegistryController extends Controller
         // Phase 6 (visitor model): the plate's visits as an unregistered visitor move to the vehicle.
         $moved = (int) ($vehicle->transferred_visits ?? 0);
         $message = $vehicle->plate_number.' was saved to the local vehicle registry.'
-            .($moved > 0 ? ' '.$moved.' earlier '.\Illuminate\Support\Str::plural('visit', $moved).' as an unregistered visitor moved to this vehicle.' : '');
+            .($moved > 0 ? ' '.$moved.' earlier '.\Illuminate\Support\Str::plural('visit', $moved).' as an unregistered guest moved to this vehicle.' : '');
 
         if ($request->expectsJson()) {
             return response()->json([

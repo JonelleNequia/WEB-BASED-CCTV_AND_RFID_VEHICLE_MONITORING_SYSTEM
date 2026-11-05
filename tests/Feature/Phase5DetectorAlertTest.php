@@ -95,7 +95,7 @@ class Phase5DetectorAlertTest extends TestCase
         $observation = GuestVehicleObservation::query()->where('external_event_key', 'det-no-pass-1')->firstOrFail();
         $event = VehicleEvent::query()->where('external_event_key', 'det-no-pass-1')->firstOrFail();
 
-        $this->assertStringContainsString('Unregistered visitor', $observation->notes);
+        $this->assertStringContainsString('Unregistered guest', $observation->notes);
         $this->assertSame(VehicleEvent::MATCH_NO_PASS_ALERT, $event->match_status);
         $this->assertSame('Unregistered', $event->display_status_label);
         $this->assertNull($event->resulting_state);
@@ -104,13 +104,13 @@ class Phase5DetectorAlertTest extends TestCase
 
         $metrics = $this->liveMetrics();
         $this->assertSame($insideBefore, $metrics['vehicles_inside']);
-        // UI Phase 2 (wording): an unregistered visitor is normal traffic, not an alert.
+        // UI Phase 2 (wording): an unregistered guest is normal traffic, not an alert.
         $this->assertArrayNotHasKey('no_pass_alerts_today', $metrics);
         $this->assertSame(0, $metrics['alerts_total']);
 
         $this->actingAs($this->admin)
             ->getJson(route('api.recent-station-logs'))
-            ->assertJsonPath('logs.0.verification_label', 'Unregistered Visitor')
+            ->assertJsonPath('logs.0.verification_label', 'Unregistered Guest')
             ->assertJsonPath('logs.0.plate_number', 'NOP 101')
             ->assertJsonPath('logs.0.no_pass_alert', true)
             ->assertJsonPath('logs.0.alert_location', 'gate-1');

@@ -35,6 +35,7 @@
         ['Status', 'status_label'],
         ['Match', 'match_label'],
         ['Alert', 'alert_reason'],
+        ['Vehicle snapshot', 'image_status'],
         ['Time', 'display_time'],
     ];
 

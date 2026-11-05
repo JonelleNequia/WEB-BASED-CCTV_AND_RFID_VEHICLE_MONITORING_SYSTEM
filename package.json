@@ -5,7 +5,7 @@
     "scripts": {
         "build": "vite build",
         "dev": "vite",
-        "test:js": "node --test tests/js/calibration-editor.test.mjs",
+        "test:js": "node --test tests/js/calibration-editor.test.mjs tests/js/plate-input.test.mjs",
         "test:ui": "node tests/browser/settings-ui.mjs"
     },
     "devDependencies": {

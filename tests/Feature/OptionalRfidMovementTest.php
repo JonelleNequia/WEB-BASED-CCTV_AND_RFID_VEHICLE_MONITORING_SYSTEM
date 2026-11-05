@@ -65,7 +65,7 @@ class OptionalRfidMovementTest extends TestCase
     private function vehicle(string $plate = 'TAG-0001', bool $tagged = false): Vehicle
     {
         return $this->registry()->register(['plate_number' => $plate, 'vehicle_type' => 'Car',
-            'registered_by' => 'Original Registrar', 'auto_register_tag' => true,
+            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Original Registrar', 'auto_register_tag' => true,
             ...($tagged ? ['rfid_uid' => 'ASSIGNED-'.(++$this->sequence)] : [])])->fresh();
     }
 
@@ -73,6 +73,7 @@ class OptionalRfidMovementTest extends TestCase
     {
         $at ??= now()->addMinutes(2 * ++$this->sequence);
         $crossing = VehicleCrossing::query()->create([
+            'camera_id' => \App\Models\Camera::forRole('gate-1')->value('id'),
             'external_event_key' => 'optional-pass-'.(++$this->sequence), 'gate' => 'gate-1', 'direction' => $direction,
             'crossed_at' => $at, 'detection_metadata_json' => ['rfid_status' => 'no_pass'],
         ]);
@@ -93,7 +94,7 @@ class OptionalRfidMovementTest extends TestCase
 
     public function test_untagged_registration_has_no_dummy_tag_and_retains_staff_default_rules(): void
     {
-        $data = ['plate_number' => '  ab  00001 ', 'vehicle_type' => 'Motorcycle', 'registered_by' => 'Ma. José Dela Cruz',
+        $data = ['plate_number' => '  ab  00001 ', 'vehicle_type' => 'Motorcycle', 'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Ma. José Dela Cruz',
             'rfid_uid' => '  ', 'auto_register_tag' => true];
         $id = $this->postJson(route('vehicle-registry.store'), $data)->assertCreated()->json('vehicle_id');
         $vehicle = Vehicle::findOrFail($id);
@@ -114,13 +115,13 @@ class OptionalRfidMovementTest extends TestCase
     public function test_supplied_tags_remain_strict_and_invalid_plates_cannot_register_without_a_tag(): void
     {
         foreach (['---', 'ABC/0001'] as $plate) {
-            $this->postJson(route('vehicle-registry.store'), ['registered_by' => 'Staff', 'plate_number' => $plate, 'vehicle_type' => 'Car'])
+            $this->postJson(route('vehicle-registry.store'), ['vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Staff', 'plate_number' => $plate, 'vehicle_type' => 'Car'])
                 ->assertUnprocessable()->assertJsonValidationErrors('plate_number');
         }
-        $this->postJson(route('vehicle-registry.store'), ['registered_by' => 'Staff', 'plate_number' => 'GOOD-0001',
+        $this->postJson(route('vehicle-registry.store'), ['vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Staff', 'plate_number' => 'GOOD-0001',
             'vehicle_type' => 'Car', 'rfid_tag_id' => 99999])->assertUnprocessable()->assertJsonValidationErrors('rfid_tag_id');
         $tag = RfidTag::query()->create(['uid' => 'AVAILABLE', 'status' => 'available']);
-        $id = $this->postJson(route('vehicle-registry.store'), ['registered_by' => 'Staff', 'plate_number' => 'GOOD-0001',
+        $id = $this->postJson(route('vehicle-registry.store'), ['vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Staff', 'plate_number' => 'GOOD-0001',
             'vehicle_type' => 'Car', 'rfid_tag_id' => $tag->id])->assertCreated()->json('vehicle_id');
         $this->assertSame($id, $tag->fresh()->vehicle_id);
         $this->assertDatabaseCount('vehicle_rfid_tags', 1);
@@ -287,12 +288,12 @@ class OptionalRfidMovementTest extends TestCase
         $record = $this->pass($vehicle->plate_number);
         $event = $record->movementEvent;
         $this->withHeader('X-Api-Key', 'test-detector-key')->post(route('api.integration.crossings'), [
-            'external_event_key' => $record->external_event_key, 'camera_role' => 'gate-1', 'direction' => 'OUT',
-            'event_time' => now()->toIso8601String(),
+            'external_event_key' => $record->external_event_key, 'camera_role' => 'gate-1', 'direction' => 'IN',
+            'event_time' => $record->seen_at->toIso8601String(),
             'snapshot' => \Illuminate\Http\UploadedFile::fake()->image('clearer.jpg'),
         ])->assertOk()->assertJsonPath('duplicate', true);
         $snapshot = $record->crossing->fresh()->snapshot_path;
-        Storage::disk('public')->assertExists($snapshot);
+        $this->assertTrue(\App\Support\OccurrenceMedia::exists($snapshot));
         $this->assertSame($snapshot, $record->fresh()->snapshot_path);
         $this->assertSame($snapshot, $event->fresh()->vehicle_image_path);
         $this->assertSame('IN', $record->crossing->fresh()->direction);

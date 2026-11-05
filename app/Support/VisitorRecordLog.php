@@ -18,7 +18,7 @@ final class VisitorRecordLog
 
         return [
             'record_type' => 'visitor_record',
-            'record_type_label' => $plateOnly ? 'Registered vehicle (plate only)' : ($review ? 'Review' : 'Unregistered Visitor'),
+            'record_type_label' => $plateOnly ? 'Registered vehicle (plate only)' : ($review ? 'Review' : 'Unregistered Guest'),
             'id' => $record->id,
             'detail_url' => $record->plateProfile
                 ? route('visitors.profiles.show', $record->plateProfile)
@@ -46,21 +46,21 @@ final class VisitorRecordLog
             'category_label' => VehicleCategory::label($category),
             'source_label' => match (true) {
                 $record->source === VisitorRecord::SOURCE_MANUAL => 'Manual · no registered tag',
-                $plateOnly => 'Camera · plate only, no tag read',
+                $plateOnly => 'Camera · plate only',
                 $record->source === VisitorRecord::SOURCE_LEGACY => 'Camera · older guest record',
                 default => 'Camera · no registered tag',
             },
             'station_label' => \App\Models\Gate::labelFor($record->gate),
-            'state_label' => $plateOnly ? 'Not changed (no tag read)' : 'Not tracked (visitor)',
+            'state_label' => $plateOnly ? 'Not recorded for this occurrence' : 'Not tracked (guest)',
             'display_time' => DisplayTime::datetime($time, 'No time'),
-            'summary_label' => ($plateOnly ? 'Registered vehicle' : ($review ? 'Review' : 'Unregistered Visitor')).' #'.$record->id.' • '.(DisplayTime::datetime($time, 'No time')),
+            'summary_label' => ($plateOnly ? 'Registered vehicle' : ($review ? 'Review' : 'Unregistered Guest')).' #'.$record->id.' • '.(DisplayTime::datetime($time, 'No time')),
             'event_time_export' => $time?->toDateTimeString(),
             // UI Phase 3: what needs a look (yellow) or the plate result.
             ...match (true) {
                 $review => ['status_label' => 'Review', 'status_badge_class' => 'manual-review'],
                 $record->plate_status === VisitorRecord::PLATE_UNREADABLE => ['status_label' => 'Plate unreadable', 'status_badge_class' => 'manual-review'],
                 $record->direction === 'UNKNOWN' => ['status_label' => 'Direction unknown', 'status_badge_class' => 'manual-review'],
-                $plateOnly => ['status_label' => 'Tag not read', 'status_badge_class' => 'manual-review'],
+                $plateOnly => ['status_label' => 'Plate identified', 'status_badge_class' => 'matched'],
                 $record->plate_status === VisitorRecord::PLATE_PENDING => ['status_label' => 'Reading plate…', 'status_badge_class' => 'secondary'],
                 $record->plate_status === VisitorRecord::PLATE_CORRECTED => ['status_label' => 'Plate corrected', 'status_badge_class' => 'matched'],
                 default => ['status_label' => 'Plate read', 'status_badge_class' => 'matched'],
@@ -68,12 +68,15 @@ final class VisitorRecordLog
             'match_label' => $plateOnly ? 'Registered vehicle (plate only)' : ($review ? 'Review' : 'Unregistered'),
             'rfid_tag_uid' => 'N/A',
             'image_url' => $record->snapshot_url,
+            'image_status' => $record->snapshot_url ? 'Available'
+                : (data_get($record->crossing?->detection_metadata_json, \App\Services\CrossingSnapshotService::KEY.'.status') === 'failed'
+                    ? 'Unavailable (image upload failed)' : 'Unavailable'),
             // Unregistered visitors are normal traffic, not alerts.
             'is_alert' => false,
             'alert_reason' => $record->registration_reason,
             'sort_time' => (float) ($record->created_at?->format('U.u') ?? $time?->format('U.u') ?? 0),
             'log_type' => $plateOnly ? 'registered' : ($review ? 'review' : 'unregistered_visitor'),
-            'log_type_label' => $plateOnly ? 'Registered' : ($review ? 'Review' : 'Unregistered Visitor'),
+            'log_type_label' => $plateOnly ? 'Registered' : ($review ? 'Review' : 'Unregistered Guest'),
             'is_guest' => ! $plateOnly && ! $review,
         ];
     }

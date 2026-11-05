@@ -122,7 +122,7 @@ class GateDirectionMatrixTest extends TestCase
         $this->assertSame([0, 0, 4], [$counts['in'], $counts['out'], $counts['unknown']]);
 
         $this->actingAs($this->admin)->get(route('visitors.index', ['tab' => 'review']))
-            ->assertOk()->assertSee('Review (4)')->assertSee('Unregistered Visitor');
+            ->assertOk()->assertSee('Review (4)')->assertSee('Unregistered Guest');
         // Activity Logs marks the state-based direction.
         $this->actingAs($this->admin)->get(route('logs.index'))->assertOk()->assertSee('Direction unknown');
         $this->actingAs($this->admin)->get(route('logs.print', ['report' => 'today']))->assertOk()->assertSee('Direction unknown');

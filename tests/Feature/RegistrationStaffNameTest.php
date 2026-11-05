@@ -37,7 +37,7 @@ class RegistrationStaffNameTest extends TestCase
         return array_replace([
             '_form' => 'add', 'auto_register_tag' => true, 'rfid_uid' => 'STAFF-TEST-'.$index,
             'plate_number' => 'STF-'.$index, 'vehicle_type' => 'Car', 'category' => 'faculty_staff',
-            'registered_by' => 'Ma. José Dela Cruz',
+            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Ma. José Dela Cruz',
         ], $extra);
     }
 
@@ -99,14 +99,14 @@ class RegistrationStaffNameTest extends TestCase
         $this->assertSame($data['registered_by'], $this->defaultName());
     }
 
-    public function test_the_same_staff_member_can_register_multiple_vehicles_without_an_owner_name(): void
+    public function test_the_same_staff_member_can_register_multiple_vehicles_with_a_separate_owner_name(): void
     {
         foreach (range(1, 2) as $index) {
             $this->postJson(route('vehicle-registry.store'), $this->payload(['registered_by' => 'Anne-Marie']))->assertCreated();
         }
         $this->assertDatabaseCount('vehicles', 2);
         $this->assertSame(['Anne-Marie', 'Anne-Marie'], Vehicle::query()->pluck('registered_by')->all());
-        $this->assertSame([null, null], Vehicle::query()->pluck('vehicle_owner_name')->all());
+        $this->assertSame(['Fixture Owner', 'Fixture Owner'], Vehicle::query()->pluck('vehicle_owner_name')->all());
     }
 
     public static function validNames(): array

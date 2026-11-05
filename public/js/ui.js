@@ -115,9 +115,16 @@
         }
 
         lastTrigger = trigger || document.activeElement;
+        // A row action closes its popover before opening a dialog. Return to
+        // its visible summary rather than the now-hidden action button.
+        const rowMenu = lastTrigger?.closest('details.menu');
+        if (rowMenu && !rowMenu.open && rowMenu.querySelector('[data-row-menu-panel]')) {
+            lastTrigger = rowMenu.querySelector(':scope > summary');
+        }
         drawer.hidden = false;
         document.body.classList.add('has-drawer');
         requestAnimationFrame(function () {
+            if (drawer.hidden) return;
             drawer.classList.add('is-open');
             const autofocus = drawer.querySelector('[autofocus]') || drawer.querySelector('.drawer-body ' + focusableSelector.split(', ').join(', .drawer-body '));
             (autofocus || drawer.querySelector('.drawer-panel')).focus({ preventScroll: true });

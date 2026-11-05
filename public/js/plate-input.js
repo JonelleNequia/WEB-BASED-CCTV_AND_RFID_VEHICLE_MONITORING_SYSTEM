@@ -6,14 +6,7 @@
         return value.replace(/[a-z]/g, (letter) => letter.toUpperCase()).replace(/\p{Zs}+/gu, ' ');
     }
     function normalize(value) {
-        const text = spaces(value).replace(/^ +| +$/g, '');
-        if (/[^A-Z0-9 -]/.test(text)) return text;
-        const compact = text.replace(/[ -]/g, '');
-        for (const [letters, digits] of [[3, 4], [3, 3], [2, 5], [2, 4]]) {
-            const match = compact.match(new RegExp('^(\\d{' + digits + '})([A-Z]{' + letters + '})$'));
-            if (match) return match[2] + '-' + match[1];
-        }
-        return text;
+        return spaces(value).replace(/^ +| +$/g, '');
     }
     function apply(input, final = false) {
         if (!(input instanceof HTMLInputElement) || !input.matches(selector) || composing.has(input)) return;

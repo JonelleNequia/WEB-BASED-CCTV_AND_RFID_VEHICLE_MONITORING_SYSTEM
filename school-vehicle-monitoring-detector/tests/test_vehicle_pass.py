@@ -230,6 +230,24 @@ class RecordingClient(FakeClient):
 
 
 class PlateAnalysisTests(unittest.TestCase):
+    def test_image_retry_keeps_the_original_occurrence_direction(self):
+        payload = detector.crossing_payload_locked("gate-1", 1, {
+            "event_key": "fixed-pass", "event_time": "2026-11-03T12:00:00+08:00",
+            "direction": "OUT", "recorded_direction": "IN",
+        }, "matched", {"type": "Car"}, (10, 20, 50, 60))
+        self.assertEqual(payload["direction"], "IN")
+        self.assertEqual(payload["external_event_key"], "fixed-pass")
+
+    def test_picture_time_is_host_selection_time_not_invented_sensor_or_upload_time(self):
+        selected = "2026-11-03T12:00:01+08:00"
+        details = detector.picture_details(
+            {"best_selected_at": selected, "best_score": 12},
+            np.zeros((100, 160, 3), dtype=np.uint8), (20, 20, 120, 80),
+        )
+        self.assertEqual(details["selected_at"], selected)
+        self.assertNotIn("captured_at", details)
+        self.assertNotIn("uploaded_at", details)
+
     def test_fallback_reader_keeps_the_vote_crop_and_plate_evidence_without_color(self):
         frame = np.zeros((80, 120, 3), dtype=np.uint8)
         frames = [(frame, (0, 0, 120, 80))] * 2

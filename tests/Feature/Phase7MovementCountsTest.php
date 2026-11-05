@@ -44,7 +44,7 @@ class Phase7MovementCountsTest extends TestCase
     {
         $today = app(MovementCountService::class)->counts('today');
 
-        // IN: Faculty RFID, Registered Visitor RFID, unregistered camera, plate-only Faculty.
+        // IN: Faculty RFID, Registered Guest RFID, unregistered camera, plate-only Faculty.
         // OUT: Faculty RFID, unregistered camera, older camera guest record.
         $this->assertSame([4, 3, 1], [$today['in'], $today['out'], $today['unknown']]);
         $this->assertSame(
@@ -65,7 +65,7 @@ class Phase7MovementCountsTest extends TestCase
     {
         $occupancy = app(VehicleOccupancyService::class);
 
-        // Faculty went IN then OUT; the Registered Visitor is inside; unregistered visitors never are.
+        // Faculty went IN then OUT; the Registered Guest is inside; unregistered guests never are.
         $this->assertSame(['registered' => 2, 'total' => 2], $occupancy->counts());
         $this->assertSame(['faculty_staff' => 1, 'registered_visitor' => 1], collect($occupancy->insideByCategory())->map->inside->all());
 
@@ -93,7 +93,7 @@ class Phase7MovementCountsTest extends TestCase
         $this->actingAs($this->admin)->get(route('logs.index', ['tab' => 'events', 'gate' => 'gate-2']))
             ->assertOk()->assertSee('RVS 2002')->assertSee('NFB 9863')->assertDontSee('LEG 777');
 
-        // Unregistered Visitors: camera records and the older guest record, no registered vehicle.
+        // Unregistered Guests: camera records and the older guest record, no registered vehicle.
         $this->actingAs($this->admin)->get(route('logs.index', ['tab' => 'events', 'category' => 'unregistered_visitor']))
             ->assertOk()->assertSee('LEG 777')->assertDontSee('RVS 2002');
 
@@ -111,7 +111,7 @@ class Phase7MovementCountsTest extends TestCase
         $csv = $this->actingAs($this->admin)->get(route('vehicle-events.export.csv', ['gate' => 'gate-2', 'all' => 1]))->assertOk()->streamedContent();
         $this->assertStringContainsString('Category,Gate', $csv);
         $this->assertStringContainsString('RVS 2002', $csv);
-        $this->assertStringContainsString('"Registered Visitor","Gate 2"', $csv);
+        $this->assertStringContainsString('"Registered Guest","Gate 2"', $csv);
         $this->assertStringNotContainsString('LEG 777', $csv);
 
         // ROI work, Phase 7: the printed report is its own page with the same filters.
@@ -150,7 +150,7 @@ class Phase7MovementCountsTest extends TestCase
         $this->assertSame([$counts['in'], $counts['out']], [$byCategory['total']['in'], $byCategory['total']['out']]);
         $this->assertSame($byCategory['total'], ['label' => 'Total'] + $byGate['total']);
         $this->assertSame(
-            ['Faculty & Staff' => [2, 1], 'Registered Visitor' => [1, 0], 'Unregistered Visitor' => [1, 2]],
+            ['Faculty & Staff' => [2, 1], 'Registered Guest' => [1, 0], 'Unregistered Guest' => [1, 2]],
             collect($byCategory['rows'])->mapWithKeys(fn (array $row) => [$row['label'] => [$row['in'], $row['out']]])->all()
         );
         $this->assertSame(

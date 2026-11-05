@@ -3,7 +3,7 @@
 require __DIR__.'/ui-workspace.php'; // Verifies the private temporary database before writes.
 
 $vehicle = app(App\Services\VehicleRegistryService::class)->register([
-    'registered_by' => 'Fixture Registrar', 'plate_number' => 'AB-00001', 'vehicle_type' => 'Motorcycle',
+    'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Fixture Registrar', 'plate_number' => 'AB-00001', 'vehicle_type' => 'Motorcycle',
     'rfid_uid' => 'PIPELINE-FIXTURE', 'auto_register_tag' => true,
 ])->fresh();
 $make = static function (string $key, ?string $plate, float $confidence, string $status): App\Models\VisitorRecord {

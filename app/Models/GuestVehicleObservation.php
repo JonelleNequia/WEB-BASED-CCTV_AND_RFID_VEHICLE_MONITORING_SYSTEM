@@ -7,7 +7,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Facades\Storage;
 
 class GuestVehicleObservation extends Model
 {
@@ -114,9 +113,7 @@ class GuestVehicleObservation extends Model
      */
     public function getSnapshotUrlAttribute(): string
     {
-        if ($this->snapshot_path && Storage::disk('public')->exists($this->snapshot_path)) {
-            return Storage::disk('public')->url($this->snapshot_path);
-        }
+        if ($url = \App\Support\OccurrenceMedia::url($this->snapshot_path)) return $url;
 
         return asset('images/placeholders/vehicle-placeholder.svg');
     }

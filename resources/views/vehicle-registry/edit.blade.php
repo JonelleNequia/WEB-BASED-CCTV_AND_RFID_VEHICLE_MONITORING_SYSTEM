@@ -57,7 +57,7 @@
                 <div class="field">
                     <label for="vehicle_owner_name">Vehicle Owner Name</label>
                     <input id="vehicle_owner_name" type="text" name="vehicle_owner_name" value="{{ old('vehicle_owner_name', $vehicle->vehicle_owner_name) }}">
-                    <span class="field-help">Optional. New names may use letters, spaces, apostrophes, hyphens and periods (up to 100 characters). An existing organization name can be kept unchanged.</span>
+                    <span class="field-help">An existing blank or unchanged organization name can be kept. New names may use letters, spaces, apostrophes, hyphens and periods (up to 100 characters).</span>
                     @error('vehicle_owner_name')
                         <span class="field-error">{{ $message }}</span>
                     @enderror

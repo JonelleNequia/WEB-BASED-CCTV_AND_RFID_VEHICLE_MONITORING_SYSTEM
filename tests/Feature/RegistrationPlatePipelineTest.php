@@ -41,7 +41,7 @@ class RegistrationPlatePipelineTest extends TestCase
     private function register(string $plate, string $staff = 'Phase Two Registrar'): Vehicle
     {
         return app(VehicleRegistryService::class)->register([
-            'plate_number' => $plate, 'registered_by' => $staff, 'vehicle_type' => 'Motorcycle',
+            'plate_number' => $plate, 'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => $staff, 'vehicle_type' => 'Motorcycle',
             'rfid_uid' => 'PHASE-TWO-'.(++$this->sequence), 'auto_register_tag' => true,
         ])->fresh();
     }
@@ -76,7 +76,7 @@ class RegistrationPlatePipelineTest extends TestCase
         return [
             ['  abc   0001 ', 'ABC 0001', 'ABC0001', 'ABC 0001'],
             ['ab-00001', 'AB-00001', 'AB00001', 'AB 00001'],
-            ['0012 abc', 'ABC-0012', 'ABC0012', 'ABC 0012'],
+            ['0012 abc', '0012 ABC', '0012ABC', '0012 ABC'],
             ['001 ab', '001 AB', '001AB', '001 AB'], // No invented reverse layout.
             ['a1-b02', 'A1-B02', 'A1B02', 'A1-B02'],
             ['000123', '000123', '000123', '000123'],
@@ -109,7 +109,7 @@ class RegistrationPlatePipelineTest extends TestCase
     {
         $this->register('ABC-0001');
         $this->assertNull(PlateNumber::key($input));
-        $this->postJson(route('vehicle-registry.store'), ['registered_by' => 'Another Staff', 'plate_number' => $input,
+        $this->postJson(route('vehicle-registry.store'), ['vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Another Staff', 'plate_number' => $input,
             'vehicle_type' => 'Car', 'rfid_uid' => 'INVALID-NEW-TAG', 'auto_register_tag' => true])->assertUnprocessable()->assertJsonValidationErrors('plate_number');
         $record = $this->read($this->crossing(), $input);
         $this->assertSame('review', $record->registration_status);
@@ -169,7 +169,7 @@ class RegistrationPlatePipelineTest extends TestCase
         $this->assertStringContainsString('AB 00001', $csv);
         $this->assertStringContainsString('Registered', $csv);
         $this->get(route('logs.print', ['log_type' => 'registered', 'autoprint' => 0]))->assertOk()->assertSee('AB 00001');
-        $this->get(route('visitors.index'))->assertOk()->assertSee('Registered vehicle · tag not read');
+        $this->get(route('visitors.index'))->assertOk()->assertSee('Registered vehicle · plate identified');
         $this->assertSame('Phase Two Registrar', app(VehicleRegistryService::class)->rememberedStaffName());
         $this->assertSame('Phase Two Registrar', $vehicle->fresh()->registered_by);
         // Late OCR delivery cannot replace a staff-confirmed plate or original OCR evidence.
@@ -202,7 +202,7 @@ class RegistrationPlatePipelineTest extends TestCase
         $this->patchJson(route('visitors.records.review', $record), ['action' => 'correct_plate', 'plate' => 'ABC 0001'])->assertOk()->assertJsonPath('needs.plate', true);
         $this->assertNull($record->fresh()->vehicle_id);
         $this->postJson(route('vehicle-registry.store'), ['plate_number' => 'ABC0001', 'vehicle_type' => 'Car',
-            'registered_by' => 'Other Staff', 'rfid_uid' => 'COLLIDING-TAG', 'auto_register_tag' => true])->assertUnprocessable()->assertJsonValidationErrors('plate_number');
+            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Other Staff', 'rfid_uid' => 'COLLIDING-TAG', 'auto_register_tag' => true])->assertUnprocessable()->assertJsonValidationErrors('plate_number');
         $this->assertSame([$first->plate_number, $legacy->plate_number], Vehicle::query()->orderBy('id')->pluck('plate_number')->all());
         $this->assertSame('Phase Two Registrar', app(VehicleRegistryService::class)->rememberedStaffName());
     }
@@ -263,9 +263,10 @@ class RegistrationPlatePipelineTest extends TestCase
         $scan->forceFill(['vehicle_crossing_id' => $crossing->id, 'correlated_vehicle_event_id' => $event->id])->save();
         $eventBefore = $event->fresh()->getRawOriginal();
         $scanBefore = $scan->fresh()->getRawOriginal();
+        $this->travel(1)->hours();
         $record = app(VisitorRecordService::class)->applyPlateReading([
             'external_event_key' => $crossing->external_event_key, 'camera_role' => 'gate-1',
-            'event_time' => now()->addHour()->toIso8601String(), 'plate_status' => 'read', 'plate_confidence' => 0.95,
+            'event_time' => $crossing->crossed_at->toIso8601String(), 'plate_status' => 'read', 'plate_confidence' => 0.95,
             'plate_number' => 'OTHER-0007',
         ]);
         $this->assertSame([$crossing->id, $crossing->crossed_at->timestamp, 'kept/rfid.jpg'], [$record->vehicle_crossing_id, $record->seen_at->timestamp, $record->snapshot_path]);
@@ -277,7 +278,8 @@ class RegistrationPlatePipelineTest extends TestCase
         $this->patchJson(route('visitors.records.review', $record), ['action' => 'correct_plate', 'plate' => 'OTHER-0007'])->assertOk()->assertJsonPath('needs.plate', true);
         $this->patchJson(route('visitors.records.review', $record), ['action' => 'correct_plate', 'plate' => 'rfid-0001'])->assertOk();
         $this->assertSame('dismissed', $record->fresh()->status);
-        $this->assertSame($eventBefore, $event->fresh()->getRawOriginal());
+        $this->assertSame(\Illuminate\Support\Arr::except(array_replace($eventBefore, ['visitor_record_id' => $record->id]), ['updated_at']),
+            \Illuminate\Support\Arr::except($event->fresh()->getRawOriginal(), ['updated_at']));
         $this->assertSame($scanBefore, $scan->fresh()->getRawOriginal());
         $this->assertSame(1, app(MovementCountService::class)->counts('today')['in']);
         $this->assertDatabaseCount('vehicle_events', 1);
@@ -315,7 +317,7 @@ class RegistrationPlatePipelineTest extends TestCase
         $this->getJson(route('api.recent-event-logs'))->assertOk()->assertJsonPath('logs.0.log_type', 'registered');
         $this->patchJson(route('visitors.records.review', $record), ['action' => 'correct_plate', 'plate' => 'XYZ-9876'])->assertOk();
         $this->getJson(route('api.recent-station-logs'))->assertJsonPath('logs.0.registered', false)
-            ->assertJsonPath('logs.0.category_label', 'Unregistered Visitor');
+            ->assertJsonPath('logs.0.category_label', 'Unregistered Guest');
         $this->getJson(route('logs.index', ['category' => 'faculty_staff']))->assertJsonPath('total', 0);
         $this->assertSame('Phase Two Registrar', $vehicle->fresh()->registered_by);
     }

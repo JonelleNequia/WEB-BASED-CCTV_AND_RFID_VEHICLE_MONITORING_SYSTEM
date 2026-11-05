@@ -129,7 +129,7 @@ class SettingsService
         $this->saveGates($values['gates'] ?? []);
         // ROI work (Settings › Advanced › Timing): minimum movement per gate, percent (empty = default).
         foreach ((array) ($values['pass_min_move'] ?? []) as $code => $percent) {
-            Gate::query()->where('code', $code)->update(['pass_min_move' => filled($percent) ? (int) $percent : null]);
+            Gate::query()->retained()->where('code', $code)->update(['pass_min_move' => filled($percent) ? (int) $percent : null]);
         }
         $this->saveCameraConfigurations($values['camera_configs'] ?? []);
         $this->exportCameraRuntimeConfig($this->all());

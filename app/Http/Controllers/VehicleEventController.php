@@ -65,7 +65,7 @@ class VehicleEventController extends Controller
             'logFilterChips' => self::LOG_FILTER_CHIPS,
             'periodOptions' => $this->periodOptions(),
             'categoryOptions' => $this->categoryOptions(),
-            'gateOptions' => \App\Models\Gate::historicalOptions(),
+            'gateOptions' => \App\Models\Gate::filterOptions(),
         ]);
     }
 
@@ -208,14 +208,17 @@ class VehicleEventController extends Controller
      */
     public function show(VehicleEvent $vehicleEvent, VehicleRegistryService $vehicleRegistryService): View
     {
+        $vehicleEvent->load([
+            'camera',
+            'vehicle.rfidTags',
+            'rfidScanLog.vehicleRfidTag',
+            'matchedEntry.camera',
+            'activeSession',
+        ]);
+
         return view('vehicle-events.show', [
-            'vehicleEvent' => $vehicleEvent->load([
-                'camera',
-                'vehicle.rfidTags',
-                'rfidScanLog.vehicleRfidTag',
-                'matchedEntry.camera',
-                'activeSession',
-            ]),
+            'vehicleEvent' => $vehicleEvent,
+            'activityLog' => $this->vehicleEventLogPayload($vehicleEvent),
             'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
         ]);
     }
@@ -610,10 +613,10 @@ class VehicleEventController extends Controller
      */
     public const LOG_TYPES = [
         'registered' => 'Registered',
-        'unregistered_visitor' => 'Unregistered Visitor',
+        'unregistered_visitor' => 'Unregistered Guest',
         'guest_pass' => 'Old pass record',
         'manual' => 'Manual',
-        'no_pass_alert' => 'Unregistered Visitor (camera)',
+        'no_pass_alert' => 'Unregistered Guest (camera)',
     ];
 
     /**
@@ -633,7 +636,7 @@ class VehicleEventController extends Controller
     public const LOG_FILTER_CHIPS = [
         '' => 'All',
         'registered' => 'Registered',
-        'unregistered_visitor' => 'Unregistered Visitors',
+        'unregistered_visitor' => 'Unregistered Guests',
         'manual' => 'Manual',
         'alerts' => 'Alerts',
     ];
@@ -831,7 +834,12 @@ class VehicleEventController extends Controller
             ...$this->vehicleEventStatus($event),
             'match_label' => $event->match_display,
             'rfid_tag_uid' => $event->rfidScanLog?->tag_uid ?: 'N/A',
-            'image_url' => $event->has_visual_evidence ? $event->vehicle_image_url : null,
+            'image_url' => \App\Support\OccurrenceMedia::url($event->vehicle_image_path),
+            'image_status' => \App\Support\OccurrenceMedia::exists($event->vehicle_image_path) ? 'Available'
+                : (data_get($event->detection_metadata_json, \App\Services\CrossingSnapshotService::KEY.'.status') === 'failed'
+                    ? 'Unavailable (image upload failed)' : 'Unavailable'),
+            'image_selected_at' => data_get($event->detection_metadata_json, \App\Services\CrossingSnapshotService::KEY.'.selected_at'),
+            'image_uploaded_at' => data_get($event->detection_metadata_json, \App\Services\CrossingSnapshotService::KEY.'.uploaded_at'),
             // Alerts are anomalies; a camera record of an unregistered visitor is not one.
             'is_alert' => filled($event->anomaly_reason) && $event->match_status !== VehicleEvent::MATCH_NO_PASS_RESOLVED
                 && ! in_array($event->event_origin, ['guest_cctv', 'guest_manual'], true),
@@ -852,9 +860,10 @@ class VehicleEventController extends Controller
     protected function guestLogPayload(GuestVehicleObservation $observation): array
     {
         $time = $observation->observed_at;
+
         return [
             'record_type' => 'guest_observation',
-            'record_type_label' => 'Unregistered Visitor',
+            'record_type_label' => 'Unregistered Guest',
             'id' => $observation->id,
             'detail_url' => route('logs.index', ['tab' => 'alerts', 'plate_text' => $observation->plate_number ?: $observation->plate_text]),
             'export_url' => route('vehicle-events.export.csv', [
@@ -874,7 +883,7 @@ class VehicleEventController extends Controller
             'station_label' => \App\Models\Gate::labelFor($observation->location),
             'state_label' => 'Not tracked',
             'display_time' => DisplayTime::datetime($time, 'No time'),
-            'summary_label' => 'Unregistered Visitor #'.$observation->id.' • '.(DisplayTime::datetime($time, 'No time')),
+            'summary_label' => 'Unregistered Guest #'.$observation->id.' • '.(DisplayTime::datetime($time, 'No time')),
             'event_time_export' => $time?->toDateTimeString(),
             'status_label' => 'Unregistered',
             'status_badge_class' => 'secondary',

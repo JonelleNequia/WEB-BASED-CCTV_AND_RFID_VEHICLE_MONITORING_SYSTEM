@@ -87,7 +87,7 @@ class AlertSummaryService
                     'tone' => 'warning',
                     'label' => 'Unknown tag',
                     'title' => $record->tag_uid.' · '.\App\Models\Gate::labelFor($record->gate),
-                    'detail' => 'Read for an Unregistered Visitor ('.($record->plate_number ?: 'plate not read').'). Not in the registry.',
+                    'detail' => 'Read for an Unregistered Guest ('.($record->plate_number ?: 'plate not read').'). Not in the registry.',
                     'time' => DisplayTime::time($record->seen_at),
                     'sort' => $record->seen_at?->getTimestamp() ?? 0,
                     'action_label' => 'Register this tag',

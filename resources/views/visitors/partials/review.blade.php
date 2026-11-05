@@ -1,5 +1,5 @@
 {{--
-    Gate direction work, Phase D: Visitors › Review, one card at a time.
+    Gate direction work, Phase D: Guests › Review, one card at a time.
     A card waits for its plate (unreadable, not sure, or only a possible
     match) and/or its direction (unknown). IN / OUT is already counted when
     the direction is known: Review is for the plate and the matching.
@@ -49,10 +49,11 @@
                 default => null,
             };
         @endphp
-        <article class="review-card" id="review-card-{{ $record->id }}" data-review-card data-needs-plate="{{ $needsPlate ? '1' : '0' }}" data-needs-direction="{{ $needsDirection ? '1' : '0' }}">
+        <article class="review-card" id="review-card-{{ $record->id }}" data-review-card @if((string) old('_review_record_id') === (string) $record->id) data-review-retry @endif data-needs-plate="{{ $needsPlate ? '1' : '0' }}" data-needs-direction="{{ $needsDirection ? '1' : '0' }}">
             <form method="POST" action="{{ route('visitors.records.review', $record) }}" class="review-card-form" data-review-form>
                 @csrf
                 @method('PATCH')
+                <input type="hidden" name="_review_record_id" value="{{ $record->id }}">
                 {{-- Enter in the plate box saves the plate (the form's first button is its default). --}}
                 <button type="submit" name="action" value="correct_plate" class="sr-only" tabindex="-1" aria-hidden="true">Save plate</button>
                 <div class="review-media">
@@ -73,6 +74,7 @@
                 </div>
 
                 <div class="review-facts">
+                    <p class="field-error" data-review-error role="alert" hidden></p>
                     <div class="review-reasons">
                         <span class="field-help" data-registration-reason @if(!$record->registration_reason) hidden @endif>{{ $record->registration_reason }}</span>
                         @if ($why)<x-badge tone="warning" :label="$why" />@endif
@@ -110,7 +112,7 @@
                         @endif
                         <div class="review-inline">
                             <label class="sr-only" for="review-plate-{{ $record->id }}-input">Plate of record #{{ $record->id }}</label>
-                            <input id="review-plate-{{ $record->id }}-input" type="text" name="plate" value="{{ $record->suggestedProfile?->plate_number ?: $read }}" list="review-plate-options" placeholder="ABC 1234" maxlength="30" autocomplete="off" data-review-plate-input data-normalize-plate>
+                            <input id="review-plate-{{ $record->id }}-input" type="text" name="plate" value="{{ (string) old('_review_record_id') === (string) $record->id ? old('plate', $read) : ($record->plate_number ?: $read) }}" list="review-plate-options" placeholder="ABC 1234" maxlength="30" autocomplete="off" data-review-plate-input data-normalize-plate>
                             <button type="submit" name="action" value="correct_plate" class="button button-primary button-sm" data-review-enter>Save plate</button>
                         </div>
                         <div class="review-buttons">
@@ -139,7 +141,6 @@
                         <button type="submit" name="action" value="dismiss:not_vehicle" class="button button-secondary button-sm" data-review-key="d"><kbd>D</kbd> Not a vehicle</button>
                         <button type="submit" name="action" value="dismiss:duplicate" class="button button-secondary button-sm" data-review-key="u"><kbd>U</kbd> Duplicate</button>
                     </div>
-                    <p class="field-error" data-review-error hidden></p>
                 </div>
             </form>
         </article>

@@ -1,7 +1,7 @@
 {{--
-    Phase 5: rows of Unregistered Visitor records (Visitors page and plate profile).
+    Phase 5: rows of Unregistered Guest records (Guests page and plate profile).
     UI Phase 4: snapshot, plate, gate, direction, time and one "⋯" menu
-    (dialogs in visitors.partials.record-dialogs).
+    (dialogs in guests.partials.record-dialogs).
 --}}
 <thead>
     <tr>
@@ -62,7 +62,7 @@
                 @if ($record->classificationCategory() === 'review')
                     <div class="table-subtext">Review · {{ $record->registration_reason ?: 'Check the plate.' }}</div>
                 @elseif ($record->isRegisteredAtOccurrence())
-                    <div class="table-subtext">Registered vehicle · tag not read</div>
+                    <div class="table-subtext">Registered vehicle · plate identified</div>
                 @elseif ($record->vehicle)
                     {{-- Phase 6: the plate is in the Registry (registered later, or its tag was not read). --}}
                     <div class="table-subtext">Unregistered at occurrence · vehicle registered later</div>

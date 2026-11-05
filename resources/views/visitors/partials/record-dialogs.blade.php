@@ -1,4 +1,4 @@
-{{-- UI Phase 4: the dialogs behind each visitor record's "⋯" menu (filled by public/js/visitors.js). --}}
+{{-- UI Phase 4: the dialogs behind each guest record's "⋯" menu (filled by public/js/visitors.js). --}}
 <x-modal id="visitor-plate-modal" title="Correct plate" size="sm">
     <form method="POST" action="" class="stack-form" data-visitor-form="plate">
         @csrf

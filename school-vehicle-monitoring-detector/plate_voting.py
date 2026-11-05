@@ -1,7 +1,7 @@
 """
 Phase 5 (visitor model): one plate per vehicle from several frames.
 
-Each frame gives at most one plate (literal PH letter-first form,
+Each frame gives at most one plate (literal PH letter-first or number-first form,
 e.g. "ABC-1234", see anpr.py) and a score. The
 vote:
 
@@ -28,7 +28,10 @@ AGREEING_FRAMES_TO_STOP = 2
 
 def plate_layout(plate):
     match = re.fullmatch(r"([A-Z]+)-(\d+)", plate or "")
-    return (len(match.group(1)), len(match.group(2))) if match else None
+    if match:
+        return (len(match.group(1)), len(match.group(2)))
+    number_first = re.fullmatch(r"(\d+)([A-Z]+)", plate or "")
+    return (len(number_first.group(1)), len(number_first.group(2)), "number_first") if number_first else None
 
 
 def frames_agree(frame_reads, needed=AGREEING_FRAMES_TO_STOP):

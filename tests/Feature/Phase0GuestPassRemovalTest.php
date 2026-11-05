@@ -87,7 +87,7 @@ class Phase0GuestPassRemovalTest extends TestCase
 
         $this->actingAs($this->admin)->get(route('dashboard.index'))
             ->assertOk()
-            ->assertDontSee('<span class="nav-label">Guests</span>', false)
+            ->assertSee('<span class="nav-label">Guests</span>', false)
             ->assertDontSee('Active Guests');
         $this->actingAs($this->admin)->get(route('settings.index'))->assertOk()->assertDontSee('Guest Pass Rules');
         $this->actingAs($this->admin)->get(route('registry.index', ['tab' => 'tags']))->assertOk()->assertDontSee('Guest Passes');

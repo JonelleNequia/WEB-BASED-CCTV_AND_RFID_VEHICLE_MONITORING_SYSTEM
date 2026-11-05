@@ -130,30 +130,11 @@ def normalize_plate_text(text: str) -> Optional[str]:
     if not re.search(r"[A-Z]", cleaned) or not re.search(r"\d", cleaned):
         return None
 
-    reordered_plate = number_first_plate_candidate(cleaned)
-
-    if reordered_plate:
-        return reordered_plate
-
     for prefix_len, digit_len in PLATE_LAYOUTS:
         if re.fullmatch(rf"[A-Z]{{{prefix_len}}}\d{{{digit_len}}}", cleaned):
             return f"{cleaned[:prefix_len]}-{cleaned[prefix_len:]}"
-
-    return None
-
-
-def number_first_plate_candidate(text: str) -> Optional[str]:
-    """
-    OCR sometimes returns separated plate groups in visual order as 233DPF.
-    Save that as the expected letter-first PH plate format: DPF-233.
-    """
-    for prefix_len, digit_len in PLATE_LAYOUTS:
-        match = re.fullmatch(rf"(\d{{{digit_len}}})([A-Z]{{{prefix_len}}})", text)
-
-        if match:
-            digits, letters = match.groups()
-
-            return f"{letters}-{digits}"
+        if re.fullmatch(rf"\d{{{digit_len}}}[A-Z]{{{prefix_len}}}", cleaned):
+            return cleaned  # Literal number-first identity, never transposed.
 
     return None
 
@@ -162,8 +143,7 @@ def plate_layout_candidates(text: str) -> List[str]:
     """
     Legacy candidate helper; the active normalize_plate_text path does not
     use its positional guesses or substring extraction for identity.
-    Accept only letter-first PH-style plate candidates after number-first
-    OCR group ordering has already been normalized.
+    This unused legacy helper only generates letter-first PH-style candidates.
     """
     candidates: List[Tuple[int, int, int, str]] = []
 
@@ -582,7 +562,7 @@ def select_consensus_plate_scored(candidates: List[Tuple[str, float]]) -> Tuple[
     best_score = scores[best]
     score = round(min(best_score, 1.0), 3)
 
-    if re.match(r"^[A-Z]{3}-\d{3,4}$", best) and best_score >= 0.42:
+    if plate_layout_rank(best) >= 3 and best_score >= 0.42:
         return best, score
 
     if best_score >= 0.55:
@@ -592,18 +572,10 @@ def select_consensus_plate_scored(candidates: List[Tuple[str, float]]) -> Tuple[
 
 
 def plate_layout_rank(plate: str) -> int:
-    if re.match(r"^[A-Z]{3}-\d{4}$", plate):
-        return 4
-
-    if re.match(r"^[A-Z]{3}-\d{3}$", plate):
-        return 3
-
-    if re.match(r"^[A-Z]{2}-\d{5}$", plate):
-        return 2
-
-    if re.match(r"^[A-Z]{2}-\d{4}$", plate):
-        return 1
-
+    compact = re.sub(r"[ -]", "", plate or "")
+    for letters, digits, rank in [(3, 4, 4), (3, 3, 3), (2, 5, 2), (2, 4, 1)]:
+        if re.fullmatch(rf"(?:[A-Z]{{{letters}}}\d{{{digits}}}|\d{{{digits}}}[A-Z]{{{letters}}})", compact):
+            return rank
     return 0
 
 
@@ -654,7 +626,7 @@ def read_license_plate_details(frame, bounding_box) -> Dict[str, object]:
 
         details = result()
 
-        if details["plate"] and re.match(r"^[A-Z]{3}-\d{3,4}$", details["plate"]):
+        if details["plate"] and plate_layout_rank(details["plate"]) >= 3:
             return details
 
         if time.monotonic() - started_at >= OCR_TIME_BUDGET_SECONDS:

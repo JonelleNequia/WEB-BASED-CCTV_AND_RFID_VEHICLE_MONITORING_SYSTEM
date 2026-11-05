@@ -300,6 +300,7 @@ class SystemResetService
         $archive = Storage::disk($this->localStorageService->archiveDisk());
 
         $folders = [];
+        $folders['snapshots/occurrence-media'] = Storage::disk('occurrences')->path('');
         foreach (['vehicle_images', 'plate_images', 'detected_vehicle_images'] as $key) {
             $folders['snapshots/'.$this->localStorageService->mediaDirectory($key)] = $media->path($this->localStorageService->mediaDirectory($key));
         }

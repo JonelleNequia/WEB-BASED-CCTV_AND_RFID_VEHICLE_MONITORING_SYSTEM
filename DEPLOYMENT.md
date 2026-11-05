@@ -217,8 +217,11 @@ from General to Gates; existing General bookmarks redirect there. Inactive
 gates still count toward the minimum of two retained gates. With more than
 two, an admin can confirm **Remove gate**. This archives the gate and releases
 its camera/reader assignments without deleting devices, calibration or
-historical records. Archived gates are excluded from monitoring and new
-record selectors; report filters still include them.
+historical records. Archived gates are excluded from monitoring, new-record
+selectors and normal filter choices. All-gates historical results still include
+their records. Supported archived-gate bookmarks show a read-only historical
+criterion with Change gate and Reset. See `REGISTRATION-PHASE5.md`; this filter
+and terminology update adds no migration.
 
 For a bundled Windows installation, use the existing `deploy\windows\update.bat`
 workflow with a release containing these changes. It backs up the installation,
@@ -242,3 +245,26 @@ write serializes SQLite writers and takes a row lock on MySQL. Keep this
 mutex table when backing up/restoring the database. This gate migration does
 not change accounts; the accompanying account-security migration and its
 one-time password transition are described in [ACCOUNT-SECURITY.md](ACCOUNT-SECURITY.md).
+
+## Registration Phase 6 image update
+
+Use a coherent release containing the Phase 6 PHP, views, public assets and Python
+changes. The release builder exports committed HEAD; a development working tree
+is not automatically included. Follow the existing backup/stop/update/cache/
+restart workflow above. Phase 6 adds no migration and requires no reseeding or
+historical image backfill. Refresh config, routes and views, and restart the
+detector so its callback context and frame-selection metadata match the server.
+
+Ensure the service account can write `storage/app/private/occurrence-media`.
+This directory must remain outside public storage links. Its new images require
+an active application session through `/evidence/occurrences/*`. Existing public
+historical/legacy media retains its existing access; this update does not silently
+move it or close every legacy public-media path. Keep that limitation in mind on
+a LAN, where the default HTTP deployment also remains unencrypted.
+
+Phase 6 backups include private occurrence media as well as the existing folders.
+Restore them with an image-aware application version; old application code cannot
+display the new private path references. Verify real RFID + camera, plate-only,
+Guest/Review, separate IN/OUT photos, clearer updates, private access, disk errors,
+and backup/restore on the Windows PC before operational sign-off. No such Windows
+update or hardware verification was performed by the Phase 6 implementation.

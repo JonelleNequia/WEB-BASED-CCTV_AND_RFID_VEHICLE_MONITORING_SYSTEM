@@ -78,7 +78,7 @@ final class StatusBadge
             ! empty($log['anomaly']) => 'critical',
             ($log['category_label'] ?? null) === 'Review' => 'warning',
             in_array($type, ['UNKNOWN TAG', 'SCAN ONLY', 'UNKNOWN'], true) => 'warning',
-            $type === 'UNREGISTERED', ! empty($log['no_pass_alert']), ($log['verification_label'] ?? '') === 'Unregistered Visitor' => 'neutral',
+            $type === 'UNREGISTERED', ! empty($log['no_pass_alert']), in_array($log['verification_label'] ?? '', ['Unregistered Guest', 'Unregistered Visitor'], true) => 'neutral',
             in_array($type, ['ENTRY', 'EXIT', 'IN', 'OUT'], true) => 'info',
             default => 'neutral',
         };

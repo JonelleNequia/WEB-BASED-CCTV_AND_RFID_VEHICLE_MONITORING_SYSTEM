@@ -75,7 +75,7 @@ class ActivityLogClassificationTest extends TestCase
 
     public static function registeredCategories(): array
     {
-        return [['faculty_staff', 'Faculty & Staff'], ['registered_visitor', 'Registered Visitor'], ['parent', 'Registered Visitor']];
+        return [['faculty_staff', 'Faculty & Staff'], ['registered_visitor', 'Registered Guest'], ['parent', 'Registered Guest']];
     }
 
     #[DataProvider('registeredCategories')]
@@ -165,7 +165,7 @@ class ActivityLogClassificationTest extends TestCase
             'verification_status' => 'guest_pass_lost', 'scan_time' => now(), 'scan_location' => 'gate-2']);
         $rows = $this->actingAs($this->admin)->getJson(route('logs.index'))->assertOk()->json('logs');
         $byId = collect($rows)->keyBy('id');
-        $this->assertSame(['no_pass_alert', 'Unregistered Visitor', true],
+        $this->assertSame(['no_pass_alert', 'Unregistered Guest', true],
             [$byId[$guest->id]['log_type'], $byId[$guest->id]['category_label'], $byId[$guest->id]['is_guest']]);
         $this->assertSame(['guest_pass', 'Old pass record', true],
             [$byId[$pass->id]['log_type'], $byId[$pass->id]['log_type_label'], $byId[$pass->id]['is_guest']]);
@@ -195,7 +195,7 @@ class ActivityLogClassificationTest extends TestCase
         $this->assertNull($record->plateProfile?->vehicle_id);
         $this->actingAs($this->admin)->getJson(route('logs.index'))->assertOk()
             ->assertJsonPath('logs.0.log_type', $status === 'read' ? 'unregistered_visitor' : 'review')
-            ->assertJsonPath('logs.0.category_label', $status === 'read' ? 'Unregistered Visitor' : 'Review')
+            ->assertJsonPath('logs.0.category_label', $status === 'read' ? 'Unregistered Guest' : 'Review')
             ->assertJsonPath('logs.0.is_guest', $status === 'read')->assertJsonPath('summary.guests', $status === 'read' ? 1 : 0);
         $this->getJson(route('logs.index', ['log_type' => 'registered']))->assertJsonPath('total', 0);
         $this->getJson(route('logs.index', ['log_type' => 'unregistered_visitor']))->assertJsonPath('total', $status === 'read' ? 1 : 0);
@@ -211,7 +211,7 @@ class ActivityLogClassificationTest extends TestCase
             'camera_role' => 'gate-1', 'event_time' => now()->toIso8601String(), 'plate_status' => 'read', 'plate_number' => 'REG-1234', 'plate_confidence' => 0.95]);
         $this->assertSame($vehicle->id, $record->vehicle_id);
         $this->actingAs($this->admin)->getJson(route('logs.index', ['log_type' => 'registered']))->assertOk()
-            ->assertJsonPath('total', 1)->assertJsonPath('logs.0.category_label', 'Registered Visitor')
+            ->assertJsonPath('total', 1)->assertJsonPath('logs.0.category_label', 'Registered Guest')
             ->assertJsonPath('logs.0.status_label', 'Direction unknown')->assertJsonPath('summary.guests', 0);
         $this->assertSame(Vehicle::STATE_OUTSIDE, $vehicle->fresh()->current_state);
     }

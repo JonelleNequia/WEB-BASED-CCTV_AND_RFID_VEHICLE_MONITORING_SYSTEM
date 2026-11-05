@@ -107,6 +107,12 @@ class Gate extends Model
         return static::query()->orderBy('sort_order')->orderBy('id')->pluck('name', 'code')->all();
     }
 
+    /** Normal history filters include inactive gates, but do not offer archived gates. */
+    public static function filterOptions(): array
+    {
+        return static::query()->retained()->orderBy('sort_order')->orderBy('id')->pluck('name', 'code')->all();
+    }
+
     /**
      * Turn any gate input (code, old "entrance"/"exit") into a gate code.
      * Unknown values return null.

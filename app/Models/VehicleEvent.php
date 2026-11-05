@@ -9,7 +9,6 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Support\Facades\Storage;
 
 class VehicleEvent extends Model
 {
@@ -239,15 +238,13 @@ class VehicleEvent extends Model
         return [
             'plate_number' => $event->plate_text ?: 'NO PLATE READ',
             'owner_name' => 'Unknown',
-            'verification_label' => 'Unregistered Visitor',
+            'verification_label' => 'Unregistered Guest',
             'resulting_state' => 'N/A',
             // Older CCTV guest rows (before Phase 5) keep their old status and do not alert.
             'no_pass_alert' => $event->match_status === self::MATCH_NO_PASS_ALERT,
             // Phase 1: the gate whose camera raised the alert.
             'alert_location' => $event->camera?->camera_role,
-            'snapshot_url' => $event->vehicle_image_path
-                ? Storage::disk('public')->url($event->vehicle_image_path)
-                : null,
+            'snapshot_url' => \App\Support\OccurrenceMedia::url($event->vehicle_image_path),
         ];
     }
 
@@ -284,11 +281,7 @@ class VehicleEvent extends Model
      */
     public function getVehicleImageUrlAttribute(): string
     {
-        if ($this->vehicle_image_path && Storage::disk('public')->exists($this->vehicle_image_path)) {
-            return Storage::disk('public')->url($this->vehicle_image_path);
-        }
-
-        return asset('images/placeholders/vehicle-placeholder.svg');
+        return \App\Support\OccurrenceMedia::url($this->vehicle_image_path) ?: asset('images/placeholders/vehicle-placeholder.svg');
     }
 
     /**
@@ -296,11 +289,7 @@ class VehicleEvent extends Model
      */
     public function getPlateImageUrlAttribute(): string
     {
-        if ($this->plate_image_path && Storage::disk('public')->exists($this->plate_image_path)) {
-            return Storage::disk('public')->url($this->plate_image_path);
-        }
-
-        return asset('images/placeholders/plate-placeholder.svg');
+        return \App\Support\OccurrenceMedia::url($this->plate_image_path) ?: asset('images/placeholders/plate-placeholder.svg');
     }
 
     /**
@@ -357,8 +346,8 @@ class VehicleEvent extends Model
      */
     public function getHasVisualEvidenceAttribute(): bool
     {
-        return (filled($this->vehicle_image_path) && Storage::disk('public')->exists($this->vehicle_image_path))
-            || (filled($this->plate_image_path) && Storage::disk('public')->exists($this->plate_image_path));
+        return \App\Support\OccurrenceMedia::exists($this->vehicle_image_path)
+            || \App\Support\OccurrenceMedia::exists($this->plate_image_path);
     }
 
     /**

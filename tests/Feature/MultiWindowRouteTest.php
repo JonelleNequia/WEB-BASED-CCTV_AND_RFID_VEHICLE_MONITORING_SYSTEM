@@ -178,7 +178,7 @@ class MultiWindowRouteTest extends TestCase
             ->assertOk()
             ->assertJsonFragment([
                 'event_type' => 'UNREGISTERED',
-                'verification_label' => 'Unregistered Visitor',
+                'verification_label' => 'Unregistered Guest',
                 'resulting_state' => 'Not tracked',
             ]);
     }

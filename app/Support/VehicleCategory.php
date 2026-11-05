@@ -25,8 +25,8 @@ final class VehicleCategory
 
     public const LABELS = [
         self::FACULTY_STAFF => 'Faculty & Staff',
-        self::REGISTERED_VISITOR => 'Registered Visitor',
-        self::UNREGISTERED_VISITOR => 'Unregistered Visitor',
+        self::REGISTERED_VISITOR => 'Registered Guest',
+        self::UNREGISTERED_VISITOR => 'Unregistered Guest',
     ];
 
     /** Categories that can be picked in the Registry. */

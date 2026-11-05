@@ -29,7 +29,7 @@ final class RfidLogClassification
             'log_type' => $type,
             'log_type_label' => match ($type) {
                 'guest_pass' => 'Old pass record',
-                'no_pass_alert' => 'Unregistered Visitor (camera)',
+                'no_pass_alert' => 'Unregistered Guest (camera)',
                 'registered' => 'Registered',
                 default => 'RFID Scan',
             },

@@ -2,7 +2,7 @@
     Activity Logs › Alerts: what needs a look. Anomalies (direction does not
     fit, disabled tag, inactive vehicle...) and unknown tags. Old lost-tag
     alerts remain historical evidence; new lost reads are ignored.
-    Unregistered visitors are normal traffic: see the Visitors page.
+    Unregistered guests are normal traffic: see the Guests page.
 --}}
 <x-stat-row data-auto-update="summary">
     <x-stat label="Anomalies Today" :value="$alertCounts['anomalies'] ?? 0" tone="danger" hint="Direction does not fit, disabled tag or inactive vehicle" />

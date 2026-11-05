@@ -313,10 +313,10 @@ class RfidOnlyWithVehicleTest extends TestCase
 
     public function test_an_unregistered_visitor_result_shows_the_plate_once_read(): void
     {
-        $this->assertSame(['Unregistered Visitor', 'Plate not read yet'],
-            \App\Support\MovementRow::result(['event_type' => 'UNREGISTERED', 'plate_number' => 'No plate', 'category_label' => 'Unregistered Visitor']));
-        $this->assertSame(['Unregistered Visitor', 'Plate ABC 1234'],
-            \App\Support\MovementRow::result(['event_type' => 'ENTRY', 'plate_number' => 'ABC 1234', 'category_label' => 'Unregistered Visitor']));
+        $this->assertSame(['Unregistered Guest', 'Plate not read yet'],
+            \App\Support\MovementRow::result(['event_type' => 'UNREGISTERED', 'plate_number' => 'No plate', 'category_label' => 'Unregistered Guest']));
+        $this->assertSame(['Unregistered Guest', 'Plate ABC 1234'],
+            \App\Support\MovementRow::result(['event_type' => 'ENTRY', 'plate_number' => 'ABC 1234', 'category_label' => 'Unregistered Guest']));
     }
 
     public function test_registration_modes_and_test_scan_accept_a_tag_without_a_record(): void

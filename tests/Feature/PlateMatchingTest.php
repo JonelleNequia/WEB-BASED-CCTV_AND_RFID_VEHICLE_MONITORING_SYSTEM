@@ -121,14 +121,16 @@ class PlateMatchingTest extends TestCase
         $this->assertSame([$abc->id, PlateMatchService::MANUAL, null], [$low->fresh()->plate_profile_id, $low->fresh()->match_confidence, $low->fresh()->suggested_profile_id]);
         $this->assertSame(['read_key' => 'ABC1284', 'plate_key' => 'ABC1234', 'times' => 1], PlateCorrection::query()->sole()->only(['read_key', 'plate_key', 'times']));
 
-        // Next day the camera misreads it the same way: the right plate at once.
+        // A later repeated misread remains literal; the remembered correction is only a suggestion.
         $this->travel(1)->days();
         $this->pass('in-c', 'gate-1', 'IN', 'read', 'ABC-1284', color: 'Red');
         $learned = VisitorRecord::query()->where('external_event_key', 'in-c')->sole();
-        $this->assertSame(['ABC 1234', $abc->id, PlateMatchService::LEARNED], [$learned->plate_number, $learned->plate_profile_id, $learned->match_confidence]);
+        $this->assertSame(['ABC 1284', null, PlateMatchService::LOW], [$learned->plate_number, $learned->plate_profile_id, $learned->match_confidence]);
+        $this->assertSame($abc->id, $learned->suggested_profile_id);
+        $this->assertTrue($learned->plateNeedsReview());
         // And 3 <-> 8 now counts as an easy mix-up.
         $this->assertTrue(app(PlateMatchService::class)->easyMixup('8', '3'));
-        $this->assertSame(3, $abc->fresh()->visit_count);
+        $this->assertSame(2, $abc->fresh()->visit_count);
     }
 
     public function test_no_sensible_time_or_two_equal_candidates_is_low(): void

@@ -26,7 +26,7 @@ class VisitorController extends Controller
     use ResolvesTab;
 
     public const TABS = [
-        'records' => 'Unregistered Visitors',
+        'records' => 'Unregistered Guests',
         'plates' => 'Plate Profiles',
         // ROI work, Phase 2: passes the camera could not tell IN from OUT.
         'review' => 'Review',
@@ -62,7 +62,7 @@ class VisitorController extends Controller
                 ? PlateProfile::query()->current()->orderBy('plate_number')->get(['id', 'plate_number', 'visit_count'])
                 : collect(),
             'gates' => Gate::options(),
-            'historicalGates' => Gate::historicalOptions(),
+            'historicalGates' => Gate::filterOptions(),
             // ROI work: registered records the camera could not tell (saved before Phase A's state fallback).
             'review' => $tab === 'review' ? $this->directionUnknown() : null,
             // Gate direction work, Phase D: the Review cards (plate to check, unknown direction).
@@ -157,10 +157,10 @@ class VisitorController extends Controller
         $record = $service->createManual($validated, $request->user(), $request->file('snapshot'));
 
         return redirect()->route('visitors.index')
-            ->with('status', 'Unregistered visitor '.($record->plate_number ?: '(no plate)').' recorded '.$record->direction.' at '.Gate::labelFor($record->gate).'.');
+            ->with('status', 'Unregistered guest '.($record->plate_number ?: '(no plate)').' recorded '.$record->direction.' at '.Gate::labelFor($record->gate).'.');
     }
 
-    public function correctPlate(Request $request, VisitorRecord $visitorRecord, VisitorRecordService $service): RedirectResponse
+    public function correctPlate(Request $request, VisitorRecord $visitorRecord, VisitorRecordService $service): JsonResponse|RedirectResponse
     {
         $validated = $request->validate([
             'plate_number' => ['nullable', 'required_unless:unreadable,1', 'string', 'max:30', 'regex:/^[A-Za-z0-9 -]+$/', new \App\Rules\PlateIdentifier(20, $visitorRecord->plate_number)],
@@ -168,17 +168,19 @@ class VisitorController extends Controller
         ], ['plate_number.regex' => 'Use letters, digits, spaces or a dash.']);
 
         $plate = ($validated['unreadable'] ?? '0') === '1' ? null : $validated['plate_number'];
-        $record = $service->correctPlate($visitorRecord, $plate, $request->user());
+        return $this->attemptCorrection($request, function () use ($service, $visitorRecord, $plate, $request): RedirectResponse {
+            $record = $service->correctPlate($visitorRecord, $plate, $request->user());
 
-        $message = $plate === null
-            ? "Record #{$record->id} marked as plate unreadable."
-            : "Record #{$record->id} plate set to {$record->plate_number}.";
+            $message = $plate === null
+                ? "Record #{$record->id} marked as plate unreadable."
+                : "Record #{$record->id} plate set to {$record->plate_number}.";
 
-        if ($plate !== null && ! PlateNumber::isPhilippineFormat($plate)) {
-            $message .= ' Note: this is not a usual PH plate layout (ABC 1234, ABC 123, AB 12345).';
-        }
+            if ($plate !== null && ! PlateNumber::isPhilippineFormat($plate)) {
+                $message .= ' Note: this is not a usual PH plate layout (ABC 1234, ABC 123, AB 12345).';
+            }
 
-        return back()->with('status', $message);
+            return back()->with('status', $message);
+        });
     }
 
     /**
@@ -209,11 +211,34 @@ class VisitorController extends Controller
             }] = $argument;
         }
 
-        $result = $service->act($visitorRecord, $action, $validated, $request->user());
+        return $this->attemptCorrection($request, function () use ($service, $visitorRecord, $action, $validated, $request): JsonResponse|RedirectResponse {
+            $result = $service->act($visitorRecord, $action, $validated, $request->user());
 
-        return $request->expectsJson()
-            ? response()->json(['ok' => true] + $result)
-            : back()->with('status', $result['message']);
+            return $request->expectsJson()
+                ? response()->json(['ok' => true] + $result)
+                : back()->with('status', $result['message']);
+        });
+    }
+
+    private function attemptCorrection(Request $request, \Closure $work): JsonResponse|RedirectResponse
+    {
+        try {
+            return $work();
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            throw $exception;
+        } catch (\Throwable $exception) {
+            report($exception);
+            $conflict = $exception instanceof \App\Exceptions\OccurrenceConflict;
+            $message = $conflict ? \App\Exceptions\OccurrenceConflict::PUBLIC_MESSAGE
+                : 'Could not save this correction. Your input is kept. Try again; if it continues, ask an admin to check the system logs.';
+            if ($request->expectsJson()) {
+                return response()->json(['ok' => false, 'error_code' => $conflict ? 'occurrence_conflict' : 'correction_failed',
+                    'message' => $message], $conflict ? 409 : 500);
+            }
+
+            return back()->withErrors(['plate' => $message])->withInput($request->only(['plate', 'plate_number', 'unreadable', 'action'])
+                + ['_review_record_id' => $request->route('visitorRecord')?->id]);
+        }
     }
 
     /**
@@ -242,7 +267,7 @@ class VisitorController extends Controller
         $validated = $request->validate(['note' => ['nullable', 'string', 'max:1000']]);
         $service->updateNote($plateProfile, $validated['note'] ?? null, $request->user());
 
-        return back()->with('status', 'Visitor note saved.');
+        return back()->with('status', 'Guest note saved.');
     }
 
     public function merge(Request $request, PlateProfile $plateProfile, VisitorRecordService $service): RedirectResponse

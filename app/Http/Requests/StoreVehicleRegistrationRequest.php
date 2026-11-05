@@ -7,6 +7,7 @@ use App\Models\Vehicle;
 use App\Rules\PersonalName;
 use App\Rules\PlateIdentifier;
 use App\Rules\RegistrationStaffName;
+use App\Rules\RegistrationOwnerName;
 use App\Support\VehicleCategory;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
@@ -37,6 +38,9 @@ class StoreVehicleRegistrationRequest extends FormRequest
         $blankFields = $this->attributes->get('blank_name_fields', []);
         $blankOwner = in_array('vehicle_owner_name', $blankFields, true)
             || ($this->input('vehicle_owner_name') === null && in_array('owner_name', $blankFields, true));
+        $invalidOwnerFields = $this->attributes->get('invalid_owner_name_fields', []);
+        $invalidNewOwner = in_array('vehicle_owner_name', $invalidOwnerFields, true)
+            || ($this->attributes->get('registration_owner_from_alias') && in_array('owner_name', $invalidOwnerFields, true));
 
         return [
             // Registration attribution is recorded once; unrelated edits leave
@@ -66,11 +70,11 @@ class StoreVehicleRegistrationRequest extends FormRequest
                 new PlateIdentifier(legacyValue: $legacyPlate),
                 Rule::unique('vehicles', 'plate_number')->ignore($vehicleId),
             ],
-            'vehicle_owner_name' => ['bail', 'nullable', 'string', new PersonalName($legacyOwner, $blankOwner), Rule::when(
+            'vehicle_owner_name' => $vehicle instanceof Vehicle ? ['bail', 'nullable', 'string', new PersonalName($legacyOwner, $blankOwner), Rule::when(
                 $legacyOwner === null || ! is_string($this->input('vehicle_owner_name')) || PersonalName::normalize($this->input('vehicle_owner_name')) !== PersonalName::normalize($legacyOwner),
                 'max:100'
-            )],
-            // Phase 4 (visitor model): Faculty & Staff or Registered Visitor.
+            )] : RegistrationOwnerName::rules($invalidNewOwner),
+            // Phase 4 (visitor model): Faculty & Staff or Registered Guest.
             // Unregistered Visitor is set by the system (camera, no tag).
             'category' => [
                 'bail', 'required',
@@ -79,9 +83,9 @@ class StoreVehicleRegistrationRequest extends FormRequest
                     $value = strtolower(trim((string) $value));
 
                     if (in_array($value, [VehicleCategory::UNREGISTERED_VISITOR, 'guest', 'guests'], true)) {
-                        $fail('Unregistered Visitor cannot be picked here: the system sets it for vehicles the camera sees without a registered tag. Choose Faculty & Staff or Registered Visitor.');
+                        $fail('Unregistered Guest cannot be picked here: the system sets it for vehicles the camera sees without a registered tag. Choose Faculty & Staff or Registered Guest.');
                     } elseif (! in_array($value, VehicleCategory::REGISTRY, true)) {
-                        $fail('Choose Faculty & Staff or Registered Visitor.');
+                        $fail('Choose Faculty & Staff or Registered Guest.');
                     }
                 },
             ],
@@ -103,6 +107,7 @@ class StoreVehicleRegistrationRequest extends FormRequest
     {
         return [
             ...RegistrationStaffName::messages(),
+            ...RegistrationOwnerName::messages(),
             // UI Phase 3: clear message for the Add Vehicle / Edit drawers.
             'rfid_tag_uid.unique' => 'This RFID tag is already assigned to another vehicle. Use Replace Tag on that vehicle first.',
         ];
@@ -121,6 +126,7 @@ class StoreVehicleRegistrationRequest extends FormRequest
         }
 
         if (in_array($this->input('vehicle_owner_name'), [null, ''], true) && $this->filled('owner_name')) {
+            $this->attributes->set('registration_owner_from_alias', true);
             $this->merge(['vehicle_owner_name' => $this->input('owner_name')]);
         }
 
