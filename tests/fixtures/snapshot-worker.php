@@ -58,5 +58,6 @@ if (! in_array($response->getStatusCode(), [200, 201], true)) {
 }
 app(App\Services\VisitorRecordService::class)->applyPlateReading(['external_event_key' => $data['external_event_key'],
     'camera_role' => 'gate-1', 'event_time' => $data['event_time'], 'plate_status' => 'read', 'plate_number' => '395ISX', 'plate_confidence' => .99]);
+Tests\fixtures\ConfirmedActualPlate::for(App\Models\VisitorRecord::where('external_event_key', $data['external_event_key'])->sole(), '395ISX');
 echo "accepted\n";
 $completed = true;

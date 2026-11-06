@@ -280,6 +280,7 @@
         setField(form, 'id', vehicle.id);
         setField(form, 'tag_id', vehicle.tag ? vehicle.tag.id : '');
         setField(form, 'plate_number', vehicle.plate_number);
+        form.querySelector('[name="plate_number"]').dataset.plateLegacy = vehicle.plate_number || '';
         setField(form, 'vehicle_owner_name', vehicle.vehicle_owner_name);
 
         // Phase 4: Faculty & Staff or Registered Visitor (no custom categories).

@@ -93,11 +93,9 @@ try {
         await showCard(failure);
         const failureInput = failure.locator('[data-review-plate-input]');
         await failureInput.fill('395/isx');
-        const invalid = page.waitForResponse(r => r.url().endsWith('/records/' + errorsIds.failure + '/review') && r.request().method() === 'POST');
-        await failure.getByRole('button', { name: 'Save plate', exact: true }).click();
-        check((await invalid).status() === 422, 'Unsupported input receives validation feedback without identity extraction');
-        await failure.locator('[data-review-error]').waitFor({ state: 'visible' });
-        check(await failureInput.inputValue() === '395/ISX' && (await failure.locator('[data-review-error]').textContent()).includes('Unsupported'), 'Validation error preserves the entered plate and explains the field problem');
+        check(await failure.getByRole('button', { name: 'Save plate', exact: true }).isDisabled(), 'Unsupported input is blocked before identity extraction');
+        await failure.locator('[data-plate-error]').waitFor({ state: 'visible' });
+        check(await failureInput.inputValue() === '395/ISX' && (await failure.locator('[data-plate-error]').textContent()).includes('Unsupported'), 'Validation error preserves the entered plate and explains the field problem');
         await failureInput.fill('395isx');
         const failed = page.waitForResponse(r => r.url().endsWith('/records/' + errorsIds.failure + '/review') && r.request().method() === 'POST');
         await failure.getByRole('button', { name: 'Save plate', exact: true }).click();

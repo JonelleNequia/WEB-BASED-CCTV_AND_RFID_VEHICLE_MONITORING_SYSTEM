@@ -43,13 +43,28 @@
             </section>
         @endif
 
-        <x-table data-auto-table title="Unregistered Guests" :paginator="$records" :empty="$records->isEmpty()" :empty-title="array_filter($filters, fn ($value) => filled($value)) ? 'No guests match these filters.' : 'No unregistered guests yet'" empty-text="Vehicles that cross a gate without a registered tag appear here.">
+        @php
+            $baseQuery = ['tab' => 'records'] + array_filter($filters, fn ($value) => filled($value));
+            $activeRecordFilter = (string) ($filters['record_filter'] ?? '');
+        @endphp
+        <x-table data-auto-table class="guest-records-table" title="Guest records" :paginator="$records" :empty="$records->isEmpty()" :empty-title="array_filter($filters, fn ($value) => filled($value)) ? 'No guests match these filters.' : 'No guest records yet'" empty-text="Camera observations and manually recorded occurrences appear here.">
+            <x-slot:toolbar>
+                <div class="chip-group" role="group" aria-label="Filter guest records" data-auto-update="record-filters">
+                    @foreach (\App\Http\Controllers\VisitorController::RECORD_FILTERS as $value => $label)
+                        <a href="{{ route('visitors.index', array_filter(array_merge($baseQuery, ['record_filter' => $value, 'page' => null]), fn ($v) => filled($v))) }}"
+                           @class(['chip', 'chip-brand' => $activeRecordFilter === $value, 'chip-soft' => $activeRecordFilter !== $value])
+                           @if ($activeRecordFilter === $value) aria-current="true" @endif>{{ $label }}</a>
+                    @endforeach
+                </div>
+                @include('partials.list-report-actions', ['reportDataset' => 'guests'])
+            </x-slot:toolbar>
             <x-slot:filters>
                 <form method="GET" action="{{ route('visitors.index') }}" class="log-filter-form" data-auto-filter>
                     <input type="hidden" name="tab" value="records">
+                    <input type="hidden" name="record_filter" value="{{ $activeRecordFilter }}">
                     <div class="field">
                         <label for="visitor_q">Plate</label>
-                        <input id="visitor_q" type="search" name="q" value="{{ $filters['q'] ?? '' }}" placeholder="ABC 1234">
+                        <input id="visitor_q" type="search" name="q" value="{{ $filters['q'] ?? '' }}" placeholder="ABC 1234" data-normalize-plate-search>
                     </div>
                     <x-gate-filter id="visitor_gate" :value="$filters['gate'] ?? ''" :options="$historicalGates" all="All" />
                     <div class="field">

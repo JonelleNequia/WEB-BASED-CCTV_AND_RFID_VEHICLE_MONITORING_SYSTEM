@@ -184,7 +184,7 @@
                 <div class="form-grid">
                     <div class="field">
                         <label for="plate_text">Plate</label>
-                        <input id="plate_text" type="text" name="plate_text" value="{{ old('plate_text', $vehicleEvent->plate_text) }}" placeholder="ABC-1234" required data-normalize-plate>
+                        <input id="plate_text" type="text" name="plate_text" value="{{ old('plate_text', $vehicleEvent->plate_text) }}" placeholder="ABC-1234" required maxlength="50" data-normalize-plate data-plate-legacy="{{ $vehicleEvent->plate_text }}">
                     </div>
 
                     <div class="field">

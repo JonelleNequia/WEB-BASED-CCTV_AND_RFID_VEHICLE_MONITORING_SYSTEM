@@ -86,7 +86,7 @@ class VehicleColorRemovalTest extends TestCase
         $observation = GuestVehicleObservation::query()->sole();
         $this->assertNull($observation->vehicle_color);
         $this->assertSame(['track_id' => 123, 'frame_results' => [['plate_score' => 0.9]], 'overlay' => ['color' => 'green']],
-            \Illuminate\Support\Arr::except($observation->detection_metadata_json, [\App\Services\VehicleTypeEvidenceService::KEY]));
+            \Illuminate\Support\Arr::except($observation->detection_metadata_json, [\App\Services\VehicleTypeEvidenceService::KEY, \App\Services\PlateEvidenceService::KEY]));
         foreach (EventReceiveLog::query()->get() as $log) {
             $payload = json_encode($log->payload_json);
             $this->assertStringNotContainsString('vehicle_color', $payload);
@@ -150,8 +150,10 @@ class VehicleColorRemovalTest extends TestCase
         ]))->assertOk();
         $record = VisitorRecord::query()->sole();
         $this->assertNull($record->vehicle_color);
+        $this->assertNull($record->plate_profile_id);
+        $record = \Tests\fixtures\ConfirmedActualPlate::for($record, 'CLR-0006');
         $this->assertNull($record->plateProfile->vehicle_color);
-        $this->assertSame(['frames_checked' => 2], \Illuminate\Support\Arr::except($record->ocr_details_json, [\App\Services\VehicleTypeEvidenceService::KEY]));
+        $this->assertSame(['frames_checked' => 2], \Illuminate\Support\Arr::except($record->ocr_details_json, [\App\Services\VehicleTypeEvidenceService::KEY, \App\Services\PlateEvidenceService::KEY]));
         $record->forceFill(['vehicle_color' => 'HistoricalColorMarker'])->save();
         $this->postJson(route('api.integration.visitor-plates'), $this->capture([
             'plate_number' => 'CLR-0006', 'plate_status' => 'read', 'vehicle_color' => 'different ignored value',
@@ -201,9 +203,10 @@ class VehicleColorRemovalTest extends TestCase
             $this->travel(20)->minutes();
         }
         $exit = VisitorRecord::query()->where('external_event_key', 'exit')->sole();
-        $this->assertSame(PlateMatchService::MEDIUM, $exit->match_confidence);
-        $this->assertNotNull($exit->plate_profile_id);
-        $this->assertStringNotContainsString('colour', $exit->match_reason);
+        $this->assertSame('review', $exit->registration_status);
+        $this->assertNull($exit->match_confidence);
+        $this->assertNull($exit->plate_profile_id);
+        $this->assertNull($exit->vehicle_color);
         $this->assertSame([null, null], VisitorRecord::query()->pluck('vehicle_color')->all());
     }
 

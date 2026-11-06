@@ -84,7 +84,8 @@ try {
     await page.locator('.field-error').filter({ hasText: 'Digits, emojis' }).waitFor();
     check(await page.locator('#vehicle_owner_name').inputValue() === 'Owner 123', 'Rejected name remains editable');
     check(await page.locator('#plate_number').inputValue() === 'UIV-0001', 'Valid plate survives rejected submission');
-    check(await page.locator('.field-error').count() === 1, 'Name error is field-specific');
+    const visibleErrors = await page.locator('.field-error:visible').allTextContents();
+    check(visibleErrors.length === 1, 'Name error is field-specific: ' + JSON.stringify(visibleErrors));
     check(await page.locator('#vehicle_type').inputValue() === 'Car', 'Valid vehicle type survives rejected submission');
     check(await page.locator('#vehicle_type_other').isHidden(), 'Empty custom type does not become required after rejection');
     await page.locator('#vehicle_owner_name').fill('O’Connor');

@@ -194,11 +194,11 @@ class ActivityLogClassificationTest extends TestCase
         $this->assertNull($record->vehicle_id);
         $this->assertNull($record->plateProfile?->vehicle_id);
         $this->actingAs($this->admin)->getJson(route('logs.index'))->assertOk()
-            ->assertJsonPath('logs.0.log_type', $status === 'read' ? 'unregistered_visitor' : 'review')
-            ->assertJsonPath('logs.0.category_label', $status === 'read' ? 'Unregistered Guest' : 'Review')
-            ->assertJsonPath('logs.0.is_guest', $status === 'read')->assertJsonPath('summary.guests', $status === 'read' ? 1 : 0);
+            ->assertJsonPath('logs.0.log_type', 'review')
+            ->assertJsonPath('logs.0.category_label', 'Review')
+            ->assertJsonPath('logs.0.is_guest', false)->assertJsonPath('summary.guests', 0);
         $this->getJson(route('logs.index', ['log_type' => 'registered']))->assertJsonPath('total', 0);
-        $this->getJson(route('logs.index', ['log_type' => 'unregistered_visitor']))->assertJsonPath('total', $status === 'read' ? 1 : 0);
+        $this->getJson(route('logs.index', ['log_type' => 'unregistered_visitor']))->assertJsonPath('total', 0);
         $this->assertSame($before, $record->fresh()->getRawOriginal());
         $this->assertDatabaseCount('vehicle_events', 0);
     }
@@ -209,6 +209,7 @@ class ActivityLogClassificationTest extends TestCase
         $this->travel(2)->seconds();
         $record = app(VisitorRecordService::class)->applyPlateReading(['external_event_key' => 'classification-known',
             'camera_role' => 'gate-1', 'event_time' => now()->toIso8601String(), 'plate_status' => 'read', 'plate_number' => 'REG-1234', 'plate_confidence' => 0.95]);
+        $record = \Tests\fixtures\ConfirmedActualPlate::for($record, 'REG-1234');
         $this->assertSame($vehicle->id, $record->vehicle_id);
         $this->actingAs($this->admin)->getJson(route('logs.index', ['log_type' => 'registered']))->assertOk()
             ->assertJsonPath('total', 1)->assertJsonPath('logs.0.category_label', 'Registered Guest')
@@ -220,6 +221,7 @@ class ActivityLogClassificationTest extends TestCase
     {
         $record = app(VisitorRecordService::class)->applyPlateReading(['external_event_key' => 'classification-before',
             'camera_role' => 'gate-1', 'event_time' => now()->subDay()->toIso8601String(), 'plate_status' => 'read', 'plate_number' => 'OLD-1234', 'plate_confidence' => 0.95]);
+        $record = \Tests\fixtures\ConfirmedActualPlate::for($record, 'OLD-1234');
         $vehicle = $this->vehicle('OLD-1234');
         $this->assertNull($record->fresh()->vehicle_id); // Ordinary registration does not relink earlier passes.
         $before = $record->fresh()->getRawOriginal();

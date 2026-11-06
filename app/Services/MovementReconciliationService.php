@@ -50,7 +50,7 @@ class MovementReconciliationService
             if (! $eligible) {
                 if ($event) {
                     $event->forceFill(['event_status' => VehicleEvent::STATUS_PENDING_DETAILS,
-                        'plate_text' => $record->plate_number, 'plate_number' => $record->plate_number,
+                        'plate_text' => $record->plate_number, 'plate_number' => \App\Support\PlateNumber::storageKey($record->plate_number),
                         'vehicle_id' => null, 'vehicle_category' => $record->classificationCategory()])->save();
                     if ($oldVehicleId) {
                         $this->reconcile((int) $oldVehicleId);
@@ -76,7 +76,7 @@ class MovementReconciliationService
                 'event_type' => VehicleEvent::eventTypeForDirection($record->direction),
                 'event_status' => VehicleEvent::STATUS_COMPLETED,
                 'event_origin' => $record->reviewed_at !== null || $record->source === VisitorRecord::SOURCE_MANUAL ? 'plate_review' : 'plate_ocr',
-                'plate_text' => $record->plate_number, 'plate_number' => $record->plate_number,
+                'plate_text' => $record->plate_number, 'plate_number' => \App\Support\PlateNumber::storageKey($record->plate_number),
                 'plate_confidence' => $record->plate_confidence, 'vehicle_category' => $record->classificationCategory(),
                 'vehicle_type' => $record->vehicle_type,
                 'detected_vehicle_type' => data_get($record->ocr_details_json, VehicleTypeEvidenceService::KEY.'.raw'),

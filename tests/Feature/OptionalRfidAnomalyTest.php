@@ -55,11 +55,13 @@ class OptionalRfidAnomalyTest extends TestCase
         ]);
         app(VisitorRecordService::class)->createFromCrossing($crossing);
 
-        return app(VisitorRecordService::class)->applyPlateReading([
+        $record = app(VisitorRecordService::class)->applyPlateReading([
             'external_event_key' => $crossing->external_event_key, 'camera_role' => 'gate-1',
             'event_time' => now()->toIso8601String(), 'plate_status' => $plate ? 'read' : 'unreadable',
             'plate_number' => $plate, 'plate_confidence' => .99,
         ]);
+        // This fixture represents an actual plate explicitly confirmed by staff.
+        return $plate !== null ? \Tests\fixtures\ConfirmedActualPlate::for($record, $plate) : $record;
     }
 
     public function test_new_untagged_registration_does_not_create_a_movement_or_anomaly(): void
@@ -108,6 +110,7 @@ class OptionalRfidAnomalyTest extends TestCase
                     'event_time' => $record->seen_at->toIso8601String(), 'plate_status' => 'read',
                     'plate_number' => '395isx', 'plate_confidence' => .99,
                 ]);
+                \Tests\fixtures\ConfirmedActualPlate::for($record, '395ISX');
             }
         }
         $event->refresh();
@@ -118,7 +121,7 @@ class OptionalRfidAnomalyTest extends TestCase
         $this->assertSame('faculty_staff', $event->vehicle_category);
         $this->assertDatabaseCount('vehicle_events', 1);
         $this->assertDatabaseCount('rfid_scan_logs', 0);
-        $this->assertDatabaseCount('review_actions', $path === 'staff' ? 1 : 0);
+        $this->assertDatabaseCount('review_actions', 1);
         $this->assertSame(1, $vehicle->fresh()->entries_today_count);
         $this->assertSame(1, app(MovementCountService::class)->counts('today')['in']);
         $this->assertSame(0, app(AlertSummaryService::class)->counts()['total']);

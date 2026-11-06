@@ -167,6 +167,7 @@ class Phase6VisitorRankingTest extends TestCase
                 'plate_confidence' => 0.9,
                 'detected_vehicle_type' => 'Car',
             ])->assertOk();
+            \Tests\fixtures\ConfirmedActualPlate::for(\App\Models\VisitorRecord::where('external_event_key', $key)->sole(), $plate);
         }
     }
 

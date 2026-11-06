@@ -51,6 +51,7 @@
             @endif
             </span>
         </form>
+        @include('partials.list-report-actions', ['reportDataset' => 'vehicles'])
     </x-slot:toolbar>
     <x-slot:emptyAction>
         <button type="button" class="button button-primary button-sm" data-drawer-open="add-vehicle-drawer">Add Vehicle</button>

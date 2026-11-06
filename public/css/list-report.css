@@ -1,0 +1,14 @@
+/* Shared Activity Logs print sheet; only dataset column sizing differs here. */
+.list-report .report-meta dd { overflow-wrap: anywhere; }
+.list-report .summary-table th:first-child { width: 72%; }
+.list-report .records-table { font-size: 8.5pt; }
+.list-report .records-table th { font-size: 7.5pt; letter-spacing: 0; overflow-wrap: normal; word-break: normal; }
+.list-report .report-cell-id { width: 9mm; }
+.list-report .report-cell-time, .list-report .report-cell-last_seen { width: 29mm; }
+.list-report .report-cell-plate, .list-report .report-cell-uid { width: 28mm; }
+.list-report .report-cell-owner { width: 30mm; }
+.list-report .report-cell-registration_status, .list-report .report-cell-classification { width: 26mm; }
+.list-report .col-snapshot img { object-fit: contain; }
+.list-report figure { margin: 0; }
+.list-report figcaption { color: var(--muted); font-size: 7pt; margin-top: .5mm; }
+.list-report .no-snapshot[hidden] { display: none; }

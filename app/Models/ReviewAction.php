@@ -16,6 +16,7 @@ class ReviewAction extends Model
         'correct_plate' => 'Corrected the plate',
         'pick_match' => 'Picked a known plate',
         'no_plate' => 'No plate visible',
+        'temporary_identifier' => 'Confirmed a temporary identifier',
         'set_direction' => 'Set the direction',
         'set_name' => 'Saved the name',
         'dismiss' => 'Dismissed',

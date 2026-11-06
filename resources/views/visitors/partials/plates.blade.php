@@ -6,7 +6,7 @@
             <input type="hidden" name="tab" value="plates">
             <div class="field">
                 <label for="plate_q">Plate</label>
-                <input id="plate_q" type="search" name="q" value="{{ $filters['q'] ?? '' }}" placeholder="ABC 1234">
+                <input id="plate_q" type="search" name="q" value="{{ $filters['q'] ?? '' }}" placeholder="ABC 1234" data-normalize-plate-search>
             </div>
             <div class="field">
                 <label for="plate_sort">Order</label>

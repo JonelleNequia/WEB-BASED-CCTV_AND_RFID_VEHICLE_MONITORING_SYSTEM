@@ -25,7 +25,7 @@ use Illuminate\Validation\ValidationException;
  */
 class VisitorReviewService
 {
-    public const ACTIONS = ['confirm', 'correct_plate', 'pick_match', 'no_plate', 'set_direction', 'set_name', 'dismiss'];
+    public const ACTIONS = ['confirm', 'correct_plate', 'pick_match', 'no_plate', 'temporary_identifier', 'set_direction', 'set_name', 'dismiss'];
 
     public const DISMISS_REASONS = ['not_vehicle' => 'Not a vehicle', 'duplicate' => 'Duplicate of another pass'];
 
@@ -97,12 +97,24 @@ class VisitorReviewService
 
         $message = app(PlateProcessingLock::class)->run(function () use ($record, $action, $input, $user): string {
             $record = VisitorRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
+            $rules = match ($action) {
+                'correct_plate' => ['plate' => ['required', 'string', 'max:30', new \App\Rules\PlateIdentifier(20)]],
+                'pick_match' => ['profile_id' => ['required', 'integer', 'exists:plate_profiles,id']],
+                'set_direction' => ['direction' => ['required', 'in:IN,OUT']],
+                'set_name' => ['name' => ['nullable', 'string']],
+                'dismiss' => ['reason' => ['required', \Illuminate\Validation\Rule::in(array_keys(self::DISMISS_REASONS))]],
+                'temporary_identifier' => ['identifier_type' => ['required', \Illuminate\Validation\Rule::in(array_keys(PlateEvidenceService::TEMPORARY))],
+                    'identifier_text' => ['required', 'string', 'max:200', 'not_regex:/[\p{Cc}\p{Cf}]/u']],
+                default => [],
+            };
+            $input = \Illuminate\Support\Facades\Validator::make($input, $rules)->validate();
 
             return match ($action) {
             'confirm' => $this->confirm($record, $user),
             'correct_plate' => $this->correctPlate($record, (string) ($input['plate'] ?? ''), $user, 'correct_plate'),
             'pick_match' => $this->pickMatch($record, (int) ($input['profile_id'] ?? 0), $user),
             'no_plate' => $this->noPlate($record, $user),
+            'temporary_identifier' => $this->temporaryIdentifier($record, $input['identifier_type'], $input['identifier_text'], $user),
             'set_direction' => $this->setDirection($record, (string) ($input['direction'] ?? ''), $user),
             'set_name' => $this->setName($record, (string) ($input['name'] ?? ''), $user),
             'dismiss' => $this->dismiss($record, (string) ($input['reason'] ?? ''), $user),
@@ -121,6 +133,7 @@ class VisitorReviewService
             'registration_status' => $record->registration_status,
             'registration_reason' => $record->registration_reason,
             'plate_number' => $record->plate_number,
+            'direction' => $record->direction,
         ];
     }
 
@@ -147,14 +160,21 @@ class VisitorReviewService
     /** The camera's read is right (also a low match: it is its own plate). */
     protected function confirm(VisitorRecord $record, User $user): string
     {
-        $plate = $record->plate_number;
-        if (! $plate || ! in_array($record->plate_status, [VisitorRecord::PLATE_READ, VisitorRecord::PLATE_CORRECTED], true)) {
+        $plate = $record->plate_number ?: $record->ocr_plate_number;
+        if (! $plate) {
             throw ValidationException::withMessages(['plate' => 'There is no plate to confirm: type it, or press "No plate visible".']);
         }
 
         $this->visitorRecordService->correctPlate($record, $plate, $user, 'confirm');
 
         return "Record #{$record->id}: plate {$plate} confirmed.";
+    }
+
+    protected function temporaryIdentifier(VisitorRecord $record, string $kind, string $text, User $user): string
+    {
+        $this->visitorRecordService->confirmTemporary($record, $kind, $text, $user);
+
+        return "Record #{$record->id}: ".PlateEvidenceService::TEMPORARY[$kind].' saved as evidence only; no actual plate assigned.';
     }
 
     protected function correctPlate(VisitorRecord $record, string $plate, User $user, string $action): string

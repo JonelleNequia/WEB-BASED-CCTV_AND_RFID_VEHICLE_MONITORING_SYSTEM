@@ -73,18 +73,32 @@
 
             <div class="field">
                 <label for="plate_text">Plate</label>
-                <input id="plate_text" type="search" name="plate_text" value="{{ $filters['plate_text'] ?? '' }}" placeholder="ABC 1234">
+                <input id="plate_text" type="search" name="plate_text" value="{{ $filters['plate_text'] ?? '' }}" placeholder="ABC 1234" data-normalize-plate-search>
             </div>
             {{-- Phase 7 (visitor model): gate filter, also used by CSV and Print. --}}
             <x-gate-filter :value="$filters['gate'] ?? ''" :options="$gateOptions" />
             <div class="field">
                 <label for="date_from">From</label>
-                <input id="date_from" type="date" name="date_from" value="{{ $filters['date_from'] ?? '' }}">
+                <input id="date_from" type="date" name="date_from" min="0001-01-01" max="9999-12-31" value="{{ $filters['date_from'] ?? '' }}" aria-describedby="date_from_error">
+                <span id="date_from_error" class="field-error" data-filter-error-for="date_from" role="alert" hidden></span>
             </div>
             <div class="field">
                 <label for="date_to">To</label>
-                <input id="date_to" type="date" name="date_to" value="{{ $filters['date_to'] ?? '' }}">
+                <input id="date_to" type="date" name="date_to" min="0001-01-01" max="9999-12-31" value="{{ $filters['date_to'] ?? '' }}" aria-describedby="date_to_error">
+                <span id="date_to_error" class="field-error" data-filter-error-for="date_to" role="alert" hidden></span>
             </div>
+            <div class="field">
+                <label for="time_from">From Time</label>
+                <input id="time_from" type="time" name="time_from" step="60" value="{{ $filters['time_from'] ?? '' }}" aria-describedby="time_from_error log-time-help">
+                <span id="time_from_error" class="field-error" data-filter-error-for="time_from" role="alert" hidden></span>
+            </div>
+            <div class="field">
+                <label for="time_to">To Time</label>
+                <input id="time_to" type="time" name="time_to" step="60" value="{{ $filters['time_to'] ?? '' }}" aria-describedby="time_to_error log-time-help">
+                <span id="time_to_error" class="field-error" data-filter-error-for="time_to" role="alert" hidden></span>
+            </div>
+
+            <p class="field-help log-time-help" id="log-time-help">Daily window in Asia/Manila, including the entire end minute. Blank times apply no time restriction. Overnight periods require separate selections.</p>
 
             <div class="log-filter-actions">
                 <noscript><button type="submit" class="button button-primary button-sm">Apply</button></noscript>

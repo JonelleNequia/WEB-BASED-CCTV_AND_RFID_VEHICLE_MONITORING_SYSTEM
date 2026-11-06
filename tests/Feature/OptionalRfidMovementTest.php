@@ -79,10 +79,12 @@ class OptionalRfidMovementTest extends TestCase
         ]);
         app(VisitorRecordService::class)->createFromCrossing($crossing);
 
-        return app(VisitorRecordService::class)->applyPlateReading([
+        $record = app(VisitorRecordService::class)->applyPlateReading([
             'external_event_key' => $crossing->external_event_key, 'camera_role' => 'gate-1', 'event_time' => $at->toIso8601String(),
             'plate_status' => $plate ? 'read' : 'unreadable', 'plate_number' => $plate, 'plate_confidence' => $confidence,
         ]);
+        // This fixture represents an actual plate explicitly confirmed by staff.
+        return $plate !== null && $confidence >= .6 ? \Tests\fixtures\ConfirmedActualPlate::for($record, $plate) : $record;
     }
 
     private function online(): void
@@ -134,7 +136,7 @@ class OptionalRfidMovementTest extends TestCase
         $this->assertSame(Vehicle::STATE_INSIDE, $vehicle->fresh()->current_state);
         $this->assertSame(1, $vehicle->fresh()->entries_today_count);
         $event = $in->movementEvent;
-        $this->assertSame('plate_ocr', $event->event_origin);
+        $this->assertSame('plate_review', $event->event_origin);
         $this->assertSame($in->id, $event->visitor_record_id);
         $this->assertNull($event->rfid_scan_log_id);
         $this->pass($vehicle->plate_number, 'UNKNOWN');
@@ -169,7 +171,7 @@ class OptionalRfidMovementTest extends TestCase
         $this->assertSame(Vehicle::STATE_INSIDE, $vehicle->fresh()->current_state);
         $this->assertSame($newest->seen_at->timestamp, $vehicle->fresh()->last_seen_at->timestamp);
         $this->assertSame([2, 1], [$vehicle->fresh()->entries_today_count, $vehicle->fresh()->exits_today_count]);
-        $this->assertDatabaseCount('review_actions', 1);
+        $this->assertDatabaseCount('review_actions', 3);
         $this->assertDatabaseCount('vehicle_events', 3);
         app(VisitorRecordService::class)->applyPlateReading([
             'external_event_key' => $older->external_event_key, 'camera_role' => 'gate-1', 'event_time' => $older->seen_at->toIso8601String(),
@@ -365,7 +367,7 @@ class OptionalRfidMovementTest extends TestCase
         $this->assertSame('IN', $record->fresh()->direction);
         $this->assertSame('IN', $record->crossing->fresh()->direction);
         $this->assertSame('INSIDE', $vehicle->fresh()->current_state);
-        $this->assertSame('plate_ocr', $event->fresh()->event_origin);
+        $this->assertSame('plate_review', $event->fresh()->event_origin);
         $this->assertSame('manual', $event->fresh()->direction_source);
         $this->assertSame(1, $vehicle->fresh()->entries_today_count);
         $this->assertDatabaseCount('rfid_scan_logs', 0);
@@ -424,7 +426,7 @@ class OptionalRfidMovementTest extends TestCase
         $this->getJson(route('logs.index'))->assertJsonPath('total', 1)->assertJsonPath('logs.0.log_type', 'registered');
     }
 
-    public function test_conflicting_late_ocr_stays_in_review_when_the_shared_event_already_has_verified_rfid(): void
+    public function test_conflicting_late_ocr_does_not_overwrite_staff_evidence_when_the_event_has_verified_rfid(): void
     {
         $vehicle = $this->vehicle(tagged: true);
         $this->online();
@@ -434,8 +436,9 @@ class OptionalRfidMovementTest extends TestCase
             'external_event_key' => $record->external_event_key, 'camera_role' => 'gate-1', 'event_time' => now()->toIso8601String(),
             'plate_status' => 'read', 'plate_number' => 'OTHER-0002', 'plate_confidence' => 0.95,
         ]);
-        $this->assertSame('review', $record->fresh()->registration_status);
-        $this->assertSame(1, app(\App\Services\VisitorReviewService::class)->count());
+        $this->assertSame('registered', $record->fresh()->registration_status);
+        $this->assertSame(\App\Support\PlateNumber::display($vehicle->plate_number), $record->fresh()->plate_number);
+        $this->assertSame(0, app(\App\Services\VisitorReviewService::class)->count());
         $this->assertSame($vehicle->id, $record->movementEvent->vehicle_id);
         $this->assertSame('INSIDE', $vehicle->fresh()->current_state);
         $this->assertSame(1, $vehicle->fresh()->entries_today_count);

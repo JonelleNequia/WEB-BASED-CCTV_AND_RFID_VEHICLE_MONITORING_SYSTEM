@@ -113,6 +113,8 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
     // Phase 5 (visitor model): Unregistered Visitor records and plate profiles.
     // Guards correct plates and keep notes; merging plates is for admins.
     Route::get('/visitors', [VisitorController::class, 'index'])->middleware(\App\Http\Middleware\ValidateListFilters::class)->name('visitors.index');
+    Route::get('/visitors/print', [\App\Http\Controllers\ListReportController::class, 'print'])->middleware(\App\Http\Middleware\ValidateListFilters::class)->name('visitors.print');
+    Route::get('/visitors/export/csv', [\App\Http\Controllers\ListReportController::class, 'csv'])->middleware(\App\Http\Middleware\ValidateListFilters::class)->name('visitors.export.csv');
     // Phase 8: the old Guests page is the Visitors page (guards too).
     Route::get('/guests', $legacyRedirect('visitors.index'))->name('guests.index');
     Route::post('/visitors/records', [VisitorController::class, 'store'])->name('visitors.records.store');
@@ -138,6 +140,8 @@ Route::middleware(['auth', 'detector'])->group(function () use ($legacyRedirect)
         Route::redirect('/dashboard', '/admin')->name('dashboard.legacy');
         // UI Phase 2: the six sidebar pages.
         Route::get('/registry', [RegistryController::class, 'index'])->middleware(\App\Http\Middleware\ValidateListFilters::class)->name('registry.index');
+        Route::get('/registry/print', [\App\Http\Controllers\ListReportController::class, 'print'])->middleware(\App\Http\Middleware\ValidateListFilters::class)->name('registry.print');
+        Route::get('/registry/export/csv', [\App\Http\Controllers\ListReportController::class, 'csv'])->middleware(\App\Http\Middleware\ValidateListFilters::class)->name('registry.export.csv');
         Route::get('/logs', [ActivityLogController::class, 'index'])->middleware(\App\Http\Middleware\ValidateListFilters::class)->name('logs.index');
         // ROI work, Phase 7: the printable Vehicle Activity Report (Print and Save as PDF).
         Route::get('/logs/print', [VehicleEventController::class, 'printReport'])->middleware(\App\Http\Middleware\ValidateListFilters::class)->name('logs.print');

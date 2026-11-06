@@ -34,6 +34,7 @@ foreach ([['rfid-photo', 'IN', null, true], ['plate-photo', 'OUT', '395ISX', tru
             'external_event_key' => $key, 'camera_role' => 'gate-1', 'event_time' => $at->toIso8601String(),
             'plate_status' => 'read', 'plate_number' => $plate, 'plate_confidence' => .99,
         ], Illuminate\Http\UploadedFile::fake()->image('crop.jpg', 160, 50));
+        Tests\fixtures\ConfirmedActualPlate::for(App\Models\VisitorRecord::where('external_event_key', $key)->sole(), $plate);
     }
     if ($key === 'review-photo') {
         app(App\Services\VisitorRecordService::class)->applyPlateReading([

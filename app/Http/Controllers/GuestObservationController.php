@@ -946,6 +946,9 @@ class GuestObservationController extends Controller
         $plateFingerprint = $plateNumber !== null
             ? $this->plateFingerprint($plateNumber)
             : null;
+        if ($plateFingerprint === '') {
+            return null; // Invalid legacy evidence cannot establish shared identity.
+        }
         $requestBox = $this->metadataBoundingBox($metadata);
 
         $candidates = (clone $query)
@@ -1078,7 +1081,7 @@ class GuestObservationController extends Controller
             return '';
         }
 
-        return preg_replace('/[^A-Z0-9]/', '', Str::upper((string) $plateNumber)) ?? '';
+        return PlateNumber::key($plateNumber) ?? '';
     }
 
     protected function prepareManualGuestObservationRequest(Request $request): void

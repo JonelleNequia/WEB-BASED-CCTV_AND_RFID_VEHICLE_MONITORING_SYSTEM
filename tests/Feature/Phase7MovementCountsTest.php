@@ -258,6 +258,7 @@ class Phase7MovementCountsTest extends TestCase
                 'external_event_key' => $key, 'camera_role' => $gate, 'event_time' => now()->toIso8601String(),
                 'plate_status' => 'read', 'plate_number' => $plate, 'plate_confidence' => 0.9,
             ])->assertOk();
+            \Tests\fixtures\ConfirmedActualPlate::for(\App\Models\VisitorRecord::where('external_event_key', $key)->sole(), $plate);
         }
 
         return $key;

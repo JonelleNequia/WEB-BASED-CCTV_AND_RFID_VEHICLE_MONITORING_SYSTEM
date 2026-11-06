@@ -15,7 +15,7 @@ class PlateIdentifier implements ValidationRule
         if (! is_string($value)) {
             return; // The field's string rule reports malformed types.
         }
-        if ($this->legacyValue !== null && strtoupper(trim($value)) === strtoupper(trim($this->legacyValue))) {
+        if ($this->legacyValue !== null && PlateNumber::normalize($value) === PlateNumber::normalize($this->legacyValue)) {
             return;
         }
         $key = PlateNumber::key($value);

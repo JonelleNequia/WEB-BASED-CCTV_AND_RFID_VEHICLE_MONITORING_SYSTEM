@@ -33,6 +33,8 @@
         ['RFID Tag', 'rfid_tag_uid'],
         ['State', 'state_label'],
         ['Status', 'status_label'],
+        ['Identifier type (evidence only)', 'identifier_type_label'],
+        ['Identifier text (evidence only)', 'identifier_text'],
         ['Match', 'match_label'],
         ['Alert', 'alert_reason'],
         ['Vehicle snapshot', 'image_status'],

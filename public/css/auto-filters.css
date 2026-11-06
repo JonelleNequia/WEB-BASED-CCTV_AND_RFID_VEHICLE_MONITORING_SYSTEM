@@ -11,7 +11,33 @@
 [data-auto-state="error"] [data-auto-status] { color: #b91c1c; }
 [data-auto-state="loading"] [data-auto-update="results"] { opacity: .65; }
 [data-auto-export][aria-disabled="true"] { opacity: .55; cursor: progress; }
+[data-filter-error-for][hidden] { display: none; }
+.log-filter-form .log-time-help { flex-basis: 100%; margin: 0; }
+[data-auto-list="logs-events"] .log-filter-form { width: 100%; min-width: 0; }
+[data-auto-list="logs-events"] .log-filter-form > .field { flex: 1 1 150px; min-width: 0; }
+[data-auto-list="logs-events"] .log-filter-form input,
+[data-auto-list="logs-events"] .log-filter-form select { width: 100%; min-width: 0; max-width: 100%; }
+[data-auto-list="logs-events"] .more-filters { min-width: 0; width: 100%; }
+[data-auto-list="logs-events"] .event-log-list-view,
+[data-auto-list="logs-events"] .event-log-list-view > * { min-width: 0; }
+[data-auto-list="logs-events"] .event-log-list-view .table-responsive { width: 100%; }
 [data-auto-retry][hidden], [data-auto-live][hidden] { display: none; }
+
+/* Guests keeps the existing chip layout while its table scrolls independently. */
+.guest-records-table, .guest-records-table > *, .guest-records-table .data-table-tools { min-width: 0; }
+.guest-records-table .log-filter-form { width: 100%; min-width: 0; }
+.guest-records-table .log-filter-form > .field { flex: 1 1 150px; min-width: 0; }
+.guest-records-table .log-filter-form input,
+.guest-records-table .log-filter-form select { width: 100%; min-width: 0; max-width: 100%; }
+.guest-records-table .table-responsive { width: 100%; }
+.guest-records-table table { min-width: 800px; }
+
+/* Inventory columns scroll independently so its report actions stay reachable. */
+.registry-tags-table, .registry-tags-table > *, .registry-tags-table .data-table-tools { min-width: 0; }
+.registry-tags-table .table-responsive { width: 100%; }
+.registry-tags-table table { min-width: 800px; }
+.registry-tags-table .toolbar-search { flex-wrap: wrap; min-width: 0; }
+.registry-tags-table .toolbar-search select { max-width: 100%; }
 
 /* Keep the existing direct-child print layout through the list scope. */
 @media print {

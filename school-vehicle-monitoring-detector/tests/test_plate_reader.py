@@ -71,7 +71,7 @@ class PlateReaderTests(unittest.TestCase):
             boxes.append([(0.8, [plate_box[0] - left, plate_box[1] - top, plate_box[2] - left, plate_box[3] - top])])
         calls = []
 
-        def fake_read(image):
+        def fake_read(image, evidence=None):
             calls.append(image.shape)
             return reads(len(calls)) if callable(reads) else reads.pop(0) if reads else []
 

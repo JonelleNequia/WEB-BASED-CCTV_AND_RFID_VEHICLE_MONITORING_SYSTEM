@@ -86,6 +86,10 @@
                 remaining.textContent = result.remaining;
             }
             const needs = result.needs || {};
+            const direction = card.querySelector('[data-review-direction]');
+            if (direction && result.direction) direction.textContent = result.direction;
+            const directionBadge = card.querySelector('[data-review-direction-badge]');
+            if (directionBadge) directionBadge.hidden = !needs.direction;
             const reason = card.querySelector('[data-registration-reason]');
             if (reason) {
                 reason.textContent = result.registration_reason || '';
@@ -111,18 +115,32 @@
     }
 
     queue.addEventListener('submit', (event) => {
+        if (event.defaultPrevented) return;
         const card = event.target.closest('[data-review-card]');
         if (!card) {
             return;
         }
         event.preventDefault();
         const submitter = event.submitter || card.querySelector('[data-review-enter]');
+        if (submitter.value === 'temporary_identifier') {
+            const form = event.target;
+            const text = form.elements.identifier_text.value;
+            if (!form.elements.identifier_type.value || !text.trim() || text.length > 200 || /[\p{Cc}\p{Cf}]/u.test(text)) {
+                const error = card.querySelector('[data-review-error]');
+                error.textContent = 'Choose the observed identifier type and enter its text (up to 200 characters, without control characters).';
+                error.hidden = false;
+                return;
+            }
+        }
         send(card, submitter);
     });
 
     function typing(target) {
         return target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
     }
+
+    queue.querySelector('[data-review-prev]')?.addEventListener('click', () => show(current - 1));
+    queue.querySelector('[data-review-next]')?.addEventListener('click', () => show(current + 1));
 
     document.addEventListener('keydown', (event) => {
         if (event.isComposing || event.keyCode === 229) return;
@@ -135,7 +153,7 @@
                 event.target.blur();
             } else if (event.key === 'Enter' && event.target.matches('[data-review-name-input]')) {
                 event.preventDefault();
-                send(card, card.querySelector('button[value="set_name"]'));
+                card.querySelector('[data-review-form]').requestSubmit(card.querySelector('button[value="set_name"]'));
             }
             return;
         }
@@ -157,7 +175,7 @@
             if (!button) {
                 return;
             }
-            send(card, button);
+            card.querySelector('[data-review-form]').requestSubmit(button);
         }
         event.preventDefault();
     });

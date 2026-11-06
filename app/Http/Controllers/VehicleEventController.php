@@ -55,6 +55,8 @@ class VehicleEventController extends Controller
                 'match_status',
                 'date_from',
                 'date_to',
+                'time_from',
+                'time_to',
                 'period',
                 'category',
                 'vehicle_owner_name',
@@ -76,11 +78,7 @@ class VehicleEventController extends Controller
     {
         $singleLog = $this->singleUnifiedLog($request);
         // UI Phase 4: the toolbar CSV (all=1) exports every filtered row, not only the visible page.
-        $rows = match (true) {
-            $singleLog !== null => collect([$singleLog]),
-            $request->boolean('all') => $this->filteredUnifiedLogs($request),
-            default => $this->paginatedUnifiedLogs($request, 10)->getCollection(),
-        };
+        $rows = $singleLog !== null ? collect([$singleLog]) : $this->filteredUnifiedLogs($request);
         $filename = $singleLog !== null
             ? str($singleLog['record_type'].'-'.$singleLog['id'].'-'.now()->format('Ymd-His'))->slug().'.csv'
             : 'vehicle-events-'.now()->format('Ymd-His').'.csv';
@@ -252,7 +250,7 @@ class VehicleEventController extends Controller
         }
 
         try {
-            return Carbon::parse((string) $value);
+            return Carbon::createFromFormat('!Y-m-d', (string) $value, PhilippineTime::TIMEZONE);
         } catch (\Throwable) {
             return null;
         }
@@ -327,7 +325,7 @@ class VehicleEventController extends Controller
             ->map(fn (array $log): array => $this->printRow($log))
             ->values();
         $dateRange = $this->printDateRange($reportRequest, $rows);
-        $printedAt = DisplayTime::datetime(now());
+        $printedAt = now(PhilippineTime::TIMEZONE)->format(DisplayTime::DATETIME);
 
         return view('logs.print', [
             'reportKey' => $reportKey,
@@ -420,8 +418,9 @@ class VehicleEventController extends Controller
     protected function printDateRange(Request $request, Collection $rows): string
     {
         $span = function ($from, $to): string {
-            $first = DisplayTime::date($from, '…');
-            $last = DisplayTime::date($to, '…');
+            $localDate = fn ($at) => $at ? Carbon::parse($at, PhilippineTime::TIMEZONE)->setTimezone(PhilippineTime::TIMEZONE)->format(DisplayTime::DATE) : '…';
+            $first = $localDate($from);
+            $last = $localDate($to);
 
             return $first === $last ? $first : "{$first} – {$last}";
         };
@@ -524,7 +523,7 @@ class VehicleEventController extends Controller
                     ->orWhereHas('camera', fn ($camera) => $camera->whereIn('camera_role', $gates)));
             })
             ->when($dateFrom !== null, function ($query) use ($dateFrom): void {
-                $query->where('event_time', '>=', $dateFrom->copy()->startOfDay());
+                $query->where('event_time', '>=', $dateFrom);
             })
             ->when($dateUntil !== null, function ($query) use ($dateUntil): void {
                 $query->where('event_time', '<', $dateUntil);
@@ -532,8 +531,7 @@ class VehicleEventController extends Controller
     }
 
     /**
-     * Build the visible report page. CSV export intentionally uses this same
-     * paginator so exports only contain the currently visible records.
+     * Build the visible report page. Bulk exports use the complete collection.
      *
      * @return LengthAwarePaginator<int, array<string, mixed>>
      */
@@ -570,7 +568,12 @@ class VehicleEventController extends Controller
      */
     protected function filteredUnifiedLogs(Request $request): Collection
     {
+        $timeWindow = \App\Support\ActivityLogTimeWindow::forRequest($request);
         [$dateFrom, $dateUntil] = $this->dateWindowForRequest($request);
+        // Occurrence columns use the application's storage timezone; requested
+        // calendar boundaries are Manila midnight, even on a UTC installation.
+        $dateFrom = $dateFrom?->copy()->setTimezone(config('app.timezone'));
+        $dateUntil = $dateUntil?->copy()->setTimezone(config('app.timezone'));
 
         $eventLogs = $this->filteredEventsQuery($request, $dateFrom, $dateUntil)
             ->with('rfidScanLog:id,scan_location,tag_uid')
@@ -594,6 +597,7 @@ class VehicleEventController extends Controller
             ->concat($guestLogs)
             ->concat($rfidOnlyLogs)
             ->concat($visitorLogs)
+            ->filter(fn (array $log): bool => $timeWindow->includes($log['event_time_export'] ?? null))
             // Phase 4: Log Type filter (Registered, Guest Pass, Manual, No-pass Alert).
             ->when(
                 array_key_exists((string) $request->query('log_type'), self::LOG_TYPES),
@@ -722,7 +726,7 @@ class VehicleEventController extends Controller
                 $query->whereRaw('1 = 0');
             })
             ->when($dateFrom !== null, function ($query) use ($dateFrom): void {
-                $query->where('observed_at', '>=', $dateFrom->copy()->startOfDay());
+                $query->where('observed_at', '>=', $dateFrom);
             })
             ->when($dateUntil !== null, function ($query) use ($dateUntil): void {
                 $query->where('observed_at', '<', $dateUntil);
@@ -738,10 +742,11 @@ class VehicleEventController extends Controller
             ->when($this->gateFilter($request) !== null, fn ($query) => $query->whereIn('scan_location', $this->gateFilterValues($request)))
             ->when($request->filled('plate_text'), function ($query) use ($request): void {
                 $term = '%'.$request->string('plate_text')->trim().'%';
+                $plate = $request->string('plate_text')->value();
 
-                $query->where(function ($query) use ($term): void {
+                $query->where(function ($query) use ($term, $plate): void {
                     $query->where('tag_uid', 'like', $term)
-                        ->orWhereHas('vehicle', fn ($vehicleQuery) => $vehicleQuery->where('plate_number', 'like', $term));
+                        ->orWhereHas('vehicle', fn ($vehicleQuery) => \App\Support\PlateNumber::search($vehicleQuery, ['plate_number'], $plate));
                 });
             })
             ->when($request->filled('event_type'), function ($query) use ($request): void {
@@ -761,7 +766,7 @@ class VehicleEventController extends Controller
                 });
             })
             ->when($dateFrom !== null, function ($query) use ($dateFrom): void {
-                $query->where('scan_time', '>=', $dateFrom->copy()->startOfDay());
+                $query->where('scan_time', '>=', $dateFrom);
             })
             ->when($dateUntil !== null, function ($query) use ($dateUntil): void {
                 $query->where('scan_time', '<', $dateUntil);
@@ -827,9 +832,7 @@ class VehicleEventController extends Controller
             'direction_source' => $event->direction_source,
             'direction_source_label' => $this->directionSourceLabel($event->direction_source, $event->direction_confidence),
             'state_label' => $event->resulting_state_label,
-            'display_time' => DisplayTime::datetime($time, 'No time'),
-            'summary_label' => 'Vehicle Event #'.$event->id.' • '.(DisplayTime::datetime($time, 'No time')),
-            'event_time_export' => $time?->toDateTimeString(),
+            ...$this->occurrenceTimeFields($time, 'Vehicle Event #'.$event->id),
             // UI Phase 3: the real status (not Entry / Exit again, which the movement shows).
             ...$this->vehicleEventStatus($event),
             'match_label' => $event->match_display,
@@ -882,9 +885,7 @@ class VehicleEventController extends Controller
             'source_label' => $observation->observation_source === 'cctv' ? 'Camera · no registered tag' : 'Manual · no registered tag',
             'station_label' => \App\Models\Gate::labelFor($observation->location),
             'state_label' => 'Not tracked',
-            'display_time' => DisplayTime::datetime($time, 'No time'),
-            'summary_label' => 'Unregistered Guest #'.$observation->id.' • '.(DisplayTime::datetime($time, 'No time')),
-            'event_time_export' => $time?->toDateTimeString(),
+            ...$this->occurrenceTimeFields($time, 'Unregistered Guest #'.$observation->id),
             'status_label' => 'Unregistered',
             'status_badge_class' => 'secondary',
             'match_label' => 'Unregistered',
@@ -924,9 +925,7 @@ class VehicleEventController extends Controller
             'source_label' => 'RFID Scan',
             'station_label' => \App\Models\Gate::labelFor($scanLog->scan_location),
             'state_label' => $scanLog->resultingStateLabel,
-            'display_time' => DisplayTime::datetime($time, 'No time'),
-            'summary_label' => 'RFID Scan #'.$scanLog->id.' • '.(DisplayTime::datetime($time, 'No time')),
-            'event_time_export' => $time?->toDateTimeString(),
+            ...$this->occurrenceTimeFields($time, 'RFID Scan #'.$scanLog->id),
             'status_label' => $scanLog->verificationLabel,
             'status_badge_class' => $scanLog->verificationBadgeClass,
             'match_label' => 'No vehicle event',
@@ -967,7 +966,7 @@ class VehicleEventController extends Controller
                 \App\Support\PlateNumber::search($query, ['plate_number', 'ocr_plate_number'], $request->string('plate_text')->value());
             })
             ->when($this->gateFilter($request) !== null, fn ($query) => $query->whereIn('gate', $this->gateFilterValues($request)))
-            ->when($dateFrom !== null, fn ($query) => $query->where('seen_at', '>=', $dateFrom->copy()->startOfDay()))
+            ->when($dateFrom !== null, fn ($query) => $query->where('seen_at', '>=', $dateFrom))
             ->when($dateUntil !== null, fn ($query) => $query->where('seen_at', '<', $dateUntil))
             ->get();
 
@@ -987,7 +986,8 @@ class VehicleEventController extends Controller
      */
     protected function visitorRecordLogPayload(VisitorRecord $record): array
     {
-        return \App\Support\VisitorRecordLog::fields($record);
+        return array_replace(\App\Support\VisitorRecordLog::fields($record),
+            $this->occurrenceTimeFields($record->seen_at, ($record->isRegisteredAtOccurrence() ? 'Registered vehicle' : ($record->classificationCategory() === 'review' ? 'Review' : 'Unregistered Guest')).' #'.$record->id));
     }
     /**
      * UI Phase 3: status of a vehicle log row: Anomaly (red), Unregistered
@@ -1038,6 +1038,7 @@ class VehicleEventController extends Controller
             $request->filled('log_type') ? (self::LOG_FILTER_CHIPS[$request->string('log_type')->value()] ?? null) : null,
             $request->filled('plate_text') ? 'Plate "'.$request->string('plate_text')->trim().'"' : null,
             $request->filled('vehicle_owner_name') ? 'Owner "'.$request->string('vehicle_owner_name')->trim().'"' : null,
+            \App\Support\ActivityLogTimeWindow::forRequest($request)->label(),
         ]);
 
         return $parts === [] ? 'No filters' : implode(' · ', $parts);
@@ -1069,6 +1070,14 @@ class VehicleEventController extends Controller
     protected function sortTimestamp($createdAt, $eventAt): float
     {
         return (float) ($createdAt?->format('U.u') ?? $eventAt?->format('U.u') ?? 0);
+    }
+
+    protected function occurrenceTimeFields(?\Carbon\CarbonInterface $time, string $summary): array
+    {
+        $local = $time?->copy()->setTimezone(PhilippineTime::TIMEZONE);
+        $display = $local?->format(DisplayTime::DATETIME) ?? 'No time';
+
+        return ['display_time' => $display, 'event_time_export' => $local?->toDateTimeString(), 'summary_label' => $summary.' • '.$display];
     }
 
 }

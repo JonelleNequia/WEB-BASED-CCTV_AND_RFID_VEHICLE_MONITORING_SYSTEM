@@ -1,0 +1,191 @@
+[
+  {
+    "input": "abc 1234",
+    "normalized": "ABC 1234",
+    "key": "ABC1234",
+    "display": "ABC 1234",
+    "valid": true
+  },
+  {
+    "input": "abc 123",
+    "normalized": "ABC 123",
+    "key": "ABC123",
+    "display": "ABC 123",
+    "valid": true
+  },
+  {
+    "input": "123abc",
+    "normalized": "123ABC",
+    "key": "123ABC",
+    "display": "123ABC",
+    "valid": true
+  },
+  {
+    "input": "a123bc",
+    "normalized": "A123BC",
+    "key": "A123BC",
+    "display": "A123BC",
+    "valid": true
+  },
+  {
+    "input": "ab-00123",
+    "normalized": "AB-00123",
+    "key": "AB00123",
+    "display": "AB 00123",
+    "valid": true
+  },
+  {
+    "input": "395isx",
+    "normalized": "395ISX",
+    "key": "395ISX",
+    "display": "395ISX",
+    "valid": true
+  },
+  {
+    "input": "isx395",
+    "normalized": "ISX395",
+    "key": "ISX395",
+    "display": "ISX 395",
+    "valid": true
+  },
+  {
+    "input": "ao0123",
+    "normalized": "AO0123",
+    "key": "AO0123",
+    "display": "AO 0123",
+    "valid": true
+  },
+  {
+    "input": "a00123",
+    "normalized": "A00123",
+    "key": "A00123",
+    "display": "A00123",
+    "valid": true
+  },
+  {
+    "input": "ai0123",
+    "normalized": "AI0123",
+    "key": "AI0123",
+    "display": "AI 0123",
+    "valid": true
+  },
+  {
+    "input": "a10123",
+    "normalized": "A10123",
+    "key": "A10123",
+    "display": "A10123",
+    "valid": true
+  },
+  {
+    "input": "  a-1 23-bc ",
+    "normalized": "A-1 23-BC",
+    "key": "A123BC",
+    "display": "A-1 23-BC",
+    "valid": true
+  },
+  {
+    "input": "395 isx",
+    "normalized": "395 ISX",
+    "key": "395ISX",
+    "display": "395 ISX",
+    "valid": true
+  },
+  {
+    "input": "000123",
+    "normalized": "000123",
+    "key": "000123",
+    "display": "000123",
+    "valid": true
+  },
+  {
+    "input": "ABC/1234",
+    "normalized": "ABC/1234",
+    "key": null,
+    "display": "ABC/1234",
+    "valid": false
+  },
+  {
+    "input": "ABC_1234",
+    "normalized": "ABC_1234",
+    "key": null,
+    "display": "ABC_1234",
+    "valid": false
+  },
+  {
+    "input": "ABC\t1234",
+    "normalized": "ABC\t1234",
+    "key": null,
+    "display": "ABC\t1234",
+    "valid": false
+  },
+  {
+    "input": "---",
+    "normalized": "---",
+    "key": null,
+    "display": "---",
+    "valid": false
+  },
+  {
+    "input": "ＡＢＣ1234",
+    "normalized": "ＡＢＣ1234",
+    "key": null,
+    "display": "ＡＢＣ1234",
+    "valid": false
+  },
+  {
+    "input": "ABO🚗123",
+    "normalized": "ABO🚗123",
+    "key": null,
+    "display": "ABO🚗123",
+    "valid": false
+  },
+  {
+    "input": "",
+    "normalized": null,
+    "key": null,
+    "display": null,
+    "valid": false
+  },
+  {
+    "input": "A01234567890123456789",
+    "normalized": "A01234567890123456789",
+    "key": "A01234567890123456789",
+    "display": "A01234567890123456789",
+    "valid": false
+  },
+  {
+    "input": "A0 12 34 56 78 90 12 34 56 78",
+    "normalized": "A0 12 34 56 78 90 12 34 56 78",
+    "key": "A0123456789012345678",
+    "display": "A0 12 34 56 78 90 12 34 56 78",
+    "valid": true
+  },
+  {
+    "input": "A012345678901234567890",
+    "normalized": "A012345678901234567890",
+    "key": "A012345678901234567890",
+    "display": "A012345678901234567890",
+    "valid": false
+  },
+  {
+    "input": "ABC1234\n",
+    "normalized": "ABC1234\n",
+    "key": null,
+    "display": "ABC1234\n",
+    "valid": false
+  },
+  {
+    "input": "\tABC1234",
+    "normalized": "\tABC1234",
+    "key": null,
+    "display": "\tABC1234",
+    "valid": false
+  },
+  {
+    "input": "ABC1234\r",
+    "normalized": "ABC1234\r",
+    "key": null,
+    "display": "ABC1234\r",
+    "valid": false
+  }
+]

@@ -94,7 +94,8 @@ class RegistrationPlatePipelineTest extends TestCase
         $vehicle = $this->register($input);
         $this->assertSame($normalized, $vehicle->plate_number);
         $record = $this->read($this->crossing(), $input);
-        $this->assertSame(['registered', $vehicle->id, $display, $key], [$record->registration_status, $record->vehicle_id, $record->plate_number, $record->plate_key]);
+        $this->assertSame(['review', null, null, null], [$record->registration_status, $record->vehicle_id, $record->plate_number, $record->plate_key]);
+        $this->assertSame($display, $record->ocr_plate_number);
         $this->patchJson(route('visitors.records.review', $record), ['action' => 'correct_plate', 'plate' => strtolower($input)])->assertOk();
         $this->assertSame([$display, $key, $vehicle->id], [$record->fresh()->plate_number, $record->fresh()->plate_key, $record->fresh()->vehicle_id]);
     }
@@ -125,13 +126,13 @@ class RegistrationPlatePipelineTest extends TestCase
     public function test_readable_unmatched_and_unreliable_results_follow_the_decision_table(): void
     {
         $this->register('ABC-0001');
-        foreach ([['XYZ-9876', 0.95, 'read', 'guest'], ['ABC-0001', 0.2, 'read', 'review'],
+        foreach ([['XYZ-9876', 0.95, 'read', 'review'], ['ABC-0001', 0.2, 'read', 'review'],
             ['ABC-0001', null, 'read', 'review'], ['ABC-0001', 0.95, 'unreadable', 'review'], [null, 0.0, 'unreadable', 'review']] as [$plate, $confidence, $status, $expected]) {
             $record = $this->read($this->crossing(), $plate, $confidence, $status);
             $this->assertSame($expected, $record->registration_status);
             $this->assertNull($record->vehicle_id);
         }
-        $this->assertSame(4, VisitorRecord::query()->needsReview()->count());
+        $this->assertSame(5, VisitorRecord::query()->needsReview()->count());
     }
 
     public function test_manual_correction_updates_one_pass_audit_profiles_and_outputs_without_replaying_state(): void
@@ -213,6 +214,7 @@ class RegistrationPlatePipelineTest extends TestCase
         $vehicle->forceFill(['status' => 'inactive'])->save();
         $record = $this->read($this->crossing(), 'ABC-0001');
         $this->assertSame('review', $record->registration_status);
+        $record = \Tests\fixtures\ConfirmedActualPlate::for($record, 'ABC-0001');
         $this->assertStringContainsString('inactive', $record->registration_reason);
         $this->assertNull($record->vehicle_id);
         $vehicle->forceFill(['status' => 'active'])->save();
@@ -227,7 +229,7 @@ class RegistrationPlatePipelineTest extends TestCase
 
     public function test_later_registration_does_not_relink_or_reclassify_prior_passes(): void
     {
-        $record = $this->read($this->crossing(), 'LATE-0007');
+        $record = \Tests\fixtures\ConfirmedActualPlate::for($this->read($this->crossing(), 'LATE-0007'), 'LATE-0007');
         $before = $record->fresh()->getRawOriginal();
         $this->travel(1)->minutes();
         $vehicle = $this->register('LATE-0007');
@@ -237,7 +239,7 @@ class RegistrationPlatePipelineTest extends TestCase
         $this->patchJson(route('visitors.records.review', $record), ['action' => 'correct_plate', 'plate' => 'LATE-0007'])->assertOk();
         $this->assertSame('guest', $record->fresh()->registration_status);
         $this->assertNull($record->fresh()->vehicle_id);
-        $future = $this->read($this->crossing(), 'LATE-0007');
+        $future = \Tests\fixtures\ConfirmedActualPlate::for($this->read($this->crossing(), 'LATE-0007'), 'LATE-0007');
         $this->assertSame($vehicle->id, $future->vehicle_id);
         $this->assertSame('registered', $future->registration_status);
     }
@@ -272,6 +274,7 @@ class RegistrationPlatePipelineTest extends TestCase
         $this->assertSame([$crossing->id, $crossing->crossed_at->timestamp, 'kept/rfid.jpg'], [$record->vehicle_crossing_id, $record->seen_at->timestamp, $record->snapshot_path]);
         $this->assertSame('review', $record->registration_status);
         $this->assertTrue($record->plateNeedsReview());
+        $record = \Tests\fixtures\ConfirmedActualPlate::for($record, 'OTHER-0007');
         $this->assertStringContainsString('RFID', $record->registration_reason);
         $this->assertSame(1, app(MovementCountService::class)->counts('today')['in']);
         $this->getJson(route('logs.index'))->assertJsonPath('total', 1);
@@ -304,7 +307,7 @@ class RegistrationPlatePipelineTest extends TestCase
     public function test_normalized_searches_and_realtime_feeds_show_the_same_corrected_classification(): void
     {
         $vehicle = $this->register('AB-00001');
-        $record = $this->read($this->crossing(), 'AB 00001');
+        $record = \Tests\fixtures\ConfirmedActualPlate::for($this->read($this->crossing(), 'AB 00001'), 'AB 00001');
         foreach (['ab00001', 'ab-00001', '  ab   00001 '] as $query) {
             $this->getJson(route('logs.index', ['plate_text' => $query]))->assertOk()->assertJsonPath('total', 1);
             $this->get(route('visitors.index', ['q' => $query]))->assertOk()->assertViewHas('records', fn ($records) => $records->total() === 1);
@@ -330,7 +333,7 @@ class RegistrationPlatePipelineTest extends TestCase
         $this->assertNull($record->fresh()->ocr_plate_number);
         $late = $this->read($record, 'A8-00001', 0.2);
         $this->assertSame(['AB 00001', 'A8-00001', $vehicle->id, 'registered'], [$late->plate_number, $late->ocr_plate_number, $late->vehicle_id, $late->registration_status]);
-        $this->assertSame(['fixture' => 'simulated OCR evidence'], \Illuminate\Support\Arr::except($late->ocr_details_json, [\App\Services\VehicleTypeEvidenceService::KEY]));
+        $this->assertSame(['fixture' => 'simulated OCR evidence'], \Illuminate\Support\Arr::except($late->ocr_details_json, [\App\Services\VehicleTypeEvidenceService::KEY, \App\Services\PlateEvidenceService::KEY]));
         $this->assertDatabaseCount('review_actions', 1);
         $this->assertDatabaseCount('visitor_records', 1);
     }

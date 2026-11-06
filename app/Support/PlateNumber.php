@@ -50,7 +50,15 @@ final class PlateNumber
             return $matches[1].' '.$matches[2];
         }
 
-        return trim(preg_replace('/\s+/', ' ', strtoupper((string) $plate)) ?? $key);
+        return self::normalize($plate);
+    }
+
+    /** Machine columns are 20 characters; never truncate a different identity. */
+    public static function storageKey(?string $plate): ?string
+    {
+        $key = self::key($plate);
+
+        return $key !== null && strlen($key) <= 20 ? $key : null;
     }
 
     /**

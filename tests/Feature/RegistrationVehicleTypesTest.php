@@ -50,12 +50,14 @@ class RegistrationVehicleTypesTest extends TestCase
             'snapshot_path' => 'kept/vehicle.jpg', 'detection_metadata_json' => ['rfid_status' => 'no_pass']]);
         app(VisitorRecordService::class)->createFromCrossing($crossing);
 
-        return app(VisitorRecordService::class)->applyPlateReading([
+        $record = app(VisitorRecordService::class)->applyPlateReading([
             'external_event_key' => $crossing->external_event_key, 'camera_role' => 'gate-1',
             'event_time' => $at->toIso8601String(), 'plate_status' => $plate ? 'read' : 'unreadable',
             'plate_number' => $plate, 'plate_confidence' => 0.95, 'detected_vehicle_type' => $raw,
             'ocr_details' => ['fixture' => 'raw OCR'],
         ]);
+        // This fixture represents an actual plate explicitly confirmed by staff.
+        return $plate !== null ? \Tests\fixtures\ConfirmedActualPlate::for($record, $plate) : $record;
     }
 
     public function test_every_supported_choice_can_register_and_requested_choices_are_on_existing_forms(): void

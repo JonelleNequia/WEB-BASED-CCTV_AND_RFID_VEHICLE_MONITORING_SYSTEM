@@ -40,6 +40,9 @@ if (str_starts_with($mode, 'initialize')) {
             'plate_status' => $mode === 'initialize-evidence' ? 'unreadable' : 'read',
             'plate_number' => $mode === 'initialize-evidence' ? null : $vehicle->plate_number, 'plate_confidence' => 0.95,
         ]);
+        if ($mode !== 'initialize-evidence') {
+            Tests\fixtures\ConfirmedActualPlate::for(App\Models\VisitorRecord::where('external_event_key', $crossing->external_event_key)->sole(), $vehicle->plate_number);
+        }
     }
     exit(0);
 }

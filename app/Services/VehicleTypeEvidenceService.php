@@ -33,7 +33,10 @@ class VehicleTypeEvidenceService
     public function mergeOcrDetails(VisitorRecord $record, ?array $incoming): array
     {
         $incoming ??= [];
-        unset($incoming[self::KEY]);
+        unset($incoming[self::KEY], $incoming[PlateEvidenceService::KEY]);
+        if ($plate = data_get($record->ocr_details_json, PlateEvidenceService::KEY)) {
+            $incoming[PlateEvidenceService::KEY] = $plate;
+        }
         if ($existing = data_get($record->ocr_details_json, self::KEY)) {
             $incoming[self::KEY] = $existing;
         }
@@ -47,6 +50,9 @@ class VehicleTypeEvidenceService
         $raw = $provided ? $raw : (array_key_exists('raw', $previous) ? $previous['raw']
             : ($record->source === VisitorRecord::SOURCE_MANUAL ? null : ($record->crossing?->vehicle_type ?? $record->vehicle_type)));
         $evidence = array_replace($previous, ['raw' => $raw, 'detected' => VehicleType::detector($raw)]);
+        $rfidEvent = $record->crossing?->rfidScanLog?->correlatedVehicleEvent;
+        $identifiedVehicleId = $record->isRegisteredAtOccurrence() ? $record->vehicle_id :
+            ($rfidEvent?->event_status === \App\Models\VehicleEvent::STATUS_COMPLETED ? $rfidEvent->vehicle_id : null);
         $correction = $record->exists ? VehicleTypeCorrection::query()->where('visitor_record_id', $record->id)->latest('id')->first() : null;
         if ($correction) {
             $type = $correction->corrected_type;
@@ -55,17 +61,17 @@ class VehicleTypeEvidenceService
             && in_array($previous['source'] ?? null, [null, 'manual'], true)) {
             $type = $record->vehicle_type;
             $evidence['source'] = 'manual';
-        } elseif ($record->isRegisteredAtOccurrence() && $record->vehicle_id) {
-            $event = $record->movementEvent ?? $record->crossing?->rfidScanLog?->correlatedVehicleEvent;
-            if (($previous['source'] ?? null) === 'registry' && (int) ($previous['vehicle_id'] ?? 0) === (int) $record->vehicle_id) {
+        } elseif ($identifiedVehicleId) {
+            $event = $record->movementEvent ?? $rfidEvent;
+            if (($previous['source'] ?? null) === 'registry' && (int) ($previous['vehicle_id'] ?? 0) === (int) $identifiedVehicleId) {
                 $type = $previous['registry'];
-            } elseif ($event && (int) $event->vehicle_id === (int) $record->vehicle_id && filled($event->vehicle_type)
+            } elseif ($event && (int) $event->vehicle_id === (int) $identifiedVehicleId && filled($event->vehicle_type)
                 && data_get($event->detection_metadata_json, self::KEY.'.source') !== 'detector') {
                 $type = $event->vehicle_type;
             } else {
-                $type = Vehicle::query()->find($record->vehicle_id)?->vehicle_type;
+                $type = Vehicle::query()->find($identifiedVehicleId)?->vehicle_type;
             }
-            $evidence = array_replace($evidence, ['source' => 'registry', 'registry' => $type, 'vehicle_id' => $record->vehicle_id]);
+            $evidence = array_replace($evidence, ['source' => 'registry', 'registry' => $type, 'vehicle_id' => $identifiedVehicleId]);
             if (blank($type)) {
                 $type = $evidence['detected'];
                 $evidence['source'] = 'detector';
@@ -83,7 +89,7 @@ class VehicleTypeEvidenceService
 
     public function hasOcrDetails(VisitorRecord $record): bool
     {
-        return count(\Illuminate\Support\Arr::except((array) $record->ocr_details_json, [self::KEY])) > 0;
+        return count(\Illuminate\Support\Arr::except((array) $record->ocr_details_json, [self::KEY, PlateEvidenceService::KEY])) > 0;
     }
 
     /** Type-only update: no occupancy projection, new event or history transfer. */

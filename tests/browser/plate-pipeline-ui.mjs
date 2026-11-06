@@ -112,9 +112,8 @@ try {
     for (let attempt = 0; attempt < 3 && !(await card.isVisible()); attempt++) await page.keyboard.press('j');
     await card.waitFor({ state: 'visible' });
     await card.locator('[data-review-plate-input]').fill('---');
-    await card.getByRole('button', { name: 'Save plate', exact: true }).last().click();
-    await card.locator('[data-review-error]').waitFor({ state: 'visible' });
-    check((await card.locator('[data-review-error]').innerText()).includes('plate'), 'Invalid manual plate returns a recoverable inline server error');
+    check(await card.getByRole('button', { name: 'Save plate', exact: true }).last().isDisabled()
+        && (await card.locator('[data-plate-error]').innerText()).includes('plate'), 'Invalid manual plate is blocked with recoverable inline field feedback');
     await card.locator('[data-review-plate-input]').fill('ab   00001');
     check(await card.locator('[data-review-plate-input]').inputValue() === 'AB 00001', 'Manual correction uses the shared input normalization');
     await card.getByRole('button', { name: 'Save plate', exact: true }).last().click();
@@ -137,7 +136,7 @@ try {
     await ready();
     check((await rows()).length === 2, 'Automatic registration filter uses the corrected classification');
     const normalizedResponse = page.waitForResponse((response) => response.request().headers()['x-auto-filter'] === '1'
-        && new URL(response.url()).searchParams.get('plate_text') === 'ab00001');
+        && new URL(response.url()).searchParams.get('plate_text') === 'AB00001');
     await page.locator('[name=plate_text]').fill('ab00001');
     await normalizedResponse;
     await ready();

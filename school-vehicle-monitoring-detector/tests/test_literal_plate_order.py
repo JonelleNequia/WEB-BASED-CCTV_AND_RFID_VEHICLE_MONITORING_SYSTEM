@@ -13,8 +13,10 @@ class LiteralPlateOrderTests(unittest.TestCase):
                                 ('isx395', 'ISX-395'), ('0012 ab', '0012AB')]:
             with self.subTest(value=value):
                 self.assertEqual(normalize_plate_text(value), expected)
-        for value in ['395/ISX', 'prefix395ISXsuffix', '395_ISX', '395\tISX']:
+        for value in ['395/ISX', '395_ISX', '395\tISX']:
             self.assertIsNone(normalize_plate_text(value))
+
+        self.assertEqual(normalize_plate_text("prefix395ISXsuffix"), "PREFIX395ISXSUFFIX")  # Never extract an enclosed identity.
 
     def test_voting_keeps_both_orders_in_separate_layouts(self):
         self.assertNotEqual(plate_layout('395ISX'), plate_layout('ISX-395'))

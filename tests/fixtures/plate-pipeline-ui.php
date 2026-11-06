@@ -19,7 +19,7 @@ $make = static function (string $key, ?string $plate, float $confidence, string 
         'plate_status' => $status, 'plate_number' => $plate, 'best_guess' => $plate, 'plate_confidence' => $confidence,
     ]);
 };
-$readable = $make('pipeline-readable', 'ab  00001', 0.95, 'read');
+$readable = Tests\fixtures\ConfirmedActualPlate::for($make('pipeline-readable', 'ab  00001', 0.95, 'read'), 'ab 00001');
 $review = $make('pipeline-review', 'A8-00001', 0.2, 'unreadable');
 $unmatched = $make('pipeline-unmatched', 'XYZ-9876', 0.4, 'read');
 file_put_contents($directory.'/plate-records.json', json_encode([

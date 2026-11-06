@@ -132,27 +132,25 @@ class VisitorRecordService
                     'plate_image_path' => $upload['path'] && ! \App\Support\OccurrenceMedia::exists($record->plate_image_path)
                         ? $upload['path'] : $record->plate_image_path,
                 ]);
+                app(PlateEvidenceService::class)->observe($record, $data);
 
                 if ($record->plate_status !== VisitorRecord::PLATE_CORRECTED && $record->reviewed_at === null) {
-                    $originalPlate = $plate;
-                    // Gate direction work, Phase C: the plate's profile, also when
-                    // the read is one character off a plate already seen.
-                    $match = $read ? $this->tieToProfile($record, $plate) : ['plate' => null, 'profile' => null, 'confidence' => null, 'reason' => null, 'suggested' => null];
-                    $plate = $match['plate'];
+                    // Current readers recognize characters in a generic plate
+                    // region, not actual vs temporary identifiers. Neither a
+                    // layout nor a Registry match establishes that distinction.
                     $record->fill([
-                        'plate_status' => $read ? VisitorRecord::PLATE_READ : VisitorRecord::PLATE_UNREADABLE,
-                        'plate_number' => $read ? $plate : null,
-                        'plate_key' => $read && strlen(PlateNumber::key($plate) ?? '') <= 20 ? PlateNumber::key($plate) : null,
+                        'plate_status' => VisitorRecord::PLATE_UNREADABLE,
+                        'plate_number' => null,
+                        'plate_key' => null,
                         'plate_confidence' => isset($data['plate_confidence']) ? (float) $data['plate_confidence'] : null,
-                        'match_confidence' => $match['confidence'],
-                        'match_reason' => $match['reason'],
+                        'match_confidence' => null,
+                        'match_reason' => null,
                     ]);
-                    $profile = $match['profile'];
-                    $record->plate_profile_id = $profile?->id;
-                    $record->vehicle_id = $profile?->vehicle_id;
-                    $record->suggested_profile_id = $match['suggested'];
-                    $this->classifyPlate($record, $originalPlate, $read && $record->plate_confidence !== null
-                        && $record->plate_confidence >= VisitorRecord::LOW_PLATE_CONFIDENCE && $record->plate_confidence <= 1);
+                    $record->plate_profile_id = null;
+                    $record->vehicle_id = null;
+                    $record->suggested_profile_id = null;
+                    $this->classifyPlate($record, null, false);
+                    $record->registration_reason = data_get($record->ocr_details_json, PlateEvidenceService::KEY.'.reason');
                 }
 
                 app(VehicleTypeEvidenceService::class)->resolve($record, $data['detected_vehicle_type'] ?? null, array_key_exists('detected_vehicle_type', $data));
@@ -333,7 +331,7 @@ class VisitorRecordService
                 'suggested_profile_id' => null,
                 // What OCR said stays in ocr_plate_number.
                 'ocr_plate_number' => $record->ocr_plate_number ?? ($record->source === VisitorRecord::SOURCE_MANUAL ? null : $record->plate_number),
-                'plate_status' => $plate ? ($action === 'confirm' ? $record->plate_status : VisitorRecord::PLATE_CORRECTED) : VisitorRecord::PLATE_UNREADABLE,
+                'plate_status' => $plate ? ($action === 'confirm' && $record->plate_status === VisitorRecord::PLATE_READ ? VisitorRecord::PLATE_READ : VisitorRecord::PLATE_CORRECTED) : VisitorRecord::PLATE_UNREADABLE,
                 'plate_number' => $plate,
                 'plate_key' => PlateNumber::key($plate),
                 'plate_profile_id' => $profile?->id,
@@ -344,8 +342,42 @@ class VisitorRecordService
                 'reviewed_at' => now(),
             ])->save();
 
+            app(PlateEvidenceService::class)->confirm($record, $plate ? 'actual_plate' : 'none', $plate, $user);
+            $record->save();
+
             $this->refreshProfiles([$oldProfileId, $record->plate_profile_id]);
             app(VisitorReviewService::class)->log($record, $plate === null ? 'no_plate' : $action, $before, $record->plate_number, $user);
+            app(MovementReconciliationService::class)->syncPlate($record);
+
+            return $record->fresh();
+        });
+    }
+
+    /** A staff-confirmed temporary identifier is evidence, never a plate/profile. */
+    public function confirmTemporary(VisitorRecord $record, string $kind, string $text, User $user): VisitorRecord
+    {
+        \Illuminate\Support\Facades\Validator::make(['identifier_type' => $kind, 'identifier_text' => $text], [
+            'identifier_type' => ['required', \Illuminate\Validation\Rule::in(array_keys(PlateEvidenceService::TEMPORARY))],
+            'identifier_text' => ['required', 'string', 'max:200', 'not_regex:/[\p{Cc}\p{Cf}]/u'],
+        ])->validate();
+
+        return app(PlateProcessingLock::class)->run(function () use ($record, $kind, $text, $user): VisitorRecord {
+            $record = VisitorRecord::whereKey($record->id)->lockForUpdate()->firstOrFail();
+            if (PlateEvidenceService::kind($record) === $kind && app(PlateEvidenceService::class)->staffConfirmed($record)
+                && data_get($record->ocr_details_json, PlateEvidenceService::KEY.'.text') === $text) {
+                return $record;
+            }
+            $profile = $record->plate_profile_id;
+            $before = $record->plate_number ?: $record->ocr_plate_number;
+            app(PlateEvidenceService::class)->confirm($record, $kind, $text, $user);
+            $record->forceFill(['plate_number' => null, 'plate_key' => null, 'plate_profile_id' => null,
+                'vehicle_id' => null, 'suggested_profile_id' => null, 'match_confidence' => null, 'match_reason' => null,
+                'plate_status' => VisitorRecord::PLATE_UNREADABLE, 'reviewed_by' => $user->id, 'reviewed_at' => now(),
+                'corrected_by' => $user->id, 'corrected_at' => now(), 'registration_status' => 'guest', 'registration_category' => null,
+                'registration_reason' => PlateEvidenceService::TEMPORARY[$kind].' confirmed by staff; no actual plate confirmed.',
+            ])->save();
+            $this->refreshProfiles([$profile]);
+            app(VisitorReviewService::class)->log($record, 'temporary_identifier', $before, PlateEvidenceService::TEMPORARY[$kind].': '.$text, $user);
             app(MovementReconciliationService::class)->syncPlate($record);
 
             return $record->fresh();
@@ -601,21 +633,25 @@ class VisitorRecordService
 
     protected function vehicleIdForPlateKey(string $key, ?Carbon $seenAt = null): ?int
     {
-        $matches = app(VehicleRegistryService::class)->plateMatches($key, $seenAt);
+        $registry = app(VehicleRegistryService::class);
+        $candidates = $registry->plateCandidates($key, $seenAt);
+        $matches = $registry->eligiblePlateMatches($candidates);
 
-        return $matches->count() === 1 && $matches->first()->status === 'active' ? $matches->first()->id : null;
+        return $candidates->count() === 1 && $matches->count() === 1 && $matches->first()->status === 'active' ? $matches->first()->id : null;
     }
 
     /** Classify this pass only. Profile aliases/suggestions never prove registration. */
     protected function classifyPlate(VisitorRecord $record, ?string $plate, bool $reliable, bool $manual = false): void
     {
         app(CanonicalMovementEventService::class)->resolve($record);
-        $matches = app(VehicleRegistryService::class)->plateMatches($plate, $record->seen_at);
+        $registry = app(VehicleRegistryService::class);
+        $candidates = $registry->plateCandidates($plate, $record->seen_at);
+        $matches = $registry->eligiblePlateMatches($candidates);
         $valid = $plate !== null && PlateNumber::key($plate) !== null && strlen(PlateNumber::key($plate)) <= 20 && mb_strlen(PlateNumber::display($plate)) <= 30;
         $reason = match (true) {
             ! $valid => 'Plate unreadable or invalid. Check the plate.',
             ! $reliable => 'OCR confidence is missing or below the review threshold.',
-            $matches->count() > 1 => 'Multiple registrations match this plate. Resolve the registry collision before confirming.',
+            $candidates->count() > 1 => 'Multiple registrations match this plate. Resolve the registry collision before confirming.',
             $matches->count() === 1 && $matches->first()->status !== 'active' => 'The matching registration is inactive. Check its status in the Registry.',
             ! $manual && ($record->match_confidence === PlateMatchService::LOW
                 || ($matches->isEmpty() && $record->plateProfile

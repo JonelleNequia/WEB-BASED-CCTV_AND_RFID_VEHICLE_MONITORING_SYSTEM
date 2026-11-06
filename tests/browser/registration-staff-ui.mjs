@@ -159,7 +159,7 @@ try {
     await openAdd();
     await page.locator('#add_available').selectOption(recoveryTag);
     await staff.fill('Anne-Marie');
-    await page.locator('#add_plate_number').fill('---');
+    await page.locator('#add_plate_number').fill('STF-7001'); // Valid syntax, existing registration: server-side uniqueness failure.
     await save.click();
     await page.locator('#add-vehicle-drawer .field-error').filter({ hasText: 'plate' }).waitFor();
     check(await staff.inputValue() === 'Anne-Marie', 'Server validation failure preserves the edited staff value');

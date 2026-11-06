@@ -48,7 +48,7 @@
 
                 <div class="field">
                     <label for="plate_number">Plate Number</label>
-                    <input id="plate_number" type="text" name="plate_number" value="{{ old('plate_number', $vehicle->plate_number) }}" required maxlength="50" data-normalize-plate>
+                    <input id="plate_number" type="text" name="plate_number" value="{{ old('plate_number', $vehicle->plate_number) }}" required maxlength="50" data-normalize-plate data-plate-legacy="{{ $vehicle->plate_number }}">
                     @error('plate_number')
                         <span class="field-error">{{ $message }}</span>
                     @enderror

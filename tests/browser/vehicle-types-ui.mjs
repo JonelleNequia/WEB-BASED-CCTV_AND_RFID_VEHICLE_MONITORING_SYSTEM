@@ -96,7 +96,11 @@ try {
         external_event_key: 'phase4-type-pass', camera_role: 'gate-1', event_time: at, plate_status: 'read',
         plate_number: 'PC00001', plate_confidence: .95, detected_vehicle_type: 'Motorcycle',
     } });
-    const eventId = (await read.json()).visitor_record.vehicle_event_id;
+    const evidence = (await read.json()).visitor_record;
+    check(evidence.registration_status === 'review', 'OCR cannot establish actual identifier type');
+    const confirm = await page.request.patch(base + '/visitors/records/' + evidence.id + '/review', { headers: integration, data: { action: 'correct_plate', plate: 'PC00001' } });
+    check(confirm.status() === 200, 'Staff confirms the actual plate before type snapshot assertions');
+    const eventId = (await (await page.request.post(base + '/api/v1/integration/visitor-plates', { headers: integration, data: { external_event_key: 'phase4-type-pass', camera_role: 'gate-1', event_time: at, plate_status: 'read', plate_number: 'PC00001', plate_confidence: .95 } })).json()).visitor_record.vehicle_event_id;
     check(Boolean(eventId) && (await vehicle()).entries_today === 1, 'Registry identity creates one canonical entry');
     await page.goto(base + '/vehicle-events/' + eventId);
     check(await page.getByText('Registry record', { exact: true }).isVisible(), 'Details distinguish registry type from independent visual recognition');

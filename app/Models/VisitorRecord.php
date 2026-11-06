@@ -144,6 +144,25 @@ class VisitorRecord extends Model
             && $this->vehicle->created_at->lte($this->seen_at);
     }
 
+    /** SQL equivalent of isRegisteredAtOccurrence(), including the legacy fallback. */
+    public function scopeRegisteredAtOccurrence(Builder $query): Builder
+    {
+        return $query->where(fn (Builder $decision) => $decision->where('registration_status', 'registered')
+            ->orWhere(fn (Builder $legacy) => $legacy->whereNull('registration_status')
+                ->whereNotIn('visitor_records.id', static::query()->plateToCheck()->select('visitor_records.id'))
+                ->whereHas('vehicle', fn (Builder $vehicle) => $vehicle->whereColumn('vehicles.created_at', '<=', 'visitor_records.seen_at'))));
+    }
+
+    /** The Guest presentation excludes both registered occurrences and Review evidence. */
+    public function scopeUnregisteredAtOccurrence(Builder $query): Builder
+    {
+        // ID subqueries preserve the existing Review predicate's NULL semantics.
+        // Negating its individual nullable evidence columns would misclassify legacy rows.
+        return $query->where(fn (Builder $decision) => $decision->whereNull('registration_status')->orWhere('registration_status', '!=', 'review'))
+            ->whereNotIn('visitor_records.id', static::query()->registeredAtOccurrence()->select('visitor_records.id'))
+            ->whereNotIn('visitor_records.id', static::query()->plateToCheck()->select('visitor_records.id'));
+    }
+
     public function classificationCategory(): string
     {
         return $this->isRegisteredAtOccurrence()
@@ -252,11 +271,24 @@ class VisitorRecord extends Model
 
     public function plateLabel(): string
     {
+        if ($label = \App\Services\PlateEvidenceService::label($this)) {
+            return $label.' (no actual plate)';
+        }
         return match ($this->plate_status) {
             self::PLATE_PENDING => 'Reading plate…',
             self::PLATE_UNREADABLE => 'Plate unreadable',
             default => (string) $this->plate_number,
         };
+    }
+
+    public function getIdentifierLabelAttribute(): ?string
+    {
+        return \App\Services\PlateEvidenceService::label($this);
+    }
+
+    public function getIdentifierTextAttribute(): ?string
+    {
+        return data_get($this->ocr_details_json, \App\Services\PlateEvidenceService::KEY.'.text');
     }
 
     public function getSnapshotUrlAttribute(): ?string

@@ -9,7 +9,7 @@
 
     @include('registry.partials.register-tag-drawer')
 
-    <x-table data-auto-table title="Tag Inventory" :empty="$rfidTagInventory->isEmpty()"
+    <x-table data-auto-table class="registry-tags-table" title="Tag Inventory" :empty="$rfidTagInventory->isEmpty()"
              :empty-title="$tagStatusFilter ? 'No tags match this filter.' : 'No RFID tags registered yet.'"
              empty-text="Register tags by tapping them on the reader.">
         <x-slot:toolbar>
@@ -30,6 +30,7 @@
                 </span>
             </form>
             <span class="text-muted" data-auto-update="count">{{ $rfidTagInventory->count() }} records</span>
+            @include('partials.list-report-actions', ['reportDataset' => 'tags'])
         </x-slot:toolbar>
         <x-slot:emptyAction>
             <button type="button" class="button button-primary button-sm" data-drawer-open="register-tag-drawer">Register Tags</button>

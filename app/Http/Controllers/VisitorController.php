@@ -32,10 +32,20 @@ class VisitorController extends Controller
         'review' => 'Review',
     ];
 
+    public const RECORD_FILTERS = [
+        '' => 'All',
+        'registered' => 'Registered',
+        'unregistered' => 'Unregistered Guests',
+        'manual' => 'Manual entries',
+    ];
+
     public function index(Request $request, \App\Services\VisitorReviewService $reviewService): View
     {
         $tab = $this->resolveTab($request, self::TABS);
         $filters = $request->only(['q', 'gate', 'plate_status', 'status', 'sort']);
+        if ($tab === 'records') {
+            $filters += $request->only('record_filter');
+        }
 
         return view('visitors.index', [
             'tab' => $tab,
@@ -163,7 +173,7 @@ class VisitorController extends Controller
     public function correctPlate(Request $request, VisitorRecord $visitorRecord, VisitorRecordService $service): JsonResponse|RedirectResponse
     {
         $validated = $request->validate([
-            'plate_number' => ['nullable', 'required_unless:unreadable,1', 'string', 'max:30', 'regex:/^[A-Za-z0-9 -]+$/', new \App\Rules\PlateIdentifier(20, $visitorRecord->plate_number)],
+            'plate_number' => ['exclude_if:unreadable,1', 'required', 'string', 'max:30', new \App\Rules\PlateIdentifier(20)],
             'unreadable' => ['nullable', 'in:0,1'],
         ], ['plate_number.regex' => 'Use letters, digits, spaces or a dash.']);
 
@@ -191,18 +201,11 @@ class VisitorController extends Controller
      */
     public function review(Request $request, VisitorRecord $visitorRecord, \App\Services\VisitorReviewService $service): JsonResponse|RedirectResponse
     {
-        $validated = $request->validate([
-            'action' => ['required', 'string', 'max:40'],
-            'plate' => ['nullable', 'string', 'max:30', new \App\Rules\PlateIdentifier(20, $visitorRecord->plate_number)],
-            'profile_id' => ['nullable', 'integer'],
-            'direction' => ['nullable', 'in:IN,OUT'],
-            'name' => ['nullable', 'string', \Illuminate\Validation\Rule::when(
-                ! is_string($request->input('name')) || \App\Rules\PersonalName::normalize($request->input('name')) !== \App\Rules\PersonalName::normalize($visitorRecord->plateProfile?->owner_name ?? ''),
-                'max:120'
-            )],
-            'reason' => ['nullable', 'string', 'max:40'],
-        ]);
+        $validated = $request->validate(['action' => ['required', 'string', 'max:40']]);
         [$action, $argument] = array_pad(explode(':', $validated['action'], 2), 2, null);
+        // The service validates only inputs used by this action, including
+        // direct callers. Stale plate/name fields must not block other actions.
+        $validated = $request->only(['plate', 'profile_id', 'direction', 'name', 'reason', 'identifier_type', 'identifier_text']);
         if ($argument !== null) {
             $validated[match ($action) {
                 'pick_match' => 'profile_id',
@@ -284,17 +287,6 @@ class VisitorController extends Controller
      */
     protected function records(array $filters): Builder
     {
-        $status = $filters['status'] ?? VisitorRecord::STATUS_ACTIVE;
-
-        return VisitorRecord::query()
-            ->with(['plateProfile', 'corrector', 'vehicle'])
-            ->when($status !== 'all', fn (Builder $query) => $query->where('status', $status))
-            ->when(filled($filters['gate'] ?? null), fn (Builder $query) => $query->where('gate', $filters['gate']))
-            ->when(filled($filters['plate_status'] ?? null), fn (Builder $query) => $query->where('plate_status', $filters['plate_status']))
-            ->when(filled($filters['q'] ?? null), function (Builder $query) use ($filters): void {
-                PlateNumber::search($query, ['plate_number', 'ocr_plate_number'], $filters['q']);
-            })
-            ->latest('seen_at')
-            ->latest('id');
+        return app(\App\Services\GuestRecordQuery::class)->query($filters);
     }
 }

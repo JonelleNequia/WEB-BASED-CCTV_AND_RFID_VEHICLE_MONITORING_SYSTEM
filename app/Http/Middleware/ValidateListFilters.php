@@ -23,13 +23,21 @@ class ValidateListFilters
         $rules = ['tab' => ['nullable', 'string', 'max:30'], 'page' => ['nullable', 'integer', 'min:1']];
         $text = ['bail', 'nullable', 'string', 'max:255'];
         $choice = static fn (array $values): array => ['bail', 'nullable', 'string', Rule::in($values)];
-        if ($route === 'registry.index') {
+        $registryReport = in_array($route, ['registry.print', 'registry.export.csv'], true);
+        $guestReport = in_array($route, ['visitors.print', 'visitors.export.csv'], true);
+        $listReport = $registryReport || $guestReport;
+        if ($listReport) {
+            $rules['tab'] = ['nullable', 'string', Rule::in($registryReport ? ['vehicles', 'tags'] : ['records'])];
+            $rules += ['snapshots' => ['nullable', 'boolean'], 'autoprint' => ['nullable', 'boolean']];
+        }
+        if ($route === 'registry.index' || $registryReport) {
             $rules += $tab === 'tags'
                 ? ['status' => $choice(RfidTag::STATUSES)]
                 : ['q' => $text, 'category' => $choice([...array_keys(VehicleCategory::LABELS), ...VehicleCategory::LEGACY_REGISTERED]),
                     'state' => $choice(['inside', 'outside']), 'status' => $choice(['active', 'inactive'])];
-        } elseif ($route === 'visitors.index') {
+        } elseif ($route === 'visitors.index' || $guestReport) {
             $rules += ['q' => $text, 'gate' => ['bail', 'nullable', 'string', new ValidGate(historical: true)],
+                'record_filter' => $choice(array_keys(\App\Http\Controllers\VisitorController::RECORD_FILTERS)),
                 'plate_status' => $choice(['pending', 'read', 'unreadable', 'corrected']),
                 'status' => $choice(['active', 'duplicate', 'dismissed', 'all']), 'sort' => $choice(['entries', 'recent'])];
         } elseif ($route === 'logs.index' && $tab === 'scans') {
@@ -39,12 +47,9 @@ class ValidateListFilters
         } elseif ($route === 'logs.index' && $tab === 'alerts') {
             $rules += ['q' => $text, 'type' => $choice(['anomaly', 'unknown_tag'])];
         } else {
-            $from = $request->query('date_from');
-            $validFrom = is_string($from) && Validator::make(['from' => $from], ['from' => ['required', 'date']])->passes();
+            $rules += \App\Support\ActivityLogTimeWindow::rules($request->query());
             $rules += ['plate_text' => $text, 'vehicle_owner_name' => $text,
                 'gate' => ['bail', 'nullable', 'string', new ValidGate(historical: true)],
-                'date_from' => ['bail', 'nullable', 'date'],
-                'date_to' => ['bail', 'nullable', 'date', Rule::when($validFrom, 'after_or_equal:date_from')],
                 'period' => $choice(['today', 'week', 'month', 'year']),
                 'event_type' => $choice([...array_keys(VehicleEventController::MOVEMENT_OPTIONS), 'GUEST']),
                 'category' => $choice([...array_keys(VehicleCategory::LABELS), ...VehicleCategory::LEGACY_REGISTERED, 'guest', 'guest_pass']),
@@ -74,7 +79,7 @@ class ValidateListFilters
                 }
             }
         }
-        $validator = Validator::make($input, $rules);
+        $validator = Validator::make($input, $rules, \App\Support\ActivityLogTimeWindow::messages());
         if ($validator->passes()) {
             return $next($request);
         }
@@ -85,8 +90,14 @@ class ValidateListFilters
         // redirect a rejected export into a broader automatic download.
         $valid = $validator->valid();
         unset($valid['page']);
-        if ($route === 'logs.print' || $route === 'vehicle-events.export.csv') {
+        if ($listReport) {
             return response()->view('errors.filters', ['messages' => $validator->errors()->all(),
+                'backUrl' => route($registryReport ? 'registry.index' : 'visitors.index', Arr::except($valid, ['snapshots', 'autoprint']))], 422);
+        }
+        if ($route === 'logs.print' || $route === 'vehicle-events.export.csv'
+            || ($route === 'logs.index' && ! in_array($tab, ['scans', 'alerts'], true)
+                && array_intersect(array_keys($validator->errors()->toArray()), ['date_from', 'date_to', 'time_from', 'time_to']))) {
+            return response()->view('errors.filters', ['messages' => $validator->errors()->all(), 'isList' => $route === 'logs.index',
                 'backUrl' => route('logs.index', ['tab' => 'events'] + Arr::except($valid, ['tab', 'report', 'record_type', 'record_id', 'all', 'snapshots', 'autoprint']))], 422);
         }
 

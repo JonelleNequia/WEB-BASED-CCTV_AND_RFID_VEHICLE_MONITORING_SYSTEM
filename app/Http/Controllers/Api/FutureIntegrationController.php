@@ -231,17 +231,14 @@ class FutureIntegrationController extends Controller
         // Direction is 'OUT'
         $activeSession = null;
 
-        if ($plateNumber) {
+        if ($plateKey = PlateNumber::storageKey($plateNumber)) {
             // Find active session matching plate_number
             $activeSession = ActiveSession::query()
-                ->where(function ($query) use ($plateNumber): void {
-                    $query->where('plate_number', $plateNumber)
-                        ->orWhere('plate_text', $plateNumber);
-                })
                 ->whereNull('time_out')
                 ->where('status', 'open')
                 ->oldest()
-                ->first();
+                ->get()
+                ->first(fn (ActiveSession $session): bool => PlateNumber::key($session->plate_number ?: $session->plate_text) === $plateKey);
         }
 
         if ($activeSession) {

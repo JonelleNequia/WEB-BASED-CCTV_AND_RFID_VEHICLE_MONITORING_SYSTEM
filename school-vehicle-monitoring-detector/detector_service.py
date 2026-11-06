@@ -71,6 +71,8 @@ from tracking import (
     zone_height,
 )
 from anpr import ocr_runtime_status, read_license_plate_details
+import anpr
+from plate_identifier import review_submission
 from plate_voting import frames_agree, vote_plate
 import plate_reader
 from camera_health import ReconnectBackoff, RtspDiagnosis, rtsp_play_check, short_reason, strip_credentials, take_over_stale_detector
@@ -2619,12 +2621,8 @@ def update_record_after_left_zone(role, state, track_id, window, matched, larave
             "external_event_key": window["event_key"],
             "camera_role": role,
             "event_time": window["event_time"],
-            "plate_number": vote["plate"],
-            "plate_status": vote["status"],
-            "plate_confidence": vote["confidence"],
-            "best_guess": vote["best_guess"],
+            **review_submission(vote, analysis_details),
             "detected_vehicle_type": payload["detected_vehicle_type"],
-            "ocr_details": analysis_details,
         },
         plate_image["bytes"] if plate_image else None,
         plate_image["filename"] if plate_image else None,
@@ -2671,6 +2669,7 @@ def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None, plate_fram
 
     frame_reads = []
     crops = {}
+    evidence_crop = None
     runtime_status = ocr_runtime_status()
     frame_results = []
     started_at = time.monotonic()
@@ -2687,6 +2686,8 @@ def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None, plate_fram
             read = {"plate": None, "score": 0.0, "crop": None}
             plate_error = str(error)
 
+        if read.get("crop") is not None and (evidence_crop is None or read["crop"].size > evidence_crop.size):
+            evidence_crop = read["crop"]
         if read["plate"] and read.get("crop") is not None:
             if read["score"] > crops.get(read["plate"], (-1.0, None))[0]:
                 crops[read["plate"]] = (read["score"], read["crop"])
@@ -2699,13 +2700,16 @@ def analyze_guest_vehicle_details(analysis_frames, vehicle_type=None, plate_fram
             "plate_number": read["plate"],
             "plate_score": read["score"],
             "plate_error": plate_error,
+            "raw_reads": read.get("raw_reads", []),
         })
 
         if frames_agree(frame_reads):
             break
 
-    vote = vote_plate(frame_reads, vehicle_type)
+    vote = anpr.review_guess(vote_plate(frame_reads, vehicle_type), [raw for result in frame_results for raw in result.get("raw_reads", [])])
     crop = crops.get(vote["plate"] or vote["best_guess"] or "", (0.0, None))[1]
+    if crop is None:
+        crop = evidence_crop
 
     return (
         vote,
@@ -2848,7 +2852,9 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
         analysis_frames = [(snapshot_frame, window_payload["xyxy"])]
 
     vote, ocr_status, analysis_details, plate_crop = analyze_guest_vehicle_details(analysis_frames, window_payload["detected_vehicle_type"], plate_frames)
-    plate_number = vote["plate"]
+    submission = review_submission(vote, analysis_details)
+    plate_number = submission["plate_number"]
+    analysis_details = submission["ocr_details"]
 
     print(
         f"{role.capitalize()} unregistered visitor analysis {window_payload['event_key']}: "
@@ -2868,12 +2874,8 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
                 "external_event_key": window_payload["event_key"],
                 "camera_role": role,
                 "event_time": window_payload["event_time"],
-                "plate_number": plate_number,
-                "plate_status": vote["status"],
-                "plate_confidence": vote["confidence"],
-                "best_guess": vote["best_guess"],
+                **submission,
                 "detected_vehicle_type": window_payload["detected_vehicle_type"],
-                "ocr_details": analysis_details,
             },
             plate_image["bytes"] if plate_image else None,
             plate_image["filename"] if plate_image else None,

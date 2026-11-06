@@ -262,7 +262,7 @@ class EventService
                 ['entry_event_id' => $event->id],
                 [
                     'plate_text' => $event->plate_text,
-                    'plate_number' => $event->plate_text,
+                    'plate_number' => \App\Support\PlateNumber::storageKey($event->plate_text),
                     'vehicle_type' => $event->vehicle_type,
                     'vehicle_color' => $event->vehicle_color,
                     'entry_time' => $event->event_time,
@@ -321,7 +321,7 @@ class EventService
                 ['entry_event_id' => $event->id],
                 [
                     'plate_text' => $event->plate_text,
-                    'plate_number' => $event->plate_text,
+                    'plate_number' => \App\Support\PlateNumber::storageKey($event->plate_text),
                     'vehicle_type' => $event->vehicle_type,
                     'vehicle_color' => $event->vehicle_color,
                     'entry_time' => $event->event_time,

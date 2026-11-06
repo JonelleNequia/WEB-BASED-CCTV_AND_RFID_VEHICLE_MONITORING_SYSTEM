@@ -49,5 +49,6 @@
     <script src="{{ asset('js/row-menus.js') }}?v={{ filemtime(public_path('js/row-menus.js')) }}"></script>
     @stack('scripts')
     <script src="{{ asset('js/plate-input.js') }}?v={{ filemtime(public_path('js/plate-input.js')) }}"></script>
+    <script src="{{ asset('js/plate-validation.js') }}?v={{ filemtime(public_path('js/plate-validation.js')) }}"></script>
 </body>
 </html>

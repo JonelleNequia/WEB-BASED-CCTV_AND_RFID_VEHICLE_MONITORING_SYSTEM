@@ -78,18 +78,17 @@ def plate_ocr():
         return None
 
 
-def read_with_plate_ocr(engine, crop):
+def read_with_plate_ocr(engine, crop, evidence=None):
     """[(plate "ABC-1234", confidence)] from the plate OCR model, or [] when it is not a PH plate layout."""
     image = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB) if engine.config.image_color_mode == "rgb" else cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     prediction = engine.run(image, return_confidence=True)[0]
     text = str(prediction.plate or "")
-    plate = anpr.normalize_plate_text(text)
-    if not plate:
-        return []
     probabilities = [float(value) for value in list(prediction.char_probs)[:len(text)]] or [0.0]
     # The weakest character counts as much as the average.
     confidence = 0.5 * (sum(probabilities) / len(probabilities)) + 0.5 * min(probabilities)
-    return [(plate, round(confidence, 3))]
+    anpr.remember_read(evidence, text, confidence, "plate_ocr")
+    plate = anpr.normalize_plate_text(text)
+    return [(plate, round(confidence, 3))] if plate else []
 
 
 @lru_cache(maxsize=1)
@@ -165,25 +164,25 @@ def prepared_variants(crop):
     return [even, sharpened]
 
 
-def read_crop(crop):
+def read_crop(crop, evidence=None):
     """[(plate "ABC-1234", confidence), ...] for one plate crop (mirrored too when nothing was read)."""
     engine = plate_ocr()
     if engine is not None:
         try:
-            reads = read_with_plate_ocr(engine, crop)
+            reads = read_with_plate_ocr(engine, crop, evidence)
             if not reads:
-                reads = [(plate, confidence * 0.9) for plate, confidence in read_with_plate_ocr(engine, cv2.flip(crop, 1))]
+                reads = [(plate, confidence * 0.9) for plate, confidence in read_with_plate_ocr(engine, cv2.flip(crop, 1), evidence)]
             return reads
         except Exception:
             pass
     reads = []
     for variant in prepared_variants(crop):
-        reads.extend(anpr.read_with_easyocr_candidates(variant))
+        reads.extend(anpr.read_with_easyocr_candidates(variant, evidence))
         if any(confidence >= 0.6 for _, confidence in reads):
             break
     if not reads:
         # A mirrored picture (a webcam or a test through a phone screen).
-        mirrored = [(plate, confidence * 0.9) for plate, confidence in anpr.read_with_easyocr_candidates(prepared_variants(cv2.flip(crop, 1))[0])]
+        mirrored = [(plate, confidence * 0.9) for plate, confidence in anpr.read_with_easyocr_candidates(prepared_variants(cv2.flip(crop, 1))[0], evidence)]
         reads.extend(mirrored)
     return reads
 
@@ -231,11 +230,12 @@ def read_pass(frames, vehicle_type=None, budget_seconds=OCR_BUDGET_SECONDS):
     plates.sort(key=lambda plate: plate["quality"], reverse=True)
 
     reads = []
+    raw_reads = []
     fast = plate_ocr() is not None
     for plate in plates[:MAX_OCR_CROPS if fast else MAX_EASYOCR_CROPS]:
         if reads and time.monotonic() - started >= budget_seconds:
             break
-        text, score = anpr.select_consensus_plate_scored(read_crop(plate["crop"]))
+        text, score = anpr.select_consensus_plate_scored(read_crop(plate["crop"], raw_reads))
         sharp_share = plate["measure"]["sharpness"] / (plate["measure"]["sharpness"] + HALF_SHARP)
         plate["read"], plate["score"] = text, round(score, 3)
         reads.append({"plate": text, "score": score * (0.6 + 0.4 * sharp_share)})
@@ -243,7 +243,7 @@ def read_pass(frames, vehicle_type=None, budget_seconds=OCR_BUDGET_SECONDS):
         if not fast and frames_agree(reads):
             break
 
-    vote = vote_plate(reads, vehicle_type)
+    vote = anpr.review_guess(vote_plate(reads, vehicle_type), raw_reads)
     best = plates[0] if plates else None
     details = {
         "reader": "plate_detector",
@@ -252,6 +252,7 @@ def read_pass(frames, vehicle_type=None, budget_seconds=OCR_BUDGET_SECONDS):
         "frames_checked": min(len(frames), MAX_FRAMES),
         "plates_found": len(plates),
         "crops_read": len(reads),
+        "raw_reads": raw_reads,
         "elapsed_seconds": round(time.monotonic() - started, 3),
         "best_crop": {"frame": best["frame"], "confidence": best["confidence"], "quality": round(best["quality"], 3), **best["measure"]} if best else None,
         "crops": [

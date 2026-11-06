@@ -58,7 +58,7 @@ class Phase5VisitorRecordsTest extends TestCase
         $this->assertSame(['gate-1', 'IN', VisitorRecord::PLATE_PENDING, VisitorRecord::STATUS_ACTIVE], [$record->gate, $record->direction, $record->plate_status, $record->status]);
         $this->assertNotNull($record->snapshot_path); // the crossing's (full-resolution) snapshot
 
-        $this->plate('k-1', 'read', 'ABC-1234', 0.82, image: true)->assertOk()->assertJsonPath('visitor_record.plate_number', 'ABC 1234');
+        $this->plate('k-1', 'read', 'ABC-1234', 0.82, image: true)->assertOk()->assertJsonPath('visitor_record.registration_status', 'review');
 
         $record->refresh();
         $profile = PlateProfile::query()->sole();
@@ -150,7 +150,7 @@ class Phase5VisitorRecordsTest extends TestCase
         $this->assertStringContainsString('REG 1001', $record->status_note);
     }
 
-    public function test_the_same_vehicle_sent_twice_is_a_duplicate_and_not_counted(): void
+    public function test_overlap_duplicates_and_staff_confirmed_duplicates_are_not_counted_twice(): void
     {
         // New track ID for the same car: same box, 2 s later.
         $this->crossing('k-d1', 'IN');
@@ -163,10 +163,13 @@ class Phase5VisitorRecordsTest extends TestCase
         $this->crossing('k-d3', 'IN', box: [400, 100, 500, 200]);
         $this->plate('k-d1', 'read', 'NBC-123', 0.9);
         $this->plate('k-d3', 'read', 'NBC-123', 0.9);
-
-        $this->assertSame(VisitorRecord::STATUS_DUPLICATE, VisitorRecord::query()->where('external_event_key', 'k-d3')->value('status'));
+        // Equal text in a different observation is not proof of the same pass.
+        $third = VisitorRecord::where('external_event_key', 'k-d3')->sole();
+        $this->assertSame(VisitorRecord::STATUS_ACTIVE, $third->status);
+        $this->actingAs($this->guard)->patchJson(route('visitors.records.review', $third), ['action' => 'dismiss', 'reason' => 'duplicate'])->assertOk();
+        $this->assertSame(VisitorRecord::STATUS_DISMISSED, $third->fresh()->status);
         $this->assertSame(1, PlateProfile::query()->where('plate_key', 'NBC123')->value('visit_count'));
-        $this->actingAs($this->admin)->get(route('visitors.index', ['status' => 'duplicate']))->assertOk()->assertSee('Same plate as record');
+        $this->actingAs($this->admin)->get(route('visitors.index', ['status' => 'dismissed']))->assertOk()->assertSee('Duplicate of another pass');
     }
 
     public function test_guard_can_keep_a_visitor_note_and_dismiss_a_false_alarm(): void
@@ -204,7 +207,7 @@ class Phase5VisitorRecordsTest extends TestCase
 
     protected function plate(string $key, string $status, ?string $plate, float $confidence, ?string $bestGuess = null, bool $image = false): TestResponse
     {
-        return $this->withHeaders(['X-Api-Key' => 'test-detector-key'])->post(route('api.integration.visitor-plates'), array_filter([
+        $response = $this->withHeaders(['X-Api-Key' => 'test-detector-key'])->post(route('api.integration.visitor-plates'), array_filter([
             'external_event_key' => $key,
             'camera_role' => 'gate-1',
             'event_time' => VehicleCrossing::where('external_event_key', $key)->first()?->crossed_at?->toIso8601String() ?? now()->toIso8601String(),
@@ -217,6 +220,11 @@ class Phase5VisitorRecordsTest extends TestCase
             'ocr_details' => json_encode(['frames_checked' => 3]),
             'plate_image' => $image ? UploadedFile::fake()->image('plate.jpg', 240, 80) : null,
         ]), ['Accept' => 'application/json']);
+        $record = VisitorRecord::where('external_event_key', $key)->first();
+        if ($response->isSuccessful() && $status === 'read' && $confidence >= .6 && $plate && $record && $record->reviewed_at === null) {
+            \Tests\fixtures\ConfirmedActualPlate::for($record, $plate);
+        }
+        return $response;
     }
 
     protected function cameraOnline(): void

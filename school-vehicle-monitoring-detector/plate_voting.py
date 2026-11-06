@@ -18,6 +18,8 @@ vote:
 
 import re
 
+from anpr import normalize_plate_text
+
 # A single read is trusted only when it is this sure.
 STRONG_SINGLE_READ = 0.80
 # Each character needs this share of the weight when frames disagree.
@@ -31,16 +33,20 @@ def plate_layout(plate):
     if match:
         return (len(match.group(1)), len(match.group(2)))
     number_first = re.fullmatch(r"(\d+)([A-Z]+)", plate or "")
-    return (len(number_first.group(1)), len(number_first.group(2)), "number_first") if number_first else None
+    if number_first:
+        return (len(number_first.group(1)), len(number_first.group(2)), "number_first")
+    normalized = normalize_plate_text(plate)
+    return ("mixed", "".join("L" if char.isalpha() else "D" for char in normalized)) if normalized else None
 
 
 def frames_agree(frame_reads, needed=AGREEING_FRAMES_TO_STOP):
     """True once `needed` frames read the exact same plate (OCR can stop)."""
     counts = {}
     for read in frame_reads:
-        if read.get("plate"):
-            counts[read["plate"]] = counts.get(read["plate"], 0) + 1
-            if counts[read["plate"]] >= needed:
+        plate = normalize_plate_text(read.get("plate"))
+        if plate:
+            counts[plate] = counts.get(plate, 0) + 1
+            if counts[plate] >= needed:
                 return True
     return False
 
@@ -54,9 +60,9 @@ def vote_plate(frame_reads, vehicle_type=None):
     "best_guess", "reason", "frames_checked", "frames_with_plate", "candidates"}.
     """
     reads = [
-        {"plate": read["plate"], "score": max(0.05, min(1.0, float(read.get("score") or 0.0)))}
+        {"plate": normalize_plate_text(read["plate"]), "score": max(0.05, min(1.0, float(read.get("score") or 0.0)))}
         for read in frame_reads
-        if read.get("plate") and plate_layout(read["plate"])
+        if read.get("plate") and normalize_plate_text(read["plate"]) and plate_layout(normalize_plate_text(read["plate"]))
     ]
     candidates = {}
     for read in reads:
@@ -103,6 +109,10 @@ def vote_plate(frame_reads, vehicle_type=None):
     agreement = min(shares)
     result["best_guess"] = plate
     result["confidence"] = round(mean_score * (sum(shares) / len(shares)), 3)
+
+    if sum(read["score"] for read in layout_reads) / sum(read["score"] for read in reads) < MAJORITY_SHARE:
+        result["reason"] = "Frames disagree on the identifier layout."
+        return result
 
     if len(layout_reads) == 1:
         if layout_reads[0]["score"] >= STRONG_SINGLE_READ:

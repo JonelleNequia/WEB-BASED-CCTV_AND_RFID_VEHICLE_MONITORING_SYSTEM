@@ -291,10 +291,20 @@ class RfidCameraFusionService
             $existing = $record ? app(CanonicalMovementEventService::class)->resolve($record) : null;
             $projector = app(MovementReconciliationService::class);
             $projector->begin($vehicle);
-            if ($existing?->vehicle_id && (int) $existing->vehicle_id !== (int) $vehicle->id && (int) $record->vehicle_id !== (int) $vehicle->id) {
+            $staffPlateConflict = $record && PlateEvidenceService::kind($record) === 'actual_plate'
+                && app(PlateEvidenceService::class)->staffConfirmed($record)
+                && ($record->plate_key !== \App\Support\PlateNumber::key($vehicle->plate_number)
+                    || $record->registration_status === 'review');
+            if ($staffPlateConflict || ($existing?->vehicle_id && (int) $existing->vehicle_id !== (int) $vehicle->id && (int) $record->vehicle_id !== (int) $vehicle->id)) {
                 // Two identities for one occurrence: keep the evidence and use
                 // existing Review, never move either vehicle on a guess.
-                $oldVehicleId = $existing->vehicle_id;
+                $oldVehicleId = $existing?->vehicle_id;
+                $existing ??= new VehicleEvent(['visitor_record_id' => $record->id, 'external_event_key' => $record->external_event_key,
+                    'vehicle_id' => $scan->vehicle_id, 'vehicle_category' => $vehicle->category,
+                    'event_origin' => 'rfid', 'event_type' => VehicleEvent::eventTypeForDirection($record->direction),
+                    'event_time' => $record->seen_at, 'camera_id' => $record->camera_id,
+                    'plate_text' => $record->plate_number, 'plate_number' => $record->plate_key,
+                    'vehicle_image_path' => $record->snapshot_path, 'plate_image_path' => $record->plate_image_path]);
                 $existing->forceFill(['event_status' => VehicleEvent::STATUS_PENDING_DETAILS, 'rfid_scan_log_id' => $scan->id])->save();
                 $record->forceFill(['status' => \App\Models\VisitorRecord::STATUS_ACTIVE, 'registration_status' => 'review',
                     'registration_reason' => 'Plate evidence conflicts with the linked RFID identity. Check the plate; RFID identity is retained.'])->save();
@@ -302,7 +312,7 @@ class RfidCameraFusionService
                     'fusion_status' => RfidScanLog::FUSION_SCAN_ONLY, 'is_anomaly' => true,
                     'anomaly_reason' => 'RFID and plate identify different vehicles; check Review.', 'outcome' => RfidIngestResult::ANOMALY])->save();
                 $crossing->forceFill(['rfid_scan_log_id' => $scan->id])->save();
-                $projector->reconcile((int) $oldVehicleId);
+                if ($oldVehicleId) $projector->reconcile((int) $oldVehicleId);
 
                 return RfidIngestResult::ANOMALY;
             }
@@ -327,7 +337,7 @@ class RfidCameraFusionService
             if ($existing) {
                 $oldVehicleId = $existing->vehicle_id;
                 $existing->forceFill(['vehicle_id' => $vehicle->id, 'vehicle_category' => $vehicle->category,
-                    'plate_text' => $record->plate_number, 'plate_number' => $record->plate_number,
+                    'plate_text' => $record->plate_number, 'plate_number' => \App\Support\PlateNumber::storageKey($record->plate_number),
                     'event_origin' => $record->reviewed_at !== null ? 'plate_review' : ($existing->event_origin === 'guest_cctv' ? 'plate_ocr' : $existing->event_origin),
                     'event_status' => VehicleEvent::STATUS_COMPLETED, 'rfid_scan_log_id' => $scan->id,
                     'event_type' => $eventType, 'direction' => $direction, 'direction_source' => $source,

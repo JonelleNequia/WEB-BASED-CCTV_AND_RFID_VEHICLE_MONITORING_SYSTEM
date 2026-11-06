@@ -181,5 +181,21 @@ class PlateMatchingTest extends TestCase
             'vehicle_color' => $color,
             'detected_vehicle_type' => 'Car',
         ]))->assertSuccessful();
+
+        // Historical snapshot fixture: Phase 3's new ingestion correctly waits
+        // for type confirmation. Exercise the retained legacy matcher directly
+        // rather than permitting new OCR to create actual-plate profiles.
+        $record = VisitorRecord::where('external_event_key', $key)->sole();
+        $literal = \App\Support\PlateNumber::display($plate);
+        $service = app(\App\Services\VisitorRecordService::class);
+        $match = $literal && $status === 'read'
+            ? (function () use ($record, $literal) { return $this->tieToProfile($record, $literal); })->call($service)
+            : ['plate' => null, 'profile' => null, 'confidence' => null, 'reason' => null, 'suggested' => null];
+        $record->forceFill(['plate_status' => $status, 'plate_number' => $match['plate'],
+            'plate_key' => \App\Support\PlateNumber::key($match['plate']), 'plate_profile_id' => $match['profile']?->id,
+            'match_confidence' => $match['confidence'], 'match_reason' => $match['reason'], 'suggested_profile_id' => $match['suggested'],
+            'registration_status' => null, 'registration_reason' => null,
+            'ocr_details_json' => \Illuminate\Support\Arr::except($record->ocr_details_json, [\App\Services\PlateEvidenceService::KEY])])->save();
+        $service->refreshProfiles([$record->plate_profile_id]);
     }
 }

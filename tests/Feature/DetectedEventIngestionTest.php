@@ -867,6 +867,7 @@ class DetectedEventIngestionTest extends TestCase
     public function test_detector_guest_observation_duplicate_updates_late_ocr_details(): void
     {
         Storage::fake('public');
+        $eventTime = now()->toIso8601String();
         $this->seed(PortalSeeder::class);
 
         $headers = [
@@ -878,7 +879,7 @@ class DetectedEventIngestionTest extends TestCase
             'external_event_key' => 'guest-window-two-step-001',
             'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
-            'event_time' => now()->toIso8601String(),
+            'event_time' => $eventTime,
             'snapshot' => UploadedFile::fake()->image('guest-two-step.jpg', 640, 480),
             'detection_metadata' => json_encode([
                 'track_id' => 77,
@@ -890,7 +891,7 @@ class DetectedEventIngestionTest extends TestCase
             'external_event_key' => 'guest-window-two-step-001',
             'camera_role' => 'gate-1',
             'detected_vehicle_type' => 'Car',
-            'event_time' => now()->toIso8601String(),
+            'event_time' => $eventTime,
             'plate_number' => 'abc 123',
             'vehicle_color' => 'white',
             'detection_metadata' => [

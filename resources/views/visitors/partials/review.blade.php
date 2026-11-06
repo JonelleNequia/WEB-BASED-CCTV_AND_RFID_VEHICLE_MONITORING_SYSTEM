@@ -25,6 +25,9 @@
     </div>
     <p class="field-help review-keys" data-review-keys hidden>Keys: <kbd>C</kbd> confirm · <kbd>E</kbd> type the plate · <kbd>1</kbd>–<kbd>3</kbd> pick a known plate · <kbd>I</kbd> / <kbd>O</kbd> set IN / OUT · <kbd>N</kbd> name · <kbd>X</kbd> no plate visible · <kbd>D</kbd> not a vehicle · <kbd>U</kbd> duplicate · <kbd>J</kbd> / <kbd>K</kbd> next / previous.</p>
     <p class="review-flash" data-review-flash role="status" aria-live="polite" hidden></p>
+    @if (session('status'))
+        <noscript><p class="review-flash" role="status">{{ session('status') }}</p></noscript>
+    @endif
 
     @if ($reviewQueue->isEmpty())
         <x-empty-state title="Nothing to review" text="Every plate was read clearly and every vehicle has a direction." />
@@ -42,7 +45,9 @@
             $needsDirection = $record->direction === 'UNKNOWN';
             $suggestions = $reviewService->suggestions($record);
             $read = $record->ocr_plate_number ?: $record->plate_number;
+            $reviewErrors = (string) old('_review_record_id') === (string) $record->id ? $errors->all() : [];
             $why = match (true) {
+                \App\Services\PlateEvidenceService::kind($record) === 'uncertain' && (float) $record->plate_confidence >= .6 && \App\Support\PlateNumber::storageKey($read) !== null => 'Identifier unconfirmed',
                 $record->plate_status === \App\Models\VisitorRecord::PLATE_UNREADABLE => 'Plate unreadable',
                 $record->match_confidence === 'low' => 'Possible match',
                 $needsPlate => 'Not sure',
@@ -74,11 +79,11 @@
                 </div>
 
                 <div class="review-facts">
-                    <p class="field-error" data-review-error role="alert" hidden></p>
+                    <p class="field-error" data-review-error role="alert" @if (! $reviewErrors) hidden @endif>{{ implode(' ', $reviewErrors) }}</p>
                     <div class="review-reasons">
                         <span class="field-help" data-registration-reason @if(!$record->registration_reason) hidden @endif>{{ $record->registration_reason }}</span>
                         @if ($why)<x-badge tone="warning" :label="$why" />@endif
-                        @if ($needsDirection)<x-badge tone="warning" label="Direction unknown" />@endif
+                        @if ($needsDirection)<span data-review-direction-badge><x-badge tone="warning" label="Direction unknown" /></span>@endif
                     </div>
                     <dl class="review-grid">
                         <div><dt>Camera read</dt><dd><strong class="review-read">{{ $read ?: '—' }}</strong>@if ((float) $record->plate_confidence > 0) <span class="table-subtext">{{ round((float) $record->plate_confidence * 100) }}%</span>@endif</dd></div>
@@ -95,11 +100,28 @@
                             @endif
                         </dd></div>
                     </dl>
+                    @if ($record->identifier_label)
+                        <p class="field-help">{{ $record->identifier_label }}: {{ $record->identifier_text }}. Evidence only; no actual plate assigned.</p>
+                    @endif
+                    @php($rawReads = \App\Services\PlateEvidenceService::rawReads($record))
+                    @if ($rawReads)
+                        <details class="review-ocr-evidence">
+                            <summary>Raw OCR evidence</summary>
+                            <ul>
+                                @foreach (array_slice($rawReads, 0, 20) as $raw)
+                                    @if (is_array($raw) && is_string($raw['text'] ?? null))
+                                        <li><code>{{ mb_substr($raw['text'], 0, 200) }}</code>@if ($raw['truncated'] ?? false) (truncated)@endif</li>
+                                    @endif
+                                @endforeach
+                            </ul>
+                        </details>
+                    @endif
                     @if ($record->match_reason && $record->match_confidence === 'low')
                         <p class="table-subtext">Possible match: {{ $record->match_reason }}</p>
                     @endif
 
                     <div class="review-section" data-review-plate @if (! $needsPlate) hidden @endif>
+                        <p class="field-help">Save plate confirms that the image shows an actual plate. A matching Registry entry or character pattern alone does not establish the identifier type.</p>
                         @if ($suggestions->isNotEmpty())
                             <div class="review-suggestions" role="group" aria-label="Known plates like this one">
                                 @foreach ($suggestions as $index => $suggestion)
@@ -116,11 +138,29 @@
                             <button type="submit" name="action" value="correct_plate" class="button button-primary button-sm" data-review-enter>Save plate</button>
                         </div>
                         <div class="review-buttons">
-                            @if ($record->plate_number)
-                                <button type="submit" name="action" value="confirm" class="button button-secondary button-sm" data-review-key="c"><kbd>C</kbd> Confirm {{ $record->plate_number }}</button>
+                            @if ($read && \App\Support\PlateNumber::storageKey($read) && mb_strlen(\App\Support\PlateNumber::display($read)) <= 30)
+                                <button type="submit" name="action" value="confirm" class="button button-secondary button-sm" data-review-key="c"><kbd>C</kbd> Confirm {{ $read }} as actual plate</button>
                             @endif
                             <button type="submit" name="action" value="no_plate" class="button button-secondary button-sm" data-review-key="x"><kbd>X</kbd> No plate visible</button>
                         </div>
+                        <details class="review-temporary">
+                            <summary>Temporary identifier instead of an actual plate</summary>
+                            <p class="field-help">Use visible evidence in the images. This saves evidence only and does not match the Registry or create a plate profile.</p>
+                            <div class="field">
+                                <label for="identifier-type-{{ $record->id }}">Identifier type</label>
+                                <select id="identifier-type-{{ $record->id }}" name="identifier_type">
+                                    <option value="">Choose the observed type</option>
+                                    @foreach (\App\Services\PlateEvidenceService::TEMPORARY as $kind => $label)
+                                        <option value="{{ $kind }}" @selected(old('identifier_type') === $kind)>{{ $label }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label for="identifier-text-{{ $record->id }}">Identifier text (evidence only)</label>
+                                <input id="identifier-text-{{ $record->id }}" type="text" name="identifier_text" maxlength="200" value="{{ old('identifier_text', $record->identifier_text ?: $read) }}">
+                            </div>
+                            <button type="submit" name="action" value="temporary_identifier" class="button button-secondary button-sm">Confirm temporary identifier</button>
+                        </details>
                     </div>
 
                     <div class="review-section" data-review-direction-actions @if (! $needsDirection) hidden @endif>

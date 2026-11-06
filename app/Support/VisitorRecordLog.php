@@ -58,6 +58,7 @@ final class VisitorRecordLog
             // UI Phase 3: what needs a look (yellow) or the plate result.
             ...match (true) {
                 $review => ['status_label' => 'Review', 'status_badge_class' => 'manual-review'],
+                filled($record->identifier_label) => ['status_label' => 'Evidence only', 'status_badge_class' => 'secondary'],
                 $record->plate_status === VisitorRecord::PLATE_UNREADABLE => ['status_label' => 'Plate unreadable', 'status_badge_class' => 'manual-review'],
                 $record->direction === 'UNKNOWN' => ['status_label' => 'Direction unknown', 'status_badge_class' => 'manual-review'],
                 $plateOnly => ['status_label' => 'Plate identified', 'status_badge_class' => 'matched'],
@@ -74,6 +75,8 @@ final class VisitorRecordLog
             // Unregistered visitors are normal traffic, not alerts.
             'is_alert' => false,
             'alert_reason' => $record->registration_reason,
+            'identifier_type_label' => $record->identifier_label,
+            'identifier_text' => $record->identifier_label ? $record->identifier_text : null,
             'sort_time' => (float) ($record->created_at?->format('U.u') ?? $time?->format('U.u') ?? 0),
             'log_type' => $plateOnly ? 'registered' : ($review ? 'review' : 'unregistered_visitor'),
             'log_type_label' => $plateOnly ? 'Registered' : ($review ? 'Review' : 'Unregistered Guest'),

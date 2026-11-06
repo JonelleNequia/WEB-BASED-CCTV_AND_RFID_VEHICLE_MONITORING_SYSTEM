@@ -1108,6 +1108,11 @@ textarea:focus-visible {
     font-weight: 700;
 }
 
+.field-error[data-plate-error][hidden],
+.field-error[data-review-error][hidden] {
+    display: none;
+}
+
 .field-help {
     display: block;
     margin-top: 0.38rem;

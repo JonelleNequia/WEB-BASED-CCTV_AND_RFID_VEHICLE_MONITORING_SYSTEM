@@ -60,9 +60,7 @@ class VehicleRegistryController extends Controller
         // UI Phase 2: Registry › RFID Tags tab.
         return view('registry.index', [
             'tab' => 'tags',
-            'rfidTagInventory' => $allTags
-                ->when($tagStatus, fn ($tags) => $tags->where('status', $tagStatus))
-                ->values(),
+            'rfidTagInventory' => $vehicleRegistryService->filteredRfidTagInventory(['status' => $tagStatus], $allTags),
             'tagStatusFilter' => $tagStatus,
             'nextTagNumber' => $vehicleRegistryService->nextTagNumber(),
             'rfidStats' => $rfidService->stats(),

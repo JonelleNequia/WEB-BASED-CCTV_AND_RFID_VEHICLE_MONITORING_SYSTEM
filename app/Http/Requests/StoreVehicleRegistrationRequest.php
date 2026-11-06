@@ -67,7 +67,7 @@ class StoreVehicleRegistrationRequest extends FormRequest
                 'required',
                 'string',
                 'max:50',
-                new PlateIdentifier(legacyValue: $legacyPlate),
+                new PlateIdentifier(20, $legacyPlate),
                 Rule::unique('vehicles', 'plate_number')->ignore($vehicleId),
             ],
             'vehicle_owner_name' => $vehicle instanceof Vehicle ? ['bail', 'nullable', 'string', new PersonalName($legacyOwner, $blankOwner), Rule::when(
@@ -244,7 +244,7 @@ class StoreVehicleRegistrationRequest extends FormRequest
 
     protected function plateFingerprint(string $plateNumber): string
     {
-        return preg_replace('/[^A-Z0-9]/', '', Str::upper($plateNumber)) ?? '';
+        return \App\Support\PlateNumber::key($plateNumber) ?? '';
     }
 
     protected function ownerFingerprint(string $ownerName): string

@@ -24,9 +24,10 @@ class AlertController extends Controller
             ->when(($filters['type'] ?? '') === 'unknown_tag', fn ($query) => $query->where('verification_status', 'unknown_tag'))
             ->when(($filters['type'] ?? '') === 'anomaly', fn ($query) => $query->where('verification_status', '!=', 'unknown_tag'))
             ->when(filled($filters['q'] ?? null), function ($query) use ($filters): void {
-                $term = '%'.trim((string) $filters['q']).'%';
+                $search = (string) $filters['q'];
+                $term = '%'.trim($search).'%';
                 $query->where(fn ($inner) => $inner->where('tag_uid', 'like', $term)
-                    ->orWhereHas('vehicle', fn ($vehicle) => $vehicle->where('plate_number', 'like', $term)));
+                    ->orWhereHas('vehicle', fn ($vehicle) => \App\Support\PlateNumber::search($vehicle, ['plate_number'], $search)));
             })
             ->latest('scan_time')
             ->latest('id')

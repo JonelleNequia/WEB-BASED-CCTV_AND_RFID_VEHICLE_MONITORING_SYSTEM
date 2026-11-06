@@ -11,12 +11,13 @@ records are never polluted with fake plate numbers.
 import re
 import shutil
 import time
-import unicodedata
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+
+from plate_identifier import key as plate_key, normalize as normalize_identifier, valid as valid_identifier
 
 MAX_OCR_CANDIDATES = 6
 MAX_OCR_VARIANTS_PER_CANDIDATE = 2
@@ -115,28 +116,34 @@ def preprocess_variants_for_ocr(crop) -> List[np.ndarray]:
 
 
 def normalize_plate_text(text: str) -> Optional[str]:
-    # Same identifier alphabet as Laravel PlateNumber. Never remove symbols
-    # or change O/0, I/1, etc. to manufacture a registered identity.
-    normalized = "".join(" " if unicodedata.category(char) == "Zs" else char for char in (text or ""))
-    normalized = re.sub(r" +", " ", normalized).strip(" ")
-    normalized = re.sub(r"[a-z]", lambda match: match.group(0).upper(), normalized)
-    if not re.fullmatch(r"[A-Z0-9 -]+", normalized):
+    # Keep OCR's existing minimum/mixed-character plausibility requirement,
+    # but accept supported interleaved/other identifiers without reordering.
+    cleaned = plate_key(text)
+    if not valid_identifier(text) or len(cleaned) < 5:
         return None
-    cleaned = normalized.replace(" ", "").replace("-", "")
-
-    if len(cleaned) < 5:
+    if not re.search(r"[A-Z]", cleaned) or not re.search(r"[0-9]", cleaned):
         return None
-
-    if not re.search(r"[A-Z]", cleaned) or not re.search(r"\d", cleaned):
-        return None
-
     for prefix_len, digit_len in PLATE_LAYOUTS:
-        if re.fullmatch(rf"[A-Z]{{{prefix_len}}}\d{{{digit_len}}}", cleaned):
+        if re.fullmatch(rf"[A-Z]{{{prefix_len}}}[0-9]{{{digit_len}}}", cleaned):
             return f"{cleaned[:prefix_len]}-{cleaned[prefix_len:]}"
-        if re.fullmatch(rf"\d{{{digit_len}}}[A-Z]{{{prefix_len}}}", cleaned):
-            return cleaned  # Literal number-first identity, never transposed.
+    return cleaned
 
-    return None
+
+def remember_read(evidence, text, confidence, engine):
+    if evidence is not None and text and len(evidence) < 20:
+        raw = str(text)
+        evidence.append({"text": raw[:200], "truncated": len(raw) > 200,
+                         "confidence": round(float(confidence or 0.0), 3), "engine": engine})
+
+
+def review_guess(vote, evidence):
+    if not vote.get("plate") and not vote.get("best_guess") and evidence:
+        # A long raw read stays in diagnostics; never truncate it into an identity.
+        best = max(evidence, key=lambda item: item.get("confidence", 0.0))
+        raw = normalize_identifier(best["text"])
+        if raw and not best.get("truncated") and len(raw) <= 30:
+            vote["best_guess"] = raw
+    return vote
 
 
 def plate_layout_candidates(text: str) -> List[str]:
@@ -272,7 +279,7 @@ def correct_plate_character_positions(text: str, prefix_len: int = 3, digit_len:
     return format_plate(corrected_text, prefix_len)
 
 
-def read_with_easyocr_candidates(image) -> List[Tuple[str, float]]:
+def read_with_easyocr_candidates(image, evidence=None) -> List[Tuple[str, float]]:
     reader = easyocr_reader()
 
     if reader is None:
@@ -299,6 +306,7 @@ def read_with_easyocr_candidates(image) -> List[Tuple[str, float]]:
         text = result[1] if len(result) > 1 else ""
         confidence = float(result[2]) if len(result) > 2 else 0.0
 
+        remember_read(evidence, text, confidence, "easyocr")
         if confidence < 0.35:
             continue
 
@@ -343,7 +351,7 @@ def read_with_easyocr(image) -> Optional[str]:
     return candidates[0][0]
 
 
-def read_with_tesseract_candidates(image) -> List[Tuple[str, float]]:
+def read_with_tesseract_candidates(image, evidence=None) -> List[Tuple[str, float]]:
     if not tesseract_binary_available():
         return []
 
@@ -368,6 +376,7 @@ def read_with_tesseract_candidates(image) -> List[Tuple[str, float]]:
                     if str(value).strip() not in {"", "-1"}
                 ]
                 confidence = (sum(confidences) / len(confidences) / 100.0) if confidences else 0.0
+                remember_read(evidence, text, confidence, "tesseract")
                 plate = normalize_plate_text(text)
 
                 if plate and confidence >= 0.35:
@@ -379,6 +388,7 @@ def read_with_tesseract_candidates(image) -> List[Tuple[str, float]]:
                 image,
                 config=f"--psm {page_mode} -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
             )
+            remember_read(evidence, raw_text, 0.32, "tesseract")
             plate = normalize_plate_text(raw_text)
 
             if plate:
@@ -549,9 +559,15 @@ def select_consensus_plate_scored(candidates: List[Tuple[str, float]]) -> Tuple[
     scores: Dict[str, float] = {}
     counts: Dict[str, int] = {}
 
-    for plate, confidence in candidates:
+    for raw_plate, confidence in candidates:
+        plate = normalize_plate_text(raw_plate)
+        if plate is None:
+            continue
         scores[plate] = scores.get(plate, 0.0) + max(confidence, 0.0)
         counts[plate] = counts.get(plate, 0) + 1
+
+    if not scores:
+        return None, 0.0
 
     ranked = sorted(
         scores,
@@ -601,13 +617,15 @@ def read_license_plate_details(frame, bounding_box) -> Dict[str, object]:
     seen_shapes = set()
 
     ocr_candidates = []
+    raw_reads = []
     best_region: Dict[str, Tuple[float, object]] = {}
+    evidence_crop = None
     started_at = time.monotonic()
 
     def result():
         plate, score = select_consensus_plate_scored(ocr_candidates)
         region = best_region.get(plate) if plate else None
-        return {"plate": plate, "score": score, "crop": region[1] if region else None}
+        return {"plate": plate, "score": score, "crop": region[1] if region else evidence_crop, "raw_reads": raw_reads}
 
     for candidate in candidates[:MAX_OCR_CANDIDATES]:
         shape_key = crop_signature(candidate)
@@ -616,9 +634,11 @@ def read_license_plate_details(frame, bounding_box) -> Dict[str, object]:
             continue
 
         seen_shapes.add(shape_key)
+        if evidence_crop is None or candidate.size > evidence_crop.size:
+            evidence_crop = candidate
 
         for prepared in preprocess_variants_for_ocr(candidate)[:MAX_OCR_VARIANTS_PER_CANDIDATE]:
-            reads = read_with_easyocr_candidates(prepared) + read_with_tesseract_candidates(prepared)
+            reads = read_with_easyocr_candidates(prepared, raw_reads) + read_with_tesseract_candidates(prepared, raw_reads)
             ocr_candidates.extend(reads)
             for plate, confidence in reads:
                 if confidence > best_region.get(plate, (-1.0, None))[0]:

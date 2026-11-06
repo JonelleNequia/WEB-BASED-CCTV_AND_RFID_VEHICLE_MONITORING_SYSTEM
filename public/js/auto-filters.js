@@ -8,6 +8,7 @@
     const status = root.querySelector('[data-auto-status]');
     const retry = root.querySelector('[data-auto-retry]');
     const results = root.querySelector('[data-auto-update="results"]');
+    const exportHrefs = new WeakMap();
     const textInput = (input) => input instanceof HTMLInputElement && ['text', 'search'].includes(input.type);
     const key = (value) => {
         const url = new URL(value, location.href);
@@ -23,8 +24,14 @@
         retry.hidden = kind !== 'error';
         results.setAttribute('aria-busy', kind === 'loading' || kind === 'refreshing' ? 'true' : 'false');
         root.querySelectorAll('[data-auto-export]').forEach((link) => {
-            if (state.dirty || kind === 'error') link.setAttribute('aria-disabled', 'true');
-            else link.removeAttribute('aria-disabled');
+            if (!exportHrefs.has(link)) exportHrefs.set(link, link.href);
+            if (state.dirty || kind === 'error') {
+                link.setAttribute('aria-disabled', 'true');
+                link.removeAttribute('href'); // Also blocks modified clicks/context-menu stale URLs.
+            } else {
+                link.removeAttribute('aria-disabled');
+                link.href = exportHrefs.get(link);
+            }
         });
     }
 
@@ -54,18 +61,43 @@
     function valid() {
         const from = form.querySelector('[name="date_from"]');
         const to = form.querySelector('[name="date_to"]');
+        const timeFrom = form.querySelector('[name="time_from"]');
+        const timeTo = form.querySelector('[name="time_to"]');
         from?.setCustomValidity('');
         to?.setCustomValidity('');
+        timeFrom?.setCustomValidity('');
+        timeTo?.setCustomValidity('');
+        renderFieldErrors({});
         if (from?.value && to?.value && from.value > to.value) to.setCustomValidity('To date must be on or after From.');
+        if (timeFrom?.value && timeTo?.value && timeFrom.value > timeTo.value) {
+            timeTo.setCustomValidity('To Time must be on or after From Time. Overnight periods require separate selections with this daily-window filter.');
+        }
         if (form.checkValidity()) return true;
+        const errors = {};
+        for (const input of form.elements) {
+            if (input.validity && !input.validity.valid) errors[input.name] = [input.validationMessage];
+        }
+        renderFieldErrors(errors);
         const invalid = Array.from(form.elements).find((input) => input.validity && !input.validity.valid);
         invalid?.setAttribute('aria-invalid', 'true');
         feedback('error', (invalid?.validationMessage || 'Check the selected filters.') + ' Previous results are kept.');
         return false;
     }
 
+    function renderFieldErrors(errors) {
+        form.querySelectorAll('[data-filter-error-for]').forEach((span) => {
+            const messages = errors[span.dataset.filterErrorFor] || [];
+            span.textContent = messages.join(' ');
+            span.hidden = messages.length === 0;
+            const input = form.elements.namedItem(span.dataset.filterErrorFor);
+            if (messages.length) input?.setAttribute('aria-invalid', 'true');
+            else input?.removeAttribute('aria-invalid');
+        });
+    }
+
     function syncControls(next) {
         const incoming = next.querySelector('form[data-auto-filter]');
+        renderFieldErrors({});
         for (const input of form.elements) {
             if (!input.name) continue;
             const source = Array.from(incoming.elements).find((other) => other.name === input.name && other.type === input.type
@@ -106,7 +138,10 @@
             current.replaceChildren(...Array.from(incoming.childNodes, (node) => node.cloneNode(true)));
             if (incoming.hasAttribute('data-auto-empty')) current.dataset.autoEmpty = incoming.dataset.autoEmpty;
         }
-        for (const [current, incoming] of links) current.href = incoming.href;
+        for (const [current, incoming] of links) {
+            exportHrefs.set(current, incoming.href);
+            current.href = incoming.href;
+        }
         state.applied = url;
         state.desired = url;
         state.dirty = false;
@@ -148,6 +183,7 @@
                     for (const input of form.elements) {
                         if (body.errors?.[input.name]) input.setAttribute('aria-invalid', 'true');
                     }
+                    renderFieldErrors(body.errors || {});
                     throw new Error(Object.values(body.errors || {}).flat().join(' ') || 'Check the selected filters.');
                 }
                 throw new Error(response.status === 401 || response.status === 403
@@ -200,7 +236,7 @@
     form.addEventListener('input', (event) => {
         if (state.composing || event.isComposing) return;
         if (textInput(event.target)) changed(300);
-        else if (event.target.type === 'date') changed(0);
+        else if (['date', 'time'].includes(event.target.type)) changed(0);
     });
     form.addEventListener('change', (event) => {
         if (!state.composing && !textInput(event.target)) changed(0);
@@ -211,6 +247,12 @@
     });
 
     document.addEventListener('click', (event) => {
+        const exporting = event.target.closest('[data-auto-export]');
+        if (exporting && root.contains(exporting) && exporting.getAttribute('aria-disabled') === 'true') {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return;
+        }
         const link = event.target.closest('a[href]');
         if (!link || !root.contains(link) || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         if (link.matches('[data-auto-export]')) {

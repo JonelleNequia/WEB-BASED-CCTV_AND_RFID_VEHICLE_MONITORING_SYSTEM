@@ -142,6 +142,7 @@ class VehicleRegistryService
                 'vehicleEvents as total_exits_count' => fn ($query) => $query->where('event_type', 'EXIT')->where('event_status', \App\Models\VehicleEvent::STATUS_COMPLETED),
             ])
             ->orderBy('plate_number')
+            ->orderBy('id')
             ->get();
     }
 
@@ -161,6 +162,14 @@ class VehicleRegistryService
             );
 
         return $this->orderTagsByNumberThenUid($query)->get();
+    }
+
+    /** Reuse the list's status criterion and inventory ordering in reports. */
+    public function filteredRfidTagInventory(array $filters = [], ?Collection $inventory = null): Collection
+    {
+        return ($inventory ?? $this->rfidTagInventory())
+            ->when(filled($filters['status'] ?? null), fn (Collection $tags) => $tags->where('status', $filters['status']))
+            ->values();
     }
 
     /**
@@ -211,13 +220,20 @@ class VehicleRegistryService
      */
     public function resolveVehicleByPlate(?string $plateNumber): ?Vehicle
     {
-        $matches = $this->plateMatches($plateNumber);
+        $candidates = $this->plateCandidates($plateNumber);
+        $matches = $this->eligiblePlateMatches($candidates);
 
-        return $matches->count() === 1 && $matches->first()->status === 'active' ? $matches->first() : null;
+        return $candidates->count() === 1 && $matches->count() === 1 && $matches->first()->status === 'active' ? $matches->first() : null;
     }
 
     /** Exact keys only; historical collisions are returned, never picked. */
     public function plateMatches(?string $plate, ?\Carbon\CarbonInterface $at = null): Collection
+    {
+        return $this->eligiblePlateMatches($this->plateCandidates($plate, $at));
+    }
+
+    /** Count all literal collisions before eligibility can exclude a candidate. */
+    public function plateCandidates(?string $plate, ?\Carbon\CarbonInterface $at = null): Collection
     {
         $key = PlateNumber::key($plate);
         if ($key === null) {
@@ -225,14 +241,18 @@ class VehicleRegistryService
         }
 
         return Vehicle::query()->when($at, fn ($query) => $query->where('created_at', '<=', $at))->get()
-            ->filter(fn (Vehicle $vehicle) => in_array(VehicleCategory::normalize($vehicle->category), VehicleCategory::REGISTRY, true)
-                && PlateNumber::key($vehicle->plate_number) === $key)->values();
+            ->filter(fn (Vehicle $vehicle) => PlateNumber::key($vehicle->plate_number) === $key)->values();
+    }
+
+    public function eligiblePlateMatches(Collection $candidates): Collection
+    {
+        return $candidates->filter(fn (Vehicle $vehicle) => in_array(VehicleCategory::normalize($vehicle->category), VehicleCategory::REGISTRY, true))->values();
     }
 
     public function assertUniquePlate(string $plate, ?int $except = null): void
     {
         \Illuminate\Support\Facades\Validator::make(['plate_number' => PlateNumber::normalize($plate)], [
-            'plate_number' => ['required', 'string', 'max:50', new \App\Rules\PlateIdentifier],
+            'plate_number' => ['required', 'string', 'max:50', new \App\Rules\PlateIdentifier(20)],
         ])->validate();
         $key = PlateNumber::key($plate);
         if (Vehicle::query()->when($except, fn ($query) => $query->whereKeyNot($except))->get()

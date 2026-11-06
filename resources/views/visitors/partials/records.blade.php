@@ -27,7 +27,9 @@
             </td>
             <td>
                 <div class="plate-cell">
-                    @if ($record->plate_status === 'unreadable')
+                    @if ($record->identifier_label)
+                        <strong>{{ $record->plateLabel() }}</strong>
+                    @elseif ($record->plate_status === 'unreadable')
                         <x-badge tone="warning" label="Plate unreadable" />
                     @elseif ($record->plateProfile)
                         <a href="{{ route('visitors.profiles.show', $record->plateProfile) }}"><strong>{{ $record->plateLabel() }}</strong></a>
@@ -42,12 +44,16 @@
                 </div>
                 <div class="table-subtext">
                     <span data-vehicle-type title="{{ $record->vehicle_type_source_label }}">{{ $record->display_vehicle_type }}</span> ·
+                    @if ($record->identifier_label)
+                        Evidence only: {{ $record->identifier_text }} · confirmed by staff
+                    @else
                     @switch($record->plate_status)
                         @case('read') Camera{{ $record->plate_confidence !== null ? ' · '.number_format($record->plate_confidence * 100).'%' : '' }} @break
                         @case('corrected') {{ $record->source === 'manual' ? 'Typed by' : 'Corrected by' }} {{ $record->corrector?->name ?? 'a guard' }}{{ $record->ocr_plate_number && $record->ocr_plate_number !== $record->plate_number ? ' · camera read '.$record->ocr_plate_number : '' }} @break
                         @case('unreadable') {{ $record->ocr_plate_number ? 'Best guess: '.$record->ocr_plate_number : 'No plate found' }} @break
                         @default OCR running
                     @endswitch
+                    @endif
                     @if (in_array($record->match_confidence, ['high', 'medium', 'learned', 'low'], true))
                         {{-- Gate direction work, Phase C: tied to a plate already seen, one character off. --}}
                         · <span data-match="{{ $record->match_confidence }}" title="{{ $record->match_reason }}">{{ \App\Services\PlateMatchService::LABELS[$record->match_confidence] }}</span>

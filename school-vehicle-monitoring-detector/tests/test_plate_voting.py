@@ -66,8 +66,8 @@ class PhilippinePlateFormatTests(unittest.TestCase):
 
     def test_layouts_and_corrections(self):
         self.assertEqual(normalize_plate_text("abc 1234"), "ABC-1234")
-        self.assertIsNone(normalize_plate_text("ABC1Z34"))  # No positional substitutions.
-        self.assertIsNone(normalize_plate_text("A8C1234"))
+        self.assertEqual(normalize_plate_text("ABC1Z34"), "ABC1Z34")  # Distinct mixed identifier; never ABC-1234.
+        self.assertEqual(normalize_plate_text("A8C1234"), "A8C1234")
         self.assertEqual(normalize_plate_text("1234ABC"), "1234ABC")   # Literal order is preserved.
         self.assertEqual(normalize_plate_text("NBC 123"), "NBC-123")
         self.assertEqual(normalize_plate_text("AB 12345"), "AB-12345")
