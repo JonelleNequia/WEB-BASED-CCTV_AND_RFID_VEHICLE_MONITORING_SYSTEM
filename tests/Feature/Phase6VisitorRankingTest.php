@@ -114,7 +114,9 @@ class Phase6VisitorRankingTest extends TestCase
         $this->assertSame($vehicle->id, $record->vehicle_id);
         $this->assertSame($vehicle->id, PlateProfile::query()->sole()->vehicle_id);
         $this->assertSame([], app(\App\Services\VisitorRecordService::class)->unregisteredRanking()->all());
-        $this->actingAs($this->admin)->get(route('visitors.index'))->assertOk()->assertSee('Registered vehicle · plate identified');
+        $this->actingAs($this->admin)->get(route('visitors.index'))->assertOk()
+            ->assertViewHas('records', fn ($records) => $records->isEmpty())->assertDontSee('Registered vehicle · plate identified');
+        $this->getJson(route('logs.index', ['log_type' => 'registered']))->assertOk()->assertJsonPath('total', 1);
     }
 
     public function test_ordinary_registration_or_plate_edit_does_not_relink_earlier_passes(): void

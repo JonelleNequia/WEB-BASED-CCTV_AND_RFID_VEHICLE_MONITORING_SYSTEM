@@ -23,7 +23,7 @@ $record('manual-1', ['source' => 'manual', 'plate_status' => 'corrected', 'plate
 $record('manual-2', ['source' => 'manual', 'plate_status' => 'corrected', 'plate_number' => 'MAN 0002', 'gate' => 'gate-2']);
 $record('manual-archived', ['source' => 'manual', 'plate_status' => 'corrected', 'plate_number' => 'MAN 0003', 'gate' => $archived->code]);
 $record('registered-1', ['registration_status' => 'registered', 'registration_category' => 'faculty_staff', 'vehicle_id' => $vehicle->id, 'plate_number' => $vehicle->plate_number]);
-$record('registered-2', ['registration_status' => 'registered', 'registration_category' => 'registered_visitor', 'plate_number' => 'REG 0002']);
+$record('registered-2', ['registration_status' => 'registered', 'registration_category' => 'registered_visitor', 'plate_number' => 'REG 0002', 'source' => 'manual']);
 $record('review', ['registration_status' => 'review', 'registration_reason' => 'Confirm the identifier type.', 'plate_number' => 'WIN 0099']);
 $record('duplicate', ['source' => 'manual', 'plate_status' => 'corrected', 'status' => 'duplicate', 'plate_number' => 'MAN 0004']);
 $record('dismissed', ['source' => 'manual', 'plate_status' => 'corrected', 'status' => 'dismissed', 'plate_number' => 'MAN 0005']);

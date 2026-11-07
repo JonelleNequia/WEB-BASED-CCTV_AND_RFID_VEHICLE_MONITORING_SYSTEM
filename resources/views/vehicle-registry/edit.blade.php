@@ -30,7 +30,7 @@
                         <option value="">{{ $vehicle->rfid_tag_id ? 'Keep current RFID assignment' : 'No RFID assigned' }}</option>
                         @foreach ($assignableTags as $tag)
                             <option value="{{ $tag->id }}" @selected($selectedRfidTagId === (string) $tag->id)>
-                                RFID #{{ $tag->tag_number ?: 'N/A' }} - {{ $tag->uid }}
+                                RFID #{{ $tag->number_label ?: 'N/A' }} - {{ $tag->uid }}
                                 @if ($tag->vehicle && (int) $tag->vehicle_id === (int) $vehicle->id)
                                     (current)
                                 @endif

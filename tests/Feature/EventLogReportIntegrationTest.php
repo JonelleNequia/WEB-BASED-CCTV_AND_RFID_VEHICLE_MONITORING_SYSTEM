@@ -34,7 +34,7 @@ class EventLogReportIntegrationTest extends TestCase
             ->assertSee('Vehicle Activity Report')
             ->assertSeeInOrder(['Current List', 'Today', 'This Week', 'This Month', 'This Year', 'All Records'])
             ->assertSee(e(route('logs.print', ['report' => 'all', 'autoprint' => 1])), false)
-            ->assertSee('Include snapshots')
+            ->assertSee('Include images')
             ->assertDontSee('event-log-report-data', false)
             ->assertSee('CSV')
             ->assertSee('event-log-list-view', false)

@@ -101,10 +101,11 @@
     @include('visitors.partials.record-dialogs')
 
     {{-- Phase 8 (visitor model): replaces "Add Guest Observation" (Activity Logs › Alerts). --}}
-    <x-drawer id="add-visitor-drawer" title="Add guest manually" :open="request()->boolean('add') || $errors->hasAny(['gate', 'direction', 'seen_at', 'plate_number', 'snapshot'])">
+    <x-drawer id="add-visitor-drawer" title="Add guest manually" :open="request()->boolean('add') || $errors->hasAny(['gate', 'direction', 'seen_at', 'plate_number', 'snapshot']) || (old('_form') === 'manual-guest' && $errors->has('vehicle_type'))">
         <form method="POST" action="{{ route('visitors.records.store') }}" enctype="multipart/form-data" class="stack-form">
             @csrf
-            <p class="field-help">For a vehicle without a registered tag that the camera did not record (camera offline, missed). It is counted as an Unregistered Guest.</p>
+            <input type="hidden" name="_form" value="manual-guest">
+            <p class="field-help">For a vehicle the camera missed. Recognized registered vehicles appear in Activity Logs; guest records stay here. Leave the plate and type blank if unknown.</p>
             <div class="field">
                 <label for="manual_gate">Gate</label>
                 <select id="manual_gate" name="gate" required>
@@ -129,8 +130,10 @@
             </div>
             <div class="field">
                 <label for="manual_plate">Plate number (optional)</label>
-                <input id="manual_plate" type="text" name="plate_number" value="{{ old('plate_number') }}" placeholder="ABC 1234" maxlength="30" autocomplete="off" data-normalize-plate>
-                @error('plate_number')<span class="field-error">{{ $message }}</span>@enderror
+                <input id="manual_plate" type="text" name="plate_number" value="{{ old('plate_number') }}" placeholder="ABC 1234" maxlength="30" autocomplete="off" data-normalize-plate
+                       aria-describedby="manual_plate_help manual_plate-plate-error" aria-invalid="{{ $errors->has('plate_number') ? 'true' : 'false' }}">
+                <span id="manual_plate_help" class="field-help">Letters or digits with spaces or hyphens. Leave blank if the plate is unknown.</span>
+                <span id="manual_plate-plate-error" class="field-error" aria-live="polite" @unless($errors->has('plate_number')) hidden @endunless>{{ $errors->first('plate_number') }}</span>
             </div>
             <div class="field">
                 <label for="manual_type">Vehicle type (optional)</label>
@@ -140,6 +143,7 @@
                         <option value="{{ $type }}" @selected(\App\Support\VehicleType::canonical(old('vehicle_type')) === $type)>{{ $type }}</option>
                     @endforeach
                 </select>
+                @error('vehicle_type')<span class="field-error">{{ $message }}</span>@enderror
             </div>
             <div class="field">
                 <label for="manual_note">Note (optional)</label>

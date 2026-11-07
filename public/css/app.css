@@ -6397,6 +6397,11 @@ img.thumb-plate {
     border-color: var(--border);
 }
 
+/* Keep the complete occurrence crop readable beside its plate. */
+img.activity-plate-image {
+    object-fit: contain;
+}
+
 .thumb-button:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
@@ -6485,6 +6490,48 @@ img.thumb-plate {
 
 .dashboard-wide {
     grid-column: 1 / -1;
+}
+
+.dashboard-review-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem 0.75rem;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.dashboard-review-summary a {
+    font-weight: 700;
+}
+
+.dashboard-grid .segmented {
+    flex-wrap: wrap;
+    max-width: 100%;
+}
+
+.dashboard-grid .movement-counts {
+    table-layout: fixed;
+}
+
+.dashboard-grid .movement-counts th:first-child {
+    width: 64%;
+    overflow-wrap: anywhere;
+}
+
+.dashboard-stream .badge {
+    flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+    .dashboard-stream .stream-item {
+        flex-wrap: wrap;
+        gap: 0.35rem;
+    }
+
+    .dashboard-stream .stream-item > div {
+        flex-basis: 100%;
+    }
 }
 
 .movement-counts-panel {

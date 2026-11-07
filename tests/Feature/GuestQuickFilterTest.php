@@ -43,17 +43,17 @@ class GuestQuickFilterTest extends TestCase
         $manual = $this->record(['source' => 'manual', 'plate_status' => 'corrected', 'corrected_by' => auth()->id()]);
         $cameraCorrected = $this->record(['plate_status' => 'corrected', 'corrected_by' => auth()->id()]);
         $review = $this->record(['registration_status' => 'review', 'registration_reason' => 'Confirm the identifier type.']);
-        $this->assertSame([$registered->id], $this->ids(['record_filter' => 'registered']));
+        $this->assertSame([$registered->id], VisitorRecord::registeredAtOccurrence()->pluck('id')->all());
         $this->assertSame([$oldGuest->id, $manual->id, $cameraCorrected->id], $this->ids(['record_filter' => 'unregistered']));
         $this->assertSame([$manual->id], $this->ids(['record_filter' => 'manual']));
-        $this->assertCount(5, $this->ids());
-        foreach (['registered' => 'registered', 'unregistered' => 'unregistered_visitor'] as $filter => $logType) {
+        $this->assertCount(4, $this->ids());
+        foreach (['unregistered' => 'unregistered_visitor'] as $filter => $logType) {
             $logs = $this->getJson(route('logs.index', ['log_type' => $logType]))->assertOk()->json('logs');
             $ids = collect($logs)->where('record_type', 'visitor_record')->pluck('id')->sort()->values()->all();
             $this->assertSame($ids, $this->ids(['record_filter' => $filter]));
         }
         $vehicle->forceFill(['status' => 'inactive', 'category' => 'student'])->save();
-        $this->assertSame([$registered->id], $this->ids(['record_filter' => 'registered']));
+        $this->assertNotContains($registered->id, $this->ids());
         $this->assertContains($oldGuest->id, $this->ids(['record_filter' => 'unregistered']));
         $this->assertNotContains($review->id, $this->ids(['record_filter' => 'unregistered']));
     }
@@ -63,7 +63,8 @@ class GuestQuickFilterTest extends TestCase
         $earlier = Vehicle::create(['plate_number' => 'OLD 1234', 'category' => 'faculty_staff']);
         $earlier->forceFill(['created_at' => now()->subDays(2)])->save();
         $later = Vehicle::create(['plate_number' => 'NEW 1234', 'category' => 'faculty_staff']);
-        $expected = ['registered' => [], 'unregistered' => []];
+        $expected = ['' => [], 'unregistered' => []];
+        $registered = [];
         foreach ([null, 'guest', 'registered', 'review'] as $decision) {
             foreach ([null, $earlier->id, $later->id] as $vehicle) {
                 foreach ([[], ['plate_status' => 'unreadable'], ['plate_confidence' => 0.2], ['match_confidence' => PlateMatchService::LOW],
@@ -71,12 +72,18 @@ class GuestQuickFilterTest extends TestCase
                     ['plate_status' => 'unreadable', 'status' => 'dismissed'], ['registration_reason' => 'No plate visible (checked by staff).']] as $evidence) {
                     $record = $this->record($evidence + ['registration_status' => $decision, 'registration_category' => 'faculty_staff', 'vehicle_id' => $vehicle]);
                     $type = VisitorRecordLog::fields($record->fresh())['log_type'];
-                    if ($type === 'registered' || $type === 'unregistered_visitor') {
-                        $expected[$type === 'registered' ? 'registered' : 'unregistered'][] = $record->id;
+                    if ($type === 'registered') {
+                        $registered[] = $record->id;
+                    } else {
+                        $expected[''][] = $record->id;
+                    }
+                    if ($type === 'unregistered_visitor') {
+                        $expected['unregistered'][] = $record->id;
                     }
                 }
             }
         }
+        $this->assertSame($registered, VisitorRecord::registeredAtOccurrence()->orderBy('id')->pluck('id')->all());
         foreach ($expected as $filter => $ids) {
             $actual = [];
             for ($page = 1; $page <= (int) ceil(count($ids) / 20); $page++) {
@@ -92,13 +99,13 @@ class GuestQuickFilterTest extends TestCase
         $vehicle = Vehicle::create(['plate_number' => '395ISX', 'category' => 'faculty_staff', 'vehicle_type' => 'Car']);
         $vehicle->forceFill(['created_at' => now()->subDays(2)])->save();
         $record = $this->record(['registration_status' => 'review', 'plate_number' => null, 'ocr_plate_number' => '395ISX']);
-        $this->assertSame([], $this->ids(['record_filter' => 'registered']));
+        $this->assertSame([$record->id], $this->ids());
         $this->patchJson(route('visitors.records.review', $record), ['action' => 'correct_plate', 'plate' => '395ISX'])
             ->assertOk()->assertJsonPath('registration_status', 'registered');
         $record->refresh();
         $before = $record->getRawOriginal();
         $vehicleBefore = $vehicle->fresh()->getRawOriginal();
-        $this->assertSame([$record->id], $this->ids(['record_filter' => 'registered']));
+        $this->assertSame([], $this->ids());
         $this->assertSame([], $this->ids(['record_filter' => 'unregistered']));
         $this->assertSame([], $this->ids(['record_filter' => 'manual']));
         $this->getJson(route('logs.index', ['log_type' => 'registered']))->assertOk()
@@ -143,11 +150,11 @@ class GuestQuickFilterTest extends TestCase
         @$dom->loadHTML($html);
         $xpath = new \DOMXPath($dom);
         $links = $xpath->query('//*[@data-auto-update="record-filters"]/a');
-        $this->assertCount(4, $links);
-        $this->assertSame(['All', 'Registered', 'Unregistered Guests', 'Manual entries'], array_map(fn ($node) => trim($node->textContent), iterator_to_array($links)));
+        $this->assertCount(3, $links);
+        $this->assertSame(['All', 'Unregistered Guests', 'Manual entries'], array_map(fn ($node) => trim($node->textContent), iterator_to_array($links)));
         parse_str(parse_url($links[0]->getAttribute('href'), PHP_URL_QUERY), $query);
         $this->assertSame(['tab' => 'records', 'q' => 'ABC', 'gate' => 'gate-1', 'plate_status' => 'read', 'status' => 'all'], $query);
-        $this->assertSame('true', $links[3]->getAttribute('aria-current'));
+        $this->assertSame('true', $links[2]->getAttribute('aria-current'));
         $response->assertSee('name="record_filter" value="manual"', false)->assertSee('data-auto-reset', false);
         $this->get(route('visitors.index'))->assertOk()->assertSee('value="active" selected', false);
     }
@@ -160,7 +167,7 @@ class GuestQuickFilterTest extends TestCase
         $this->get(route('visitors.index', ['record_filter' => 'bad', 'gate' => 'gate-1', 'q' => 'ABC']))
             ->assertRedirect(route('visitors.index', ['gate' => 'gate-1', 'q' => 'ABC']))->assertSessionHasErrors('record_filter');
         foreach (['plates', 'review'] as $tab) {
-            $this->get(route('visitors.index', ['tab' => $tab, 'record_filter' => 'registered']))
+            $this->get(route('visitors.index', ['tab' => $tab, 'record_filter' => 'manual']))
                 ->assertOk()->assertDontSee('data-auto-update="record-filters"', false);
         }
     }

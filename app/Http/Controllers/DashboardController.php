@@ -61,6 +61,7 @@ class DashboardController extends Controller
                 'camera_total' => $data['cameraSummary']['total'],
                 // UI Phase 4
                 'alerts_total' => $data['alertCounts']['total'],
+                'review_count' => $data['reviewCount'],
             ],
             'attention' => $data['attentionItems'],
             'hourly' => $data['hourlyTraffic'],
@@ -114,7 +115,7 @@ class DashboardController extends Controller
             ->filter(fn (string $role): bool => \App\Support\PipelineReport::connection($detectorStatus, $role)['state'] === 'connected')
             ->count();
         // Phase 7 (visitor model): one source for every IN / OUT number.
-        $movementCounts = app(MovementCountService::class)->allPeriods();
+        $movementCounts = app(MovementCountService::class)->dashboardPeriods();
         $trafficSummary = $this->trafficSummary($movementCounts);
         $totalTraffic = $trafficSummary['today'];
 
@@ -147,7 +148,7 @@ class DashboardController extends Controller
             // Gate direction work, Phase C: unregistered vehicles IN today without an OUT (an estimate only).
             'possiblyInsideCount' => app(\App\Services\VisitorPresenceService::class)->possiblyInside()['vehicles']->count(),
             // Gate direction work, Phase D: Visitors › Review cards waiting.
-            'reviewCount' => app(\App\Services\VisitorReviewService::class)->count(),
+            'reviewCount' => app(\App\Services\VisitorReviewService::class)->totalCount(),
             'latestEvents' => $this->recentEventActivities(),
             'frequentEntryVehicles' => $this->frequentEntryVehicles(),
             // Phase 6 (visitor model): Visitor Ranking, separate from the registered one.
@@ -258,6 +259,7 @@ class DashboardController extends Controller
                 $plate = $scan->vehicle?->plate_number ?: ($scan->isUnknownTag() ? 'Unknown tag' : 'No plate');
 
                 return [
+                    'key' => 'rfid_scan:'.$scan->id,
                     'title' => $scan->tag_uid.' • '.$scan->resolvedEventTypeLabel,
                     'summary' => $plate.' • '.$scan->scanLocationLabel.' • State: '.$scan->resultingStateLabel,
                     'display_time' => DisplayTime::datetime($time, 'No time'),
@@ -277,6 +279,7 @@ class DashboardController extends Controller
                 $plate = $this->guestDisplayPlate($observation);
 
                 return [
+                    'key' => 'guest_observation:'.$observation->id,
                     'title' => $plate,
                     'summary' => 'Unregistered Guest • '.Gate::labelFor($observation->location),
                     'display_time' => DisplayTime::datetime($time, 'No time'),
@@ -301,73 +304,12 @@ class DashboardController extends Controller
      */
     protected function recentEventActivities(): Collection
     {
-        $eventRows = VehicleEvent::query()
-            ->withoutHiddenGuestCopies()
-            ->with(['camera', 'vehicle', 'rfidScanLog'])
-            ->where('event_status', '!=', VehicleEvent::STATUS_PENDING_DETAILS)
-            ->orderBy('created_at', 'desc')
-            ->limit(30)
-            ->get()
-            ->map(function (VehicleEvent $event): array {
-                $time = $event->event_time;
-                $plate = $event->plate_text ?: $event->vehicle?->plate_number ?: 'No plate';
-                // UI Phase 4: the reported direction (an unknown one is not shown as IN).
-                $movement = in_array($event->event_type, ['ENTRY', 'EXIT'], true)
-                    ? (\App\Support\MovementRow::eventDirection($event) ?? 'Direction unknown')
-                    : $event->event_type;
-
-                return [
-                    'title' => $movement.' • '.$plate,
-                    'summary' => $event->event_origin_label.' • '.$event->display_vehicle_type,
-                    'display_time' => DisplayTime::datetime($time, 'No time'),
-                    'badge_label' => in_array($event->event_origin, ['guest_cctv', 'guest_manual'], true) ? 'Unregistered' : $event->display_status_label,
-                    'badge_class' => $event->status_badge_class,
-                    'sort_time' => $event->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,
-                ];
-            });
-
-        $guestRows = $this->unmirroredGuestObservationsQuery()
-            ->with('camera')
-            ->orderBy('created_at', 'desc')
-            ->limit(30)
-            ->get()
-            ->map(function (GuestVehicleObservation $observation): array {
-                $time = $observation->observed_at;
-                $eventType = VehicleEvent::eventTypeForDirection(data_get($observation->detection_metadata_json, 'direction'));
-
-                return [
-                    'title' => match (VehicleEvent::directionForEventType($eventType)) {
-                        'UNKNOWN' => 'Direction unknown',
-                        default => VehicleEvent::directionForEventType($eventType),
-                    }.' • '.$this->guestDisplayPlate($observation),
-                    'summary' => 'Unregistered Guest • '.Gate::labelFor($observation->location),
-                    'display_time' => DisplayTime::datetime($time, 'No time'),
-                    'badge_label' => 'Unregistered',
-                    'badge_class' => 'secondary',
-                    'sort_time' => $observation->created_at?->getTimestamp() ?? $time?->getTimestamp() ?? 0,
-                ];
-            });
-
-        // UI Phase 4: the latest 8 only ("View all" opens Activity Logs).
-        return $eventRows
-            ->concat($guestRows)
-            ->sortByDesc('sort_time')
-            ->take(8)
-            ->values();
+        return app(\App\Services\DashboardActivityService::class)->recent();
     }
 
     protected function unmirroredGuestObservationsQuery()
     {
-        return GuestVehicleObservation::query()
-            ->where(function ($query): void {
-                $query->whereNull('external_event_key')
-                    ->orWhereNotExists(function ($subquery): void {
-                        $subquery->selectRaw('1')
-                            ->from('vehicle_events')
-                            ->whereColumn('vehicle_events.external_event_key', 'guest_vehicle_observations.external_event_key')
-                            ->whereIn('vehicle_events.event_origin', ['guest_cctv', 'guest_manual']);
-                    });
-            });
+        return app(\App\Services\DashboardActivityService::class)->legacyQuery();
     }
 
     protected function guestDisplayPlate(GuestVehicleObservation $observation): string

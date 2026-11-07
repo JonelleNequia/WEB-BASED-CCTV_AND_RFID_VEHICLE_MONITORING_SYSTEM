@@ -121,6 +121,13 @@ try {
     check(duplicateVote.status() === 200 && (await duplicateVote.json()).visitor_record.vehicle_event_id === eventId, 'Repeated OCR keeps the same movement event');
     check((await getVehicle()).entries_today === 1, 'Repeated OCR does not increment the entry count');
 
+    await page.goto(base + '/visitors');
+    check(await page.locator('#visitor-record-' + plateBody.visitor_record.id).count() === 0, 'Untagged Registered occurrence is excluded from the Guests list');
+    const guestPrint = await page.request.get(base + '/visitors/print');
+    const guestCSV = await page.request.get(base + '/visitors/export/csv');
+    check(guestPrint.status() === 200 && !(await guestPrint.text()).includes('data-record-id="' + plateBody.visitor_record.id + '"')
+        && guestCSV.status() === 200 && (await guestCSV.text()).trim().split('\r\n').length === 1, 'Guests Print and CSV also exclude the untagged Registered occurrence');
+
     await page.goto(base + '/logs?tab=events&log_type=registered');
     let logs = await page.locator('#event-log-modal-data').evaluate((node) => JSON.parse(node.textContent));
     check(logs.length === 1 && logs[0].source_label === 'Staff-confirmed plate' && logs[0].rfid_tag_uid === 'N/A', 'Activity Logs preserves real plate provenance without fake RFID');

@@ -80,17 +80,22 @@ try {
     const choose = async (id, value) => { await page.locator(id).selectOption(value); await ready(); };
     const search = async value => { await page.locator('#visitor_q').fill(value); await ready(); };
     await page.goto(base + '/visitors');
-    check(JSON.stringify(await chips.getByRole('link').allTextContents()) === JSON.stringify(['All', 'Registered', 'Unregistered Guests', 'Manual entries']), 'Four compact quick filters use accurate labels');
+    check(JSON.stringify(await chips.getByRole('link').allTextContents()) === JSON.stringify(['All', 'Unregistered Guests', 'Manual entries']), 'Three quick filters remain, without Registered');
     check(await selected() === 'All' && await page.locator('[name=record_filter]').inputValue() === '', 'All is selected by default');
     check(await page.getByRole('link', { name: 'Plate Profiles', exact: true }).count() === 1 && await page.getByRole('link', { name: /^Review/ }).count() === 1, 'Plate Profiles and Review remain separate tabs');
-    await click('Registered');
-    check(eq(await rows(), [data.ids['registered-1'], data.ids['registered-2']]), 'Registered uses the saved occurrence decision, not the shared plate');
-    check(await selected() === 'Registered' && await page.locator('[name=record_filter]').inputValue() === 'registered', 'Selected chip and hidden criterion stay synchronized');
-    const selectedColor = await chip('Registered').evaluate(link => getComputedStyle(link).backgroundColor);
-    const otherColor = await chip('All').evaluate(link => getComputedStyle(link).backgroundColor);
+    const allIds = [...await rows()];
+    await page.locator('.pagination-links').getByRole('link', { name: 'Next', exact: true }).click(); await ready(); allIds.push(...await rows());
+    check(allIds.length === 30 && !allIds.includes(data.ids['registered-1']) && !allIds.includes(data.ids['registered-2']), 'All pages exclude Registered occurrences, including manual-source evidence');
+    const report = await page.request.get(await page.locator('[data-auto-link=list-print]').getAttribute('href'));
+    const printedIds = [...(await report.text()).matchAll(/data-record-id="(\d+)"/g)].map(match => Number(match[1]));
+    const csv = await page.request.get(await page.locator('[data-auto-link=list-csv]').getAttribute('href'));
+    const csvIds = (await csv.text()).slice(1).trim().split('\r\n').slice(1).map(line => Number(line.split(',')[0]));
+    check(eq(allIds.sort((a,b)=>a-b), printedIds) && eq(allIds, csvIds), 'Guests pagination, Print and CSV share the same non-Registered IDs');
+    const selectedColor = await chip('All').evaluate(link => getComputedStyle(link).backgroundColor);
+    const otherColor = await chip('Manual entries').evaluate(link => getComputedStyle(link).backgroundColor);
     check(selectedColor !== otherColor, 'Applied chip has a distinct visual state');
     const activityRegistered = await (await page.request.get(base + '/logs?log_type=registered', { headers: { Accept: 'application/json' } })).json();
-    check(eq(await rows(), activityRegistered.logs.filter(row => row.record_type === 'visitor_record').map(row => row.id)), 'Registered IDs agree with Activity Logs for the same occurrences');
+    check(eq(activityRegistered.logs.filter(row => row.record_type === 'visitor_record').map(row => row.id).sort((a,b)=>a-b), [data.ids['registered-1'], data.ids['registered-2']]), 'Registered occurrences remain available in Activity Logs');
     await click('Unregistered Guests');
     check((await rows()).length === 20 && new URL(page.url()).searchParams.get('record_filter') === 'unregistered', 'Unregistered results paginate with the applied criterion');
     const guestIds = [...await rows()];
@@ -124,11 +129,11 @@ try {
     await page.locator('[data-auto-reset]').click(); await ready();
     check(await selected() === 'All' && await page.locator('#visitor_q').inputValue() === '' && await page.locator('#visitor_gate').inputValue() === ''
         && await page.locator('#visitor_plate_status').inputValue() === '' && await page.locator('#visitor_status').inputValue() === 'active', 'Reset restores existing defaults and clears quick selection');
-    await chip('Registered').focus(); await page.keyboard.press('Enter'); await ready();
-    check(await selected() === 'Registered', 'Quick filters work with keyboard Enter and expose aria-current');
+    await chip('Manual entries').focus(); await page.keyboard.press('Enter'); await ready();
+    check(await selected() === 'Manual entries', 'Quick filters work with keyboard Enter and expose aria-current');
     await search('NO-MATCH');
     check(await page.locator('[data-auto-update=results]').getAttribute('data-auto-empty') === 'true'
-        && await selected() === 'Registered', 'Empty results preserve the selected filter');
+        && await selected() === 'Manual entries', 'Empty results preserve the selected filter');
     await search('');
     await page.evaluate(() => {
         window.savedFetch = window.fetch;
@@ -169,14 +174,38 @@ try {
     check(await page.locator('#visitor_note_value').inputValue() === 'Synthetic note after automatic refresh', 'Row action still saves and reloads data after results replacement');
     await page.locator('#visitor-note-modal').getByRole('button', { name: 'Close', exact: true }).click();
     if (await page.locator('.toast-close').isVisible()) await page.locator('.toast-close').click();
+    await page.goto(base + '/visitors?record_filter=registered&q=LATE&gate=gate-1&plate_status=read&status=all&page=2');
+    const legacyURL = new URL(page.url());
+    check(!legacyURL.searchParams.has('record_filter') && !legacyURL.searchParams.has('page') && await selected() === 'All', 'Old Registered bookmark recovers to the canonical Guests list');
+    check(legacyURL.searchParams.get('q') === 'LATE' && legacyURL.searchParams.get('gate') === 'gate-1'
+        && legacyURL.searchParams.get('plate_status') === 'read' && legacyURL.searchParams.get('status') === 'all'
+        && eq(await rows(), [data.ids['historical-guest']]), 'Legacy recovery keeps valid criteria and genuine historical Guest');
+    check((await page.locator('[data-list-filter-errors]').innerText()).includes('The Registered filter has been removed from Guests.'), 'Legacy bookmark explains the removed criterion');
+    for (const path of ['/visitors/print?record_filter=registered', '/visitors/export/csv?record_filter=registered']) {
+        const rejected = await page.request.get(base + path);
+        check(rejected.status() === 422 && !(await rejected.headers())['content-disposition'], 'Old report URL rejects instead of silently exporting another dataset');
+    }
+    await page.goto(base + '/visitors?record_filter=manual');
+    const previous = await rows();
+    await page.evaluate(() => { history.pushState(null, '', '/visitors?record_filter=registered'); dispatchEvent(new PopStateEvent('popstate')); });
+    await page.waitForFunction(() => document.querySelector('[data-auto-list]').dataset.autoState === 'error');
+    check(eq(await rows(), previous) && (await page.locator('[data-auto-status]').innerText()).includes('The Registered filter has been removed'), 'An old history entry preserves valid rows with a clear error');
+    check(await page.locator('[data-auto-link=list-print]').getAttribute('href') === null
+        && await page.locator('[data-auto-link=list-csv]').getAttribute('href') === null, 'Old invalid history criteria cannot export stale results');
+    await page.locator('[data-auto-reset]').click(); await ready(); await click('Manual entries');
     await page.screenshot({ path: path.join(artifacts, 'desktop-manual.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     const bounds = await chips.getByRole('link').evaluateAll(links => links.map(link => { const rect = link.getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, viewport: innerWidth }; }));
-    check(bounds.every(rect => rect.left >= 0 && rect.right <= rect.viewport) && new Set(bounds.map(rect => rect.top)).size > 1, 'Chips wrap within the narrow viewport');
+    check(bounds.every(rect => rect.left >= 0 && rect.right <= rect.viewport), 'Remaining chips fit within the narrow viewport');
     const inputs = await page.locator('form[data-auto-filter]').evaluate(form => [...form.querySelectorAll('input:not([type=hidden]), select')].map(input => { const r = input.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }));
     check(inputs.every(Boolean), 'Existing filter controls fit at 390px');
     check(await page.locator('.guest-records-table .table-responsive').evaluate(node => node.scrollWidth > node.clientWidth), 'Narrow table scrolls horizontally without crushing the plate and row text');
     await page.screenshot({ path: path.join(artifacts, 'mobile-manual.png'), fullPage: true });
+    await page.setViewportSize({ width: 320, height: 844 });
+    const compactBounds = await chips.getByRole('link').evaluateAll(links => links.map(link => { const rect = link.getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, viewport: innerWidth }; }));
+    check(compactBounds.every(rect => rect.left >= 0 && rect.right <= rect.viewport)
+        && new Set(compactBounds.map(rect => rect.top)).size > 1, 'Chips wrap when the available width requires it');
+    await page.screenshot({ path: path.join(artifacts, 'compact-manual.png'), fullPage: true });
     check(errors.length === 0, 'No browser script errors');
     check(requests.some(url => new URL(url).searchParams.get('record_filter') === 'manual'), 'Quick changes use the existing automatic refresh requests');
     console.log(`Guests quick-filter browser checks: ${checks} passed.`);

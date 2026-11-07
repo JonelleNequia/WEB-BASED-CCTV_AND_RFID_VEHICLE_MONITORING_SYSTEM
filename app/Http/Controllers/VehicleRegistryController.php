@@ -81,19 +81,21 @@ class VehicleRegistryController extends Controller
         Request $request,
         VehicleRegistryService $vehicleRegistryService
     ): RedirectResponse|JsonResponse {
+        $hasPrintedNumber = $request->exists('display_number');
         $validated = $request->validate([
             // UI Phase 3: bulk scanning sends auto_number instead of a number.
             'tag_number' => [
-                'required_unless:auto_number,1',
+                Rule::requiredIf(! $hasPrintedNumber && ! $request->boolean('auto_number')),
                 'nullable',
                 'integer',
                 'min:1',
                 'max:999999',
                 Rule::unique('vehicle_rfid_tags', 'tag_number'),
             ],
+            'display_number' => ['bail', Rule::requiredIf($hasPrintedNumber), 'nullable', new \App\Rules\RfidTagNumber, Rule::unique('vehicle_rfid_tags', 'display_number')],
             'uid' => ['required', 'string', 'max:100'],
             'auto_number' => ['sometimes', 'boolean'],
-        ]);
+        ], [], ['display_number' => 'Tag number', 'uid' => 'Electronic RFID UID']);
 
         try {
             $tag = $vehicleRegistryService->registerRfidTag($validated);
@@ -118,9 +120,12 @@ class VehicleRegistryController extends Controller
 
         if ($request->expectsJson()) {
             return response()->json([
-                'message' => 'RFID #'.$tag->tag_number.' ('.$tag->uid.') was added to the RFID inventory.',
+                'message' => 'RFID #'.$tag->number_label.' ('.$tag->uid.') was added to the RFID inventory.',
                 'rfid_tag_id' => $tag->id,
                 'tag_number' => $tag->tag_number,
+                'display_number' => $tag->display_number,
+                'number_label' => $tag->number_label,
+                'next_tag_number' => $vehicleRegistryService->nextTagNumber(),
                 'uid' => $tag->uid,
                 'label' => $tag->label,
             ], 201);
@@ -128,7 +133,7 @@ class VehicleRegistryController extends Controller
 
         return redirect()
             ->route('registry.index', ['tab' => 'tags'])
-            ->with('status', 'RFID #'.$tag->tag_number.' ('.$tag->uid.') was added to the RFID inventory.');
+            ->with('status', 'RFID #'.$tag->number_label.' ('.$tag->uid.') was added to the RFID inventory.');
     }
 
     /**

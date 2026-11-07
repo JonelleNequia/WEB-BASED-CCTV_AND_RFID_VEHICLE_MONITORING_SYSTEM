@@ -15,7 +15,9 @@ class GuestRecordQuery
 
         return VisitorRecord::query()
             ->with(['plateProfile', 'corrector', 'vehicle'])
-            ->when(($filters['record_filter'] ?? '') === 'registered', fn (Builder $query) => $query->registeredAtOccurrence())
+            // Exclude by occurrence decision, including the legacy fallback.
+            // A current Registry link must not hide an earlier genuine Guest.
+            ->whereNotIn('visitor_records.id', VisitorRecord::query()->registeredAtOccurrence()->select('visitor_records.id'))
             ->when(($filters['record_filter'] ?? '') === 'unregistered', fn (Builder $query) => $query->unregisteredAtOccurrence())
             ->when(($filters['record_filter'] ?? '') === 'manual', fn (Builder $query) => $query->where('source', VisitorRecord::SOURCE_MANUAL))
             ->when($status !== 'all', fn (Builder $query) => $query->where('status', $status))

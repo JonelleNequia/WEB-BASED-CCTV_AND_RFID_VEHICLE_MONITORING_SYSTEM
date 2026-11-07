@@ -59,7 +59,7 @@
                 @endforeach
                 <label class="menu-check">
                     <input type="checkbox" data-event-log-print-snapshots>
-                    Include snapshots
+                    Include images
                 </label>
             </div>
         </details>

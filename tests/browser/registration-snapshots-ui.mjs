@@ -69,7 +69,7 @@ try {
     await page.locator('[data-event-log-list]').waitFor();
     const logs = await page.locator('#event-log-modal-data').evaluate(node => JSON.parse(node.textContent));
     check(logs.length === 5, 'One rendered occurrence per fixture');
-    const thumbnails = page.locator('[data-event-log-list] img[src*="/evidence/occurrences/"]');
+    const thumbnails = page.locator('[data-event-log-list] td:nth-child(2) img[src*="/evidence/occurrences/"]');
     check(await thumbnails.count() === 4, 'Registered RFID, plate, Guest and unreadable Review show their own thumbnails');
     for (let i = 0; i < 4; i++) {
         await thumbnails.nth(i).evaluate(img => img.complete && img.naturalWidth > 0 ? true : new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; }));

@@ -30,7 +30,7 @@
         <select id="{{ $prefix }}_available" name="rfid_tag_id" data-tag-select>
             <option value="">{{ $prefix === 'add' ? 'No RFID assigned' : ($availableTags->isEmpty() ? 'No available tags — scan a new one' : 'Choose a tag') }}</option>
             @foreach ($availableTags as $tag)
-                <option value="{{ $tag->id }}" @selected($useOld && (string) old('rfid_tag_id') === (string) $tag->id)>#{{ $tag->tag_number ?: 'N/A' }} · {{ $tag->uid }}</option>
+                <option value="{{ $tag->id }}" @selected($useOld && (string) old('rfid_tag_id') === (string) $tag->id)>#{{ $tag->number_label ?: 'N/A' }} · {{ $tag->uid }}</option>
             @endforeach
         </select>
         @if ($useOld)

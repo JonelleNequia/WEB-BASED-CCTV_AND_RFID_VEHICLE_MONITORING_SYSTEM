@@ -80,7 +80,7 @@
                 <td>{{ $vehicle->vehicle_type }}</td>
                 <td>
                     @if ($vehicle->rfidTag)
-                        #{{ $vehicle->rfidTag->tag_number ?: '—' }}
+                        #{{ $vehicle->rfidTag->number_label ?: '—' }}
                         @if ($vehicle->rfidTag->status !== 'assigned')
                             <x-badge :status="$vehicle->rfidTag->status" :label="$vehicle->rfidTag->status_label" />
                         @endif
@@ -207,7 +207,7 @@
 
         <p class="replace-current" data-replace-current>
             @if ($replaceVehicle)
-                {{ $replaceVehicle->plate_number }} · current tag {{ $replaceVehicle->rfidTag ? '#'.$replaceVehicle->rfidTag->tag_number.' · '.$replaceVehicle->rfidTag->uid : 'none' }}
+                {{ $replaceVehicle->plate_number }} · current tag {{ $replaceVehicle->rfidTag ? '#'.$replaceVehicle->rfidTag->number_label.' · '.$replaceVehicle->rfidTag->uid : 'none' }}
             @endif
         </p>
 

@@ -31,13 +31,9 @@
         return wrapper;
     }
 
-    function streamKey(item) {
-        return [
-            item.title || '',
-            item.summary || '',
-            item.display_time || '',
-            item.badge_label || '',
-        ].join('|');
+    function streamKey(item, index) {
+        // Source IDs retain distinct movements even when all visible text is identical.
+        return item.key || `${item.record_type || 'row'}:${item.id ?? index}`;
     }
 
     function buildStreamItem(item) {
@@ -95,7 +91,7 @@
         const seen = new Set();
 
         items.forEach(function (item, index) {
-            const key = streamKey(item);
+            const key = streamKey(item, index);
             let node = nodeMap.get(key);
 
             if (!node) {
@@ -180,6 +176,34 @@
                 }, counts);
                 if (value !== undefined && value !== null) {
                     node.textContent = String(value);
+                }
+            });
+            Object.entries(counts).forEach(function ([period, row]) {
+                const body = document.querySelector(`[data-dashboard-gates="${period}"]`);
+                if (!body) return;
+                const gates = Object.entries(row.gates || {});
+                body.replaceChildren(...gates.map(function ([code, gate]) {
+                    const tr = document.createElement('tr');
+                    const label = document.createElement('th');
+                    label.scope = 'row';
+                    label.textContent = gate.label;
+                    tr.append(label);
+                    ['in', 'out'].forEach(function (direction) {
+                        const td = document.createElement('td');
+                        td.dataset.movement = `${period}.gates.${code}.${direction}`;
+                        td.textContent = gate[direction] ?? 0;
+                        tr.append(td);
+                    });
+                    return tr;
+                }));
+                if (!gates.length) {
+                    const td = document.createElement('td');
+                    td.colSpan = 3;
+                    td.className = 'text-muted';
+                    td.textContent = 'No operational gates configured.';
+                    const tr = document.createElement('tr');
+                    tr.append(td);
+                    body.append(tr);
                 }
             });
         }
@@ -284,7 +308,7 @@
         if (items.length === 0) {
             const clear = document.createElement('li');
             clear.className = 'attention-clear';
-            clear.textContent = 'All clear. No anomalies or unknown tags.';
+            clear.textContent = 'No anomalies or unknown tags.';
             list.replaceChildren(clear);
             return;
         }
@@ -314,111 +338,6 @@
         }));
     }
 
-    /* UI Phase 4: entries and exits per hour today (plain SVG, works offline). */
-    // Step between y-axis labels: every whole number up to 4, then 1, 2, 5,
-    // 10, 20, 50... so there are at most 4 steps.
-    function axisStep(peak) {
-        if (peak <= 4) {
-            return 1;
-        }
-        const rough = peak / 4;
-        const power = Math.pow(10, Math.floor(Math.log10(rough)));
-        const nice = [1, 2, 5, 10].find((factor) => factor * power >= rough);
-        return nice * power;
-    }
-
-    function renderChart(hourly) {
-        const box = document.querySelector('[data-dashboard-chart]');
-
-        if (!box || !Array.isArray(hourly) || hourly.length === 0) {
-            return;
-        }
-
-        const ns = 'http://www.w3.org/2000/svg';
-        const width = 480;
-        const height = 170;
-        const top = 10;
-        const bottom = 22;
-        const left = 22;
-        const plotHeight = height - top - bottom;
-        const slot = (width - left) / hourly.length;
-        const barWidth = Math.max(2, (slot - 3) / 2);
-        // UI Phase 3: whole-number axis (it showed 0, 1, 1 when the peak was 1).
-        const peak = Math.max(0, ...hourly.map((row) => Math.max(row.entries, row.exits)));
-        const step = axisStep(peak);
-        const max = Math.max(step, Math.ceil(peak / step) * step);
-        const ticks = [];
-        for (let value = 0; value <= max; value += step) {
-            ticks.push(value);
-        }
-        const svg = document.createElementNS(ns, 'svg');
-        const nowHour = Number(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Manila' }).format(new Date())) % 24;
-
-        svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-        svg.setAttribute('preserveAspectRatio', 'none');
-
-        ticks.forEach(function (value) {
-            const y = top + plotHeight - plotHeight * (value / max);
-            const line = document.createElementNS(ns, 'line');
-            line.setAttribute('x1', left);
-            line.setAttribute('x2', width);
-            line.setAttribute('y1', y);
-            line.setAttribute('y2', y);
-            line.setAttribute('class', 'chart-grid');
-            svg.append(line);
-
-            const label = document.createElementNS(ns, 'text');
-            label.setAttribute('x', 0);
-            label.setAttribute('y', y + 3);
-            label.setAttribute('class', 'chart-axis');
-            label.textContent = String(value);
-            svg.append(label);
-        });
-
-        hourly.forEach(function (row, index) {
-            const x = left + index * slot + 1;
-
-            if (row.hour === nowHour) {
-                const now = document.createElementNS(ns, 'rect');
-                now.setAttribute('x', x - 1);
-                now.setAttribute('y', top);
-                now.setAttribute('width', slot);
-                now.setAttribute('height', plotHeight);
-                now.setAttribute('class', 'chart-now');
-                svg.append(now);
-            }
-
-            [['entries', 0], ['exits', 1]].forEach(function ([key, offset]) {
-                const value = row[key] || 0;
-                const barHeight = (value / max) * plotHeight;
-                const rect = document.createElementNS(ns, 'rect');
-                const title = document.createElementNS(ns, 'title');
-
-                rect.setAttribute('x', x + offset * (barWidth + 1));
-                rect.setAttribute('y', top + plotHeight - barHeight);
-                rect.setAttribute('width', barWidth);
-                rect.setAttribute('height', Math.max(value > 0 ? 1.5 : 0, barHeight));
-                rect.setAttribute('class', `chart-bar chart-${key}`);
-                title.textContent = `${row.label}: ${value} ${key}`;
-                rect.append(title);
-                svg.append(rect);
-            });
-
-            if (row.hour % 3 === 0) {
-                const label = document.createElementNS(ns, 'text');
-                label.setAttribute('x', x);
-                label.setAttribute('y', height - 6);
-                label.setAttribute('class', 'chart-axis');
-                label.textContent = row.label.replace(':00', '');
-                svg.append(label);
-            }
-        });
-
-        box.replaceChildren(svg);
-    }
-
-    renderChart(payload.hourly || []);
-
     function renderState(body) {
         const metrics = body.metrics || {};
 
@@ -443,7 +362,6 @@
         renderVisitorRanking(body.frequent_unregistered_visitors || []);
         renderMovementCounts(body.movement_counts || null, body.inside_by_category || null);
         renderAttention(body.attention);
-        renderChart(body.hourly);
     }
 
     async function refreshDashboard() {

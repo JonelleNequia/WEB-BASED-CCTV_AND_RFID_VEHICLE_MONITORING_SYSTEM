@@ -217,6 +217,12 @@ class RfidTag extends Model
      */
     public function getLabelAttribute(): string
     {
-        return $this->tag_number ? 'Tag #'.$this->tag_number : (string) $this->uid;
+        return $this->number_label !== null ? 'Tag #'.$this->number_label : (string) $this->uid;
+    }
+
+    /** Printed sticker text, with the existing numeric inventory number as the legacy fallback. */
+    public function getNumberLabelAttribute(): ?string
+    {
+        return filled($this->display_number) ? (string) $this->display_number : ($this->tag_number ? (string) $this->tag_number : null);
     }
 }

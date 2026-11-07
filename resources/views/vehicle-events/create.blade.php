@@ -13,7 +13,8 @@
             <div>
                 <div class="panel-title-row">
                     <h3>Manual Vehicle Log</h3>
-<p class="field-help">ENTRY logs open sessions. EXIT logs run the same matching rules used by the rest of the system. This page is a fallback workflow.</p>                </div>
+                    <p class="field-help">ENTRY logs open sessions. EXIT logs run the same matching rules used by the rest of the system. This page is a fallback workflow.</p>
+                </div>
             </div>
         </div>
 
@@ -31,11 +32,6 @@
             <div class="field">
                 <label for="plate_text">Plate</label>
                 <input id="plate_text" type="text" name="plate_text" value="{{ old('plate_text') }}" placeholder="ABC-1234" required maxlength="50" data-normalize-plate>
-            </div>
-
-            <div class="field">
-                <label for="plate_confidence">Plate Confidence</label>
-                <input id="plate_confidence" type="number" step="0.01" min="0" max="100" name="plate_confidence" value="{{ old('plate_confidence') }}" placeholder="Optional">
             </div>
 
             <div class="field">
@@ -61,19 +57,7 @@
             </div>
 
             <div class="field">
-                <label for="roi_name">Station / ROI</label>
-                <select id="roi_name" name="roi_name" required>
-                    <option value="">Select station or ROI</option>
-                    @foreach ($rois as $roi)
-                        <option value="{{ $roi->roi_name }}" @selected(old('roi_name') === $roi->roi_name)>
-                            {{ $roi->roi_name }} ({{ $roi->camera?->camera_name ?? 'No Camera' }})
-                        </option>
-                    @endforeach
-                </select>
-            </div>
-
-            <div class="field">
-                <label for="event_time">Time</label>
+                <label for="event_time">Date and Time</label>
                 <input id="event_time" type="datetime-local" name="event_time" value="{{ old('event_time', now()->format('Y-m-d\TH:i')) }}" required>
             </div>
 

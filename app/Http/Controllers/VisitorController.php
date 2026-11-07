@@ -34,7 +34,6 @@ class VisitorController extends Controller
 
     public const RECORD_FILTERS = [
         '' => 'All',
-        'registered' => 'Registered',
         'unregistered' => 'Unregistered Guests',
         'manual' => 'Manual entries',
     ];
@@ -82,9 +81,7 @@ class VisitorController extends Controller
                 ? PlateProfile::query()->current()->orderByDesc('visit_count')->limit(500)->pluck('plate_number')
                 : collect(),
             'reviewLog' => $tab === 'review' ? $reviewService->recent() : collect(),
-            'reviewCount' => $reviewService->count()
-                + VehicleEvent::query()->where('event_type', VehicleEvent::TYPE_UNKNOWN)->whereNotNull('vehicle_id')
-                    ->where('event_status', VehicleEvent::STATUS_COMPLETED)->count(),
+            'reviewCount' => $reviewService->totalCount(),
         ]);
     }
 
@@ -158,16 +155,19 @@ class VisitorController extends Controller
             'gate' => ['required', 'string', new \App\Rules\ValidGate],
             'direction' => ['required', 'in:IN,OUT'],
             'seen_at' => ['required', 'date', 'before_or_equal:now'],
-            'plate_number' => ['nullable', 'string', 'max:30', 'regex:/^[A-Za-z0-9 -]+$/', new \App\Rules\PlateIdentifier(20)],
+            'plate_number' => ['nullable', 'string', 'max:30', new \App\Rules\PlateIdentifier(20)],
             'vehicle_type' => ['nullable', 'string', 'max:50', new \App\Rules\ValidVehicleType],
             'note' => ['nullable', 'string', 'max:200'],
             'snapshot' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:10240'],
-        ], ['plate_number.regex' => 'Use letters, digits, spaces or a dash.']);
+        ]);
 
         $record = $service->createManual($validated, $request->user(), $request->file('snapshot'));
+        $label = $record->isRegisteredAtOccurrence() ? 'Registered vehicle'
+            : ($record->classificationCategory() === 'review' ? 'Review record' : 'Unregistered guest');
 
         return redirect()->route('visitors.index')
-            ->with('status', 'Unregistered guest '.($record->plate_number ?: '(no plate)').' recorded '.$record->direction.' at '.Gate::labelFor($record->gate).'.');
+            ->with('status', $label.' '.($record->plate_number ?: '(no plate)').' recorded '.$record->direction.' at '.Gate::labelFor($record->gate).'.'
+                .($record->isRegisteredAtOccurrence() ? ' View this movement in Activity Logs.' : ''));
     }
 
     public function correctPlate(Request $request, VisitorRecord $visitorRecord, VisitorRecordService $service): JsonResponse|RedirectResponse

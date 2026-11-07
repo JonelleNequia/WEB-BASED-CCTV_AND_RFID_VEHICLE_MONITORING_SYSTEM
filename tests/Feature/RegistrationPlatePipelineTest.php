@@ -170,7 +170,7 @@ class RegistrationPlatePipelineTest extends TestCase
         $this->assertStringContainsString('AB 00001', $csv);
         $this->assertStringContainsString('Registered', $csv);
         $this->get(route('logs.print', ['log_type' => 'registered', 'autoprint' => 0]))->assertOk()->assertSee('AB 00001');
-        $this->get(route('visitors.index'))->assertOk()->assertSee('Registered vehicle · plate identified');
+        $this->get(route('visitors.index'))->assertOk()->assertViewHas('records', fn ($records) => $records->isEmpty());
         $this->assertSame('Phase Two Registrar', app(VehicleRegistryService::class)->rememberedStaffName());
         $this->assertSame('Phase Two Registrar', $vehicle->fresh()->registered_by);
         // Late OCR delivery cannot replace a staff-confirmed plate or original OCR evidence.
@@ -310,7 +310,7 @@ class RegistrationPlatePipelineTest extends TestCase
         $record = \Tests\fixtures\ConfirmedActualPlate::for($this->read($this->crossing(), 'AB 00001'), 'AB 00001');
         foreach (['ab00001', 'ab-00001', '  ab   00001 '] as $query) {
             $this->getJson(route('logs.index', ['plate_text' => $query]))->assertOk()->assertJsonPath('total', 1);
-            $this->get(route('visitors.index', ['q' => $query]))->assertOk()->assertViewHas('records', fn ($records) => $records->total() === 1);
+            $this->get(route('visitors.index', ['q' => $query]))->assertOk()->assertViewHas('records', fn ($records) => $records->total() === 0);
             $this->get(route('registry.index', ['q' => $query]))->assertOk()->assertViewHas('vehicles', fn ($vehicles) => $vehicles->count() === 1);
         }
         $this->getJson(route('logs.index', ['plate_text' => 'AB/00001']))->assertJsonPath('total', 0);
@@ -319,6 +319,8 @@ class RegistrationPlatePipelineTest extends TestCase
             ->assertJsonPath('logs.0.category_label', 'Faculty & Staff');
         $this->getJson(route('api.recent-event-logs'))->assertOk()->assertJsonPath('logs.0.log_type', 'registered');
         $this->patchJson(route('visitors.records.review', $record), ['action' => 'correct_plate', 'plate' => 'XYZ-9876'])->assertOk();
+        $this->get(route('visitors.index', ['q' => 'xyz9876']))->assertOk()
+            ->assertViewHas('records', fn ($records) => $records->pluck('id')->all() === [$record->id]);
         $this->getJson(route('api.recent-station-logs'))->assertJsonPath('logs.0.registered', false)
             ->assertJsonPath('logs.0.category_label', 'Unregistered Guest');
         $this->getJson(route('logs.index', ['category' => 'faculty_staff']))->assertJsonPath('total', 0);

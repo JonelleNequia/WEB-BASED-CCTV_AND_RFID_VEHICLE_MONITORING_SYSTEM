@@ -27,7 +27,7 @@ class UiPhase4PagesTest extends TestCase
         $this->admin = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
     }
 
-    public function test_dashboard_has_kpis_needs_attention_and_hourly_chart(): void
+    public function test_dashboard_has_kpis_needs_attention_and_no_traffic_chart(): void
     {
         // Phase 1: gates have no fixed direction, so the anomaly is a lost tag read.
         $this->vehicle('ANO 101', 'ANO-TAG', 'INSIDE')->rfidTag->forceFill(['status' => 'disabled'])->save();
@@ -36,12 +36,14 @@ class UiPhase4PagesTest extends TestCase
         $html = $this->actingAs($this->admin)->get(route('dashboard.index'))->assertOk()->getContent();
 
         // Phase 7 (visitor model): IN / OUT counts.
-        foreach (['Inside Campus', 'IN Today', 'OUT Today', 'IN / OUT Counts', 'Needs Attention', 'Needs attention', 'Live activity', "Today's traffic"] as $text) {
+        foreach (['Inside Campus', 'IN Today', 'OUT Today', 'IN / OUT Counts', 'Alerts', 'Needs Attention', 'Live activity'] as $text) {
             $this->assertStringContainsString($text, $html, $text);
         }
         // Phase 0: no guest pass card or overstay items.
         $this->assertStringNotContainsString('Active Guests', $html);
         $this->assertStringNotContainsString('Overstay', $html);
+        $this->assertStringNotContainsString("Today's traffic", $html);
+        $this->assertStringNotContainsString('data-dashboard-chart', $html);
         $this->assertStringContainsString('Anomaly', $html);
 
         $this->actingAs($this->admin)

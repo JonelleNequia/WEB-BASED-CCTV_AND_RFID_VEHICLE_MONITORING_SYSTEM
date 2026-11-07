@@ -1,6 +1,6 @@
 {{--
     Dashboard. One row of KPIs; IN / OUT counts one period at a time; the
-    latest 8 vehicles; "Needs attention"; today's traffic; both rankings in
+    latest 8 occurrences; "Needs attention" with Review; both rankings in
     one card with tabs (UI Phase 4, layout).
 --}}
 @extends('layouts.app')
@@ -30,14 +30,14 @@
         </x-stat>
         <x-stat label="IN Today" :value="$totalVehiclesEnteredToday" metric="total_vehicles_entered_today" hint="All vehicles, all gates" :href="route('logs.index', ['period' => 'today', 'event_type' => 'ENTRY'])" />
         <x-stat label="OUT Today" :value="$totalVehiclesExitedToday" metric="total_vehicles_exited_today" hint="All vehicles, all gates" :href="route('logs.index', ['period' => 'today', 'event_type' => 'EXIT'])" />
-        <x-stat label="Needs Attention" :value="$alertCounts['total']" metric="alerts_total" :tone="$alertCounts['total'] > 0 ? 'danger' : null" :href="route('logs.index', ['tab' => 'alerts'])">
-            <x-slot:detail><span data-dashboard-metric="alert_anomalies">{{ $alertCounts['anomalies'] }}</span> anomalies · <span data-dashboard-metric="alert_unknown_tags">{{ $alertCounts['unknown_tags'] }}</span> unknown tags · <a href="{{ route('visitors.index', ['tab' => 'review']) }}" data-dashboard-review><span>{{ $reviewCount }}</span> to review</a></x-slot:detail>
+        <x-stat label="Alerts" :value="$alertCounts['total']" metric="alerts_total" :tone="$alertCounts['total'] > 0 ? 'danger' : null" :href="route('logs.index', ['tab' => 'alerts'])">
+            <x-slot:detail><span data-dashboard-metric="alert_anomalies">{{ $alertCounts['anomalies'] }}</span> anomalies · <span data-dashboard-metric="alert_unknown_tags">{{ $alertCounts['unknown_tags'] }}</span> unknown tags</x-slot:detail>
         </x-stat>
     </x-stat-row>
 
     <div class="dashboard-grid">
         {{-- Phase 7 (visitor model): IN / OUT per period, category and gate (MovementCountService). UI Phase 4: one period at a time. --}}
-        <section class="panel movement-counts-panel" data-segments="dashboard-counts">
+        <section class="panel dashboard-wide movement-counts-panel" data-segments="dashboard-counts">
             <div class="panel-header panel-header-modern">
                 <h2 class="panel-title">IN / OUT Counts</h2>
                 <div class="segmented" role="tablist" aria-label="Period">
@@ -46,6 +46,7 @@
                     @endforeach
                 </div>
             </div>
+            <p class="field-help">Totals and categories include all recorded gates, including inactive and archived gates. By gate shows operational gates used by Gate Monitor.</p>
             @foreach ($movementCounts as $period => $counts)
                 <div class="movement-period-panel" data-segment-panel="{{ $period }}" @unless ($loop->first) hidden @endunless>
                     <div class="movement-totals">
@@ -66,19 +67,22 @@
                             </tbody>
                         </table>
                         <table class="movement-counts">
+                            <caption class="sr-only">Operational gates</caption>
                             <thead><tr><th scope="col">By gate</th><th scope="col">IN</th><th scope="col">OUT</th></tr></thead>
-                            <tbody>
-                                @foreach ($counts['gates'] as $gate => $row)
+                            <tbody data-dashboard-gates="{{ $period }}">
+                                @forelse ($counts['gates'] as $gate => $row)
                                     <tr>
                                         <th scope="row">{{ $row['label'] }}</th>
                                         <td data-movement="{{ $period }}.gates.{{ $gate }}.in">{{ $row['in'] ?? 0 }}</td>
                                         <td data-movement="{{ $period }}.gates.{{ $gate }}.out">{{ $row['out'] ?? 0 }}</td>
                                     </tr>
-                                @endforeach
+                                @empty
+                                    <tr><td colspan="3" class="text-muted">No operational gates configured.</td></tr>
+                                @endforelse
                             </tbody>
                         </table>
                     </div>
-                    <p class="field-help">Direction unknown (not counted): <strong data-movement="{{ $period }}.unknown">{{ $counts['unknown'] }}</strong> · Unregistered guests count IN/OUT, never as inside.</p>
+                    <p class="field-help">Direction unknown (excluded from IN/OUT): <strong data-movement="{{ $period }}.unknown">{{ $counts['unknown'] }}</strong> · Unregistered guests count IN/OUT, never as inside.</p>
                 </div>
             @endforeach
         </section>
@@ -90,7 +94,7 @@
             </div>
             <div class="dashboard-stream" data-dashboard-stream="events">
                 @forelse ($latestEvents as $event)
-                    <article class="stream-item stream-item-compact">
+                    <article class="stream-item stream-item-compact" data-dashboard-item-key="{{ $event['key'] }}">
                         <div>
                             <strong>{{ $event['title'] }}</strong>
                             <p>{{ $event['summary'] }}</p>
@@ -104,10 +108,14 @@
             </div>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-dashboard-needs-attention>
             <div class="panel-header panel-header-modern">
-                <h2 class="panel-title">Needs attention</h2>
+                <h2 class="panel-title">Needs Attention</h2>
                 <a href="{{ route('logs.index', ['tab' => 'alerts']) }}" class="button button-secondary button-sm">All alerts</a>
+            </div>
+            <div class="dashboard-review-summary">
+                <a href="{{ route('visitors.index', ['tab' => 'review']) }}" data-dashboard-review><strong data-dashboard-metric="review_count">{{ $reviewCount }}</strong> to review</a>
+                <span class="text-muted">Plate checks and unknown directions</span>
             </div>
             <ul class="attention-items" data-dashboard-attention>
                 @forelse ($attentionItems as $item)
@@ -121,17 +129,9 @@
                         <a href="{{ $item['action_url'] }}" class="button button-secondary button-sm">{{ $item['action_label'] }}</a>
                     </li>
                 @empty
-                    <li class="attention-clear">All clear. No anomalies or unknown tags.</li>
+                    <li class="attention-clear">No anomalies or unknown tags.</li>
                 @endforelse
             </ul>
-        </section>
-
-        <section class="panel">
-            <div class="panel-header panel-header-modern">
-                <h2 class="panel-title">Today's traffic</h2>
-                <span class="chart-legend"><i class="legend-entries"></i> IN <i class="legend-exits"></i> OUT</span>
-            </div>
-            <div class="traffic-chart" data-dashboard-chart role="img" aria-label="Vehicles IN and OUT per hour today"></div>
         </section>
 
         {{-- Phase 6 (visitor model): registered and unregistered rankings stay separate. UI Phase 4: one card, two tabs. --}}
@@ -198,7 +198,6 @@
         'routes' => [
             'liveState' => route('dashboard.live-state'),
         ],
-        'hourly' => $hourlyTraffic,
     ], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
 @endsection
 

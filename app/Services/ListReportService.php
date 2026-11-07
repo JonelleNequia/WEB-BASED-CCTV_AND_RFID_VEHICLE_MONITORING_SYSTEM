@@ -58,13 +58,13 @@ class ListReportService
         return $this->row($vehicle->id, ['id' => $vehicle->id, 'plate' => $vehicle->plate_number, 'owner' => $vehicle->vehicle_owner_name ?: '—',
             'category' => VehicleCategory::label($vehicle->category), 'type' => $vehicle->vehicle_type ?: 'Unknown',
             'registration_status' => ucfirst($vehicle->status ?? 'active'), 'campus_state' => ucfirst(strtolower($vehicle->current_state ?? 'outside')),
-            'tag_number' => $tag?->tag_number ?: '—', 'uid' => $tag?->uid ?? 'No RFID assigned', 'tag_status' => $tag?->status_label ?? 'No RFID assigned',
+            'tag_number' => $tag?->number_label ?: '—', 'uid' => $tag?->uid ?? 'No RFID assigned', 'tag_status' => $tag?->status_label ?? 'No RFID assigned',
             'registered_by' => $vehicle->registered_by ?: '—', 'last_seen' => DisplayTime::datetime($vehicle->last_seen_at, 'Never')]);
     }
 
     private function tag(RfidTag $tag): array
     {
-        return $this->row($tag->id, ['id' => $tag->id, 'tag_number' => $tag->tag_number ?: '—', 'uid' => $tag->uid, 'status' => $tag->status_label,
+        return $this->row($tag->id, ['id' => $tag->id, 'tag_number' => $tag->number_label ?: '—', 'uid' => $tag->uid, 'status' => $tag->status_label,
             'plate' => $tag->vehicle?->plate_number ?: '—', 'owner' => $tag->vehicle?->vehicle_owner_name ?: '—',
             'assignment' => $tag->vehicle ? ($tag->status === RfidTag::STATUS_ASSIGNED ? 'Assigned' : 'Previously on vehicle') : 'Unassigned',
             'last_scan' => DisplayTime::datetime($tag->last_scanned_at, 'No scan yet'), 'scans' => $tag->scan_logs_count]);

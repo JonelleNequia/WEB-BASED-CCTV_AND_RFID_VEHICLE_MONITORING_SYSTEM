@@ -152,6 +152,20 @@ class MovementCountService
         return collect(self::PERIODS)->mapWithKeys(fn (string $label, string $period): array => [$period => $this->counts($period)])->all();
     }
 
+    /** Overall history totals stay intact; Dashboard By Gate mirrors Gate Monitor's current scope. */
+    public function dashboardPeriods(): array
+    {
+        $operational = Gate::ordered();
+
+        return collect($this->allPeriods())->map(function (array $counts) use ($operational): array {
+            $counts['gates'] = $operational->mapWithKeys(fn (Gate $gate): array => [$gate->code => [
+                'label' => $gate->name, 'in' => $counts['gates'][$gate->code]['in'] ?? 0, 'out' => $counts['gates'][$gate->code]['out'] ?? 0,
+            ]])->all();
+
+            return $counts;
+        })->all();
+    }
+
     /**
      * Today's IN / OUT per hour (Asia/Manila), for the dashboard chart.
      *

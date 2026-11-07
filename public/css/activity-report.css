@@ -340,6 +340,23 @@ h2 {
     font-size: 7.5pt;
 }
 
+/* Activity Logs only: the crop belongs to the Plate cell, separate from Snapshot. */
+.activity-report .records-table .report-plate-image {
+    display: block;
+    width: 22mm;
+    max-width: 100%;
+    height: 8mm;
+    margin-top: 1mm;
+    object-fit: contain;
+}
+
+.activity-report .no-plate-image {
+    display: block;
+    margin-top: 1mm;
+    color: var(--muted);
+    font-size: 7.5pt;
+}
+
 .direction-in,
 .direction-out {
     font-weight: 700;

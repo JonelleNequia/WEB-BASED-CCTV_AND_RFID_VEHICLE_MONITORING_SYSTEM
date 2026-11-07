@@ -212,7 +212,7 @@
             ['Registered by', vehicle.registered_by || 'Not recorded'],
             ['Category', vehicle.category_label],
             ['Vehicle type', vehicle.vehicle_type],
-            ['RFID tag', vehicle.tag ? `#${vehicle.tag.tag_number ?? '—'} · ${vehicle.tag.uid} · ${vehicle.tag.status_label || vehicle.tag.status}` : 'No RFID assigned'],
+            ['RFID tag', vehicle.tag ? `#${vehicle.tag.number_label ?? vehicle.tag.tag_number ?? '—'} · ${vehicle.tag.uid} · ${vehicle.tag.status_label || vehicle.tag.status}` : 'No RFID assigned'],
             ['Last seen', vehicle.last_seen],
             ['Today', `${vehicle.entries_today} in · ${vehicle.exits_today} out`],
         ].forEach(function ([label, value]) {
@@ -236,7 +236,7 @@
         if (vehicle.previous_tags?.length) {
             details.append(
                 el('dt', null, 'Old tags'),
-                el('dd', null, vehicle.previous_tags.map((tag) => `#${tag.tag_number ?? '—'} · ${tag.uid} (${tag.status_label || tag.status})`).join(', '))
+                el('dd', null, vehicle.previous_tags.map((tag) => `#${tag.number_label ?? tag.tag_number ?? '—'} · ${tag.uid} (${tag.status_label || tag.status})`).join(', '))
             );
         }
 
@@ -292,7 +292,7 @@
 
         form.querySelectorAll('[data-other-select]').forEach(syncOther);
         form.querySelector('[data-edit-tag-note]').textContent = vehicle.tag
-            ? `Tag #${vehicle.tag.tag_number ?? '—'} (${vehicle.tag.uid}). Change it with Replace Tag.`
+            ? `Tag #${vehicle.tag.number_label ?? vehicle.tag.tag_number ?? '—'} (${vehicle.tag.uid}). Change it with Replace Tag.`
             : 'No RFID assigned. Plate registration remains active; use Assign Tag when a tag is available.';
 
         window.ui.closeDrawer('vehicle-panel');
@@ -304,7 +304,7 @@
         form.action = vehicle.urls.replace_tag;
         setField(form, 'expected_tag_id', vehicle.tag?.id || 0);
         setField(form, 'id', vehicle.id);
-        form.querySelector('[data-replace-current]').textContent = `${vehicle.plate_number} · current tag ${vehicle.tag ? `#${vehicle.tag.tag_number ?? '—'} · ${vehicle.tag.uid}` : 'none'}`;
+        form.querySelector('[data-replace-current]').textContent = `${vehicle.plate_number} · current tag ${vehicle.tag ? `#${vehicle.tag.number_label ?? vehicle.tag.tag_number ?? '—'} · ${vehicle.tag.uid}` : 'none'}`;
         form.querySelector('[data-old-tag-fieldset]').hidden = !vehicle.tag;
         document.getElementById('replace-tag-drawer-title').textContent = vehicle.tag ? 'Replace Tag' : 'Assign Tag';
         form.querySelector('button[type="submit"]').textContent = vehicle.tag ? 'Replace Tag' : 'Assign Tag';

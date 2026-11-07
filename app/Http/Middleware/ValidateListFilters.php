@@ -79,7 +79,13 @@ class ValidateListFilters
                 }
             }
         }
-        $validator = Validator::make($input, $rules, \App\Support\ActivityLogTimeWindow::messages());
+        $messages = \App\Support\ActivityLogTimeWindow::messages();
+        if (($route === 'visitors.index' || $guestReport) && $request->query('record_filter') === 'registered') {
+            // Old bookmarks may recover on the list; reports must still reject
+            // them rather than silently exporting a broader/different dataset.
+            $messages['record_filter.in'] = 'The Registered filter has been removed from Guests. Registered movements remain in Activity Logs.';
+        }
+        $validator = Validator::make($input, $rules, $messages);
         if ($validator->passes()) {
             return $next($request);
         }

@@ -8,7 +8,13 @@
         <div class="field">
             <label for="bulk_scan">Scan tags one after another</label>
             <input id="bulk_scan" type="text" autocomplete="off" placeholder="Focus here and tap each tag" data-bulk-scan autofocus>
-            <span class="field-help">Tag numbers are assigned automatically, starting at #<span data-bulk-next>{{ $nextTagNumber }}</span>.</span>
+            <span class="field-help" data-bulk-number-help>
+                @if ($nextTagNumber <= \App\Rules\RfidTagNumber::MAX_NUMBER)
+                    Tag numbers are assigned automatically, starting at #<span data-bulk-next>{{ $nextTagNumber }}</span>.
+                @else
+                    Automatic numbering reached 999999. Use Add RFID Tag to enter an unused number.
+                @endif
+            </span>
         </div>
 
         <div class="tag-picker-uhf">
@@ -29,6 +35,6 @@
 @once
     @push('scripts')
         <script src="{{ asset('js/uhf-tag-reader.js') }}"></script>
-        <script src="{{ asset('js/registry-tags.js') }}"></script>
+        <script src="{{ asset('js/registry-tags.js') }}?v={{ filemtime(public_path('js/registry-tags.js')) }}"></script>
     @endpush
 @endonce

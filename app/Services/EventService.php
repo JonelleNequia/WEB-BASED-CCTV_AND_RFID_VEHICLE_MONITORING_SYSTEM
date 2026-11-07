@@ -42,7 +42,7 @@ class EventService
                 'detection_metadata_json' => [VehicleTypeEvidenceService::KEY => ['source' => 'manual']],
                 'vehicle_category' => $linkedVehicle?->category,
                 'camera_id' => $data['camera_id'],
-                'roi_name' => $data['roi_name'],
+                'roi_name' => $data['roi_name'] ?? null,
                 'event_time' => $data['event_time'],
                 'vehicle_image_path' => $this->storeImage($data['vehicle_image'] ?? null, 'vehicle'),
                 'plate_image_path' => $this->storeImage($data['plate_image'] ?? null, 'plate'),

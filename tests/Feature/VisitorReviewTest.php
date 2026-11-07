@@ -78,7 +78,7 @@ class VisitorReviewTest extends TestCase
 
         // Counter in the sidebar (guards too) and on the Dashboard.
         $this->actingAs($this->guard)->get(route('gates.index'))->assertOk()->assertSee('4 to review');
-        $this->actingAs($this->admin)->get(route('dashboard.index'))->assertOk()->assertSee('<span>4</span> to review', false);
+        $this->actingAs($this->admin)->get(route('dashboard.index'))->assertOk()->assertSee('<strong data-dashboard-metric="review_count">4</strong> to review', false);
     }
 
     public function test_each_action_updates_record_profile_counts_and_the_audit_log(): void

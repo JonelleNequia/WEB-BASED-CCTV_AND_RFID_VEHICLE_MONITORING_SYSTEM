@@ -111,16 +111,16 @@ class RegistryGuestReportTest extends TestCase
         }
     }
 
-    public function test_guests_quick_filters_show_and_archived_gate_history_keep_phase_five_meaning(): void
+    public function test_guests_quick_filters_show_and_archived_gate_history_keep_occurrence_and_source_meaning(): void
     {
         $vehicle = Vehicle::create(['plate_number' => '395ISX', 'category' => 'faculty_staff']);
         $guest = $this->record(['vehicle_id' => $vehicle->id, 'plate_number' => '395ISX', 'source' => 'camera']);
         $registered = $this->record(['registration_status' => 'registered', 'registration_category' => 'faculty_staff', 'vehicle_id' => $vehicle->id]);
         $manual = $this->record();
-        $this->record(['registration_status' => 'review', 'source' => 'camera']);
+        $review = $this->record(['registration_status' => 'review', 'source' => 'camera']);
         $duplicate = $this->record(['status' => 'duplicate']);
         Gate::where('code', 'gate-2')->update(['archived_at' => now()]);
-        foreach (['registered' => [$registered->id], 'unregistered' => [$manual->id, $guest->id], 'manual' => [$manual->id, $registered->id]] as $filter => $ids) {
+        foreach (['' => [$manual->id, $guest->id, $review->id], 'unregistered' => [$manual->id, $guest->id], 'manual' => [$manual->id]] as $filter => $ids) {
             $query = ['record_filter' => $filter, 'gate' => 'gate-2'];
             $rows = $this->get('/visitors/print?'.http_build_query($query))->assertOk()->viewData('report')['rows'];
             $this->assertEqualsCanonicalizing($ids, $rows->pluck('id')->all());

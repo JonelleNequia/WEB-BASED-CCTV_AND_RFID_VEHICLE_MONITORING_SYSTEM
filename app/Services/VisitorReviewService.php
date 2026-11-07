@@ -52,6 +52,13 @@ class VisitorReviewService
         return VisitorRecord::query()->needsReview()->count();
     }
 
+    /** Same total as the Review tab: visitor cards plus completed registered direction cards. */
+    public function totalCount(): int
+    {
+        return $this->count() + \App\Models\VehicleEvent::query()->where('event_type', \App\Models\VehicleEvent::TYPE_UNKNOWN)
+            ->whereNotNull('vehicle_id')->where('event_status', \App\Models\VehicleEvent::STATUS_COMPLETED)->count();
+    }
+
     /**
      * Known plates like the read (the Phase C suggestion first), with how
      * many times each passed: [{profile, distance}], at most $limit.

@@ -7,7 +7,6 @@ use App\Http\Requests\StoreVehicleEventRequest;
 use App\Models\Camera;
 use App\Models\GuestVehicleObservation;
 use App\Models\RfidScanLog;
-use App\Models\Roi;
 use App\Models\VehicleEvent;
 use App\Models\VisitorRecord;
 use App\Services\EventService;
@@ -180,7 +179,6 @@ class VehicleEventController extends Controller
         return view('vehicle-events.create', [
             'eventType' => $eventType,
             'cameras' => Camera::query()->operational()->orderBy('camera_name')->get(),
-            'rois' => Roi::query()->whereHas('camera', fn ($query) => $query->operational())->with('camera')->orderBy('roi_name')->get(),
             'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
         ]);
     }
@@ -379,6 +377,7 @@ class VehicleEventController extends Controller
             'direction_key' => $directionKey,
             'gate' => $known($log['station_label'] ?? null),
             'image_url' => $log['image_url'] ?? null,
+            'plate_image_url' => $log['plate_image_url'] ?? null,
         ];
     }
 
@@ -838,6 +837,8 @@ class VehicleEventController extends Controller
             'match_label' => $event->match_display,
             'rfid_tag_uid' => $event->rfidScanLog?->tag_uid ?: 'N/A',
             'image_url' => \App\Support\OccurrenceMedia::url($event->vehicle_image_path),
+            // Resolve this occurrence's real crop, never the model's placeholder or a vehicle's latest image.
+            'plate_image_url' => \App\Support\OccurrenceMedia::url($event->plate_image_path),
             'image_status' => \App\Support\OccurrenceMedia::exists($event->vehicle_image_path) ? 'Available'
                 : (data_get($event->detection_metadata_json, \App\Services\CrossingSnapshotService::KEY.'.status') === 'failed'
                     ? 'Unavailable (image upload failed)' : 'Unavailable'),
@@ -891,6 +892,7 @@ class VehicleEventController extends Controller
             'match_label' => 'Unregistered',
             'rfid_tag_uid' => 'N/A',
             'image_url' => $observation->snapshot_path ? $observation->snapshot_url : null,
+            'plate_image_url' => null, // Legacy observations have no separate crop field.
             // Unregistered visitors are normal traffic, not alerts.
             'is_alert' => false,
             'alert_reason' => null,
@@ -931,6 +933,7 @@ class VehicleEventController extends Controller
             'match_label' => 'No vehicle event',
             'rfid_tag_uid' => $scanLog->tag_uid,
             'image_url' => null,
+            'plate_image_url' => null,
             'is_alert' => (bool) $scanLog->is_anomaly || in_array($scanLog->verification_status, ['guest', 'guest_pass_lost', 'guest_pass_disabled', 'inactive_tag'], true),
             'alert_reason' => $scanLog->anomaly_reason,
             'sort_time' => $this->sortTimestamp($scanLog->created_at, $time),

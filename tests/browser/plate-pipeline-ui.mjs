@@ -151,9 +151,11 @@ try {
     const retry = await page.request.patch(base + '/visitors/records/' + ids.review + '/review', { headers, data: { action: 'correct_plate', plate: 'AB-00001' } });
     check(retry.status() === 200, 'Retrying the same correction succeeds idempotently');
     await page.goto(base + '/visitors');
-    const correctedRow = page.locator('#visitor-record-' + ids.review);
-    check((await correctedRow.innerText()).includes('Registered vehicle · plate identified'), 'Visitor history shows the registered classification');
-    check((await correctedRow.innerText()).includes('camera read A8-00001'), 'Original OCR evidence remains visible after correction');
+    check(await page.locator('#visitor-record-' + ids.review).count() === 0, 'Corrected Registered occurrence is excluded from Guests records');
+    const detail = await (await page.request.get(base + '/registry/vehicles/' + ids.vehicle)).json();
+    await page.goto(detail.plate_profile_url);
+    const historyRow = page.locator('#visitor-record-' + ids.review);
+    check((await historyRow.innerText()).includes('camera read A8-00001'), 'Original OCR evidence remains available in the retained profile history');
     const feed = await (await page.request.get(base + '/api/recent-station-logs')).json();
     check(feed.logs.filter((row) => row.record_type === 'visitor_record' || row.visitor_record_id).length === 3
         && feed.logs.filter((row) => row.registered).length === 2, 'Live monitoring contains one corrected row per crossing');

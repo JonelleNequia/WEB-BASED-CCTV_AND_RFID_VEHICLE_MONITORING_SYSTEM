@@ -68,21 +68,24 @@ class VisitorPresenceService
     {
         $today = VisitorRecord::query()->active()->whereIn('direction', ['IN', 'OUT'])
             ->where(fn ($query) => PhilippineTime::constrainTodayAny($query, ['seen_at']))
-            ->with('plateProfile')
+            ->with(['plateProfile', 'vehicle'])
             ->orderBy('seen_at')
             ->get();
 
         $vehicles = $today->whereNotNull('plate_profile_id')
             ->groupBy('plate_profile_id')
             ->map(fn (Collection $records) => $records->last())
-            ->filter(fn (VisitorRecord $last) => $last->direction === 'IN' && $last->plateProfile && $last->plateProfile->vehicle_id === null)
+            // Keep the complete timeline above: a later Registered OUT still
+            // closes an earlier Guest IN. Filter only the resulting estimate.
+            ->filter(fn (VisitorRecord $last) => $last->direction === 'IN' && ! $last->isRegisteredAtOccurrence() && $last->plateProfile && $last->plateProfile->vehicle_id === null)
             ->sortByDesc(fn (VisitorRecord $last) => $last->seen_at->getTimestamp())
             ->map(fn (VisitorRecord $last) => ['profile' => $last->plateProfile, 'record' => $last])
             ->values();
 
         return [
             'vehicles' => $vehicles,
-            'without_plate' => $today->whereNull('plate_profile_id')->where('direction', 'IN')->count(),
+            'without_plate' => $today->whereNull('plate_profile_id')->where('direction', 'IN')
+                ->reject(fn (VisitorRecord $record) => $record->isRegisteredAtOccurrence())->count(),
         ];
     }
 }

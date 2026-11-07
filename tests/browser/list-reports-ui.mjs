@@ -177,11 +177,11 @@ try {
         window.savedFetch = window.fetch;
         window.fetch = async (...args) => {
             const response = await window.savedFetch(...args);
-            if (new URL(args[0], location.href).searchParams.get('record_filter') === 'registered') await new Promise(resolve => setTimeout(resolve, 650));
+            if (!new URL(args[0], location.href).searchParams.has('record_filter')) await new Promise(resolve => setTimeout(resolve, 650));
             return response;
         };
     });
-    await page.locator('[data-auto-update=record-filters]').getByRole('link', { name: 'Registered', exact: true }).click();
+    await page.locator('[data-auto-update=record-filters]').getByRole('link', { name: 'All', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('[data-auto-list]').dataset.autoState === 'loading');
     await page.locator('[data-auto-update=record-filters]').getByRole('link', { name: 'Manual entries', exact: true }).click(); await ready(); await page.waitForTimeout(800);
     check(new URL(await printLink().getAttribute('href')).searchParams.get('record_filter') === 'manual', 'Delayed older response cannot restore stale export links');

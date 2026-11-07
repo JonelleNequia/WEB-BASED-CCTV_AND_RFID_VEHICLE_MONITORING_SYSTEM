@@ -192,7 +192,7 @@ class DashboardRankingTest extends TestCase
         $this->assertTrue($latestEvents->contains(fn (array $event): bool => $event['title'] === 'IN • DPF-233'
             && $event['badge_label'] === 'Unregistered'));
         $this->assertTrue($latestEvents->contains(fn (array $event): bool => $event['title'] === 'OUT • EXIT-1001'
-            && $event['badge_label'] === 'Exit'));
+            && $event['badge_label'] === 'Unregistered'));
         // The mirrored copy is not listed a second time.
         $this->assertSame(1, $latestEvents->filter(fn (array $event): bool => str_contains($event['title'], 'DPF-233'))->count());
     }

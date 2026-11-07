@@ -130,7 +130,7 @@ class VehicleRegistryService
                         ->orWhere('vehicle_owner_name', 'like', $term)
                         ->orWhere('owner_name', 'like', $term)
                         ->orWhere('rfid_tag_uid', 'like', $term)
-                        ->orWhereHas('rfidTags', fn ($tagQuery) => $tagQuery->where('uid', 'like', $term)->orWhere('tag_number', 'like', $term));
+                        ->orWhereHas('rfidTags', fn ($tagQuery) => $tagQuery->where('uid', 'like', $term)->orWhere('tag_number', 'like', $term)->orWhere('display_number', 'like', $term));
                 });
             })
             ->when(filled($filters['category'] ?? null), fn ($query) => $query->where('category', $filters['category']))
@@ -358,8 +358,18 @@ class VehicleRegistryService
     public function registerRfidTag(array $data): RfidTag
     {
         return app(PlateProcessingLock::class)->run(function () use ($data): RfidTag {
+            $hasPrintedNumber = array_key_exists('display_number', $data);
+            \Illuminate\Support\Facades\Validator::make($data, [
+                'display_number' => [\Illuminate\Validation\Rule::requiredIf($hasPrintedNumber), 'nullable', new \App\Rules\RfidTagNumber],
+                'tag_number' => ['nullable', 'integer', 'min:1', 'max:999999'],
+            ], [], ['display_number' => 'Tag number'])->validate();
+            $displayNumber = $hasPrintedNumber ? \App\Rules\RfidTagNumber::normalize($data['display_number']) : null;
+            $numberField = $hasPrintedNumber ? 'display_number' : 'tag_number';
             $uid = $this->normalizeTagUid((string) ($data['uid'] ?? $data['rfid_uid'] ?? $data['tag_uid'] ?? ''));
-            $tagNumber = $this->normalizeTagNumber($data['tag_number'] ?? null);
+            $tagNumber = $this->normalizeTagNumber($displayNumber ?? $data['tag_number'] ?? null);
+            if ($displayNumber !== null && isset($data['tag_number']) && $this->normalizeTagNumber($data['tag_number']) !== $tagNumber) {
+                throw ValidationException::withMessages(['display_number' => 'The printed tag number must match the supplied inventory number.']);
+            }
 
             if ($uid === '') {
                 throw ValidationException::withMessages([
@@ -377,8 +387,11 @@ class VehicleRegistryService
 
             if ($tagNumber === null) {
                 throw ValidationException::withMessages([
-                    'tag_number' => 'Enter the RFID tag number before registering the scanned UID.',
+                    $numberField => 'Enter the RFID tag number before registering the scanned UID.',
                 ]);
+            }
+            if ($tagNumber > \App\Rules\RfidTagNumber::MAX_NUMBER) {
+                throw ValidationException::withMessages([$numberField => 'No further automatic tag numbers are available. Enter an unused tag number manually.']);
             }
 
             $existing = RfidTag::matchingUid($uid)->isNotEmpty();
@@ -393,14 +406,15 @@ class VehicleRegistryService
                 ->where('tag_number', $tagNumber)
                 ->first();
 
-            if ($existingNumber) {
+            if ($existingNumber || $this->printedNumberExists($tagNumber)) {
                 throw ValidationException::withMessages([
-                    'tag_number' => 'This RFID tag number is already used in the inventory.',
+                    $numberField => 'This RFID tag number is already used in the inventory (including other leading-zero formats).',
                 ]);
             }
 
             return RfidTag::query()->create([
                 'tag_number' => $tagNumber,
+                'display_number' => $displayNumber,
                 'uid' => $uid,
                 'status' => RfidTag::STATUS_AVAILABLE,
                 'tag_type' => RfidTag::TYPE_VEHICLE,
@@ -490,7 +504,20 @@ class VehicleRegistryService
      */
     public function nextTagNumber(): int
     {
-        return ((int) RfidTag::query()->max('tag_number')) + 1;
+        $next = ((int) RfidTag::query()->max('tag_number')) + 1;
+        while ($next <= \App\Rules\RfidTagNumber::MAX_NUMBER && $this->printedNumberExists($next)) {
+            $next++;
+        }
+
+        return $next;
+    }
+
+    /** Older display labels may differ from their numeric inventory value; preserve and reserve them. */
+    protected function printedNumberExists(int $number): bool
+    {
+        return RfidTag::query()->whereNotNull('display_number')->pluck('display_number')->contains(
+            fn ($label): bool => \App\Rules\RfidTagNumber::valid($label) && (int) \App\Rules\RfidTagNumber::normalize($label) === $number
+        );
     }
 
     /**
@@ -524,7 +551,7 @@ class VehicleRegistryService
             ];
         }
 
-        $summary = ['id' => $tag->id, 'uid' => $tag->uid, 'tag_number' => $tag->tag_number, 'label' => $tag->label];
+        $summary = ['id' => $tag->id, 'uid' => $tag->uid, 'tag_number' => $tag->tag_number, 'number_label' => $tag->number_label, 'label' => $tag->label];
 
         [$state, $ok, $message] = match (true) {
             $vehicle && (int) $tag->vehicle_id === (int) $vehicle->id && $tag->status === RfidTag::STATUS_ASSIGNED
@@ -680,12 +707,13 @@ class VehicleRegistryService
                 'id' => $vehicle->rfidTag->id,
                 'uid' => $vehicle->rfidTag->uid,
                 'tag_number' => $vehicle->rfidTag->tag_number,
+                'number_label' => $vehicle->rfidTag->number_label,
                 'status' => $vehicle->rfidTag->status,
                 'status_label' => $vehicle->rfidTag->status_label,
             ] : null,
             'previous_tags' => $vehicle->rfidTags
                 ->reject(fn (RfidTag $tag): bool => (int) $tag->id === (int) $vehicle->rfid_tag_id)
-                ->map(fn (RfidTag $tag): array => ['uid' => $tag->uid, 'tag_number' => $tag->tag_number, 'status' => $tag->status, 'status_label' => $tag->status_label])
+                ->map(fn (RfidTag $tag): array => ['uid' => $tag->uid, 'tag_number' => $tag->tag_number, 'number_label' => $tag->number_label, 'status' => $tag->status, 'status_label' => $tag->status_label])
                 ->values(),
             'movements' => $movements,
             // Phase 6 (visitor model): camera visits with no tag read (before

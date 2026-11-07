@@ -11,7 +11,16 @@
         @endif
     </td>
     <td>
-        <strong>{{ $log['plate_number'] ?: '—' }}</strong>
+        <div class="plate-cell">
+            <strong>{{ $log['plate_number'] ?: '—' }}</strong>
+            @if ($log['plate_image_url'] ?? null)
+                <button type="button" class="thumb-button" data-snapshot="{{ $log['plate_image_url'] }}" data-snapshot-label="Plate image" aria-label="Enlarge plate image of {{ $log['plate_number'] }}">
+                    <img src="{{ $log['plate_image_url'] }}" alt="Plate image" class="thumb thumb-plate activity-plate-image" loading="lazy">
+                </button>
+            @else
+                <span class="table-subtext">No plate image</span>
+            @endif
+        </div>
         @if (($log['owner_name'] ?? 'N/A') !== 'N/A')
             <div class="table-subtext">{{ $log['owner_name'] }}</div>
         @endif

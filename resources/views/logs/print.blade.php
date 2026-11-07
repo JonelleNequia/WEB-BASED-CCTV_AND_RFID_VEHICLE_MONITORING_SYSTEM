@@ -39,7 +39,7 @@
             @endforeach
             <label>
                 <input type="checkbox" name="snapshots" value="1" @checked($snapshots) data-report-snapshots>
-                Include snapshots
+                Include images
             </label>
             <noscript><button type="submit" class="report-button">Apply</button></noscript>
         </form>
@@ -124,7 +124,16 @@
                                     </td>
                                 @endif
                                 <td class="col-time">{{ $row['time'] }}</td>
-                                <td class="col-plate"><strong>{{ $row['plate'] }}</strong></td>
+                                <td class="col-plate">
+                                    <strong>{{ $row['plate'] }}</strong>
+                                    @if ($snapshots)
+                                        @if ($row['plate_image_url'])
+                                            <img src="{{ $row['plate_image_url'] }}" alt="Plate image of {{ $row['plate'] }}" class="report-plate-image">
+                                        @else
+                                            <span class="no-plate-image">No plate image</span>
+                                        @endif
+                                    @endif
+                                </td>
                                 <td class="col-owner">{{ $row['owner'] }}</td>
                                 <td class="col-category">{{ $row['category'] }}</td>
                                 <td class="col-type">{{ $row['type'] }}<div class="sub">{{ $row['type_source'] }}</div></td>

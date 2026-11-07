@@ -3,7 +3,7 @@
  * Details modal, snapshot viewer, toolbar print reports and a live refresh
  * of page 1 that keeps the current filters. (ROI work, Phase 7: the print
  * reports are their own page, logs/print; this file only adds the
- * "Include snapshots" choice to their links.)
+ * "Include images" choice to their links.)
  */
 (function () {
     const dataNode = document.getElementById('event-log-modal-data');
@@ -82,7 +82,24 @@
         tr.append(snap);
 
         const plate = el('td');
-        plate.append(el('strong', null, log.plate_number || '—'));
+        const plateCell = el('div', 'plate-cell');
+        plateCell.append(el('strong', null, log.plate_number || '—'));
+        if (log.plate_image_url) {
+            const button = el('button', 'thumb-button');
+            button.type = 'button';
+            button.dataset.snapshot = log.plate_image_url;
+            button.dataset.snapshotLabel = 'Plate image';
+            button.setAttribute('aria-label', `Enlarge plate image of ${log.plate_number || ''}`);
+            const img = el('img', 'thumb thumb-plate activity-plate-image');
+            img.src = log.plate_image_url;
+            img.alt = 'Plate image';
+            img.loading = 'lazy';
+            button.append(img);
+            plateCell.append(button);
+        } else {
+            plateCell.append(el('span', 'table-subtext', 'No plate image'));
+        }
+        plate.append(plateCell);
         if (log.owner_name && log.owner_name !== 'N/A') {
             plate.append(el('div', 'table-subtext', log.owner_name));
         }
@@ -208,8 +225,11 @@
         window.ui.openDrawer('log-details');
     }
 
-    function openSnapshot(url) {
-        document.querySelector('[data-snapshot-full]').src = url;
+    function openSnapshot(url, label = 'Snapshot') {
+        const image = document.querySelector('[data-snapshot-full]');
+        image.src = url;
+        image.alt = label;
+        document.getElementById('snapshot-viewer-title').textContent = label;
         window.ui.openDrawer('snapshot-viewer');
     }
 
@@ -282,7 +302,7 @@
 
         const snapshot = event.target.closest('[data-snapshot]');
         if (snapshot) {
-            openSnapshot(snapshot.dataset.snapshot);
+            openSnapshot(snapshot.dataset.snapshot, snapshot.dataset.snapshotLabel);
             return;
         }
 

@@ -27,7 +27,8 @@ class StoreVehicleEventRequest extends FormRequest
             'plate_confidence' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'vehicle_type' => ['required', 'string', 'max:50', new \App\Rules\ValidVehicleType],
             'camera_id' => ['required', 'integer', \Illuminate\Validation\Rule::exists('cameras', 'id')->whereIn('camera_role', \App\Models\Gate::codes())],
-            'roi_name' => ['required', 'string', 'max:100'],
+            // Older callers may still supply a station label; the simplified form does not.
+            'roi_name' => ['nullable', 'string', 'max:100'],
             'event_time' => ['required', 'date'],
             'vehicle_image' => ['nullable', 'image', 'max:5120'],
             'plate_image' => ['nullable', 'image', 'max:5120'],

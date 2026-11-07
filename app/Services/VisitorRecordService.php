@@ -255,6 +255,10 @@ class VisitorRecordService
     public function createManual(array $data, User $user, ?UploadedFile $snapshot = null): VisitorRecord
     {
         return app(PlateProcessingLock::class)->run(function () use ($data, $user, $snapshot): VisitorRecord {
+            // Validate before creating a profile or storing an uploaded image, including direct service calls.
+            \Illuminate\Support\Facades\Validator::make($data, [
+                'plate_number' => ['nullable', 'string', 'max:30', new \App\Rules\PlateIdentifier(20)],
+            ])->validate();
             $plate = PlateNumber::display($data['plate_number'] ?? null);
             $seenAt = Carbon::parse((string) $data['seen_at']);
             $gate = Gate::normalizeCode((string) $data['gate']);

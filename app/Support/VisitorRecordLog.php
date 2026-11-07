@@ -69,6 +69,7 @@ final class VisitorRecordLog
             'match_label' => $plateOnly ? 'Registered vehicle (plate only)' : ($review ? 'Review' : 'Unregistered'),
             'rfid_tag_uid' => 'N/A',
             'image_url' => $record->snapshot_url,
+            'plate_image_url' => $record->plate_image_url,
             'image_status' => $record->snapshot_url ? 'Available'
                 : (data_get($record->crossing?->detection_metadata_json, \App\Services\CrossingSnapshotService::KEY.'.status') === 'failed'
                     ? 'Unavailable (image upload failed)' : 'Unavailable'),

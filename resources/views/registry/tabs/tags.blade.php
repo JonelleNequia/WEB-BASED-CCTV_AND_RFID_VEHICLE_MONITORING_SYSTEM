@@ -8,6 +8,7 @@
     </x-stat-row>
 
     @include('registry.partials.register-tag-drawer')
+    @include('registry.partials.add-tag-drawer')
 
     <x-table data-auto-table class="registry-tags-table" title="Tag Inventory" :empty="$rfidTagInventory->isEmpty()"
              :empty-title="$tagStatusFilter ? 'No tags match this filter.' : 'No RFID tags registered yet.'"
@@ -49,7 +50,7 @@
                 <tbody>
                     @foreach ($rfidTagInventory as $tag)
                         <tr>
-                            <td><strong>#{{ $tag->tag_number ?: 'N/A' }}</strong></td>
+                            <td><strong>#{{ $tag->number_label ?: 'N/A' }}</strong></td>
                             <td><strong>{{ $tag->uid }}</strong></td>
                             <td>
                                 <x-badge :status="$tag->status" :label="$tag->status_label" />
