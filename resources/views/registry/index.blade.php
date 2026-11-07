@@ -9,7 +9,6 @@
         <x-slot:actions>
             @switch($tab)
                 @case('tags')
-                    <button type="button" class="button button-secondary" data-drawer-open="register-tag-drawer">Register Tags</button>
                     <button type="button" class="button button-primary" data-drawer-open="add-tag-drawer">Add RFID Tag</button>
                     @break
                 @default

@@ -162,7 +162,8 @@ class RfidStickerNumberTest extends TestCase
         $this->postJson(route('rfid-inventory.store'), ['display_number' => '999999', 'uid' => 'UPPER-BOUND'])->assertCreated()->assertJsonPath('tag_number', 999999);
         $this->postJson(route('rfid-inventory.store'), ['auto_number' => 1, 'uid' => 'NO-OVERFLOW'])->assertUnprocessable()->assertJsonValidationErrors('tag_number');
         $this->assertDatabaseMissing('vehicle_rfid_tags', ['uid' => 'NO-OVERFLOW']);
-        $this->get(route('registry.index', ['tab' => 'tags']))->assertOk()->assertSee('Automatic numbering reached 999999.');
+        $this->get(route('registry.index', ['tab' => 'tags']))->assertOk()
+            ->assertSee('Add RFID Tag')->assertDontSee('Register Tags');
     }
 
     public function test_mismatched_numeric_and_printed_values_cannot_bypass_the_shared_service(): void

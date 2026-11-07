@@ -23,7 +23,9 @@ class DirectRfidRegistryTest extends TestCase
             ->get(route('registry.index', ['tab' => 'tags']))
             ->assertOk()
             ->assertSee('RFID Tags')
-            ->assertSee('Register Tags')
+            ->assertSee('Add RFID Tag')
+            ->assertDontSee('Register Tags')
+            ->assertDontSee('data-drawer-open="register-tag-drawer"', false)
             ->assertSee('No RFID tags registered yet.');
     }
 

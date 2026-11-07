@@ -32,3 +32,10 @@
         </div>
     </form>
 </x-drawer>
+
+@once
+    @push('scripts')
+        <script src="{{ asset('js/uhf-tag-reader.js') }}"></script>
+        <script src="{{ asset('js/registry-tags.js') }}?v={{ filemtime(public_path('js/registry-tags.js')) }}"></script>
+    @endpush
+@endonce

@@ -82,7 +82,8 @@ try {
         await Promise.all([page.waitForEvent('load'), save.click()]); await navigation;
     };
     await page.goto(base + '/registry?tab=tags');
-    check(await page.getByRole('button', { name: 'Register Tags', exact: true }).count() >= 1, 'Existing bulk registration remains available');
+    check(await page.getByRole('button', { name: 'Register Tags', exact: true }).count() === 0, 'Removed Register Tags action is absent');
+    check(await page.getByRole('button', { name: 'Add RFID Tag', exact: true }).count() === 1, 'Only one Add RFID Tag entry point is shown');
     check((await page.locator('.registry-tags-table').innerText()).includes('#G-01'), 'Historical nonnumeric display label stays readable without being rewritten');
     await open();
     check(await save.isDisabled() && await number.getAttribute('type') === 'text', 'Tag number uses text to preserve zeros and blank required inputs block submission');
@@ -135,14 +136,12 @@ try {
     await uid.fill('THIRD-UID'); await submit();
     check((await page.locator('.registry-tags-table').innerText()).includes('#000125'), 'Changing only the UID recovers without changing printed text');
 
-    await page.getByRole('button', { name: 'Register Tags', exact: true }).first().click();
-    const bulk = page.locator('#register-tag-drawer'); await bulk.waitFor({ state: 'visible' });
-    await bulk.locator('[data-bulk-scan]').fill('BULK-SCANNED-UID');
-    await bulk.locator('[data-bulk-scan]').press('Enter');
-    await bulk.locator('[data-bulk-list] li[data-state=ok]').waitFor();
-    check((await bulk.locator('[data-bulk-list]').innerText()).includes('#126'), 'Bulk UID scanning still assigns the next numeric inventory number');
-    check(await bulk.locator('[data-bulk-next]').innerText() === '127', 'Bulk next-number feedback agrees with the server');
-    await Promise.all([page.waitForEvent('load'), bulk.getByRole('button', { name: 'Done', exact: true }).click()]);
+    const legacyResponse = await page.request.post(base + '/rfid-inventory', {
+        headers: await csrf(), data: { uid: 'BULK-SCANNED-UID', auto_number: '1' },
+    });
+    const legacyTag = await legacyResponse.json();
+    check(legacyResponse.status() === 201 && legacyTag.tag_number === 126, 'Existing automatic-number API remains compatible');
+    await page.reload();
     let polls = 0;
     await page.route('**/registry/tags/uhf-reads?*', route => {
         polls++;

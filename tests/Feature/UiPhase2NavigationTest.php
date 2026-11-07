@@ -98,7 +98,8 @@ class UiPhase2NavigationTest extends TestCase
         $html = $this->actingAs($this->admin)
             ->get(route('registry.index', ['tab' => 'tags']))
             ->assertOk()
-            ->assertSee('Register Tags')
+            ->assertSee('Add RFID Tag')
+            ->assertDontSee('Register Tags')
             ->assertDontSee('Guest Passes')
             ->assertSee('?tab=vehicles', false)
             ->getContent();

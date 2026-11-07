@@ -1,4 +1,4 @@
-{{-- UI Phase 3: Registry › RFID Tags (full inventory, filters, bulk Register Tags, lost/disable). --}}
+{{-- Registry › RFID Tags (full inventory, filters, Add RFID Tag, lost/disable). --}}
     {{-- UI Phase 3: tag counts (click to filter). Every tag is a vehicle tag since Phase 0. --}}
     <x-stat-row data-auto-update="summary">
         <x-stat label="Available" :value="$tagStats['available']" tone="success" :href="route('registry.index', ['tab' => 'tags', 'status' => 'available'])" hint="Ready to assign" />
@@ -7,12 +7,11 @@
         <x-stat label="Disabled" :value="$tagStats['disabled']" :href="route('registry.index', ['tab' => 'tags', 'status' => 'disabled'])" />
     </x-stat-row>
 
-    @include('registry.partials.register-tag-drawer')
     @include('registry.partials.add-tag-drawer')
 
     <x-table data-auto-table class="registry-tags-table" title="Tag Inventory" :empty="$rfidTagInventory->isEmpty()"
              :empty-title="$tagStatusFilter ? 'No tags match this filter.' : 'No RFID tags registered yet.'"
-             empty-text="Register tags by tapping them on the reader.">
+             empty-text="Use Add RFID Tag to enter the printed tag number and electronic UID.">
         <x-slot:toolbar>
             <form method="GET" action="{{ route('registry.index') }}" class="toolbar-search" data-auto-filter>
                 <input type="hidden" name="tab" value="tags">
@@ -33,9 +32,6 @@
             <span class="text-muted" data-auto-update="count">{{ $rfidTagInventory->count() }} records</span>
             @include('partials.list-report-actions', ['reportDataset' => 'tags'])
         </x-slot:toolbar>
-        <x-slot:emptyAction>
-            <button type="button" class="button button-primary button-sm" data-drawer-open="register-tag-drawer">Register Tags</button>
-        </x-slot:emptyAction>
                 <thead>
                     <tr>
                         <th>Tag No.</th>

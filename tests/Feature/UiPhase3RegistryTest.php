@@ -218,8 +218,10 @@ class UiPhase3RegistryTest extends TestCase
 
         $this->actingAs($this->admin)->get(route('registry.index', ['tab' => 'tags']))
             ->assertOk()
-            ->assertSee('Register Tags')
-            ->assertSee('data-bulk-scan', false)
+            ->assertSee('Add RFID Tag')
+            ->assertSee('data-manual-register', false)
+            ->assertDontSee('Register Tags')
+            ->assertDontSee('data-bulk-scan', false)
             ->assertSee('UI-SPARE')
             ->assertSee('Disable')
             ->assertSee('Mark lost')
