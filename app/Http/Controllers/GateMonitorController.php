@@ -61,11 +61,14 @@ class GateMonitorController extends Controller
             $camera = $runtime['cameras'][$location] ?? [];
             $gates[$location] = [
                 'camera_running' => (bool) ($camera['camera_running'] ?? false),
+                'source_configured' => array_key_exists('source_type', $camera) ? filled($camera['source_type']) && $camera['source_type'] !== 'none' : null,
+                'last_capture_time' => $camera['last_capture_time'] ?? null,
                 'camera_error' => ($camera['camera_running'] ?? false) ? null : ($camera['last_error'] ?? null),
                 'stream_url' => $camera['stream_url'] ?? $detectorRuntimeService->defaultStreamUrl($location),
                 'logs' => app(RealtimeLogController::class)->gateLogRows($location, 8),
                 // ROI work, Phase 3: vehicles Detected and not Recorded yet.
-                'checking' => \App\Support\OpenPasses::at($runtime, $location),
+                'checking' => ($runtime['service_running'] ?? false) && ($camera['camera_running'] ?? false)
+                    ? \App\Support\OpenPasses::at($runtime, $location) : [],
             ];
         }
 
@@ -73,7 +76,7 @@ class GateMonitorController extends Controller
             'detector_running' => (bool) ($runtime['service_running'] ?? false),
             'gates' => $gates,
             'generated_at' => now()->toIso8601String(),
-        ]);
+        ])->header('Cache-Control', 'no-store, max-age=0');
     }
 
     /**

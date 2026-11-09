@@ -66,6 +66,24 @@ try {
     const errors = []; page.on('pageerror', error => errors.push(error.message));
 
     const records = JSON.parse(fs.readFileSync(directory + '/plate-evidence.json', 'utf8'));
+    await page.goto(base + '/logs?plate_text=395ISX');
+    const candidateLogs = await page.locator('#event-log-modal-data').evaluate(node => JSON.parse(node.textContent));
+    const candidateIndex = candidateLogs.findIndex(row => row.id === records.actual && row.record_type === 'visitor_record');
+    check(candidateIndex >= 0 && candidateLogs[candidateIndex].plate_number === 'Needs review: 395ISX', 'Recognized candidate is displayed without claiming accepted plate');
+    check(candidateLogs[candidateIndex].plate_review_reason_code === 'identifier_type_unconfirmed', 'Matching text identifies the real Review blocker');
+    await page.locator('[data-event-log-view="' + candidateIndex + '"]').click();
+    const details = await page.locator('[data-log-details-grid]').innerText();
+    check(details.includes('OCR candidate (unconfirmed)') && details.includes('395ISX') && details.includes('Identifier type is unconfirmed'), 'Existing Details exposes candidate confidence/source and true reason');
+    check(details.includes('99% (OCR evidence)'), 'Details uses OCR evidence confidence without claiming correctness probability');
+    await page.locator('#log-details button[data-drawer-close]').click();
+    const candidatePrint = await context.newPage();
+    await candidatePrint.goto(base + '/logs/print?plate_text=395ISX&autoprint=0&snapshots=1');
+    check((await candidatePrint.locator('body').innerText()).includes('Needs review: 395ISX')
+        && (await candidatePrint.locator('body').innerText()).includes('Identifier type is unconfirmed'), 'Print keeps the candidate and Review reason');
+    await candidatePrint.close();
+    const csvURL = await page.locator('[data-auto-link=csv]').getAttribute('href');
+    const csvText = await (await page.request.get(csvURL)).text();
+    check(csvText.includes('Needs review: 395ISX') && csvText.includes('Identifier type is unconfirmed'), 'CSV agrees with candidate/reason in the activity view');
     const artifacts = path.join(root, 'storage/app/ui-review/plate-evidence'); fs.mkdirSync(artifacts, { recursive: true });
     const open = async (name) => {
         await page.goto(base + '/visitors?tab=review');
@@ -86,6 +104,11 @@ try {
     };
     let card = await open('actual');
     check((await card.innerText()).includes('Identifier type is unconfirmed'), 'Clear OCR and Registry hit still require type confirmation');
+    await page.screenshot({ path: path.join(artifacts, 'candidate-review-desktop.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    check((await card.innerText()).includes('395ISX') && (await card.innerText()).includes('Identifier type is unconfirmed'), 'Narrow Review keeps candidate and true reason readable');
+    await page.screenshot({ path: path.join(artifacts, 'candidate-review-narrow.png'), fullPage: true });
+    await page.setViewportSize({ width: 1366, height: 768 });
     check(await card.locator('.review-plate-zoom img').count() === 1, 'Linked identifier image is available');
     await card.locator('.review-ocr-evidence summary').click();
     check((await card.locator('.review-ocr-evidence').innerText()).includes('395ISX'), 'Raw OCR is inspectable');

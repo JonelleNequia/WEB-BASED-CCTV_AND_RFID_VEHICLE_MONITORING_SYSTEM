@@ -82,10 +82,10 @@ class Phase5VisitorRecordsTest extends TestCase
         $record = VisitorRecord::query()->sole();
         // Not a PH layout (a letter among the digits), so the guess stays as read.
         $this->assertSame([VisitorRecord::PLATE_UNREADABLE, null, 'ABC-1Z34', null], [$record->plate_status, $record->plate_number, $record->ocr_plate_number, $record->plate_profile_id]);
-        $this->assertSame('Plate unreadable', $record->plateLabel());
+        $this->assertSame('Needs review: ABC-1Z34', $record->plateLabel());
 
-        $this->actingAs($this->guard)->get(route('visitors.index'))
-            ->assertOk()->assertSee('Plate unreadable')->assertSee('Best guess: ABC-1Z34')->assertSee('Correct plate');
+        $this->actingAs($this->guard)->get(route('visitors.index', ['tab' => 'review']))
+            ->assertOk()->assertSee('ABC-1Z34')->assertSee('Needs review')->assertSee('Save plate');
 
         $this->actingAs($this->guard)->patch(route('visitors.records.plate', $record), ['plate_number' => 'abc 1234'])
             ->assertSessionHasNoErrors();

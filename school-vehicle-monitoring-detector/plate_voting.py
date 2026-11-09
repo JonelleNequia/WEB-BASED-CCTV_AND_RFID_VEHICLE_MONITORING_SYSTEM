@@ -126,5 +126,5 @@ def vote_plate(frame_reads, vehicle_type=None):
         return result
 
     exact = sum(1 for text in texts if text == plate)
-    result.update(plate=plate, status="read", reason=f"{exact} of {len(texts)} frame reads match exactly; character vote.")
+    result.update(plate=plate, status="read", reason=f"{exact} of {len(texts)} OCR reads match exactly; character vote.")
     return result

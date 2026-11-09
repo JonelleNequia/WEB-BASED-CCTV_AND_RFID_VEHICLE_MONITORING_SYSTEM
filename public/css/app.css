@@ -6736,6 +6736,8 @@ img.activity-plate-image {
     font-size: 1rem;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
+    max-width: 10rem;
+    white-space: normal;
 }
 
 .gate-latest.result-idle {
@@ -6797,6 +6799,13 @@ img.activity-plate-image {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.gate-card .gate-logs time { max-width: 9rem; white-space: normal; text-align: right; }
+@media (max-width: 600px) {
+    .gate-card .gate-latest { grid-template-columns: auto minmax(0, 1fr); }
+    .gate-card .gate-latest time { grid-column: 2; max-width: none; font-size: .85rem; }
+    .gate-card .gate-latest-text strong { white-space: normal; overflow-wrap: anywhere; }
 }
 
 .gate-logs .gate-logs-empty {

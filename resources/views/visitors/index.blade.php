@@ -71,7 +71,7 @@
                         <label for="visitor_plate_status">Plate result</label>
                         <select id="visitor_plate_status" name="plate_status">
                             <option value="">All</option>
-                            @foreach (['read' => 'Read by camera', 'corrected' => 'Corrected by guard', 'unreadable' => 'Plate unreadable', 'pending' => 'Still reading'] as $value => $label)
+                            @foreach (\App\Services\ListReportService::PLATE_RESULTS as $value => $label)
                                 <option value="{{ $value }}" @selected(($filters['plate_status'] ?? '') === $value)>{{ $label }}</option>
                             @endforeach
                         </select>

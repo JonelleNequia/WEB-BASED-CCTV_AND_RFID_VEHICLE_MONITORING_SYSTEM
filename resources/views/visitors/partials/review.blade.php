@@ -44,10 +44,12 @@
             $needsPlate = $record->plateNeedsReview();
             $needsDirection = $record->direction === 'UNKNOWN';
             $suggestions = $reviewService->suggestions($record);
-            $read = $record->ocr_plate_number ?: $record->plate_number;
+            $evidence = \App\Services\PlateEvidenceService::presentation($record);
+            $read = $evidence['candidate'] ?: ($record->plate_number ?: $record->ocr_plate_number);
+            $readConfidence = $evidence['candidate'] ? $evidence['confidence'] : $record->plate_confidence;
             $reviewErrors = (string) old('_review_record_id') === (string) $record->id ? $errors->all() : [];
             $why = match (true) {
-                \App\Services\PlateEvidenceService::kind($record) === 'uncertain' && (float) $record->plate_confidence >= .6 && \App\Support\PlateNumber::storageKey($read) !== null => 'Identifier unconfirmed',
+                $evidence['candidate'] !== null => 'Needs review · OCR candidate',
                 $record->plate_status === \App\Models\VisitorRecord::PLATE_UNREADABLE => 'Plate unreadable',
                 $record->match_confidence === 'low' => 'Possible match',
                 $needsPlate => 'Not sure',
@@ -81,12 +83,12 @@
                 <div class="review-facts">
                     <p class="field-error" data-review-error role="alert" @if (! $reviewErrors) hidden @endif>{{ implode(' ', $reviewErrors) }}</p>
                     <div class="review-reasons">
-                        <span class="field-help" data-registration-reason @if(!$record->registration_reason) hidden @endif>{{ $record->registration_reason }}</span>
+                        <span class="field-help" data-registration-reason @if(!$evidence['reason']) hidden @endif>{{ $evidence['reason'] }}</span>
                         @if ($why)<x-badge tone="warning" :label="$why" />@endif
                         @if ($needsDirection)<span data-review-direction-badge><x-badge tone="warning" label="Direction unknown" /></span>@endif
                     </div>
                     <dl class="review-grid">
-                        <div><dt>Camera read</dt><dd><strong class="review-read">{{ $read ?: '—' }}</strong>@if ((float) $record->plate_confidence > 0) <span class="table-subtext">{{ round((float) $record->plate_confidence * 100) }}%</span>@endif</dd></div>
+                        <div><dt>{{ $evidence['source'] ?: 'Camera read' }}</dt><dd><strong class="review-read">{{ $read ?: '—' }}</strong>@if ($readConfidence !== null) <span class="table-subtext" title="OCR evidence confidence does not prove identifier type">{{ round((float) $readConfidence * 100) }}%</span>@endif</dd></div>
                         <div><dt>Gate</dt><dd>{{ $gateLabel($record->gate) }}</dd></div>
                         <div><dt>Direction</dt><dd data-review-direction>{{ $needsDirection ? 'Unknown' : $record->direction }}</dd></div>
                         <div><dt>Time</dt><dd><x-datetime :value="$record->seen_at" /></dd></div>

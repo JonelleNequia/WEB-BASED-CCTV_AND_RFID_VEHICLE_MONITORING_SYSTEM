@@ -8,6 +8,7 @@
     const config = dataNode ? JSON.parse(dataNode.textContent || '{}') : {};
     const POLL_MS = 2000;  // ROI work, Phase 3: "checking RFID…" shows within about 2 s
     const TONE_LOOK = { info: 'verified', neutral: 'unregistered', warning: 'unknown', critical: 'alert' };
+    let refreshSequence = 0;
 
     function el(tag, className, text) {
         const node = document.createElement(tag);
@@ -41,7 +42,8 @@
     }
 
     function time(value) {
-        return window.ui && value ? window.ui.formatTime(value) : '';
+        if (!value) return '';
+        return new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
     }
 
     function renderLatest(card, log, checking) {
@@ -118,20 +120,22 @@
         }
     }
 
-    /*
-     * "Offline" only when the player has no picture: the detector's status
-     * can be down for a moment (restarting, its own stream hiccuped) while
-     * the camera's live view is fine; hiding it then made the feed go black.
-     */
+    // MJPEG can deliver the detector's placeholder or an old still. A decoded
+    // image alone is not source-health evidence. Independent video can remain
+    // healthy while the OCR process restarts.
     function renderFeed(card) {
-        const state = card.lastState;
-        const player = card.querySelector('[data-live-video]')?.liveVideo;
+        const state = card.lastState || { detectorRunning: false, gate: { camera_running: card.dataset.cameraRunning === '1', source_configured: card.dataset.sourceConfigured === '0' ? false : null } };
+        const root = card.querySelector('[data-live-video]');
+        const player = root?.liveVideo;
         const picture = Boolean(player?.hasPicture?.());
-        const live = state ? state.detectorRunning && state.gate.camera_running : false;
+        const missing = state.gate.source_configured === false;
+        const live = !card.sourceStatusStale && state.detectorRunning && state.gate.camera_running;
+        const mode = player?.mode || root?.dataset.mode;
+        const healthy = picture && !missing && (mode !== 'mjpeg' || live);
         card.querySelector('[data-gate-camera]')?.replaceChildren(
-            picture ? badge('success', 'Live') : badge(live ? 'warning' : 'critical', live ? 'Connecting' : 'Offline')
+            healthy ? badge('success', 'Live') : badge(missing ? 'critical' : 'warning', missing ? 'Source unavailable' : picture ? 'Source unverified' : live ? 'Connecting' : 'Offline')
         );
-        setOffline(card, picture || !state ? '' : (live ? '' : offlineText(state.detectorRunning, state.gate)));
+        setOffline(card, healthy ? '' : missing ? 'No camera added for this gate.' : card.sourceStatusStale ? 'Camera status unavailable' : live ? '' : offlineText(state.detectorRunning, state.gate));
     }
 
     document.querySelectorAll('[data-gate] [data-live-video]').forEach(function (root) {
@@ -151,13 +155,17 @@
             return;
         }
 
+        const sequence = ++refreshSequence;
         try {
-            const response = await window.ui.liveFetch(config.stateUrl, { headers: { Accept: 'application/json' } });
+            const response = await window.ui.liveFetch(config.stateUrl, { cache: 'no-store', headers: { Accept: 'application/json' } });
+            if (sequence !== refreshSequence) return;
             if (!response.ok) {
+                document.querySelectorAll('.gate-card[data-gate]').forEach(card => { card.sourceStatusStale = true; renderFeed(card); });
                 return;
             }
 
             const body = await response.json();
+            if (sequence !== refreshSequence) return;
             document.querySelector('[data-gate-detector]')?.replaceChildren(
                 badge(body.detector_running ? 'success' : 'warning', body.detector_running ? 'Detector running' : 'Detector starting')
             );
@@ -169,6 +177,7 @@
                 }
 
                 const live = body.detector_running && gate.camera_running;
+                card.sourceStatusStale = false;
                 card.lastState = { detectorRunning: body.detector_running, gate: gate };
                 renderFeed(card);
 
@@ -181,11 +190,12 @@
                 card.dataset.wasLive = live ? '1' : '0';
 
                 card.lastLogs = gate.logs || [];
-                renderLatest(card, (gate.logs || [])[0] || null, gate.checking);
+                renderLatest(card, (gate.logs || [])[0] || null, live && gate.source_configured !== false ? gate.checking : []);
                 renderLogs(card, gate.logs);
             });
         } catch (error) {
             // Keep the last known values during short network hiccups.
+            if (sequence === refreshSequence) document.querySelectorAll('.gate-card[data-gate]').forEach(card => { card.sourceStatusStale = true; renderFeed(card); });
         }
     }
 

@@ -95,7 +95,8 @@
             this.video.hidden = mode === 'mjpeg';
             this.img.hidden = mode !== 'mjpeg';
             if (this.badge) {
-                this.badge.textContent = { webrtc: 'Live · full quality', hls: 'Live · HLS', mjpeg: 'Live · basic' }[mode] || '';
+                // Transport selection alone does not prove a healthy camera source.
+                this.badge.textContent = { webrtc: 'WebRTC · full quality', hls: 'HLS stream', mjpeg: 'Image stream · basic' }[mode] || '';
             }
             this.emit('live:mode', { mode });
         }

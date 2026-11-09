@@ -63,12 +63,14 @@ class VisitorIntegrationController extends Controller
         }
 
         return response()->json([
-            'message' => 'Guest plate stored.',
+            'message' => 'Plate evidence stored.',
             'visitor_record' => [
                 'id' => $record->id,
                 'status' => $record->status,
                 'plate_status' => $record->plate_status,
                 'plate_number' => $record->plate_number,
+                'plate_candidate' => \App\Services\PlateEvidenceService::candidate($record),
+                'plate_review_reason' => \App\Services\PlateEvidenceService::presentation($record)['reason'],
                 'plate_profile_id' => $record->plate_profile_id,
                 'registration_status' => $record->registration_status,
                 'registration_reason' => $record->registration_reason,

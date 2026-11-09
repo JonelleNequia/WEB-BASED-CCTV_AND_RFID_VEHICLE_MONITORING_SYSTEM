@@ -20,7 +20,7 @@ class ListReportService
 
     public const TAG_STATUSES = ['available' => 'Available', 'assigned' => 'Assigned', 'lost' => 'Lost / Unavailable', 'disabled' => 'Disabled'];
 
-    public const PLATE_RESULTS = ['read' => 'Read by camera', 'corrected' => 'Corrected by guard', 'unreadable' => 'Plate unreadable', 'pending' => 'Still reading'];
+    public const PLATE_RESULTS = ['read' => 'Read by camera', 'corrected' => 'Corrected by guard', 'unreadable' => 'Unreadable / needs review', 'pending' => 'Still reading'];
 
     public const SHOW = ['active' => 'Counted records', 'duplicate' => 'Duplicates', 'dismissed' => 'Dismissed', 'all' => 'All'];
 
@@ -79,7 +79,9 @@ class ListReportService
                 VisitorRecord::SOURCE_MANUAL => 'Manual entry', VisitorRecord::SOURCE_LEGACY => 'Legacy camera record', default => 'Camera'
             },
             'gate' => Gate::labelFor($record->gate), 'direction' => $record->direction === 'UNKNOWN' ? 'Direction unknown' : $record->direction,
-            'plate_result' => self::PLATE_RESULTS[$record->plate_status] ?? $record->plate_status, 'status' => ucfirst($record->status),
+            'plate_result' => $record->identifier_label ? 'Evidence only' : (\App\Services\PlateEvidenceService::candidate($record)
+                ? 'Needs review · '.\App\Services\PlateEvidenceService::presentation($record)['reason']
+                : ($record->plate_status === VisitorRecord::PLATE_UNREADABLE ? 'Plate unreadable' : (self::PLATE_RESULTS[$record->plate_status] ?? $record->plate_status))), 'status' => ucfirst($record->status),
             'type' => $record->display_vehicle_type, 'type_source' => $record->vehicle_type_source_label],
             $record->snapshot_url ?? $record->plate_image_url, $record->snapshot_url ? 'Snapshot' : 'Plate image');
     }

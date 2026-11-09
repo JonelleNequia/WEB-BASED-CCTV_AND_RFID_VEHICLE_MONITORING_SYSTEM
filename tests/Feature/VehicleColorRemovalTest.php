@@ -118,6 +118,7 @@ class VehicleColorRemovalTest extends TestCase
 
     public function test_late_ocr_and_admin_updates_preserve_existing_colors_on_both_historical_records(): void
     {
+        $this->freezeTime(); // Repeated submissions must carry the same occurrence time, even across a wall-clock second.
         $this->withHeader('X-Api-Key', 'test-detector-key')->postJson(route('api.guest-observation'), $this->capture())->assertCreated();
         $observation = GuestVehicleObservation::query()->sole();
         $event = VehicleEvent::query()->sole();

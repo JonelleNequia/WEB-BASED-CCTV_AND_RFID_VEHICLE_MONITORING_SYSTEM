@@ -9,7 +9,7 @@
             <span data-gate-detector>
                 <x-badge :tone="$detectorRunning ? 'success' : 'warning'" :label="$detectorRunning ? 'Detector running' : 'Detector starting'" />
             </span>
-            <x-live-indicator />
+            <x-live-indicator data-live-connected-label="Updates connected" title="Activity refresh connection; camera health is shown separately for each gate." />
             {{-- Live view work: boxes are drawn over the video, and can be hidden. --}}
             <label class="overlay-toggle"><input type="checkbox" data-overlay-toggle checked> Show detection boxes</label>
         </x-slot:meta>
@@ -18,13 +18,14 @@
     <div class="gate-grid">
         @foreach ($gates as $location => $gate)
             @php($latest = $gate['logs'][0] ?? null)
-            @php($cameraLive = (bool) ($gate['camera_status']['camera_running'] ?? false))
-            <section class="gate-card" data-gate="{{ $location }}">
+            @php($sourceType = $gate['camera_status']['source_type'] ?? $gate['camera']['source_type'] ?? null)
+            @php($cameraLive = (bool) ($gate['camera_status']['camera_running'] ?? false) && $sourceType !== 'none')
+            <section class="gate-card" data-gate="{{ $location }}" data-camera-running="{{ $cameraLive ? '1' : '0' }}" data-source-configured="{{ $sourceType === null ? '' : ($sourceType && $sourceType !== 'none' ? '1' : '0') }}">
                 <header class="gate-card-head">
                     <h2>{{ $gate['short_label'] }}</h2>
                     <div class="gate-card-actions">
                         <span data-gate-camera>
-                            <x-badge :tone="$cameraLive ? 'success' : 'critical'" :label="$cameraLive ? 'Live' : 'Offline'" />
+                            <x-badge :tone="$cameraLive ? 'success' : 'critical'" :label="$sourceType === 'none' ? 'Source unavailable' : ($cameraLive ? 'Connecting' : 'Offline')" />
                         </span>
                         <a href="{{ $gate['kiosk_url'] }}" target="_blank" rel="noopener" class="button button-secondary button-sm">Open {{ $gate['short_label'] }} Kiosk</a>
                     </div>
@@ -37,6 +38,7 @@
                 </div>
 
                 {{-- UI Phase 4: the latest vehicle at this gate, big (plate, category, IN/OUT, time). --}}
+                <span class="gate-section-label">Latest recorded activity</span>
                 <div class="gate-latest result-{{ \App\Support\MovementRow::resultLook($latest) }}" data-gate-latest>
                     @if ($latest)
                         <span class="gate-latest-direction">{{ $latest['direction_label'] }}</span>
@@ -44,7 +46,7 @@
                             <strong><x-occurrence-thumbnail :url="$latest['snapshot_url'] ?? $latest['image_url'] ?? null" />{{ $latest['result_title'] ?? $latest['plate_number'] }}</strong>
                             <span>{{ $latest['result_detail'] ?? ($latest['category_label'] ?? '') }}</span>
                         </div>
-                        <time>{{ \App\Support\DisplayTime::time($latest['event_time'] ?? null) }}</time>
+                        <time>{{ \App\Support\DisplayTime::datetime($latest['event_time'] ?? null) }}</time>
                     @else
                         <p class="gate-latest-empty">No vehicles have passed yet</p>
                     @endif
@@ -58,7 +60,7 @@
                                 <span class="badge badge-tone-{{ $log['tone'] }}">{{ $log['direction_label'] }}</span>
                                 <strong><x-occurrence-thumbnail :url="$log['snapshot_url'] ?? $log['image_url'] ?? null" />{{ $log['plate_number'] }}</strong>
                                 <span class="text-muted">{{ $log['category_label'] ?? '' }}</span>
-                                <time>{{ \App\Support\DisplayTime::time($log['event_time']) }}</time>
+                                <time>{{ \App\Support\DisplayTime::datetime($log['event_time']) }}</time>
                             </li>
                         @empty
                             <li class="gate-logs-empty">No activity yet.</li>

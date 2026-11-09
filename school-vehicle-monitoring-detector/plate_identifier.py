@@ -37,12 +37,20 @@ def review_submission(vote, details):
     actual plate on the strength of shape, length, confidence or a Registry hit.
     """
     details = dict(details)
+    candidate = vote.get("plate") or vote.get("best_guess")
+    reason_code = "identifier_type_unconfirmed"
+    reason = "Identifier type unconfirmed: inspect the images and confirm actual plate or temporary identifier."
+    if not candidate:
+        reason_code, reason = "ocr_no_text", "No usable plate text was read. Inspect the available images."
+    elif not valid(candidate):
+        reason_code, reason = "ocr_invalid_text", "OCR candidate is incomplete or outside the plate contract. Confirm the literal text from the images."
+    elif vote.get("status") != "read":
+        reason_code, reason = "ocr_vote_uncertain", (vote.get("reason") or "OCR observations are uncertain.") + " Confirm the candidate and identifier type from the images."
     details["identifier_evidence"] = {
         "kind": "uncertain", "source": "unclassified_region",
-        "reason": "Identifier type unconfirmed: inspect the images and confirm actual plate or temporary identifier.",
+        "reason_code": reason_code, "reason": reason,
     }
     details.setdefault("vote", dict(vote))
-    candidate = vote.get("plate") or vote.get("best_guess")
     return {"plate_number": None, "plate_status": "unreadable",
             "plate_confidence": vote.get("confidence", 0.0),
             "best_guess": candidate if candidate and len(candidate) <= 30 else None,

@@ -38,28 +38,110 @@ class PlateEvidenceService
         if (($evidence['source'] ?? null) !== 'staff') {
             $evidence['kind'] = 'uncertain';
             $evidence['source'] = 'detector';
-            $evidence['reason'] = $this->reviewReason($data);
+            $evidence['latest'] = $observation;
+            $decision = $this->reviewDecision($data);
+            if (self::candidateFromData($data) !== null) {
+                $evidence['candidate_confidence'] = $data['plate_confidence'] ?? null;
+            } elseif (self::candidate($record) !== null) {
+                $decision = ['code' => 'earlier_ocr_candidate', 'reason' => 'Earlier OCR candidate retained; the latest read supplied no usable text. Confirm it from the occurrence images.'];
+            }
+            $evidence['reason'] = $decision['reason'];
+            $evidence['reason_code'] = $decision['code'];
         }
         $record->ocr_details_json = array_replace($details, [self::KEY => $evidence]);
     }
 
     public function reviewReason(array $data): string
     {
-        $candidate = $data['plate_number'] ?? $data['best_guess'] ?? null;
+        return $this->reviewDecision($data)['reason'];
+    }
+
+    private function reviewDecision(array $data): array
+    {
+        $vote = (array) data_get($data, 'ocr_details.vote', []);
+        $candidate = self::candidateFromData($data);
+        if ($candidate === null) {
+            return ['code' => 'ocr_no_text', 'reason' => 'No usable plate text was read. Inspect the snapshot and plate crop.'];
+        }
         $key = \App\Support\PlateNumber::storageKey($candidate);
         if (! $key || mb_strlen(\App\Support\PlateNumber::display($candidate) ?? '') > 30) {
-            return 'Plate unreadable, incomplete or invalid. Inspect the OCR evidence and images.';
+            return ['code' => 'ocr_invalid_text', 'reason' => 'OCR candidate contains unsupported characters or exceeds the plate limits. Confirm the literal text and identifier type from the images.'];
         }
-        if (($data['plate_status'] ?? null) !== 'read') {
-            $why = data_get($data, 'ocr_details.vote.reason');
-
-            return 'OCR result requires review. '.(is_string($why) ? mb_substr($why, 0, 240).' ' : '').'Confirm the text and identifier type from the images.';
+        if (isset($vote['status']) && $vote['status'] !== 'read') {
+            $why = is_string($vote['reason'] ?? null) ? mb_substr($vote['reason'], 0, 240) : 'OCR observations are uncertain.';
+            return ['code' => 'ocr_vote_uncertain', 'reason' => $why.' Confirm the candidate and identifier type from the images.'];
         }
         if (! isset($data['plate_confidence']) || $data['plate_confidence'] < VisitorRecord::LOW_PLATE_CONFIDENCE || $data['plate_confidence'] > 1) {
-            return 'OCR confidence is missing or below the review threshold. Confirm the text and identifier type.';
+            return ['code' => 'ocr_low_confidence', 'reason' => 'OCR confidence is missing or below the existing review threshold. Confirm the candidate and identifier type.'];
+        }
+        if (isset(self::TEMPORARY[data_get($data, 'ocr_details.identifier_evidence.kind', '')])) {
+            return ['code' => 'temporary_identifier_evidence', 'reason' => 'The observed text is marked as a temporary identifier: evidence only, not an accepted actual plate. Confirm the identifier type from the images.'];
+        }
+        if (($vote['status'] ?? $data['plate_status'] ?? null) !== 'read') {
+            return ['code' => 'ocr_uncertain', 'reason' => 'OCR produced a candidate but did not accept the text. Confirm the candidate and identifier type from the images.'];
         }
 
-        return 'Identifier type is unconfirmed. Inspect the images: confirm an actual plate or record a temporary identifier. Text confidence and a Registry match do not prove the type.';
+        return ['code' => 'identifier_type_unconfirmed', 'reason' => 'Identifier type is unconfirmed. Inspect the images: confirm an actual plate or record a temporary identifier. Text confidence and a Registry match do not prove the type.'];
+    }
+
+    /** Display evidence without promoting it into plate_number or a matching key. */
+    public static function candidate(VisitorRecord $record): ?string
+    {
+        if (app(self::class)->staffConfirmed($record) || self::label($record)
+            || $record->plate_status !== VisitorRecord::PLATE_UNREADABLE) return null;
+        $details = (array) $record->ocr_details_json;
+        $latest = data_get($details, self::KEY.'.latest', data_get($details, self::KEY.'.original', []));
+        foreach ([$record->ocr_plate_number, data_get($latest, 'best_guess'), data_get($latest, 'plate_number'),
+            data_get($details, 'vote.best_guess'), data_get($details, 'vote.plate')] as $value) {
+            if ($text = self::candidateText($value)) return $text;
+        }
+        return null;
+    }
+
+    private static function candidateText(mixed $value): ?string
+    {
+        if (! is_string($value) || mb_strlen($value) > 30 || preg_match('/[\p{Cc}\p{Cf}]/u', $value)
+            || ! preg_match('/[A-Za-z0-9]/', $value)) return null;
+
+        return \App\Support\PlateNumber::display($value);
+    }
+
+    public static function candidateFromData(array $data): ?string
+    {
+        foreach ([$data['plate_number'] ?? null, $data['best_guess'] ?? null,
+            data_get($data, 'ocr_details.vote.plate'), data_get($data, 'ocr_details.vote.best_guess')] as $value) {
+            if ($text = self::candidateText($value)) return $text;
+        }
+        return null;
+    }
+
+    public static function presentation(VisitorRecord $record): array
+    {
+        $candidate = self::candidate($record);
+        $reason = $record->registration_reason;
+        $evidence = (array) data_get($record->ocr_details_json, self::KEY, []);
+        $code = $reason === ($evidence['reason'] ?? null) ? ($evidence['reason_code'] ?? null) : null;
+        $earlier = ($evidence['reason_code'] ?? null) === 'earlier_ocr_candidate';
+        $confidence = $earlier ? ($evidence['candidate_confidence'] ?? data_get($evidence, 'original.plate_confidence'))
+            : ($record->plate_confidence ?? $evidence['candidate_confidence'] ?? data_get($evidence, 'original.plate_confidence'));
+        // Render older evidence correctly without rewriting historical decisions.
+        // A real RFID/Registry conflict or staff decision keeps its existing reason.
+        if ($record->classificationCategory() === 'review' && ! app(self::class)->staffConfirmed($record)
+            && ($evidence['source'] ?? null) === 'detector'
+            && (! $reason || preg_match('/^(OCR |Identifier type |Plate unreadable,|No usable plate text|The observed text)/', $reason))) {
+            $latest = $evidence['latest'] ?? $evidence['original'] ?? [];
+            $data = array_replace($latest, ['best_guess' => $candidate, 'plate_confidence' => $record->plate_confidence,
+                'ocr_details' => (array) $record->ocr_details_json]);
+            $decision = app(self::class)->reviewDecision($data);
+            $reason = $decision['reason']; $code = $decision['code'];
+            if ($candidate && $code === 'ocr_no_text') {
+                $code = 'earlier_ocr_candidate';
+                $reason = 'Earlier OCR candidate retained; the latest read supplied no usable text. Confirm it from the occurrence images.';
+            }
+        }
+        return ['candidate' => $candidate, 'reason' => $reason, 'reason_code' => $code,
+            'source' => $candidate ? ($earlier ? 'Earlier OCR candidate (unconfirmed)' : 'OCR candidate (unconfirmed)') : null,
+            'confidence' => is_numeric($confidence) && $confidence >= 0 && $confidence <= 1 ? (float) $confidence : null];
     }
 
     public function confirm(VisitorRecord $record, string $kind, ?string $text, User $user): void

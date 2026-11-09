@@ -126,7 +126,7 @@ class VisitorRecordService
                 $record->fill([
                     // Effective type is resolved separately from detector evidence below.
                     'ocr_plate_number' => ($record->plate_status === VisitorRecord::PLATE_CORRECTED || $record->reviewed_at !== null) && $record->ocr_plate_number !== null
-                        ? $record->ocr_plate_number : ($read ? $plate : PlateNumber::display($data['best_guess'] ?? null)),
+                        ? $record->ocr_plate_number : ($read ? $plate : (PlateEvidenceService::candidateFromData($data) ?: $record->ocr_plate_number)),
                     'ocr_details_json' => ($record->plate_status === VisitorRecord::PLATE_CORRECTED || $record->reviewed_at !== null) && app(VehicleTypeEvidenceService::class)->hasOcrDetails($record)
                         ? $record->ocr_details_json : app(VehicleTypeEvidenceService::class)->mergeOcrDetails($record, $data['ocr_details'] ?? null),
                     'plate_image_path' => $upload['path'] && ! \App\Support\OccurrenceMedia::exists($record->plate_image_path)
@@ -150,7 +150,9 @@ class VisitorRecordService
                     $record->vehicle_id = null;
                     $record->suggested_profile_id = null;
                     $this->classifyPlate($record, null, false);
-                    $record->registration_reason = data_get($record->ocr_details_json, PlateEvidenceService::KEY.'.reason');
+                    if (in_array($record->registration_reason, ['Plate unreadable or invalid. Check the plate.', 'OCR confidence is missing or below the review threshold.'], true)) {
+                        $record->registration_reason = data_get($record->ocr_details_json, PlateEvidenceService::KEY.'.reason');
+                    }
                 }
 
                 app(VehicleTypeEvidenceService::class)->resolve($record, $data['detected_vehicle_type'] ?? null, array_key_exists('detected_vehicle_type', $data));

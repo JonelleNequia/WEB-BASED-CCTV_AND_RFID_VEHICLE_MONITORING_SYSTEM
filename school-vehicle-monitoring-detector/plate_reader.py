@@ -252,6 +252,8 @@ def read_pass(frames, vehicle_type=None, budget_seconds=OCR_BUDGET_SECONDS):
         "frames_checked": min(len(frames), MAX_FRAMES),
         "plates_found": len(plates),
         "crops_read": len(reads),
+        "source_frames_read": len({plate['frame'] for plate in plates if 'score' in plate}),
+        "ocr_read_unit": "plate_crop",
         "raw_reads": raw_reads,
         "elapsed_seconds": round(time.monotonic() - started, 3),
         "best_crop": {"frame": best["frame"], "confidence": best["confidence"], "quality": round(best["quality"], 3), **best["measure"]} if best else None,

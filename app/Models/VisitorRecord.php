@@ -274,6 +274,9 @@ class VisitorRecord extends Model
         if ($label = \App\Services\PlateEvidenceService::label($this)) {
             return $label.' (no actual plate)';
         }
+        if ($candidate = \App\Services\PlateEvidenceService::candidate($this)) {
+            return 'Needs review: '.$candidate;
+        }
         return match ($this->plate_status) {
             self::PLATE_PENDING => 'Reading plate…',
             self::PLATE_UNREADABLE => 'Plate unreadable',

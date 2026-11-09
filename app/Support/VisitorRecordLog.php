@@ -15,6 +15,7 @@ final class VisitorRecordLog
         $plateOnly = $record->isRegisteredAtOccurrence();
         $category = $record->classificationCategory();
         $review = $category === 'review';
+        $evidence = \App\Services\PlateEvidenceService::presentation($record);
 
         return [
             'record_type' => 'visitor_record',
@@ -38,6 +39,12 @@ final class VisitorRecordLog
             'direction_source' => $record->direction_source,
             'direction_source_label' => self::directionLabel($record->direction_source, $record->direction_confidence),
             'plate_number' => $record->plateLabel(),
+            'accepted_plate_number' => $record->plate_number,
+            'plate_candidate' => $evidence['candidate'],
+            'plate_candidate_source' => $evidence['source'],
+            'plate_review_reason' => $review ? $evidence['reason'] : null,
+            'plate_review_reason_code' => $review ? $evidence['reason_code'] : null,
+            'plate_confidence_label' => $evidence['candidate'] && $evidence['confidence'] !== null ? round($evidence['confidence'] * 100).'% (OCR evidence)' : null,
             'owner_name' => $vehicle?->vehicle_owner_name ?: 'N/A',
             'vehicle_type' => $record->display_vehicle_type,
             'vehicle_type_source' => $record->vehicle_type_source_label,
@@ -57,7 +64,7 @@ final class VisitorRecordLog
             'event_time_export' => $time?->toDateTimeString(),
             // UI Phase 3: what needs a look (yellow) or the plate result.
             ...match (true) {
-                $review => ['status_label' => 'Review', 'status_badge_class' => 'manual-review'],
+                $review => ['status_label' => $evidence['candidate'] ? 'Needs review' : 'Review', 'status_badge_class' => 'manual-review'],
                 filled($record->identifier_label) => ['status_label' => 'Evidence only', 'status_badge_class' => 'secondary'],
                 $record->plate_status === VisitorRecord::PLATE_UNREADABLE => ['status_label' => 'Plate unreadable', 'status_badge_class' => 'manual-review'],
                 $record->direction === 'UNKNOWN' => ['status_label' => 'Direction unknown', 'status_badge_class' => 'manual-review'],
@@ -75,7 +82,7 @@ final class VisitorRecordLog
                     ? 'Unavailable (image upload failed)' : 'Unavailable'),
             // Unregistered visitors are normal traffic, not alerts.
             'is_alert' => false,
-            'alert_reason' => $record->registration_reason,
+            'alert_reason' => $evidence['reason'],
             'identifier_type_label' => $record->identifier_label,
             'identifier_text' => $record->identifier_label ? $record->identifier_text : null,
             'sort_time' => (float) ($record->created_at?->format('U.u') ?? $time?->format('U.u') ?? 0),

@@ -375,7 +375,7 @@
                     ? 'Offline · retrying'
                     : state === 'updating'
                         ? 'Updating…'
-                        : `Live · ${formatTime(new Date(), '', true)}`;
+                        : `${node.dataset.liveConnectedLabel || 'Live'} · ${formatTime(new Date(), '', true)}`;
             }
         });
     }

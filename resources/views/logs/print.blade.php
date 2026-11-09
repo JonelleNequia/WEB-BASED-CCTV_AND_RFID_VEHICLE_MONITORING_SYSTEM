@@ -126,6 +126,7 @@
                                 <td class="col-time">{{ $row['time'] }}</td>
                                 <td class="col-plate">
                                     <strong>{{ $row['plate'] }}</strong>
+                                    @if ($row['plate_review_reason'] ?? null)<div class="table-subtext">{{ $row['plate_review_reason'] }}</div>@endif
                                     @if ($snapshots)
                                         @if ($row['plate_image_url'])
                                             <img src="{{ $row['plate_image_url'] }}" alt="Plate image of {{ $row['plate'] }}" class="report-plate-image">

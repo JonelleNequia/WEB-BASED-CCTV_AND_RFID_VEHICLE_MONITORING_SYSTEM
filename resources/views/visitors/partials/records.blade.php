@@ -29,6 +29,8 @@
                 <div class="plate-cell">
                     @if ($record->identifier_label)
                         <strong>{{ $record->plateLabel() }}</strong>
+                    @elseif (\App\Services\PlateEvidenceService::candidate($record))
+                        <x-badge tone="warning" :label="$record->plateLabel()" />
                     @elseif ($record->plate_status === 'unreadable')
                         <x-badge tone="warning" label="Plate unreadable" />
                     @elseif ($record->plateProfile)
@@ -50,7 +52,7 @@
                     @switch($record->plate_status)
                         @case('read') Camera{{ $record->plate_confidence !== null ? ' · '.number_format($record->plate_confidence * 100).'%' : '' }} @break
                         @case('corrected') {{ $record->source === 'manual' ? 'Typed by' : 'Corrected by' }} {{ $record->corrector?->name ?? 'a guard' }}{{ $record->ocr_plate_number && $record->ocr_plate_number !== $record->plate_number ? ' · camera read '.$record->ocr_plate_number : '' }} @break
-                        @case('unreadable') {{ $record->ocr_plate_number ? 'Best guess: '.$record->ocr_plate_number : 'No plate found' }} @break
+                        @case('unreadable') {{ \App\Services\PlateEvidenceService::candidate($record) ? \App\Services\PlateEvidenceService::presentation($record)['source'] : 'No usable plate text' }} @break
                         @default OCR running
                     @endswitch
                     @endif
@@ -66,7 +68,7 @@
                     @endif
                 </div>
                 @if ($record->classificationCategory() === 'review')
-                    <div class="table-subtext">Review · {{ $record->registration_reason ?: 'Check the plate.' }}</div>
+                    <div class="table-subtext">Review · {{ \App\Services\PlateEvidenceService::presentation($record)['reason'] ?: 'Check the plate.' }}</div>
                 @elseif ($record->isRegisteredAtOccurrence())
                     <div class="table-subtext">Registered vehicle · plate identified</div>
                 @elseif ($record->vehicle)

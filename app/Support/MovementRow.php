@@ -86,7 +86,7 @@ final class MovementRow
             || strtoupper((string) ($log['event_type'] ?? '')) === 'UNREGISTERED';
 
         return match (true) {
-            ($log['category_label'] ?? null) === 'Review' => ['Review', (string) ($log['alert_reason'] ?? 'Check the plate.')],
+            ($log['category_label'] ?? null) === 'Review' => [($log['plate_candidate'] ?? null) ? 'Needs review: '.$log['plate_candidate'] : 'Review', (string) ($log['plate_review_reason'] ?? $log['alert_reason'] ?? 'Check the plate.')],
             (bool) ($log['registered'] ?? false) => ['Registered: '.($hasPlate ? $plate : 'no plate'), implode(' · ', array_filter([$owner, $log['category_label'] ?? null]))],
             $unregistered => ['Unregistered Guest', $hasPlate ? 'Plate '.$plate : 'Plate not read yet'],
             default => [$hasPlate ? $plate : '—', (string) ($log['category_label'] ?? '')],

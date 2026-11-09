@@ -14,6 +14,27 @@ import test_plate_contract as contract
 
 
 class IdentifierEvidenceTests(unittest.TestCase):
+    def test_agreement_is_text_evidence_and_never_independent_proof_of_identifier_type(self):
+        for score in (.2,.99):
+            vote=vote_plate([{'plate':'395ISX','score':score} for _ in range(8)])
+            self.assertEqual(vote['status'],'read')
+            self.assertIn('8 of 8 OCR reads',vote['reason'])
+            payload=review_submission(vote,{'raw_reads':[{'text':'395ISX','confidence':score}]})
+            self.assertIsNone(payload['plate_number']);self.assertEqual(payload['best_guess'],'395ISX')
+            self.assertEqual(payload['ocr_details']['identifier_evidence']['reason_code'],'identifier_type_unconfirmed')
+            self.assertIn('Identifier type unconfirmed',payload['ocr_details']['identifier_evidence']['reason'])
+    def test_no_text_and_uncertain_votes_report_the_actual_text_blocker(self):
+        empty=review_submission(vote_plate([]),{})
+        self.assertEqual(empty['ocr_details']['identifier_evidence']['reason_code'],'ocr_no_text')
+        self.assertIsNone(empty['best_guess'])
+        weak=review_submission(vote_plate([{'plate':'395ISX','score':.2}]),{})
+        self.assertEqual(weak['ocr_details']['identifier_evidence']['reason_code'],'ocr_vote_uncertain')
+        self.assertIn('weak',weak['ocr_details']['identifier_evidence']['reason'])
+    def test_real_reader_diagnostics_count_crops_separately_from_source_frames(self):
+        vote,_,details,_=contract.PlateContractTests().fast_pass('395ISX')
+        self.assertEqual(details['ocr_read_unit'],'plate_crop')
+        self.assertLessEqual(details['source_frames_read'],details['crops_read'])
+
     def test_clear_supported_formats_are_review_evidence_not_type_proof(self):
         for text in ['ABC 1234', 'ABC 123', '123ABC', 'A123BC', 'AB-00123', '395ISX', 'ISX395', 'AO0123', 'A00123', 'AI0123', 'A10123']:
             vote = vote_plate([{'plate': text, 'score': .99}])
