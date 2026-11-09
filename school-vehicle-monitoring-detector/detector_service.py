@@ -2880,14 +2880,16 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
 
     print(
         f"{role.capitalize()} unregistered visitor analysis {window_payload['event_key']}: "
-        f"plate={plate_number or 'unreadable'} (best guess {vote['best_guess'] or '-'}, {vote['reason']}) "
+        f"plate={plate_number or ('needs_review' if submission['best_guess'] else 'unreadable')} "
+        f"candidate={submission['best_guess'] or '-'}; "
+        f"blocker={analysis_details['identifier_evidence']['reason']}; vote={vote['reason']} "
         f"ocr_frames={analysis_details['frames_checked']} "
         f"ocr_elapsed={analysis_details['elapsed_seconds']}s",
         flush=True,
     )
 
     # Phase 5: the Unregistered Visitor record of this crossing gets the plate
-    # (or "plate unreadable"), the plate image and the vote.
+    # Candidate evidence, the original plate crop and the vote stay on this occurrence.
     submit_visitor_plate = getattr(laravel_client, "submit_visitor_plate", None)
     if submit_visitor_plate is not None:
         plate_image = encode_frame_snapshot(role, plate_crop, f"plate-{window_payload['event_key']}") if plate_crop is not None else None

@@ -74,7 +74,8 @@ class PlateEvidenceService
         if (! isset($data['plate_confidence']) || $data['plate_confidence'] < VisitorRecord::LOW_PLATE_CONFIDENCE || $data['plate_confidence'] > 1) {
             return ['code' => 'ocr_low_confidence', 'reason' => 'OCR confidence is missing or below the existing review threshold. Confirm the candidate and identifier type.'];
         }
-        if (isset(self::TEMPORARY[data_get($data, 'ocr_details.identifier_evidence.kind', '')])) {
+        $observedKind = data_get($data, 'ocr_details.identifier_evidence.kind');
+        if (is_string($observedKind) && isset(self::TEMPORARY[$observedKind])) {
             return ['code' => 'temporary_identifier_evidence', 'reason' => 'The observed text is marked as a temporary identifier: evidence only, not an accepted actual plate. Confirm the identifier type from the images.'];
         }
         if (($vote['status'] ?? $data['plate_status'] ?? null) !== 'read') {

@@ -31,9 +31,18 @@ class IdentifierEvidenceTests(unittest.TestCase):
         self.assertEqual(weak['ocr_details']['identifier_evidence']['reason_code'],'ocr_vote_uncertain')
         self.assertIn('weak',weak['ocr_details']['identifier_evidence']['reason'])
     def test_real_reader_diagnostics_count_crops_separately_from_source_frames(self):
-        vote,_,details,_=contract.PlateContractTests().fast_pass('395ISX')
+        import plate_reader
+        crop=np.zeros((30,100,3),dtype=np.uint8)
+        regions=[{'frame':0,'confidence':.99,'crop':crop.copy()} for _ in range(2)]
+        with mock.patch.object(plate_reader,'available',return_value=True), \
+             mock.patch.object(plate_reader,'find_plates',return_value=regions), \
+             mock.patch.object(plate_reader,'plate_ocr',return_value=object()), \
+             mock.patch.object(plate_reader,'read_crop',return_value=[('395ISX',.99)]):
+            vote,_,details=plate_reader.read_pass([(crop,(0,0,100,30))],'Car')
         self.assertEqual(details['ocr_read_unit'],'plate_crop')
-        self.assertLessEqual(details['source_frames_read'],details['crops_read'])
+        self.assertEqual(details['source_frames_read'],1)
+        self.assertEqual(details['crops_read'],2)
+        self.assertIn('2 of 2 OCR reads',vote['reason'])
 
     def test_clear_supported_formats_are_review_evidence_not_type_proof(self):
         for text in ['ABC 1234', 'ABC 123', '123ABC', 'A123BC', 'AB-00123', '395ISX', 'ISX395', 'AO0123', 'A00123', 'AI0123', 'A10123']:
