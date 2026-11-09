@@ -1,0 +1,11 @@
+[global]
+daemonize=no
+error_log=/dev/stderr
+[www]
+listen=127.0.0.1:9001
+pm=static
+pm.max_children=4
+pm.max_requests=1000
+catch_workers_output=yes
+clear_env=no
+chdir="{{RELEASE}}/app"

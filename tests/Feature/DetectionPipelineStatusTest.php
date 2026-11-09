@@ -73,7 +73,7 @@ class DetectionPipelineStatusTest extends TestCase
 
     public function test_the_detector_is_restarted_every_minute_without_an_open_page(): void
     {
-        $events = collect(app(Schedule::class)->events())->map(fn ($event) => $event->command.' '.$event->expression);
+        $events = collect(app(Schedule::class)->events())->map(fn ($event) => $event->getSummaryForDisplay().' '.$event->expression);
 
         $this->assertTrue($events->contains(fn (string $line) => str_contains($line, 'detector:start') && str_ends_with($line, '* * * * *')));
     }

@@ -62,6 +62,7 @@
         form.addEventListener('input', syncButtons);
         form.addEventListener('change', syncButtons);
         form.addEventListener('plate:validity', syncButtons);
+        form.addEventListener('registration:validity', syncButtons);
         form.addEventListener('submit', (event) => {
             fields.forEach((field) => { field.touched = true; validate(field); });
             syncButtons();

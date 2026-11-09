@@ -50,6 +50,7 @@ class DirectRfidRegistryTest extends TestCase
             ->post(route('vehicle-registry.store'), [
                 'registered_by' => 'Test Registrar',
                 'rfid_tag_id' => $tag->id,
+                'display_number' => $tag->number_label,
                 'plate_number' => ' dir-3003 ',
                 'vehicle_owner_name' => 'Direct Owner',
                 'category' => 'faculty_staff',
@@ -78,6 +79,7 @@ class DirectRfidRegistryTest extends TestCase
             ->post(route('vehicle-registry.store'), [
                 'registered_by' => 'Test Registrar',
                 'rfid_uid' => ' direct-4004 ',
+                'display_number' => '4004',
                 'plate_number' => ' dir-4004 ',
                 'vehicle_owner_name' => 'Direct Owner',
                 'category' => 'faculty_staff',

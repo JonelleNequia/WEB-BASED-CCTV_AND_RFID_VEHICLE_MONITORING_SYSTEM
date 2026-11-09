@@ -3,10 +3,10 @@
 require __DIR__.'/ui-workspace.php'; // Verifies the private temporary database before any writes.
 
 for ($index = 1; $index <= 28; $index++) {
-    $tag = App\Models\RfidTag::query()->create(['uid' => '0000F17E2'.$index, 'status' => 'available']);
+    $tag = App\Models\RfidTag::query()->create(['tag_number' => $index, 'uid' => '0000F17E2'.$index, 'status' => 'available']);
     $vehicle = app(App\Services\VehicleRegistryService::class)->register([
         'registered_by' => 'UI Test Registrar',
-        'rfid_tag_id' => $tag->id, 'plate_number' => ($index <= 24 ? 'ZED-' : 'ABC-').str_pad((string) $index, 4, '0', STR_PAD_LEFT),
+        'rfid_tag_id' => $tag->id, 'display_number' => $tag->number_label, 'plate_number' => ($index <= 24 ? 'ZED-' : 'ABC-').str_pad((string) $index, 4, '0', STR_PAD_LEFT),
         'vehicle_owner_name' => 'José', 'category' => $index <= 24 ? 'faculty_staff' : 'registered_visitor', 'vehicle_type' => 'Car',
     ]);
     $vehicle->fresh()->forceFill(['current_state' => $index <= 12 ? 'INSIDE' : 'OUTSIDE', 'status' => $index <= 2 ? 'inactive' : 'active'])->save();

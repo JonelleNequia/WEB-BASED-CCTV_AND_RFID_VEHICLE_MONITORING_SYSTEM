@@ -20,6 +20,8 @@ class FinalizePendingScans
 {
     public function handle(Request $request, Closure $next): Response
     {
+        // Durable retries must reach the receipt before any reconciliation side effects.
+        if (config('lifecycle.root') && $request->is('api/v1/integration/deliveries')) return $next($request);
         try {
             app(RfidCameraFusionService::class)->finalizeExpired();
         } catch (Throwable $exception) {

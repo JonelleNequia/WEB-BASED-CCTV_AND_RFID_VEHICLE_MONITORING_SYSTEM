@@ -9,6 +9,7 @@ records are never polluted with fake plate numbers.
 """
 
 import re
+import os
 import shutil
 import time
 from functools import lru_cache
@@ -51,7 +52,7 @@ def easyocr_reader():
 
 @lru_cache(maxsize=1)
 def tesseract_binary_available() -> bool:
-    return shutil.which("tesseract") is not None
+    return os.environ.get("PHILCST_PACKAGED_OFFLINE") != "1" and shutil.which("tesseract") is not None
 
 
 def ocr_runtime_status() -> Dict[str, str]:

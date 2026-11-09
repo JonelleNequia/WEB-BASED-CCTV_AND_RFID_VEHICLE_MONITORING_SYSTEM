@@ -3,11 +3,11 @@
 require __DIR__.'/ui-workspace.php'; // Refuses every database outside the private temporary directory.
 
 $register = static function (string $plate, string $category): App\Models\Vehicle {
-    $tag = App\Models\RfidTag::query()->create(['uid' => 'P4-'.$plate, 'status' => 'available']);
+    $tag = App\Models\RfidTag::query()->create(['tag_number' => App\Models\RfidTag::count() + 1, 'uid' => 'P4-'.$plate, 'status' => 'available']);
 
     return app(App\Services\VehicleRegistryService::class)->register([
         'registered_by' => 'UI Test Registrar',
-        'rfid_tag_id' => $tag->id, 'plate_number' => $plate, 'vehicle_owner_name' => 'Classification Owner',
+        'rfid_tag_id' => $tag->id, 'display_number' => $tag->number_label, 'plate_number' => $plate, 'vehicle_owner_name' => 'Classification Owner',
         'category' => $category, 'vehicle_type' => 'Car',
     ])->fresh();
 };

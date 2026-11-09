@@ -69,11 +69,11 @@ class Phase6VisitorRankingTest extends TestCase
             ->assertSee('value="VIS 4321"', false)
             ->assertSee('<option value="registered_visitor" selected>', false);
 
-        $tag = RfidTag::query()->create(['uid' => 'NEW-VIS-TAG', 'status' => RfidTag::STATUS_AVAILABLE]);
+        $tag = RfidTag::query()->create(['uid' => 'NEW-VIS-TAG', 'tag_number' => 1, 'status' => RfidTag::STATUS_AVAILABLE]);
         $this->actingAs($this->admin)
             ->post(route('vehicle-registry.store'), [
                 'registered_by' => 'Test Registrar',
-                'rfid_tag_id' => $tag->id,
+                'rfid_tag_id' => $tag->id, 'display_number' => $tag->number_label,
                 'plate_number' => 'VIS 4321',
                 'vehicle_owner_name' => 'Supplier Driver',
                 'category' => 'registered_visitor',
@@ -125,10 +125,10 @@ class Phase6VisitorRankingTest extends TestCase
         $this->visits('XYZ-9876', ['IN']);
 
         // Plain Add Vehicle with the same plate (typed differently).
-        $tag = RfidTag::query()->create(['uid' => 'PLAIN-TAG', 'status' => RfidTag::STATUS_AVAILABLE]);
+        $tag = RfidTag::query()->create(['uid' => 'PLAIN-TAG', 'tag_number' => 1, 'status' => RfidTag::STATUS_AVAILABLE]);
         $this->actingAs($this->admin)->post(route('vehicle-registry.store'), [
             'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Test Registrar',
-            'rfid_tag_id' => $tag->id, 'plate_number' => 'abc1234', 'category' => 'faculty_staff', 'vehicle_type' => 'Car',
+            'rfid_tag_id' => $tag->id, 'display_number' => $tag->number_label, 'plate_number' => 'abc1234', 'category' => 'faculty_staff', 'vehicle_type' => 'Car',
         ])->assertSessionHasNoErrors();
         $vehicle = Vehicle::query()->where('plate_number', 'ABC1234')->sole();
         $this->assertSame(0, VisitorRecord::query()->where('vehicle_id', $vehicle->id)->count());

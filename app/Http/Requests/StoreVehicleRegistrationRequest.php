@@ -41,11 +41,20 @@ class StoreVehicleRegistrationRequest extends FormRequest
         $invalidOwnerFields = $this->attributes->get('invalid_owner_name_fields', []);
         $invalidNewOwner = in_array('vehicle_owner_name', $invalidOwnerFields, true)
             || ($this->attributes->get('registration_owner_from_alias') && in_array('owner_name', $invalidOwnerFields, true));
+        $tagId = $this->input('rfid_tag_id');
+        $tagUid = $this->input('rfid_uid');
+        $registrationTag = ! $vehicle instanceof Vehicle
+            ? ((is_int($tagId) || is_string($tagId)) && filled($tagId) ? RfidTag::find($tagId) : (is_string($tagUid) ? RfidTag::findUid($tagUid) : null))
+            : null;
 
         return [
             // Registration attribution is recorded once; unrelated edits leave
             // both it and the installation's new-registration default alone.
             ...($vehicle instanceof Vehicle ? [] : ['registered_by' => RegistrationStaffName::rules()]),
+            ...($vehicle instanceof Vehicle ? [] : ['display_number' => [
+                'bail', Rule::requiredIf($this->filled('rfid_tag_id') || $this->filled('rfid_uid') || $this->filled('rfid_tag_uid')),
+                'nullable', new \App\Rules\RfidTagNumber($registrationTag?->number_label),
+            ]]),
             'rfid_tag_id' => [
                 'nullable',
                 'integer',
@@ -89,12 +98,9 @@ class StoreVehicleRegistrationRequest extends FormRequest
                     }
                 },
             ],
-            'vehicle_type' => ['required', 'string', new \App\Rules\ValidVehicleType($vehicle instanceof Vehicle ? $vehicle->vehicle_type : null),
-                Rule::when(! $vehicle instanceof Vehicle || $this->input('vehicle_type') !== $vehicle->vehicle_type, 'max:50')],
+            ...\App\Support\VehicleType::registrationRules($vehicle instanceof Vehicle ? $vehicle->vehicle_type : null),
             // Phase 6 (visitor model): "Register this vehicle" from the Visitor Ranking.
             'plate_profile_id' => ['nullable', 'integer', 'exists:plate_profiles,id'],
-            'vehicle_type_other' => ['nullable', 'required_if:vehicle_type,Others', 'string',
-                Rule::when(! $vehicle instanceof Vehicle || $this->input('vehicle_type_other') !== $vehicle->vehicle_type, 'max:50')],
             // UI Phase 3: Add Vehicle drawer registers a new scanned tag automatically.
             'auto_register_tag' => ['sometimes', 'boolean'],
         ];
@@ -108,6 +114,8 @@ class StoreVehicleRegistrationRequest extends FormRequest
         return [
             ...RegistrationStaffName::messages(),
             ...RegistrationOwnerName::messages(),
+            'display_number.required' => 'Enter the printed tag number when assigning an RFID tag.',
+            'vehicle_type_other.required' => 'Specify the vehicle type when choosing Others.',
             // UI Phase 3: clear message for the Add Vehicle / Edit drawers.
             'rfid_tag_uid.unique' => 'This RFID tag is already assigned to another vehicle. Use Replace Tag on that vehicle first.',
         ];
@@ -170,11 +178,6 @@ class StoreVehicleRegistrationRequest extends FormRequest
             $this->merge(['category' => VehicleCategory::REGISTERED_VISITOR]);
         }
 
-        if ($this->input('vehicle_type') === 'Others' && is_string($this->input('vehicle_type_other')) && $this->filled('vehicle_type_other')) {
-            $this->merge([
-                'vehicle_type' => \App\Support\VehicleType::canonical($this->input('vehicle_type_other')) ?? trim($this->input('vehicle_type_other')),
-            ]);
-        }
     }
 
     public function withValidator(Validator $validator): void

@@ -138,7 +138,7 @@
             <p class="field-error">{{ $message }}</p>
         @enderror
 
-        <span class="step-label">1 · RFID (optional)</span>
+        <span class="step-label">1 · RFID</span>
         @include('registry.partials.tag-picker', ['prefix' => 'add', 'useOld' => $failedForm === 'add', 'legend' => 'RFID Tag', 'prefillUid' => $registerTag ?: null])
 
         <span class="step-label">2 · Vehicle details</span>
@@ -235,5 +235,6 @@
 @push('scripts')
     <script src="{{ asset('js/uhf-tag-reader.js') }}"></script>
     <script src="{{ asset('js/registration-staff.js') }}?v={{ filemtime(public_path('js/registration-staff.js')) }}"></script>
+    <script src="{{ asset('js/registration-type.js') }}?v={{ filemtime(public_path('js/registration-type.js')) }}"></script>
     <script src="{{ asset('js/registry.js') }}?v={{ filemtime(public_path('js/registry.js')) }}"></script>
 @endpush

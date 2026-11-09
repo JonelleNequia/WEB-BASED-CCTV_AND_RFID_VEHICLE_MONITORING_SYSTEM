@@ -79,10 +79,13 @@ try {
     const staff = page.locator('#add_registered_by');
     const error = page.locator('#add_registered_by_error');
     const save = page.getByRole('button', { name: 'Save Vehicle', exact: true });
+    const tagNumbers = new Map();
     const tag = async (uid) => {
         const response = await page.request.post(base + '/rfid-inventory', { headers, data: { uid, auto_number: 1 } });
         assert.equal(response.status(), 201);
-        return String((await response.json()).rfid_tag_id);
+        const result = await response.json();
+        tagNumbers.set(String(result.rfid_tag_id), result.number_label);
+        return String(result.rfid_tag_id);
     };
     const submit = async (plate) => {
         await page.locator('#add_plate_number').fill(plate);
@@ -136,6 +139,7 @@ try {
     await page.reload();
     await openAdd();
     await page.locator('#add_available').selectOption(firstTag);
+    await page.locator('#add_tag_number').fill(tagNumbers.get(firstTag));
     await staff.fill('  Ma.  José   Dela Cruz  ');
     await submit('STF-7001');
     check(await staff.inputValue() === 'Ma. José Dela Cruz', 'Successful save prefills the normalized name on the next form');
@@ -158,6 +162,7 @@ try {
     await page.reload();
     await openAdd();
     await page.locator('#add_available').selectOption(recoveryTag);
+    await page.locator('#add_tag_number').fill(tagNumbers.get(recoveryTag));
     await staff.fill('Anne-Marie');
     await page.locator('#add_plate_number').fill('STF-7001'); // Valid syntax, existing registration: server-side uniqueness failure.
     await save.click();
@@ -175,7 +180,7 @@ try {
     await staff.fill('Open Form Editor');
     const secondTag = await tag('STAFF-BROWSER-003');
     const secondResponse = await page.request.post(base + '/vehicle-registry', { headers, data: {
-        vehicle_owner_name: 'Fixture Owner', rfid_tag_id: secondTag, plate_number: 'STF-7003', category: 'faculty_staff', vehicle_type: 'Car', registered_by: '李',
+        vehicle_owner_name: 'Fixture Owner', rfid_tag_id: secondTag, display_number: tagNumbers.get(secondTag), plate_number: 'STF-7003', category: 'faculty_staff', vehicle_type: 'Car', registered_by: '李',
     } });
     check(secondResponse.status() === 201, 'Another valid registration can update the installation-wide default');
     check(await staff.inputValue() === 'Open Form Editor', 'An open edited form is not overwritten by another registration');

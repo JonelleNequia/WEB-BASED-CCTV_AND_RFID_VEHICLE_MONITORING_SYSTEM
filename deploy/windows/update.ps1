@@ -19,6 +19,7 @@ The script runs from a copy in %TEMP% because app\ is replaced.
 param([string]$Zip = '', [string]$Root = '', [switch]$Yes, [switch]$FromTemp)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib\common.ps1')
+if (Test-VmsLifecycleEnabled (Get-VmsPaths $(if (Get-Variable Root -ValueOnly -ErrorAction SilentlyContinue) { $Root } else { Get-VmsRoot }))) { throw 'Uncertified legacy lifecycle path is disabled for D5A; use the authorized later subphase.' }
 if (-not $Root) { $Root = Get-VmsRoot }
 $forward = @('-Root', $Root); if ($Zip) { $forward += @('-Zip', $Zip) }; if ($Yes) { $forward += '-Yes' }
 Assert-VmsAdmin -ScriptPath $PSCommandPath -Arguments $forward

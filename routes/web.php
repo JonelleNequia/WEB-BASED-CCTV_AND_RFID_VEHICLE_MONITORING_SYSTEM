@@ -51,6 +51,9 @@ Route::middleware('guest')->group(function (): void {
 
 // Restricted sessions may change their password or log out, never operate gates.
 Route::middleware('auth')->group(function (): void {
+    Route::get('/storage/{path}', \App\Http\Controllers\HistoricalMediaController::class)
+        ->withoutMiddleware(\App\Http\Middleware\FinalizePendingScans::class)
+        ->where('path', '.*')->name('evidence.historical');
     Route::get('/account/password', [\App\Http\Controllers\Auth\AccountController::class, 'passwordForm'])->name('account.password.edit');
     Route::put('/account/password', [\App\Http\Controllers\Auth\AccountController::class, 'password'])->middleware('throttle:5,1')->name('account.password.update');
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');

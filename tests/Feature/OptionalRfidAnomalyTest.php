@@ -253,7 +253,7 @@ class OptionalRfidAnomalyTest extends TestCase
 
     public function test_actual_rfid_repeat_entry_retains_one_saved_alert_through_retries(): void
     {
-        $vehicle = $this->register(['rfid_uid' => 'ANOMALY-FIXTURE-UID', 'auto_register_tag' => true]);
+        $vehicle = $this->register(['display_number' => '123', 'rfid_uid' => 'ANOMALY-FIXTURE-UID', 'auto_register_tag' => true]);
         foreach (['first', 'repeat'] as $key) {
             $this->travel(2)->minutes();
             app(RfidTagMatcher::class)->addRead('gate-1', $vehicle->rfid_tag_uid, now());

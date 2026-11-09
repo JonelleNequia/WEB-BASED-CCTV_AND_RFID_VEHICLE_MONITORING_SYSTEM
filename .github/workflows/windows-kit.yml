@@ -1,66 +1,72 @@
-# Windows install kit: builds the self-contained bundle on a real Windows
-# runner, checks that its PHP, Python packages, Caddy, go2rtc and NSSM run,
-# builds PHILCST-VMS-Setup.exe (Inno Setup) and keeps both as build
-# artifacts (7 days). Releases go to GitHub
-# Releases, never into the repo.
-name: Windows kit
-
+# Reusable Windows leg of the manually dispatched offline-packages.yml workflow.
+# No push trigger and no GitHub Release publication.
+name: Windows offline candidate (manual workflow leg)
 on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-    # Every change that ends up in the installer (the app, its pages and
-    # scripts, the detector, the kit); not docs or the macOS-only tests.
-    paths-ignore:
-      - '**.md'
-      - 'tests/**'
-      - 'school-vehicle-monitoring-detector/tests/**'
-
+  workflow_call:
+    inputs:
+      source_commit:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      build_identity:
+        required: true
+        type: string
+permissions:
+  contents: read
 jobs:
   bundle:
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          ref: ${{ inputs.source_commit }}
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
           tools: composer:v2
           extensions: fileinfo, intl, zip, sqlite3, pdo_sqlite
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Cache downloads
-        uses: actions/cache@v4
+      - uses: actions/setup-node@v4
         with:
-          path: build/windows/cache
-          key: kit-${{ hashFiles('build/windows/runtimes.json', 'school-vehicle-monitoring-detector/requirements-windows.txt', 'composer.lock') }}
-
-      - name: Inno Setup
+          node-version: '22.18.0'
+      - name: Assert selected committed source
+        shell: pwsh
+        env:
+          SELECTED_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:SELECTED_COMMIT -or (git status --porcelain)) { throw 'Dirty or wrong source checkout refused' }
+      - name: Inno Setup (build machine only)
         shell: pwsh
         run: choco install innosetup --no-progress -y
-
-      - name: Build the kit and the installer
+      - name: Build complete unsigned acceptance candidate
         shell: pwsh
-        run: ./build/windows/build-release.ps1 -Python python -Installer
-
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.source_commit }}
+          BUILD_ID: ${{ inputs.build_identity }}
+        run: ./build/windows/build-release.ps1 -Version $env:VERSION -SourceCommit $env:COMMIT -BuildIdentity $env:BUILD_ID -DevelopmentSnapshot -Python python -Installer
       - uses: actions/upload-artifact@v4
         with:
-          name: PHILCST-VMS-win64
+          name: PHILCST-win64-${{ inputs.build_identity }}-NOT-RELEASE
           path: |
             build/windows/dist/*.zip
             build/windows/dist/*.exe
             build/windows/dist/*.sha256
-          retention-days: 7
+            build/windows/dist/*.update.json
+          retention-days: 14
           compression-level: 0
-
-      # The real installer on this clean Windows: install, sign in, install
-      # again, uninstall (after the upload, so a failing check still leaves
-      # the installer to download).
-      - name: Install, sign in, reinstall, uninstall
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UPDATE-METADATA-windows-x64-${{ inputs.build_identity }}
+          path: build/windows/dist/*.update.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Guarded hosted-runner smoke test (not clean offline/reboot acceptance)
         shell: pwsh
         timeout-minutes: 45
-        run: ./build/windows/ci/install-check.ps1 -Setup (Get-ChildItem build/windows/dist/PHILCST-VMS-Setup-*.exe | Select-Object -First 1).FullName
+        run: ./build/windows/ci/install-check.ps1 -Setup (Get-ChildItem build/windows/dist/PHILCST-VMS-Setup-*.exe | Select-Object -First 1).FullName -ConfirmIsolatedRunner

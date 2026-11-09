@@ -20,6 +20,41 @@ final class VehicleType
 
     public const COMPARISON_GROUPS = [self::CAR, self::MOTORCYCLE, self::TRUCK_BUS];
 
+    public const REGISTRY_OPTIONS = [self::CAR, self::MOTORCYCLE, 'Truck'];
+
+    /** Registry's compact picker; detector/manual-evidence contracts remain separate. */
+    public static function registrationRules(?string $legacy = null): array
+    {
+        return [
+            'vehicle_type' => ['bail', 'required', 'string',
+                function (string $attribute, mixed $value, \Closure $fail) use ($legacy): void {
+                    if ($legacy !== null && $value === $legacy) return;
+                    if (mb_strlen($value) > 50) { $fail('Vehicle Type must not exceed 50 characters.'); return; }
+                    if ($value !== 'Others') (new ValidVehicleType($legacy))->validate($attribute, $value, $fail);
+                }],
+            'vehicle_type_other' => ['bail', 'exclude_unless:vehicle_type,Others', 'required', 'string',
+                function (string $attribute, mixed $value, \Closure $fail) use ($legacy): void {
+                    if ($legacy !== null && $value === $legacy) return;
+                    if (mb_strlen($value) > 50 || ! preg_match('/\p{L}/u', $value)
+                        || ! preg_match("~\\A[\\p{L}\\p{M}\\p{N} .,'’()/&+\\-]+\\z~u", $value)
+                        || in_array(strtolower(trim($value)), ['others', 'unknown'], true)) {
+                        $fail('Specify a vehicle type using letters, numbers, spaces or common punctuation (up to 50 characters).');
+                    }
+                }],
+        ];
+    }
+
+    public static function registration(array $data, ?string $legacy = null): string
+    {
+        $validated = Validator::make($data, self::registrationRules($legacy), [
+            'vehicle_type_other.required' => 'Specify the vehicle type when choosing Others.',
+        ])->validate();
+        $value = $validated['vehicle_type'] === 'Others' ? $validated['vehicle_type_other'] : $validated['vehicle_type'];
+        if ($legacy !== null && $value === $legacy) return $legacy;
+
+        return self::canonical($value) ?? trim(preg_replace('/\s+/u', ' ', $value));
+    }
+
     public const HINTS = [
         'E-bike' => 'Electric bicycle', 'E-trike' => 'Electric tricycle', 'E-car' => 'Electric car',
         'Car' => 'General car type', 'Truck' => 'Truck', 'Tricycle' => 'Tricycle / auto rickshaw',

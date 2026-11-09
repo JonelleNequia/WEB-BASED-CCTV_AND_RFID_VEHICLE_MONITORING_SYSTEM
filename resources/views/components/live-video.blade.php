@@ -24,6 +24,7 @@
      @if ($overlayDefault) data-overlay-default="{{ $overlayDefault }}" @endif
      @unless ($shapes) data-overlay-shapes="0" @endunless
      data-stats-url="{{ route('live.stats', $gate) }}"
+     data-viewer-lease="{{ config('deployment.named_https') ? 25 : 0 }}"
      @if ($page) data-page="{{ $page }}" @endif>
     <video muted autoplay playsinline disablepictureinpicture aria-label="{{ $alt }}"></video>
     <img alt="{{ $alt }}" hidden>

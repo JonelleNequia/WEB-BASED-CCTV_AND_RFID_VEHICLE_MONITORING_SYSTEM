@@ -21,7 +21,7 @@ if (($argv[2] ?? '') === 'initialize') {
     $user = App\Models\User::factory()->create(['role' => 'admin']);
     app(App\Services\VehicleRegistryService::class)->register([
         'plate_number' => 'RCE-0001', 'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Race Fixture Registrar',
-        'vehicle_type' => 'Car', 'auto_register_tag' => true, 'rfid_uid' => 'RACE-TAG',
+        'vehicle_type' => 'Car', 'auto_register_tag' => true, 'rfid_uid' => 'RACE-TAG', 'display_number' => '1',
     ]);
     $crossing = App\Models\VehicleCrossing::query()->create([
         'external_event_key' => 'race-crossing', 'gate' => 'gate-1', 'direction' => 'IN',

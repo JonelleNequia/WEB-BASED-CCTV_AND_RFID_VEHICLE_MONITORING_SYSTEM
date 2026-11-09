@@ -68,7 +68,7 @@ function Get-VmsPaths {
         VcRedist     = Join-VmsPath $Root 'runtime' 'vc_redist.x64.exe'
         Config       = Join-VmsPath $Root 'config'
         PhpIni       = Join-VmsPath $Root 'config' 'php.ini'
-        Caddyfile    = Join-VmsPath $Root 'config' 'Caddyfile'
+        Caddyfile    = Join-VmsPath $Root 'state' 'web' 'Caddyfile'
         InstallInfo  = Join-VmsPath $Root 'config' 'install.json'
         FirstAdmin   = Join-VmsPath $Root 'config' 'setup' 'first-admin.txt'
         Logs         = Join-VmsPath $Root 'logs'
@@ -80,13 +80,13 @@ function Get-VmsPaths {
 <#
 The Windows services (NSSM). Order = start order. Each one restarts by
 itself when it stops, writes its output to a log that NSSM rotates, and runs
-as LocalSystem (the device service needs admin rights for the reader
-workaround; the web app writes the same files).
+as LocalService, except Devices (LocalSystem for the temporary reader
+adapter-address workaround). State directories have explicit writable ACLs.
 There is no queue worker: the app has no queued jobs (QUEUE_CONNECTION=sync).
 #>
 function Get-VmsServices {
     param([Parameter(Mandatory = $true)]$Paths)
-    $python = @{ PYTHONUNBUFFERED = '1'; PYTHONIOENCODING = 'utf-8'; YOLO_OFFLINE = '1' }
+    $python = @{ PYTHONUNBUFFERED = '1'; PYTHONIOENCODING = 'utf-8'; PYTHONDONTWRITEBYTECODE = '1'; YOLO_OFFLINE = 'true'; YOLO_AUTOINSTALL = 'false'; MJPEG_STREAM_BIND_HOST = '127.0.0.1'; ULTRALYTICS_AUTOINSTALL = 'false'; PHILCST_PACKAGED_CPU = '1'; PHILCST_PACKAGED_OFFLINE = '1'; PATH = ($Paths.Python.Replace('python.exe', '') + ';' + $env:SystemRoot + '\System32;' + $env:SystemRoot + '\System32\WindowsPowerShell\v1.0') }
     $list = New-Object System.Collections.ArrayList
     foreach ($n in 1..4) {
         [void]$list.Add([pscustomobject]@{
@@ -98,9 +98,9 @@ function Get-VmsServices {
     }
     [void]$list.Add([pscustomobject]@{
         Name = 'PHILCST-Web'; Display = 'PHILCST VMS - Web server'
-        Description = 'Caddy: the system in the browser (http://this-pc/) for every PC on the LAN.'
+        Description = 'Caddy: local-only browser access on 127.0.0.1; named HTTPS/LAN setup is D4.'
         Exe = $Paths.Caddy; Arguments = @('run', '--config', $Paths.Caddyfile, '--adapter', 'caddyfile'); Directory = $Paths.Root
-        Environment = @{}; Log = Join-VmsPath $Paths.Logs 'web.log'
+        Environment = @{ XDG_CONFIG_HOME = (Join-VmsPath $Paths.Root 'state' 'web' 'config'); XDG_DATA_HOME = (Join-VmsPath $Paths.Root 'state' 'web' 'data'); APPDATA = (Join-VmsPath $Paths.Root 'state' 'web') }; Log = Join-VmsPath $Paths.Root 'state' 'web' 'logs' 'web.log'
     })
     [void]$list.Add([pscustomobject]@{
         Name = 'PHILCST-LiveView'; Display = 'PHILCST VMS - Live view'
@@ -120,6 +120,14 @@ function Get-VmsServices {
         Exe = $Paths.Python; Arguments = @('camera_service.py'); Directory = $Paths.Detector
         Environment = $python; Log = Join-VmsPath $Paths.AppLogs 'detector-runtime.log'
     })
+    foreach ($service in $list) { $service | Add-Member -NotePropertyName Identity -NotePropertyValue $(if ($service.Name -eq 'PHILCST-Devices') { 'LocalSystem' } elseif ($service.Name -eq 'PHILCST-Web') { 'NT SERVICE\PHILCST-Web' } else { 'NT AUTHORITY\LocalService' }) }
+    if (Test-VmsLifecycleEnabled $Paths) {
+        foreach ($service in $list) {
+            $service.Environment.PHILCST_LIFECYCLE_ROOT=Join-VmsPath $Paths.Root 'state' 'lifecycle'
+            $service.Exe=$Paths.Python
+            $service.Arguments=@('-B',(Join-VmsPath $Paths.App 'deploy' 'lifecycle' 'service_host.py'),'--root',$Paths.Root,'--service',$service.Name)
+        }
+    }
     return $list.ToArray()
 }
 
@@ -158,7 +166,7 @@ function Set-VmsEnvValue {
     # KEY=value in .env text: replaced where it is, else added at the end.
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text, [Parameter(Mandatory = $true)][string]$Key, [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
     $line = "$Key=$Value"
-    $pattern = '(?m)^' + [regex]::Escape($Key) + '=.*$'
+    $pattern = '(?m)^' + [regex]::Escape($Key) + '=[^\r\n]*'
     if ([regex]::IsMatch($Text, $pattern)) {
         return [regex]::Replace($Text, $pattern, { param($m) $line })
     }
@@ -275,7 +283,7 @@ function Start-VmsProcess {
     # Windows PowerShell 5.1 a program's stderr line becomes a PowerShell error
     # and stops the script (the installer stopped on nssm's
     # "PHILCST-PHP1: STOP: The service has not been started.").
-    param([Parameter(Mandatory = $true)][string]$Exe, [string[]]$Arguments = @())
+    param([Parameter(Mandatory = $true)][string]$Exe, [string[]]$Arguments = @(), [int]$TimeoutSeconds = 180)
     $info = New-Object System.Diagnostics.ProcessStartInfo
     $info.FileName = $Exe
     $info.Arguments = (@($Arguments | ForEach-Object { ConvertTo-VmsArgument $_ }) -join ' ')
@@ -286,7 +294,10 @@ function Start-VmsProcess {
     $process = [System.Diagnostics.Process]::Start($info)
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    $process.WaitForExit()
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        try { $process.Kill() } catch { }
+        throw "Native command exceeded $TimeoutSeconds seconds; its owned process was stopped."
+    }
     # NSSM writes UTF-16: drop the zero bytes so its messages stay readable.
     $text = ($stdout.Result + "`n" + $stderr.Result).Replace([string][char]0, '')
     return [pscustomobject]@{
@@ -309,7 +320,7 @@ function Invoke-VmsNative {
 function Invoke-VmsQuiet {
     # Run a program whose result does not matter (stopping a stopped service,
     # removing what may not exist). Never throws.
-    param([Parameter(Mandatory = $true)][string]$Exe, [string[]]$Arguments = @())
+    param([Parameter(Mandatory = $true)][string]$Exe, [string[]]$Arguments = @(), [int]$TimeoutSeconds = 180)
     try {
         $result = Start-VmsProcess -Exe $Exe -Arguments $Arguments
         Write-Verbose "$Exe exit $($result.ExitCode): $($result.Output -join ' ')"
@@ -362,9 +373,14 @@ function Wait-VmsServiceStatus {
 
 function Start-VmsServices {
     param([Parameter(Mandatory = $true)]$Paths)
+    if (Test-VmsLifecycleEnabled $Paths) {
+        $phase=Get-Content -LiteralPath (Join-VmsPath $Paths.Root 'state' 'lifecycle' 'maintenance.json') -Raw | ConvertFrom-Json
+        if ($phase.phase -ne 'running') { throw 'Maintenance persists. Use the owned D5A Resume command.' }
+    }
     foreach ($service in Get-VmsServices $Paths) {
         $installed = Get-Service -Name $service.Name -ErrorAction SilentlyContinue
         if (-not $installed) { continue }
+        if (-not (Test-VmsServiceOwned $Paths $service.Name)) { throw "Refusing unrelated service: $($service.Name)" }
         Write-VmsStep "Starting $($service.Display)"
         try { $installed.Start() } catch { Write-VmsStep "$($service.Name): $($_.Exception.Message)" }
         Wait-VmsServiceStatus -Name $service.Name -Status 'Running' | Out-Null
@@ -373,10 +389,12 @@ function Start-VmsServices {
 
 function Stop-VmsServices {
     param([Parameter(Mandatory = $true)]$Paths)
+    if (Test-VmsLifecycleEnabled $Paths) { throw 'Use D5A Enter/Quiesce; legacy lifecycle stop is disabled.' }
     $services = @(Get-VmsServices $Paths)
     [array]::Reverse($services)
     foreach ($service in $services) {
         $installed = Get-Service -Name $service.Name -ErrorAction SilentlyContinue
+        if ($installed -and -not (Test-VmsServiceOwned $Paths $service.Name)) { throw "Refusing unrelated service: $($service.Name)" }
         if ($installed -and $installed.Status -ne 'Stopped') {
             Write-VmsStep "Stopping $($service.Display)"
             try { $installed.Stop() } catch { Write-VmsStep "$($service.Name): $($_.Exception.Message)" }
@@ -391,6 +409,7 @@ function Stop-VmsStrayProcesses {
     # service's leftover child, the every-minute scheduler): they keep files
     # locked and ports taken during a reinstall or an update.
     param([Parameter(Mandatory = $true)]$Paths)
+    if (Test-VmsLifecycleEnabled $Paths) { throw 'Use D5A Enter/Quiesce; legacy lifecycle stop is disabled.' }
     $runtime = $Paths.Runtime.TrimEnd('\') + '\'
     foreach ($process in @(Get-Process -ErrorAction SilentlyContinue)) {
         $path = $null
@@ -425,4 +444,12 @@ function Get-VmsLanAddresses {
 function Test-VmsPortFree {
     param([int]$Port)
     return -not (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+}
+
+. (Join-Path $PSScriptRoot "preflight.ps1")
+
+function Test-VmsLifecycleEnabled($Paths) {
+    if ([IO.Directory]::Exists((Join-VmsPath $Paths.Root 'state' 'lifecycle'))) { return $true }
+    if ([IO.File]::Exists($Paths.Env)) { return [bool](Get-VmsEnvValue ([IO.File]::ReadAllText($Paths.Env)) 'PHILCST_LIFECYCLE_ROOT') }
+    return $false
 }

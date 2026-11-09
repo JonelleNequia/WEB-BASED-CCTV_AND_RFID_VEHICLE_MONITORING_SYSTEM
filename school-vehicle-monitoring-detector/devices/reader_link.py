@@ -25,6 +25,7 @@ from collections import deque
 from datetime import datetime, timezone
 
 import requests
+import durable_delivery
 
 from . import uhf
 from .paths import CAPTURE_LOG_PATH, RAW_TAP_LOG_PATH, RAW_TAP_REQUEST_PATH
@@ -36,7 +37,8 @@ def utc_now():
 
 class TagPoster(threading.Thread):
     """
-    Posts tags to Laravel on its own thread so socket reads never wait on HTTP.
+    Installed captures persist before the durable worker attempts HTTP.
+    Development without lifecycle configuration retains the existing thread queue.
     """
 
     def __init__(self, log):
@@ -47,8 +49,17 @@ class TagPoster(threading.Thread):
 
     def configure(self, app):
         self.app = app or {}
+        durable_delivery.start_worker(durable_delivery.delivery_url(self.app.get('rfid_ingest_url','')),self.app.get('api_key',''))
 
+    @durable_delivery.capture_work
     def post(self, payload):
+        if durable_delivery.configured() is not None:
+            payload=dict(payload);payload.setdefault('scan_time',utc_now())
+            try:
+                return durable_delivery.submit('rfid',payload,durable_delivery.delivery_url(self.app.get('rfid_ingest_url','')),self.app.get('api_key',''))
+            except (OSError,ValueError,RuntimeError):
+                self.log('RFID delivery could not be persisted; capture refused. Check delivery capacity/status.')
+                return False
         try:
             self.queue.put_nowait(payload)
         except queue.Full:
@@ -385,6 +396,9 @@ class ReaderLink(threading.Thread):
         return command
 
     def _handle(self, frames, ip, target):
+        if not durable_delivery.can_capture():
+            with self.lock:self.status['message']='Capture paused: maintenance or delivery capacity; pending work retained.'
+            return
         for frame in frames:
             if frame.kind != "tag" or not frame.epc:
                 continue
@@ -411,6 +425,7 @@ class ReaderLink(threading.Thread):
             self.poster.post({
                 "tag_uid": frame.epc,
                 "scan_location": self.station,
+                "scan_time": now,
                 "reader_name": target.get("reader_name") or f"{self.station.capitalize()} UHF Reader",
                 "payload_json": {
                     "source": "uhf_ethernet",

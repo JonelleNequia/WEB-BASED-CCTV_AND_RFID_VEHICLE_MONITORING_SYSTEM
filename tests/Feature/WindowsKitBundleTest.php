@@ -52,9 +52,11 @@ class WindowsKitBundleTest extends TestCase
         $this->assertStringContainsString('date.timezone = Asia/Manila', $ini);
 
         $caddy = File::get(base_path('build/windows/templates/Caddyfile.template'));
-        $this->assertStringContainsString('php_fastcgi 127.0.0.1:9001 127.0.0.1:9002 127.0.0.1:9003 127.0.0.1:9004', $caddy);
-        $this->assertStringContainsString(':{{WEB_PORT}}', $caddy);
-        $this->assertStringContainsString('root * "{{INSTALL_DIR}}/app/public"', $caddy);
+        $this->assertStringContainsString('php_fastcgi {{FASTCGI}}', $caddy);
+        $this->assertStringContainsString('https://philcst.vms.internal', $caddy);
+        $this->assertStringContainsString('root * "{{APP_PUBLIC}}"', $caddy);
+        $policy = File::get(base_path('deploy/network/policy.py'));
+        $this->assertStringContainsString('range(9001,9005)', $policy);
     }
 
     public function test_runtime_fetch_checks_the_hash_and_refuses_a_wrong_file(): void

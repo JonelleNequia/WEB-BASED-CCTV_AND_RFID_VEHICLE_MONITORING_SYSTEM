@@ -109,7 +109,7 @@ class RegistryStatusOwnerTest extends TestCase
     {
         DB::unprepared("CREATE TRIGGER reject_owner_fixture BEFORE INSERT ON vehicles BEGIN SELECT RAISE(ABORT, 'isolated failure'); END");
         $this->from(route('registry.index'))->post(route('vehicle-registry.store'), $this->payload([
-            '_form' => 'add', 'auto_register_tag' => true, 'rfid_uid' => 'ROLLBACK-OWNER-TAG',
+            '_form' => 'add', 'auto_register_tag' => true, 'rfid_uid' => 'ROLLBACK-OWNER-TAG', 'display_number' => '123',
         ]))->assertSessionHasErrors('vehicle')->assertSessionHasInput('vehicle_owner_name', 'Ma. José Dela Cruz');
         $this->assertDatabaseCount('vehicles', 0);
         $this->assertDatabaseCount('vehicle_rfid_tags', 0);
@@ -144,7 +144,7 @@ class RegistryStatusOwnerTest extends TestCase
 
     public function test_status_changes_keep_campus_state_timestamps_tag_and_all_movements(): void
     {
-        $vehicle = app(VehicleRegistryService::class)->register($this->payload(['auto_register_tag' => true, 'rfid_uid' => 'STABLE-STATUS-TAG']))->fresh();
+        $vehicle = app(VehicleRegistryService::class)->register($this->payload(['auto_register_tag' => true, 'rfid_uid' => 'STABLE-STATUS-TAG', 'display_number' => '124']))->fresh();
         $vehicle->forceFill(['current_state' => 'INSIDE', 'last_seen_at' => now()->subHour()])->save();
         $before = $vehicle->fresh()->getAttributes();
         $tag = $vehicle->rfidTag->getAttributes();

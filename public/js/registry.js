@@ -19,6 +19,7 @@
         const show = ['others', 'Others'].includes(select.value);
         field.hidden = !show;
         field.toggleAttribute('required', show);
+        field.dispatchEvent(new Event('type:sync'));
     }
 
     document.querySelectorAll('[data-other-select]').forEach(function (select) {
@@ -33,6 +34,57 @@
 
     /* ---------- Tag picker ---------- */
 
+    const tagNumbers = new WeakMap();
+    const lookups = new WeakMap();
+    const existingTagNumbers = new WeakMap();
+
+    function initTagNumber(picker) {
+        const input = picker.querySelector('[data-registration-tag-number]');
+        if (!input) return;
+        const form = picker.closest('form');
+        const error = picker.querySelector('#add_tag_number_error');
+        const scan = picker.querySelector('[data-tag-scan]');
+        const select = picker.querySelector('[data-tag-select]');
+        existingTagNumbers.set(picker, select.selectedOptions[0]?.dataset.numberLabel || '');
+        let touched = input.getAttribute('aria-invalid') === 'true';
+        let serverError = error.textContent.trim();
+        let composing = false;
+        const sync = () => {
+            const hasTag = Boolean(scan.value.trim() || select.value || picker.querySelector('[data-tag-uid]').value);
+            const value = input.value.trim();
+            const significant = value.replace(/^0+/, '');
+            input.required = hasTag;
+            let message = '';
+            if (composing) message = 'Finish entering the tag number.';
+            else if (serverError) message = serverError;
+            else if (!value && hasTag) message = 'Enter the printed tag number when assigning an RFID tag.';
+            else if (value && value !== existingTagNumbers.get(picker) && (!/^[0-9]+$/.test(value) || value.length > Number(input.dataset.numberMaxLength)
+                || !significant || significant.length > input.dataset.numberMaxValue.length
+                || Number(significant) > Number(input.dataset.numberMaxValue))) message = input.dataset.numberError;
+            else if (value && !hasTag) message = 'Scan or choose the RFID tag for this number, or leave both RFID and Tag number blank.';
+            input.setCustomValidity(message);
+            const show = Boolean(message) && touched && !composing;
+            input.setAttribute('aria-invalid', show ? 'true' : 'false');
+            error.textContent = show ? message : '';
+            error.hidden = !show;
+            form.dispatchEvent(new CustomEvent('registration:validity'));
+        };
+        input.addEventListener('input', () => { if (!composing) { touched = true; serverError = ''; sync(); } });
+        input.addEventListener('change', () => { if (!composing) { touched = true; serverError = ''; sync(); } });
+        input.addEventListener('blur', () => { touched = true; sync(); });
+        input.addEventListener('invalid', () => { touched = true; sync(); });
+        input.addEventListener('compositionstart', () => { composing = true; sync(); });
+        input.addEventListener('compositionend', () => { composing = false; touched = true; serverError = ''; sync(); });
+        [scan, select].forEach(field => {
+            field.addEventListener('input', () => { serverError = ''; sync(); });
+            field.addEventListener('change', () => { serverError = ''; sync(); });
+        });
+        form.addEventListener('reset', () => window.setTimeout(() => { serverError = ''; touched = false; composing = false; sync(); }, 0));
+        window.addEventListener('pageshow', sync);
+        tagNumbers.set(picker, sync);
+        sync();
+    }
+
     function setResult(picker, text, state) {
         const result = picker.querySelector('[data-tag-result]');
         if (!result) {
@@ -40,9 +92,14 @@
         }
         result.textContent = text;
         result.dataset.state = state || '';
+        const scan = picker.querySelector('[data-tag-scan]');
+        if (tagNumbers.has(picker)) scan?.setCustomValidity(['pending', 'error'].includes(state) ? text : '');
+        tagNumbers.get(picker)?.();
     }
 
     async function lookup(picker, rawUid) {
+        const version = (lookups.get(picker) || 0) + 1;
+        lookups.set(picker, version);
         const uid = String(rawUid || '').replace(/\s+/g, '').toUpperCase();
         const hidden = picker.querySelector('[data-tag-uid]');
         const select = picker.querySelector('[data-tag-select]');
@@ -70,6 +127,7 @@
                 body: body,
             });
             const result = await response.json();
+            if (lookups.get(picker) !== version) return;
 
             if (!response.ok) {
                 setResult(picker, result.message || 'Could not check this tag.', 'error');
@@ -79,8 +137,13 @@
             if (result.ok) {
                 hidden.value = uid;
             }
-            setResult(picker, `${uid}: ${result.message}`, result.ok ? 'ok' : 'error');
+            existingTagNumbers.set(picker, result.ok ? (result.tag?.number_label || '') : '');
+            const message = result.state === 'new' && tagNumbers.has(picker)
+                ? 'New tag. Enter its printed tag number; it will be added to the inventory and assigned when you save.'
+                : result.message;
+            setResult(picker, `${uid}: ${message}`, result.ok ? 'ok' : 'error');
         } catch (error) {
+            if (lookups.get(picker) !== version) return;
             setResult(picker, 'Could not reach the server to check this tag.', 'error');
         }
     }
@@ -89,6 +152,15 @@
         const scan = picker.querySelector('[data-tag-scan]');
         const select = picker.querySelector('[data-tag-select]');
         const hidden = picker.querySelector('[data-tag-uid]');
+        initTagNumber(picker);
+
+        if (tagNumbers.has(picker)) scan?.addEventListener('input', () => {
+            existingTagNumbers.set(picker, '');
+            lookups.set(picker, (lookups.get(picker) || 0) + 1);
+            hidden.value = '';
+            select.value = '';
+            setResult(picker, scan.value.trim() ? 'Press Enter or leave the UID field to check this tag.' : 'No RFID assigned. Registration will use the plate.', scan.value.trim() ? 'pending' : '');
+        });
 
         scan?.addEventListener('keydown', function (event) {
             if (event.key === 'Enter') {
@@ -133,6 +205,8 @@
         }
 
         select?.addEventListener('change', function () {
+            existingTagNumbers.set(picker, select.selectedOptions[0]?.dataset.numberLabel || '');
+            lookups.set(picker, (lookups.get(picker) || 0) + 1);
             if (select.value) {
                 scan.value = '';
                 hidden.value = '';
@@ -146,7 +220,7 @@
         if (scan?.value) {
             lookup(picker, scan.value);
         } else if (select?.value) {
-            select.dispatchEvent(new Event('change'));
+            setResult(picker, `${select.options[select.selectedIndex].text} will be assigned.`, 'ok');
         }
 
         picker.closest('form')?.addEventListener('submit', function (event) {
@@ -159,6 +233,7 @@
     }
 
     function resetPicker(picker, vehicleId) {
+        lookups.set(picker, (lookups.get(picker) || 0) + 1);
         picker.dataset.vehicleId = vehicleId || '';
         picker.querySelector('[data-tag-scan]').value = '';
         picker.querySelector('[data-tag-uid]').value = '';
@@ -289,6 +364,7 @@
         const knownType = (options.vehicleTypes || []).includes(vehicle.vehicle_type);
         setField(form, 'vehicle_type', knownType ? vehicle.vehicle_type : 'Others');
         setField(form, 'vehicle_type_other', knownType ? '' : vehicle.vehicle_type);
+        form.querySelector('[name="vehicle_type_other"]').dataset.typeLegacy = vehicle.vehicle_type || '';
 
         form.querySelectorAll('[data-other-select]').forEach(syncOther);
         form.querySelector('[data-edit-tag-note]').textContent = vehicle.tag

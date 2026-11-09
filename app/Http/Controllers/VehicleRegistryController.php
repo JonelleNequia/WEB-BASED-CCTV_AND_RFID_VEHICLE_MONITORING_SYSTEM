@@ -35,7 +35,7 @@ class VehicleRegistryController extends Controller
             'vehicles' => $vehicleRegistryService->registeredVehicles($filters),
             'registrationStaffName' => $vehicleRegistryService->rememberedStaffName(),
             'availableTags' => $vehicleRegistryService->availableTags(),
-            'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
+            'vehicleTypes' => \App\Support\VehicleType::REGISTRY_OPTIONS,
             'vehicleCategories' => $vehicleRegistryService->vehicleCategories(),
             'rfidStats' => $rfidService->stats(),
             // Phase 6 (visitor model): "Register this vehicle" from the Visitor Ranking.
@@ -257,7 +257,7 @@ class VehicleRegistryController extends Controller
         return view('vehicle-registry.edit', [
             'vehicle' => $vehicle->load(['rfidTag', 'rfidTags']),
             'assignableTags' => $vehicleRegistryService->assignableTagsFor($vehicle),
-            'vehicleTypes' => $vehicleRegistryService->vehicleTypes(),
+            'vehicleTypes' => \App\Support\VehicleType::REGISTRY_OPTIONS,
             'vehicleCategories' => $vehicleRegistryService->vehicleCategories(),
         ]);
     }

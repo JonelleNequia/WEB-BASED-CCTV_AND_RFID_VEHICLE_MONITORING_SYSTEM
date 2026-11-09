@@ -23,7 +23,7 @@ class VehicleRegistryService
     }
 
     /**
-     * Register one vehicle with staff attribution and an optional real RFID tag.
+     * Register one vehicle; an assigned RFID tag requires its printed number.
      *
      * @param  array<string, mixed>  $data
      */
@@ -32,6 +32,19 @@ class VehicleRegistryService
         $data['registered_by'] = RegistrationStaffName::validated($data['registered_by'] ?? null);
         // Validate before inventory writes, including direct service callers.
         $data['vehicle_owner_name'] = RegistrationOwnerName::validated($data['vehicle_owner_name'] ?? $data['owner_name'] ?? null);
+        $data['vehicle_type'] = \App\Support\VehicleType::registration($data);
+        $hasTag = filled($data['rfid_tag_id'] ?? null) || filled($data['rfid_uid'] ?? $data['rfid_tag_uid'] ?? $data['tag_uid'] ?? null);
+        $tagId = $data['rfid_tag_id'] ?? null;
+        $tagUid = $data['rfid_uid'] ?? $data['rfid_tag_uid'] ?? $data['tag_uid'] ?? null;
+        $existingTag = (is_int($tagId) || is_string($tagId)) && filled($tagId) ? RfidTag::find($tagId)
+            : (is_string($tagUid) ? RfidTag::findUid($tagUid) : null);
+        \Illuminate\Support\Facades\Validator::make($data, [
+            'display_number' => ['bail', \Illuminate\Validation\Rule::requiredIf($hasTag), 'nullable', new \App\Rules\RfidTagNumber($existingTag?->number_label)],
+        ], ['display_number.required' => 'Enter the printed tag number when assigning an RFID tag.'])->validate();
+        $number = \App\Rules\RfidTagNumber::normalize($data['display_number'] ?? null);
+        if (! $hasTag && filled($number)) {
+            throw ValidationException::withMessages(['display_number' => 'Scan or choose the RFID tag for this number, or leave both RFID and Tag number blank.']);
+        }
 
         return app(PlateProcessingLock::class)->run(function () use ($data): Vehicle {
             $this->assertUniquePlate((string) $data['plate_number']);
@@ -42,6 +55,16 @@ class VehicleRegistryService
 
             $tag = $this->resolveAssignableTag($data);
 
+            if ($tag) {
+                if (\App\Rules\RfidTagNumber::normalize($data['display_number']) !== (string) $tag->number_label) {
+                    throw ValidationException::withMessages(['display_number' => 'The tag number must match the saved number of the selected RFID tag. Existing tag numbers are not changed here.']);
+                }
+                $suppliedUid = $this->normalizeTagUid((string) ($data['rfid_uid'] ?? $data['rfid_tag_uid'] ?? $data['tag_uid'] ?? ''));
+                if ($suppliedUid !== '' && $suppliedUid !== $tag->uid) {
+                    throw ValidationException::withMessages(['rfid_uid' => 'The scanned UID does not match the selected RFID tag. Choose one tag.']);
+                }
+            }
+
             $vehicle = Vehicle::query()->create([
                 'rfid_tag_id' => $tag?->id,
                 'rfid_tag_uid' => $tag?->uid,
@@ -49,7 +72,7 @@ class VehicleRegistryService
                 'vehicle_owner_name' => $this->normalizeOwnerName($data['vehicle_owner_name'] ?? null),
                 'registered_by' => $data['registered_by'],
                 'category' => $this->normalizeCategory((string) ($data['category'] ?? 'faculty_staff')),
-                'vehicle_type' => $this->normalizeVehicleType($data['vehicle_type']),
+                'vehicle_type' => $data['vehicle_type'],
             ]);
 
             if ($tag) {
@@ -96,7 +119,7 @@ class VehicleRegistryService
                 'plate_number' => $this->normalizePlate((string) $data['plate_number']),
                 'vehicle_owner_name' => $this->normalizeOwnerName($data['vehicle_owner_name'] ?? null),
                 'category' => $this->normalizeCategory((string) ($data['category'] ?? 'faculty_staff')),
-                'vehicle_type' => \App\Support\VehicleType::validated($data['vehicle_type'], $vehicle->vehicle_type),
+                'vehicle_type' => \App\Support\VehicleType::registration($data, $vehicle->vehicle_type),
             ])->save();
 
             if ($tag) {
@@ -380,7 +403,8 @@ class VehicleRegistryService
                 throw ValidationException::withMessages(['uid' => 'This UID is permanently Lost / Unavailable. Use a different tag.']);
             }
 
-            // UI Phase 3: bulk scanning and Add Vehicle number new tags automatically.
+            // Compatibility callers and Replace Tag may still request automatic numbering.
+            // Add Vehicle supplies the manually entered display_number instead.
             if ($tagNumber === null && ! empty($data['auto_number'])) {
                 $tagNumber = $this->nextTagNumber();
             }
@@ -747,7 +771,8 @@ class VehicleRegistryService
             return;
         }
 
-        $this->registerRfidTag(['uid' => $uid, 'tag_type' => RfidTag::TYPE_VEHICLE, 'auto_number' => true]);
+        $this->registerRfidTag(['uid' => $uid, 'tag_type' => RfidTag::TYPE_VEHICLE, 'auto_number' => true]
+            + (array_key_exists('display_number', $data) ? ['display_number' => $data['display_number']] : []));
     }
 
     protected function normalizeTagNumber(mixed $value): ?int

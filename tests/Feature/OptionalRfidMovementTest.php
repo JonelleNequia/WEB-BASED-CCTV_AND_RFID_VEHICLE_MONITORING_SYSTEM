@@ -66,7 +66,7 @@ class OptionalRfidMovementTest extends TestCase
     {
         return $this->registry()->register(['plate_number' => $plate, 'vehicle_type' => 'Car',
             'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Original Registrar', 'auto_register_tag' => true,
-            ...($tagged ? ['rfid_uid' => 'ASSIGNED-'.(++$this->sequence)] : [])])->fresh();
+            ...($tagged ? ['rfid_uid' => 'ASSIGNED-'.(++$this->sequence), 'display_number' => (string) $this->sequence] : [])])->fresh();
     }
 
     private function pass(?string $plate, string $direction = 'IN', ?\Carbon\Carbon $at = null, float $confidence = 0.95): VisitorRecord
@@ -110,7 +110,7 @@ class OptionalRfidMovementTest extends TestCase
         $this->postJson(route('vehicle-registry.store'), ['plate_number' => 'OTHER-0002', 'vehicle_type' => 'Car'])
             ->assertUnprocessable()->assertJsonValidationErrors('registered_by');
         $this->assertSame('Ma. José Dela Cruz', $this->registry()->rememberedStaffName());
-        $this->get(route('registry.index'))->assertOk()->assertSee('No RFID assigned')->assertSee('RFID (optional)');
+        $this->get(route('registry.index'))->assertOk()->assertSee('No RFID assigned')->assertDontSee('RFID (optional)')->assertSee('Tag number');
         $this->getJson(route('registry.vehicles.show', $vehicle))->assertOk()->assertJsonPath('tag', null);
     }
 
@@ -122,9 +122,9 @@ class OptionalRfidMovementTest extends TestCase
         }
         $this->postJson(route('vehicle-registry.store'), ['vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Staff', 'plate_number' => 'GOOD-0001',
             'vehicle_type' => 'Car', 'rfid_tag_id' => 99999])->assertUnprocessable()->assertJsonValidationErrors('rfid_tag_id');
-        $tag = RfidTag::query()->create(['uid' => 'AVAILABLE', 'status' => 'available']);
+        $tag = RfidTag::query()->create(['uid' => 'AVAILABLE', 'tag_number' => 1, 'status' => 'available']);
         $id = $this->postJson(route('vehicle-registry.store'), ['vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Staff', 'plate_number' => 'GOOD-0001',
-            'vehicle_type' => 'Car', 'rfid_tag_id' => $tag->id])->assertCreated()->json('vehicle_id');
+            'vehicle_type' => 'Car', 'rfid_tag_id' => $tag->id, 'display_number' => $tag->number_label])->assertCreated()->json('vehicle_id');
         $this->assertSame($id, $tag->fresh()->vehicle_id);
         $this->assertDatabaseCount('vehicle_rfid_tags', 1);
     }

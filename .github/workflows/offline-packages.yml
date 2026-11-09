@@ -1,0 +1,137 @@
+name: Manual offline package candidates
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: 'Full reviewed 40-character commit SHA (must contain this workflow and packaging inputs)'
+        required: true
+        type: string
+      version:
+        description: 'Candidate semantic version, e.g. 1.0.0-rc.1 (never published automatically)'
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.identity.outputs.commit }}
+      version: ${{ steps.identity.outputs.version }}
+      build_identity: ${{ steps.identity.outputs.build_identity }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 0
+      - id: identity
+        env:
+          SELECTED_COMMIT: ${{ inputs.source_commit }}
+          SELECTED_VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os,re,subprocess,sys
+          sys.path.insert(0,'build/updates')
+          from contract import Version
+          commit=os.environ['SELECTED_COMMIT'];version=os.environ['SELECTED_VERSION']
+          assert re.fullmatch(r'[a-fA-F0-9]{40}',commit), 'Select a full explicit commit SHA'
+          Version(version)
+          actual=subprocess.check_output(['git','rev-parse','HEAD']).decode().strip()
+          assert actual==commit.lower(), 'Source checkout differs from selection'
+          assert not subprocess.check_output(['git','status','--porcelain']).strip(), 'Dirty source refused'
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              f.write('commit='+actual+'\nversion='+version+'\nbuild_identity='+os.environ['GITHUB_RUN_ID']+'.'+os.environ['GITHUB_RUN_ATTEMPT']+'\n')
+          PY
+  windows:
+    needs: source
+    uses: ./.github/workflows/windows-kit.yml
+    with:
+      source_commit: ${{ needs.source.outputs.commit }}
+      version: ${{ needs.source.outputs.version }}
+      build_identity: ${{ needs.source.outputs.build_identity }}
+  mac:
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: arm64
+            runner: macos-15
+          - architecture: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: fileinfo, intl, zip, sqlite3, pdo_sqlite
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Assert clean exact source and native runner
+        env:
+          SELECTED_COMMIT: ${{ needs.source.outputs.commit }}
+          TARGET_ARCH: ${{ matrix.architecture }}
+        run: |
+          python3 - <<'PY'
+          import os,platform,subprocess
+          assert platform.machine()==os.environ['TARGET_ARCH'], 'Wrong native runner'
+          assert subprocess.check_output(['git','rev-parse','HEAD']).decode().strip()==os.environ['SELECTED_COMMIT']
+          assert not subprocess.check_output(['git','status','--porcelain']).strip(), 'Dirty checkout'
+          PY
+      - name: Build unsigned committed acceptance candidate (never a release publication)
+        env:
+          VERSION: ${{ needs.source.outputs.version }}
+          COMMIT: ${{ needs.source.outputs.commit }}
+          BUILD_ID: ${{ needs.source.outputs.build_identity }}
+          TARGET_ARCH: ${{ matrix.architecture }}
+        run: |
+          python3 -B build/macos/build.py --arch "$TARGET_ARCH" --version "$VERSION" --commit "$COMMIT" --development --build-identity "$BUILD_ID" --out "$RUNNER_TEMP/candidate" --cache "$RUNNER_TEMP/package-cache"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PHILCST-macos-${{ matrix.architecture }}-${{ needs.source.outputs.build_identity }}-NOT-RELEASE
+          path: |
+            ${{ runner.temp }}/candidate/*.tar.gz
+            ${{ runner.temp }}/candidate/*.sha256
+            ${{ runner.temp }}/candidate/*.update.json
+          compression-level: 0
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UPDATE-METADATA-macos-${{ matrix.architecture }}-${{ needs.source.outputs.build_identity }}
+          path: ${{ runner.temp }}/candidate/*.update.json
+          if-no-files-found: error
+          retention-days: 14
+  update-matrix:
+    needs: [source, windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: UPDATE-METADATA-*-${{ needs.source.outputs.build_identity }}
+          path: ${{ runner.temp }}/update-metadata
+          merge-multiple: true
+      - name: Validate common release matrix (metadata only, no package downloads)
+        env:
+          METADATA_DIR: ${{ runner.temp }}/update-metadata
+          MATRIX_FILE: ${{ runner.temp }}/UPDATE-MATRIX.json
+        run: |
+          python3 -B build/updates/generate.py --matrix "$METADATA_DIR"/*.update.json --output "$MATRIX_FILE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UPDATE-MATRIX-${{ needs.source.outputs.build_identity }}-NOT-RELEASE
+          path: ${{ runner.temp }}/UPDATE-MATRIX.json
+          if-no-files-found: error
+          retention-days: 14

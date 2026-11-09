@@ -49,7 +49,7 @@ Test-That 'the .env template becomes a production .env with every value filled i
     $template = Get-Content -LiteralPath (Join-Path $repo 'build/windows/templates/env.template') -Raw
     $text = Expand-VmsTemplate -Text $template -Values @{ APP_KEY = 'base64:abc'; API_KEY = 'f00d'; WEB_PORT = 8080; DATABASE = 'C:/PHILCST-VMS/app/database/database.sqlite'; PYTHON = 'C:/PHILCST-VMS/runtime/python/python.exe' }
     foreach ($line in 'APP_ENV=production', 'APP_DEBUG=false', 'APP_TIMEZONE=Asia/Manila', 'APP_KEY=base64:abc', 'DETECTOR_API_KEY=f00d',
-        'APP_URL=http://127.0.0.1:8080', 'MONITORING_SERVICES=managed', 'DETECTOR_STREAM_PROXY=true', 'QUEUE_CONNECTION=sync', 'DB_DATABASE=C:/PHILCST-VMS/app/database/database.sqlite') {
+        'APP_URL=https://philcst.vms.internal', 'SESSION_SECURE_COOKIE=true', 'PYTHON_INTEGRATION_URL=http://127.0.0.1:8080', 'MONITORING_SERVICES=managed', 'DETECTOR_STREAM_PROXY=true', 'QUEUE_CONNECTION=sync', 'DB_DATABASE=C:/PHILCST-VMS/app/database/database.sqlite') {
         Assert-True ($text -match ('(?m)^' + [regex]::Escape($line) + '\r?$')) $line
     }
     Assert-True ($text.Contains("`r`n") -and -not ($text -match "[^`r]`n")) 'CRLF line ends'
@@ -57,7 +57,7 @@ Test-That 'the .env template becomes a production .env with every value filled i
 }
 
 Test-That 'Caddyfile and php.ini templates fill in the folder and port' {
-    $caddy = Expand-VmsTemplate -Text (Get-Content -LiteralPath (Join-Path $repo 'build/windows/templates/Caddyfile.template') -Raw) -Values @{ INSTALL_DIR = 'C:/PHILCST-VMS'; WEB_PORT = 8080 }
+    $caddy = Expand-VmsTemplate -Text (Get-Content -LiteralPath (Join-Path $repo 'build/windows/templates/Caddyfile.template') -Raw) -Values @{ APP_PUBLIC='C:/PHILCST-VMS/app/public'; TLS_DIR='C:/PHILCST-VMS/state/web/tls'; LOG_FILE='C:/PHILCST-VMS/state/web/logs/access.log'; BIND='127.0.0.1'; ALLOWED='127.0.0.1/32'; FASTCGI='127.0.0.1:9001 127.0.0.1:9002 127.0.0.1:9003 127.0.0.1:9004'; PINNED_ROOT='' }
     Assert-True ($caddy.Contains(':8080 {')) 'site port'
     Assert-True ($caddy.Contains('root * "C:/PHILCST-VMS/app/public"')) 'root'
     Assert-True ($caddy.Contains('forward_auth 127.0.0.1:8080')) 'forward_auth to itself'
@@ -77,6 +77,15 @@ Test-That '.env values are replaced in place or added, literally' {
     Assert-Equal 1 ([regex]::Matches($text, '(?m)^APP_URL=').Count) 'one APP_URL'
     Assert-Equal $null (Get-VmsEnvValue $text 'MISSING')
     Assert-Equal 'v' (Get-VmsEnvValue (Set-VmsEnvValue '' 'K' 'v') 'K') 'empty file'
+}
+
+Test-That 'same-value reinstall preserves .env bytes and Windows line endings' {
+    $original = "APP_KEY=base64:fixture`r`nAPP_URL=http://127.0.0.1:80`r`nSECRET=kept`r`n"
+    $same = Set-VmsEnvValue $original 'APP_URL' 'http://127.0.0.1:80'
+    Assert-Equal $original $same 'same-value configuration'
+    $changed = Set-VmsEnvValue $original 'APP_URL' 'http://127.0.0.1:8080'
+    Assert-True ($changed.Contains("APP_KEY=base64:fixture`r`n")) 'key bytes preserved'
+    Assert-True (-not ($changed -match "[^`r]`n")) 'CRLF retained'
 }
 
 Test-That 'install folder: no spaces or special letters' {
@@ -122,6 +131,17 @@ Test-That 'services: four PHP workers, web, live view, devices, detector (no que
     $php = $services | Where-Object Name -eq 'PHILCST-PHP3'
     Assert-Equal '-b 127.0.0.1:9003 -c C:\PHILCST-VMS\config\php.ini' ((Format-VmsServiceParameters $php.Arguments).Replace('/', '\'))
     $detector = $services | Where-Object Name -eq 'PHILCST-Detector'
+    $web = $services | Where-Object Name -eq 'PHILCST-Web'
+    Assert-Equal 'NT SERVICE\PHILCST-Web' $web.Identity 'dedicated Caddy identity'
+    Assert-Equal 'C:\PHILCST-VMS\state\web\config' ($web.Environment.XDG_CONFIG_HOME.Replace('/', '\')) 'protected Caddy autosave'
+    Assert-Equal 'C:\PHILCST-VMS\state\web' ($web.Environment.APPDATA.Replace('/', '\')) 'protected Caddy profile'
+    Assert-Equal 'NT AUTHORITY\LocalService' $detector.Identity 'detector identity'
+    Assert-Equal 'LocalSystem' ($services | Where-Object Name -eq 'PHILCST-Devices').Identity 'adapter workaround identity'
+    Assert-True ($detector.Environment.PATH.EndsWith('\System32\WindowsPowerShell\v1.0')) 'approved Windows PowerShell remains available for reader workaround'
+    Assert-True ($detector.Environment.PATH -notmatch 'ffmpeg|tesseract') 'no optional developer executables'
+    Assert-Equal 'true' $detector.Environment.YOLO_OFFLINE 'actual Ultralytics offline value'
+    Assert-Equal 'false' $detector.Environment.YOLO_AUTOINSTALL 'actual Ultralytics install flag'
+    Assert-Equal '127.0.0.1' $detector.Environment.MJPEG_STREAM_BIND_HOST 'actual stream bind variable'
     Assert-Equal 'camera_service.py' ($detector.Arguments -join ' ')
     Assert-True ($detector.Directory.Replace('/', '\').EndsWith('app\school-vehicle-monitoring-detector')) 'detector folder'
     Assert-Equal 'detector-runtime.log' ([IO.Path]::GetFileName($detector.Log)) 'the log the app shows'

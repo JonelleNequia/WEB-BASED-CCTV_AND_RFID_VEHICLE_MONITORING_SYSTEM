@@ -1,20 +1,4 @@
-<#
-PHILCST Vehicle Monitoring - sets up this PC after the installer copied the files.
-
-Run by PHILCST-VMS-Setup.exe (as administrator). Safe to run again: it keeps
-.env (APP_KEY, keys), the database and the snapshots; it only refreshes the
-config files, services, tasks and firewall rules.
-
-    powershell -ExecutionPolicy Bypass -File install.ps1 [-Root C:\PHILCST-VMS]
-        [-ComputerName PHILCST-VMS] [-SetNetworkPrivate] [-AdminEmail admin@philcst.local]
-
-Steps: VC++ runtime, web port (80, or 8080 when 80 is taken), php.ini and
-Caddyfile, .env (new APP_KEY and API key), database (migrations, first
-admin with a random password), caches, Windows services (NSSM), Task
-Scheduler (scheduler every minute, backup every day), firewall (private
-networks), no sleep while plugged in, optional computer name. At the end
-config\install.json and config\install-result.txt say how to open it.
-#>
+<# D2 local-only installation. Runs only after package/preflight validation. Existing data and secrets are retained; no certified D5 upgrade/rollback is implied. #>
 param(
     [string]$Root = '',
     [string]$ComputerName = '',
@@ -22,7 +6,10 @@ param(
     [string]$AdminEmail = 'admin@philcst.local',
     [string]$AdminName = 'Administrator',
     [switch]$InitializeSetup,
-    [switch]$ReplaceSetupCode
+    [switch]$ReplaceSetupCode,
+    [switch]$AllowDevelopmentCandidate,
+    [string]$ExpectedPublisherThumbprint = '',
+    [string]$NetworkConfig = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,6 +17,12 @@ $ErrorActionPreference = 'Stop'
 if (-not $Root) { $Root = Get-VmsRoot }
 $Root = $Root.TrimEnd('\')
 $paths = Get-VmsPaths $Root
+if (Test-VmsLifecycleEnabled $paths) { throw 'D5A reinstall requires the later certified lifecycle path; nothing was provisioned.' }
+if ($ComputerName -or $SetNetworkPrivate) { throw 'D4 never renames the computer or silently changes network profiles. Select LAN sharing through NetworkConfig.' }
+$approvedPort = Assert-VmsInstallPreflight -Root $Root -Payload $Root -Installed -AllowDevelopmentCandidate:$AllowDevelopmentCandidate -ExpectedPublisherThumbprint $ExpectedPublisherThumbprint
+$networkPreflight='import sys,json;from pathlib import Path;sys.path.insert(0,sys.argv[1]);import server;print(json.dumps(server.preflight_configuration(server.layout(Path(sys.argv[2]),windows=True),json.loads(Path(sys.argv[3]).read_text()) if sys.argv[3] else None)))'
+Invoke-VmsNative -Exe $paths.Python -Arguments @('-B','-c',$networkPreflight,(Join-Path $paths.App 'deploy\network'),$Root,$NetworkConfig) -Quiet | Out-Null
+
 
 New-Item -ItemType Directory -Force -Path $paths.Logs, $paths.Config | Out-Null
 $logFile = Join-VmsPath $paths.Logs ('install-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
@@ -56,7 +49,9 @@ function Install-VmsVcRedist {
     # PHP and torch need the Microsoft Visual C++ 2015-2022 runtime (x64).
     $key = 'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64'
     $installed = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
-    if ($installed -and $installed.Installed -eq 1 -and [int]$installed.Major -ge 14 -and [int]$installed.Minor -ge 40) {
+    $runtimeInputs = Get-Content (Join-Path $Root 'RUNTIME-INPUTS.json') -Raw | ConvertFrom-Json
+    $requiredVc = [version]$runtimeInputs.runtimes.vc_redist.version
+    if ($installed -and $installed.Installed -eq 1 -and [version]([string]$installed.Version).TrimStart('v') -ge $requiredVc) {
         Write-VmsStep "Visual C++ runtime $($installed.Version) is already installed"
         return
     }
@@ -90,7 +85,7 @@ function Install-VmsService {
         @('DisplayName', $Service.Display),
         @('Description', $Service.Description),
         @('Start', 'SERVICE_AUTO_START'),
-        @('ObjectName', 'LocalSystem'),
+        @('ObjectName', $Service.Identity),
         @('AppStdout', $Service.Log),
         @('AppStderr', $Service.Log),
         @('AppStdoutCreationDisposition', '4'),
@@ -101,6 +96,7 @@ function Install-VmsService {
         @('AppExit', 'Default', 'Restart'),
         @('AppRestartDelay', '3000'),
         @('AppThrottle', '10000'),
+        @('AppKillProcessTree', '1'),
         @('AppStopMethodConsole', '5000')
     )
     foreach ($setting in $settings) {
@@ -131,20 +127,22 @@ try {
     Write-VmsStep "Installing PHILCST VMS $build into $Root"
     Stop-VmsServices $paths
     Install-VmsVcRedist
+    # Validate native runtimes before provisioning or migrating any database.
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $paths.Scripts 'readiness.ps1') -Root $Root -PackageOnly -Inference -Json
+    if ($LASTEXITCODE -ne 0) { throw 'Packaged runtime readiness failed before database provisioning.' }
+    Set-VmsPermissions $paths
 
     # --- Web port
-    $port = Select-VmsWebPort -IsFree { param($p) Test-VmsPortFree $p }
+    $port = $approvedPort
     $result.web_port = $port
-    if ($port -ne 80) { $result.warnings += "Port 80 is used by another program on this PC, so the system uses port $port." }
+    $result.warnings += "Explicit public-root trust enrollment is required before opening the canonical HTTPS address."
     Write-VmsStep "Web port: $port"
 
     # --- php.ini and Caddyfile from the templates
     $templates = $paths.Config
     $phpIni = Expand-VmsTemplate -Text (Get-Content -LiteralPath (Join-VmsPath $templates 'php.ini.template') -Raw) -Values @{ INSTALL_DIR = $Root }
     [IO.File]::WriteAllText($paths.PhpIni, $phpIni)
-    $caddy = Expand-VmsTemplate -Text (Get-Content -LiteralPath (Join-VmsPath $templates 'Caddyfile.template') -Raw) `
-        -Values @{ INSTALL_DIR = (ConvertTo-VmsForwardSlash $Root); WEB_PORT = $port }
-    [IO.File]::WriteAllText($paths.Caddyfile, $caddy)
+    # D4 network helper validates and generates Caddy's durable-state configuration below.
 
     # --- .env: new keys on a new install; kept (APP_KEY!) on a reinstall
     $database = ConvertTo-VmsForwardSlash $paths.Database
@@ -157,12 +155,13 @@ try {
     } else {
         Write-VmsStep 'Keeping .env (APP_KEY and keys); updating the port and paths'
         $envText = Get-Content -LiteralPath $paths.Env -Raw
-        if (-not (Get-VmsEnvValue $envText 'APP_KEY')) { $envText = Set-VmsEnvValue $envText 'APP_KEY' (New-VmsAppKey) }
-        if (-not (Get-VmsEnvValue $envText 'DETECTOR_API_KEY')) { $envText = Set-VmsEnvValue $envText 'DETECTOR_API_KEY' (New-VmsApiKey) }
-        $envText = Set-VmsEnvValue $envText 'APP_URL' "http://127.0.0.1:$port"
+        if (-not (Get-VmsEnvValue $envText 'APP_KEY')) { throw 'Existing APP_KEY missing; recover it explicitly.' }
+        if (-not (Get-VmsEnvValue $envText 'DETECTOR_API_KEY')) { throw 'Existing integration key missing; recover it explicitly.' }
+        $envText = Set-VmsEnvValue $envText 'APP_URL' 'https://philcst.vms.internal'
         $envText = Set-VmsEnvValue $envText 'DB_DATABASE' $database
         $envText = Set-VmsEnvValue $envText 'DETECTOR_PYTHON' $python
         $envText = Set-VmsEnvValue $envText 'MONITORING_SERVICES' 'managed'
+        $envText = Set-VmsEnvValue $envText 'GO2RTC_WEBRTC_HOST' '127.0.0.1'
         $envText = Set-VmsEnvValue $envText 'DETECTOR_STREAM_PROXY' 'true'
     }
     # UTF-8 without a BOM (Windows PowerShell's Set-Content would add one).
@@ -192,6 +191,17 @@ try {
     }
     $result.admin_email = $AdminEmail
 
+    # Explicit D4 mode selection, default fresh installs to this computer only.
+    $networkState=Join-Path $Root 'state\network.json'
+    if (-not $NetworkConfig) {
+        $NetworkConfig=Join-Path $Root 'config\network-selection.json'
+        if (Test-Path $networkState) { $selection=(Get-Content $networkState -Raw | ConvertFrom-Json).config | ConvertTo-Json }
+        else { $selection='{"schema":1,"mode":"local","address":null,"interface":null,"remote_scope":null}' }
+        [IO.File]::WriteAllText($NetworkConfig,$selection)
+    }
+    $networkArgs=@('-B',(Join-Path $paths.App 'deploy\network\server.py'),'configure','--root',$Root,'--config',$NetworkConfig,'--prepare-only')
+    if (-not (Test-Path (Join-Path $Root 'state\tls-identity.json'))) { $networkArgs+='--initialize-ca' }
+    Invoke-VmsNative -Exe $paths.Python -Arguments $networkArgs | Out-Null
     Write-VmsStep 'Public files, detector settings, live view config, caches'
     Invoke-VmsArtisan $paths @('storage:link') -Quiet | Out-Null
     # Managed mode: these only write the detector's settings and go2rtc.yaml (the services run the programs).
@@ -201,6 +211,7 @@ try {
     foreach ($command in 'config:cache', 'route:cache', 'view:cache') { Invoke-VmsArtisan $paths @($command) -Quiet | Out-Null }
 
     # --- Windows services
+    Invoke-VmsNative -Exe $paths.Python -Arguments @('-B',(Join-Path $paths.App 'deploy\lifecycle\maintenance.py'),'initialize','--root',$Root) | Out-Null
     foreach ($service in Get-VmsServices $paths) {
         Write-VmsStep "Service: $($service.Display)"
         Install-VmsService $service
@@ -211,55 +222,10 @@ try {
     Write-VmsStep 'Scheduled tasks'
     Register-VmsTask -Name 'PHILCST VMS Scheduler' -Schedule @('/SC', 'MINUTE', '/MO', '1') -Command (Join-VmsPath $paths.Scripts 'lib' 'scheduler.cmd')
     Register-VmsTask -Name 'PHILCST VMS Backup' -Schedule @('/SC', 'DAILY', '/ST', '02:00') -Command (Join-VmsPath $paths.Scripts 'lib' 'daily-backup.cmd')
+    Disable-ScheduledTask -TaskName 'PHILCST VMS Backup' | Out-Null # D5B coherent backup engine is not implemented.
 
-    # --- Firewall: private and domain networks only
-    Write-VmsStep 'Firewall rules (private networks)'
-    Get-NetFirewallRule -Group $script:VmsFirewallGroup -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-    $rule = @{ Group = $script:VmsFirewallGroup; Direction = 'Inbound'; Action = 'Allow'; Profile = @('Private', 'Domain') }
-    New-NetFirewallRule @rule -DisplayName "PHILCST VMS web (TCP $port)" -Protocol TCP -LocalPort $port | Out-Null
-    New-NetFirewallRule @rule -DisplayName 'PHILCST VMS live view (TCP 8555)' -Protocol TCP -LocalPort 8555 | Out-Null
-    New-NetFirewallRule @rule -DisplayName 'PHILCST VMS live view (UDP 8555)' -Protocol UDP -LocalPort 8555 | Out-Null
-    # Camera search (ONVIF, UDP 3702 multicast), reader module search (UDP broadcast) and readers in client mode answer the bundled Python.
-    New-NetFirewallRule @rule -DisplayName 'PHILCST VMS device search (UDP)' -Program $paths.Python -Protocol UDP | Out-Null
-    New-NetFirewallRule @rule -DisplayName 'PHILCST VMS device search (TCP)' -Program $paths.Python -Protocol TCP | Out-Null
-
-    if ($SetNetworkPrivate) {
-        foreach ($netProfile in @(Get-NetConnectionProfile -ErrorAction SilentlyContinue | Where-Object { $_.NetworkCategory -eq 'Public' })) {
-            try {
-                Set-NetConnectionProfile -InterfaceIndex $netProfile.InterfaceIndex -NetworkCategory Private
-                Write-VmsStep "Network '$($netProfile.Name)' ($($netProfile.InterfaceAlias)) set to Private"
-            } catch {
-                $result.warnings += "Could not set the network '$($netProfile.Name)' to Private: $($_.Exception.Message)"
-            }
-        }
-    }
-
-    # --- Power: never sleep or hibernate while plugged in
-    Write-VmsStep 'Power: no sleep while plugged in'
-    foreach ($setting in 'standby-timeout-ac', 'hibernate-timeout-ac', 'disk-timeout-ac') {
-        Invoke-VmsNative -Exe 'powercfg.exe' -Arguments @('/change', $setting, '0') -Quiet | Out-Null
-    }
-
-    # --- Optional computer name (opens as http://<name>.local after a restart)
-    $hostname = $env:COMPUTERNAME
-    if ($ComputerName -and $ComputerName -ne $env:COMPUTERNAME) {
-        if ($ComputerName -notmatch '^[A-Za-z0-9-]{1,15}$' -or $ComputerName -match '^[0-9]+$') {
-            $result.warnings += "Computer name '$ComputerName' is not valid (1-15 letters, digits or -); kept $($env:COMPUTERNAME)."
-        } else {
-            try {
-                Rename-Computer -NewName $ComputerName -Force -ErrorAction Stop
-                $hostname = $ComputerName
-                $result.restart_needed = $true
-                $result.warnings += "Restart the PC to use the new computer name $ComputerName."
-            } catch {
-                $result.warnings += "Could not rename the PC: $($_.Exception.Message)"
-            }
-        }
-    }
-    $result.hostname = $hostname
-
-    # --- Web answers?
-    Write-VmsStep 'Waiting for the web system'
+    # D2 browser access is loopback only. No network profile, hostname, power or LAN firewall changes.
+    $hostname = '127.0.0.1'
     if (-not (Wait-VmsWeb -Port $port -Seconds 120)) {
         # Say which services are down, and keep the end of their logs in this install log.
         $down = @(foreach ($service in Get-VmsServices $paths) {
@@ -274,8 +240,8 @@ try {
         throw "The web system did not answer on port $port.$which See $($paths.Logs)."
     }
 
-    $result.local_url = Format-VmsUrl 'localhost' $port
-    $result.urls = @((Format-VmsUrl ($hostname.ToLowerInvariant() + '.local') $port)) + @(Get-VmsLanAddresses | ForEach-Object { Format-VmsUrl $_ $port })
+    $result.local_url = 'https://philcst.vms.internal'
+    $result.urls = @($result.local_url)
     [IO.File]::WriteAllText($paths.OpenUrl, "[InternetShortcut]`r`nURL=$($result.local_url)`r`n")
     $result.status = 'ok'
     Write-VmsStep 'Done'
@@ -291,10 +257,10 @@ try {
     if ($result.status -eq 'ok') {
         [void]$lines.Add('PHILCST Vehicle Monitoring is installed and running.')
         [void]$lines.Add('')
-        [void]$lines.Add('Open it in Google Chrome on any PC or phone on the same network:')
+        [void]$lines.Add('Open after explicit installation-root trust enrollment:')
         foreach ($url in $result.urls) { [void]$lines.Add("    $url") }
         [void]$lines.Add("On this PC: $($result.local_url)")
-        [void]$lines.Add('(The number address can change when the router changes; the .local name does not.)')
+        [void]$lines.Add('Default access is this computer only. Use the D4 network control for explicit LAN sharing; see NETWORK-SETUP.md. Trust only the public root after verifying its printed SHA-256 fingerprint.')
         if ($setupIssued) {
             [void]$lines.Add('')
             [void]$lines.Add('Complete first-admin setup at /setup with a personal password.')

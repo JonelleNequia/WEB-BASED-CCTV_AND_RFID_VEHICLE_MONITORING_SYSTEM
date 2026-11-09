@@ -206,11 +206,23 @@ class Go2rtcService
             'rtsp:',
             '  listen: ""',
             'webrtc:',
-            '  listen: ":'.config('monitoring.live.webrtc_port').'"',
+            '  listen: "'.config('monitoring.live.webrtc_host', '').':'.config('monitoring.live.webrtc_port').'"',
+            // Remove go2rtc's own public STUN defaults too, not just browser ICE servers.
+            '  ice_servers: []',
             'log:',
             '  level: warn',
             'streams:',
         ];
+        if (config('deployment.named_https')) {
+            array_splice($lines, array_search('  ice_servers: []', $lines, true) + 1, 0, [
+                '  candidates: ["'.config('deployment.lan_ip').':'.config('monitoring.live.webrtc_port').'"]',
+                '  filters:',
+                '    networks: [udp4, tcp4]',
+                '    loopback: true',
+                '    candidates: ["'.config('deployment.lan_ip').'"]',
+                '    ips: ["'.config('deployment.lan_ip').'"]',
+            ]);
+        }
         foreach ($this->cameraStreams() as $name => $url) {
             $lines[] = '  '.$name.': '.json_encode($url, JSON_UNESCAPED_SLASHES);
         }

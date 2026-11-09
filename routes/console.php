@@ -24,7 +24,8 @@ Artisan::command('detector:start', function (DetectorRuntimeService $detectorRun
 
 // A1 (detection): restart the detector if it stopped, even when no page is
 // open. Run `php artisan schedule:work` at Windows startup (Task Scheduler).
-Schedule::command('detector:start')->everyMinute()->withoutOverlapping();
+Schedule::call(fn () => app(\App\Services\LifecycleBarrier::class)->run(fn () => app(DetectorRuntimeService::class)->ensureRunning()))
+    ->everyMinute()->name('detector:start')->withoutOverlapping();
 
 // Live view work: go2rtc (WebRTC live view) starts and follows camera changes without an open page.
 Artisan::command('go2rtc:start', function (\App\Services\Go2rtcService $go2rtc) {
@@ -35,10 +36,40 @@ Artisan::command('go2rtc:start', function (\App\Services\Go2rtcService $go2rtc) 
     }
     $this->info($go2rtc->ensureRunning(force: true) ? 'Live view service (go2rtc) running.' : 'Live view service (go2rtc) could not be started; see storage/logs/go2rtc.log.');
 })->purpose('Start the go2rtc live view service (WebRTC)');
-Schedule::command('go2rtc:start')->everyMinute()->withoutOverlapping();
+Schedule::call(fn () => app(\App\Services\LifecycleBarrier::class)->run(fn () => app(\App\Services\Go2rtcService::class)->ensureRunning(force: true)))
+    ->everyMinute()->name('go2rtc:start')->withoutOverlapping();
 
 // Live view work: the device service (UHF readers) also restarts without an open page.
-Schedule::call(fn () => app(DeviceServiceRuntime::class)->ensureRunning())->everyMinute()->name('devices:ensure-running')->withoutOverlapping();
+Schedule::call(fn () => app(\App\Services\LifecycleBarrier::class)->run(fn () => app(DeviceServiceRuntime::class)->ensureRunning()))->everyMinute()->name('devices:ensure-running')->withoutOverlapping();
+
+Artisan::command('system:delivery-init', function () {
+    $barrier = app(\App\Services\LifecycleBarrier::class);
+    if (! $barrier->enabled()) throw new \RuntimeException('Explicit lifecycle root required.');
+    $identity = $barrier->metadata('identity.json');
+    if (\Illuminate\Support\Facades\DB::table('delivery_installations')->exists()) {
+        $barrier->checkIdentity();
+    } else {
+        \Illuminate\Support\Facades\DB::table('delivery_installations')->insert(['id' => 1, 'installation' => $identity['installation'], 'generation' => $identity['generation']]);
+    }
+    $this->info('Delivery identity initialized; existing identity was not replaced.');
+});
+
+Artisan::command('system:delivery-initializable', function () {
+    if (\Illuminate\Support\Facades\DB::table('delivery_installations')->exists()) {
+        throw new \RuntimeException('Database already has an installation/generation identity; never regenerate it.');
+    }
+    $this->info('Fresh database can receive its first delivery identity.');
+});
+
+Artisan::command('system:delivery-check', function () {
+    app(\App\Services\LifecycleBarrier::class)->checkIdentity();
+    if (\Illuminate\Support\Facades\DB::getDriverName() !== 'sqlite'
+        || (array_values((array) \Illuminate\Support\Facades\DB::selectOne('PRAGMA quick_check'))[0] ?? null) !== 'ok'
+        || ! app(\App\Services\SettingsService::class)->detectorApiKey() || ! config('app.key')) {
+        throw new \RuntimeException('Local database/identity/secrets readiness failed.');
+    }
+    $this->info('Local database/identity/secrets readiness passed.');
+});
 
 // Phase 3 (visitor model): close tag reads whose camera crossing never came
 // (also done on every web request; this is for a scheduler or a manual run).

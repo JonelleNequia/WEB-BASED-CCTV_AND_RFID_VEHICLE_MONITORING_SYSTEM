@@ -24,9 +24,10 @@ class AccountReleaseBoundaryTest extends TestCase
             $this->assertCount(0, $unsafe, 'Release source must contain no installation data or account fixtures.');
             $this->assertContains('storage/framework/sessions/.gitignore', $entries);
             $this->assertContains('storage/logs/.gitignore', $entries);
-            $script = File::get(base_path('build/windows/build-release.ps1'));
-            $this->assertStringContainsString('Release blocked: installation-specific data', $script);
-            $this->assertStringContainsString('Bundled PHP must support Argon2id', $script);
+            $script = File::get(base_path('build/windows/package.py'));
+            $readiness = File::get(base_path('build/windows/checks/php-readiness.php'));
+            $this->assertStringContainsString('Installation/development data in assembled app', $script);
+            $this->assertStringContainsString('Bundled PHP must support Argon2id', $readiness);
         } finally {
             File::delete($path);
         }

@@ -35,7 +35,7 @@ class RegistrationStaffNameTest extends TestCase
         $index = ++$this->sequence;
 
         return array_replace([
-            '_form' => 'add', 'auto_register_tag' => true, 'rfid_uid' => 'STAFF-TEST-'.$index,
+            '_form' => 'add', 'auto_register_tag' => true, 'rfid_uid' => 'STAFF-TEST-'.$index, 'display_number' => (string) $index,
             'plate_number' => 'STF-'.$index, 'vehicle_type' => 'Car', 'category' => 'faculty_staff',
             'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Ma. José Dela Cruz',
         ], $extra);

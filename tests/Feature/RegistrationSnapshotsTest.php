@@ -44,7 +44,7 @@ class RegistrationSnapshotsTest extends TestCase
     public function test_registered_rfid_image_reaches_the_same_canonical_event_without_a_visitor_record(): void
     {
         $vehicle = app(VehicleRegistryService::class)->register(['plate_number' => '395ISX', 'vehicle_type' => 'Car',
-            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Snapshot Registrar', 'auto_register_tag' => true, 'rfid_uid' => 'SNAPSHOT-UID']);
+            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Snapshot Registrar', 'auto_register_tag' => true, 'rfid_uid' => 'SNAPSHOT-UID', 'display_number' => '1']);
         $this->travel(1)->minutes();
         app(RfidTagMatcher::class)->addRead('gate-1', 'SNAPSHOT-UID', now());
         $this->postJson(route('api.integration.crossings'), $this->payload() + ['snapshot' => UploadedFile::fake()->image('vehicle.jpg')])->assertCreated();
@@ -102,7 +102,7 @@ class RegistrationSnapshotsTest extends TestCase
     public function test_clearer_rfid_image_changes_no_movement_identity_state_or_type_evidence(): void
     {
         $vehicle = app(VehicleRegistryService::class)->register(['plate_number' => '395ISX', 'vehicle_type' => 'E-bike',
-            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Snapshot Registrar', 'auto_register_tag' => true, 'rfid_uid' => 'CLEARER-SNAPSHOT-UID']);
+            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Snapshot Registrar', 'auto_register_tag' => true, 'rfid_uid' => 'CLEARER-SNAPSHOT-UID', 'display_number' => '1']);
         app(RfidTagMatcher::class)->addRead('gate-1', 'CLEARER-SNAPSHOT-UID', now());
         $data = $this->payload();
         $data['detection_metadata']['picture']['selected_at'] = now()->toIso8601String();
@@ -180,9 +180,10 @@ class RegistrationSnapshotsTest extends TestCase
         $this->actingAs($guard)->get($url)->assertOk();
         $guard->forceFill(['account_status' => 'inactive'])->save();
         $this->getJson($url)->assertUnauthorized();
-        $this->get('/storage/'.$crossing->snapshot_path)->assertForbidden(); // private local disk requires a signature
+        $this->getJson('/storage/'.$crossing->snapshot_path)->assertUnauthorized(); // No generic local-disk route bypass.
         $this->assertNull(OccurrenceMedia::url('../../.env'));
         $this->actingAs(User::where('role', 'admin')->firstOrFail());
+        $this->get('/storage/'.$crossing->snapshot_path)->assertNotFound(); // Private UUID media has its own reference route.
         $this->get('/evidence/occurrences/..%2F..%2F.env')->assertNotFound();
         $prepared = app(CrossingSnapshotService::class)->prepare(UploadedFile::fake()->image('uncommitted.jpg'));
         $this->get(OccurrenceMedia::url($prepared['path']))->assertNotFound();
@@ -204,7 +205,7 @@ class RegistrationSnapshotsTest extends TestCase
     public function test_plate_corrections_late_rfid_and_crops_keep_the_same_occurrence_image(): void
     {
         $vehicle = app(VehicleRegistryService::class)->register(['plate_number' => '395ISX', 'vehicle_type' => 'Car',
-            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Snapshot Registrar', 'auto_register_tag' => true, 'rfid_uid' => 'LATE-SNAPSHOT-UID']);
+            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Snapshot Registrar', 'auto_register_tag' => true, 'rfid_uid' => 'LATE-SNAPSHOT-UID', 'display_number' => '1']);
         $this->travel(1)->minutes();
         $payload = $this->payload();
         $this->postJson(route('api.integration.crossings'), $payload + ['snapshot' => UploadedFile::fake()->image('frame.jpg')])->assertCreated();
@@ -249,7 +250,7 @@ class RegistrationSnapshotsTest extends TestCase
     public function test_write_failure_preserves_the_registered_movement_without_an_image(): void
     {
         $vehicle = app(VehicleRegistryService::class)->register(['plate_number' => '395ISX', 'vehicle_type' => 'Car',
-            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Snapshot Registrar', 'auto_register_tag' => true, 'rfid_uid' => 'FAIL-SNAPSHOT-UID']);
+            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Snapshot Registrar', 'auto_register_tag' => true, 'rfid_uid' => 'FAIL-SNAPSHOT-UID', 'display_number' => '1']);
         app(RfidTagMatcher::class)->addRead('gate-1', 'FAIL-SNAPSHOT-UID', now());
         $disk = \Mockery::mock(\Illuminate\Filesystem\FilesystemAdapter::class);
         $disk->shouldReceive('path')->once()->andThrow(new \RuntimeException('Fixture storage unavailable.'));
@@ -317,7 +318,7 @@ class RegistrationSnapshotsTest extends TestCase
     public function test_camera_offline_and_manual_history_do_not_capture_todays_scene(): void
     {
         $vehicle = app(VehicleRegistryService::class)->register(['plate_number' => '395ISX', 'vehicle_type' => 'Car',
-            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Snapshot Registrar', 'auto_register_tag' => true, 'rfid_uid' => 'OFFLINE-SNAPSHOT-UID']);
+            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Snapshot Registrar', 'auto_register_tag' => true, 'rfid_uid' => 'OFFLINE-SNAPSHOT-UID', 'display_number' => '1']);
         $result = app(\App\Services\RfidIngestService::class)->ingest(['tag_uid' => 'OFFLINE-SNAPSHOT-UID', 'scan_location' => 'gate-1']);
         $this->assertTrue($result->isSaved());
         $this->assertNull(VehicleEvent::sole()->vehicle_image_path);

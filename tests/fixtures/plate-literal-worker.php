@@ -23,7 +23,7 @@ if ($mode === 'initialize') {
     $user = App\Models\User::factory()->create(['role' => 'admin']);
     auth()->setUser($user);
     app(App\Services\VehicleRegistryService::class)->register(['plate_number' => '395ISX', 'vehicle_type' => 'Motorcycle',
-        'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Race Fixture Registrar', 'rfid_uid' => 'LITERAL-RACE-TAG', 'auto_register_tag' => true]);
+        'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Race Fixture Registrar', 'rfid_uid' => 'LITERAL-RACE-TAG', 'display_number' => '1', 'auto_register_tag' => true]);
     app(App\Services\VehicleRegistryService::class)->register(['plate_number' => 'ISX395', 'vehicle_type' => 'Car', 'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Other Registrar']);
     $camera = App\Models\Camera::create(['camera_name' => 'Race camera', 'camera_role' => 'gate-1', 'source_type' => 'none', 'source_value' => '']);
     $crossing = App\Models\VehicleCrossing::create(['external_event_key' => 'literal-race-occurrence', 'camera_id' => $camera->id,

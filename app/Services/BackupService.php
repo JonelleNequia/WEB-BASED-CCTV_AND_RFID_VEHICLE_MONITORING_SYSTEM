@@ -38,6 +38,7 @@ class BackupService
      */
     public function create(?string $directory = null, string $label = ''): string
     {
+        \App\Services\LegacyLifecycleGuard::reject();
         $directory = rtrim($directory ?: $this->directory(), '/\\');
         File::ensureDirectoryExists($directory);
         $name = self::PREFIX.now()->format('Ymd-His').($label !== '' ? '-'.preg_replace('/[^a-z0-9-]+/i', '-', $label) : '');
@@ -131,6 +132,7 @@ class BackupService
      */
     public function restore(string $zipPath): array
     {
+        \App\Services\LegacyLifecycleGuard::reject();
         $this->inspect($zipPath);
         $database = $this->databasePath();
         $zip = new ZipArchive;

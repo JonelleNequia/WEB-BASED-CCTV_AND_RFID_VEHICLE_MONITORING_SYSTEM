@@ -48,7 +48,7 @@ class UiPhase3RegistryTest extends TestCase
 
         $this->actingAs($this->admin)
             ->from(route('registry.index'))
-            ->post(route('vehicle-registry.store'), $this->vehiclePayload('NEW 2001', ['rfid_uid' => 'brand-new-uid']))
+            ->post(route('vehicle-registry.store'), $this->vehiclePayload('NEW 2001', ['rfid_uid' => 'brand-new-uid', 'display_number' => (string) $next]))
             ->assertSessionHasNoErrors()
             ->assertRedirect(route('registry.index'))
             ->assertSessionHas('status');
@@ -69,16 +69,16 @@ class UiPhase3RegistryTest extends TestCase
         $this->vehicleWithTag('OWN 101', 'EXIST-TAKEN', 913);
 
         $this->actingAs($this->admin)
-            ->post(route('vehicle-registry.store'), $this->vehiclePayload('ADD 3001', ['rfid_uid' => 'EXIST-AVAIL']))
+            ->post(route('vehicle-registry.store'), $this->vehiclePayload('ADD 3001', ['rfid_uid' => 'EXIST-AVAIL', 'display_number' => '911']))
             ->assertSessionHasNoErrors();
         $this->assertSame(RfidTag::STATUS_ASSIGNED, RfidTag::query()->where('uid', 'EXIST-AVAIL')->value('status'));
 
         $this->actingAs($this->admin)
-            ->post(route('vehicle-registry.store'), $this->vehiclePayload('ADD 3002', ['rfid_uid' => 'EXIST-LOST']))
+            ->post(route('vehicle-registry.store'), $this->vehiclePayload('ADD 3002', ['rfid_uid' => 'EXIST-LOST', 'display_number' => '912']))
             ->assertSessionHasErrors();
 
         $this->actingAs($this->admin)
-            ->post(route('vehicle-registry.store'), $this->vehiclePayload('ADD 3003', ['rfid_uid' => 'EXIST-TAKEN']))
+            ->post(route('vehicle-registry.store'), $this->vehiclePayload('ADD 3003', ['rfid_uid' => 'EXIST-TAKEN', 'display_number' => '913']))
             ->assertSessionHasErrors(['rfid_tag_uid' => 'This RFID tag is already assigned to another vehicle. Use Replace Tag on that vehicle first.']);
 
         $this->assertDatabaseMissing('vehicles', ['plate_number' => 'ADD 3002']);

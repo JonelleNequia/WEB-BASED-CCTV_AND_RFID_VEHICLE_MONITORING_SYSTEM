@@ -74,6 +74,7 @@
             this.mjpegFailed = false;
             this.start();
             this.watchdog = window.setInterval(() => this.checkStall(), 2000);
+            this.authTimer = window.setInterval(() => this.checkAuthorization(), 10000);
             this.syncOverlay();
             window.addEventListener('resize', () => this.drawOverlay());
         }
@@ -100,7 +101,7 @@
         }
 
         async start() {
-            if (this.connecting) {
+            if (this.stopped || this.connecting) {
                 return;
             }
             this.connecting = true;
@@ -117,7 +118,7 @@
                         return;
                     }
                 }
-                this.startMJPEG();
+                if (!this.stopped) this.startMJPEG();
             } finally {
                 this.connecting = false;
             }
@@ -219,6 +220,7 @@
         }
 
         teardown() {
+            window.clearTimeout(this.leaseTimer);
             if (this.pc) {
                 this.pc.close();
                 this.pc = null;
@@ -228,6 +230,27 @@
                 this.hls = null;
             }
             window.clearInterval(this.statsTimer);
+        }
+
+        async checkAuthorization() {
+            if (this.stopped) return;
+            try {
+                const response = await fetch('/live/proxy-auth', { cache: 'no-store', headers: { Accept: 'application/json' } });
+                if (response.status === 401 || response.status === 403) {
+                    this.stopped = true;
+                    this.teardown();
+                    window.clearInterval(this.overlayTimer);
+                    window.clearInterval(this.authTimer);
+                    window.clearInterval(this.watchdog);
+                    this.video.pause();
+                    this.video.srcObject = null;
+                    this.video.removeAttribute('src');
+                    this.video.load();
+                    this.img.removeAttribute('src');
+                    if (this.badge) this.badge.textContent = 'Sign in again';
+                    this.emit('live:error');
+                }
+            } catch (_) { /* Server-side leases remain authoritative during network loss. */ }
         }
 
         /* ---------- WebRTC ---------- */
@@ -256,6 +279,7 @@
                 }
                 await pc.setRemoteDescription({ type: 'answer', sdp: await response.text() });
                 await this.firstFrame(WEBRTC_TIMEOUT_MS);
+                if (this.stopped) throw new Error('session ended');
             } catch (error) {
                 pc.close();
                 this.pc = null;
@@ -263,6 +287,10 @@
             }
 
             this.setMode('webrtc');
+            // The packaged go2rtc consumer also expires at 30s without browser cooperation.
+            // Renew beforehand through Laravel, which checks the current session/account.
+            const renewalSeconds = Number(this.root.dataset.viewerLease || 0);
+            if (renewalSeconds > 0) this.leaseTimer = window.setTimeout(() => this.start(), renewalSeconds * 1000);
             this.pictureAt = Date.now();
             this.emit('live:ready');
             pc.onconnectionstatechange = () => {
@@ -363,6 +391,7 @@
                     return false;
                 }
                 await this.firstFrame(HLS_TIMEOUT_MS);
+                if (this.stopped) throw new Error('session ended');
             } catch (error) {
                 this.teardown();
                 this.video.removeAttribute('src');

@@ -11,9 +11,9 @@
 
     // Phase 4 (visitor model): Faculty & Staff or Registered Guest only.
     $categorySelectValue = \App\Support\VehicleCategory::normalize($value('category', 'faculty_staff'));
-    $selectedVehicleType = $value('vehicle_type', '');
+    $selectedVehicleType = $value('vehicle_type', 'Car');
     $vehicleTypeOtherValue = $value('vehicle_type_other', ! in_array($selectedVehicleType, $vehicleTypes, true) && $selectedVehicleType !== 'Others' ? $selectedVehicleType : '') ?? '';
-    $vehicleTypeSelectValue = $vehicleTypeOtherValue !== '' ? 'Others' : $selectedVehicleType;
+    $vehicleTypeSelectValue = in_array($selectedVehicleType, $vehicleTypes, true) ? $selectedVehicleType : 'Others';
 @endphp
 
 <div class="field">
@@ -47,15 +47,15 @@
 <div class="field">
     <label for="{{ $prefix }}_vehicle_type">Vehicle Type</label>
     <select id="{{ $prefix }}_vehicle_type" name="vehicle_type" required data-other-select data-other-target="{{ $prefix }}_vehicle_type_other" data-field="vehicle_type">
-        <option value="">Choose a vehicle type</option>
         @foreach ($vehicleTypes as $vehicleType)
             <option value="{{ $vehicleType }}" @selected($vehicleTypeSelectValue === $vehicleType)>{{ $vehicleType }}</option>
         @endforeach
         <option value="Others" @selected($vehicleTypeSelectValue === 'Others')>Others</option>
     </select>
-    <input id="{{ $prefix }}_vehicle_type_other" type="text" name="vehicle_type_other" value="{{ $vehicleTypeOtherValue }}" placeholder="Custom vehicle type" maxlength="50" aria-label="Custom vehicle type" data-other-field data-field="vehicle_type_other" @if ($vehicleTypeSelectValue !== 'Others') hidden @endif>
+    <label for="{{ $prefix }}_vehicle_type_other" data-type-specify-label @if ($vehicleTypeSelectValue !== 'Others') hidden @endif>Specify vehicle type</label>
+    <input id="{{ $prefix }}_vehicle_type_other" type="text" name="vehicle_type_other" value="{{ $vehicleTypeOtherValue }}" placeholder="Specify vehicle type" maxlength="50" aria-label="Specify vehicle type" aria-describedby="{{ $prefix }}_type_other_error" data-registration-type-other data-other-field data-field="vehicle_type_other" @if ($vehicleTypeSelectValue !== 'Others') hidden @endif @required($vehicleTypeSelectValue === 'Others')>
+    <span id="{{ $prefix }}_type_other_error" class="field-error" data-type-specify-error aria-live="polite" @if (!$useOld || !$errors->has('vehicle_type_other')) hidden @endif>{{ $useOld ? $errors->first('vehicle_type_other') : '' }}</span>
     @if ($useOld)
         @error('vehicle_type')<span class="field-error">{{ $message }}</span>@enderror
-        @error('vehicle_type_other')<span class="field-error">{{ $message }}</span>@enderror
     @endif
 </div>

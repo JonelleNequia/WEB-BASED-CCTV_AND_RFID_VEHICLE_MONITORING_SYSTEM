@@ -345,7 +345,7 @@ class DetectorRuntimeService
      */
     protected function proxiedStreamUrl(string $role): ?string
     {
-        return config('monitoring.stream.proxy')
+        return (config('deployment.named_https') || config('monitoring.stream.proxy'))
             ? rtrim((string) config('monitoring.stream.proxy_prefix'), '/').'/stream/'.$role
             : null;
     }

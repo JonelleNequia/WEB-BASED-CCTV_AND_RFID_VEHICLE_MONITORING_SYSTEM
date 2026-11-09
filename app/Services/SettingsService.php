@@ -94,6 +94,7 @@ class SettingsService
     public function allowsKeylessLocalIntegration(): bool
     {
         return $this->detectorApiKey() === ''
+            && ! config('deployment.named_https')
             && ! app()->isProduction()
             && $this->get('deployment_mode', 'offline_local') === 'offline_local';
     }

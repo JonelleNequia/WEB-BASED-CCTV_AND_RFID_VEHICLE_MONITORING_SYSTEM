@@ -35,6 +35,7 @@ Route::prefix('v1/integration')
     ->name('api.integration.')
     ->middleware('throttle:1200,1')
     ->group(function (): void {
+        Route::post('/deliveries', [\App\Http\Controllers\Api\DeliveryIntegrationController::class, 'store'])->name('deliveries');
         Route::get('/status', [FutureIntegrationController::class, 'status'])->name('status');
         Route::get('/rfid-match', [FutureIntegrationController::class, 'rfidMatch'])->name('rfid-match');
         Route::post('/events', [FutureIntegrationController::class, 'receive'])->name('events');

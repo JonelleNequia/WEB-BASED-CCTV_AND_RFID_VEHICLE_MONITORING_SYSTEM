@@ -1,0 +1,50 @@
+{
+  "signed": {
+    "schema": "philcst.update.v1",
+    "product": "philcst-vms",
+    "version": "1.1.0-rc.1",
+    "channel": "prerelease",
+    "source": {
+      "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "build_identity": "SYNTHETIC-EXAMPLE-NOT-A-RELEASE"
+    },
+    "platform": {
+      "id": "macos-arm64",
+      "os": "macos",
+      "architecture": "arm64",
+      "minimum_os": "14.0.0"
+    },
+    "compatibility": {
+      "supported_upgrade_origins": [
+        {
+          "minimum_inclusive": "1.0.0",
+          "maximum_exclusive": "1.1.0"
+        }
+      ],
+      "schema": {
+        "accepted": [
+          "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        ],
+        "target": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "runtime": {
+        "accepted": [
+          "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        ],
+        "target": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "installation_phase": "D5"
+    },
+    "package": {
+      "filename": "SYNTHETIC-PHILCST-1.1.0-rc.1-macos-arm64.tar.gz",
+      "format": "tar.gz",
+      "size": 12345,
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "content_manifest_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "issued_at": "2026-11-08T00:00:00Z",
+    "expires_at": "2026-12-08T00:00:00Z"
+  },
+  "signatures": []
+}

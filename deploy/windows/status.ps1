@@ -4,10 +4,11 @@ service, disk space, last backup and the addresses to open.
     status.bat            (double-click; no admin rights needed)
     status.ps1 -Json      (for collect-logs and checks)
 #>
-param([switch]$Json)
+param([switch]$Json, [string]$Root = '', [switch]$Readiness)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib\common.ps1')
-$paths = Get-VmsPaths (Get-VmsRoot)
+if (-not $Root) { $Root = Get-VmsRoot }
+$paths = Get-VmsPaths $Root
 $port = Get-VmsWebPort $paths
 $problems = New-Object System.Collections.ArrayList
 
@@ -26,8 +27,10 @@ function Read-JsonFile {
 $services = @(foreach ($service in Get-VmsServices $paths) {
     $installed = Get-Service -Name $service.Name -ErrorAction SilentlyContinue
     $state = if ($installed) { [string]$installed.Status } else { 'Not installed' }
+    $owned = $installed -and (Test-VmsServiceOwned $paths $service.Name)
+    if ($installed -and -not $owned) { [void]$problems.Add("Service ownership conflict: $($service.Name). Nothing was stopped.") }
     if ($state -ne 'Running') { [void]$problems.Add("$($service.Display) is $state.") }
-    [pscustomobject]@{ Service = $service.Display; Name = $service.Name; State = $state }
+    [pscustomobject]@{ Service = $service.Display; Name = $service.Name; State = $state; Owned = [bool]$owned }
 })
 
 $web = $false
@@ -60,31 +63,57 @@ if ($null -ne $freeGb -and $freeGb -lt 5) { [void]$problems.Add("Only $freeGb GB
 $lastBackup = Get-ChildItem -LiteralPath $paths.Backups -Filter 'PHILCST-backup-*.zip' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $lastBackup -or $lastBackup.LastWriteTime -lt (Get-Date).AddDays(-2)) { [void]$problems.Add('No backup in the last 2 days.') }
 
-$addresses = @(Get-VmsLanAddresses)
-$publicNetworks = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue | Where-Object { $_.NetworkCategory -eq 'Public' })
-foreach ($network in $publicNetworks) {
-    [void]$problems.Add("The network '$($network.Name)' ($($network.InterfaceAlias)) is Public: other PCs cannot open the system. Set it to Private in Windows Settings.")
-}
-
 $build = Read-JsonFile $paths.BuildInfo
+$portConflicts = @()
+$ownedPids = @{}
+foreach ($process in Get-CimInstance Win32_Process) {
+    if ($process.ExecutablePath -and $process.ExecutablePath.StartsWith($paths.Runtime + '\', [StringComparison]::OrdinalIgnoreCase)) { $ownedPids[[int]$process.ProcessId] = $true }
+}
+foreach ($requiredPort in @($port, 1984, 8555, 8765, 9001, 9002, 9003, 9004)) {
+    foreach ($listener in @(Get-NetTCPConnection -LocalPort $requiredPort -State Listen -ErrorAction SilentlyContinue)) {
+        if (-not $ownedPids.ContainsKey([int]$listener.OwningProcess)) { $portConflicts += "TCP $requiredPort (PID $($listener.OwningProcess))" }
+    }
+}
+foreach ($listener in @(Get-NetUDPEndpoint -LocalPort 8555 -ErrorAction SilentlyContinue)) {
+    if (-not $ownedPids.ContainsKey([int]$listener.OwningProcess)) { $portConflicts += "UDP 8555 (PID $($listener.OwningProcess))" }
+}
+foreach ($conflict in $portConflicts) { [void]$problems.Add("Required port ownership conflict: $conflict") }
+
 $report = [ordered]@{
     version = if ($build) { $build.version } else { $null }
+    source = if ($build -and $build.PSObject.Properties['source']) { $build.source.source_sha256 } else { $null }
+    mode = 'local-only; D4 pending'
+    application_ready = ($web -and $portConflicts.Count -eq 0 -and @($services | Where-Object { $_.State -ne 'Running' -or -not $_.Owned }).Count -eq 0)
+    device_readiness = $gates
+    dependency_readiness = 'Run readiness.ps1 -VerifyContent -Inference for native dependency/model checks'
+    recovery_status = 'D5 backup/update/restore acceptance pending'
     checked_at = (Get-Date).ToString('o')
     ok = ($problems.Count -eq 0)
     problems = @($problems)
     web = [ordered]@{ port = $port; answers = $web }
+    port_conflicts = $portConflicts
     services = $services
     detector_seconds_since_report = $detectorAge
     gates = $gates
     device_service_seconds_since_report = $devicesAge
     free_gb = $freeGb
     last_backup = if ($lastBackup) { $lastBackup.Name } else { $null }
-    urls = @(@($env:COMPUTERNAME.ToLowerInvariant() + '.local') + $addresses | ForEach-Object { Format-VmsUrl $_ $port })
+    urls = @('https://philcst.vms.internal')
 }
 
+$network=Start-VmsProcess -Exe $paths.Python -Arguments @('-B',(Join-Path $paths.App 'deploy\network\server.py'),'status','--root',$Root) -TimeoutSeconds 30
+$report | Add-Member -NotePropertyName network_https -NotePropertyValue $(if ($network.ExitCode -eq 0) { ($network.Output -join '') | ConvertFrom-Json } else { @{ diagnostic='Run network server.py status as administrator for certificate/clock/HTTPS diagnostics.' } })
+if ($Readiness) {
+    $probe = Start-VmsProcess -Exe 'powershell.exe' -Arguments @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'readiness.ps1'),'-Root',$Root,'-VerifyContent','-Json') -TimeoutSeconds 300
+    $report.dependency_readiness = if ($probe.ExitCode -eq 0) { 'passed' } else { 'failed; run readiness.ps1 for actionable errors (secrets excluded)' }
+    if ($probe.ExitCode -ne 0) { $report.application_ready = $false; [void]$problems.Add('Native dependency readiness failed; run readiness.ps1 for details.') }
+}
+$report.ok = ($problems.Count -eq 0)
+$report.problems = @($problems)
 if ($Json) { $report | ConvertTo-Json -Depth 5; exit 0 }
 
 Write-Host "PHILCST Vehicle Monitoring $($report.version)" -ForegroundColor Cyan
+Write-Host "Source: $($report.source) (see network status for selected mode)"
 $services | Format-Table Service, State -AutoSize | Out-Host
 Write-Host ("Web (port {0}): {1}" -f $port, $(if ($web) { 'answers' } else { 'NOT answering' }))
 Write-Host ("Detector: {0}" -f $(if ($null -eq $detectorAge) { 'no report yet' } else { "last report $detectorAge s ago" }))

@@ -71,6 +71,8 @@ try {
     const ready = () => page.waitForFunction(() => document.querySelector('[data-auto-list]')?.dataset.autoState === 'ready');
 
     await page.goto(base + '/registry');
+    check(JSON.stringify(await page.locator('#add_vehicle_type option').evaluateAll(nodes => nodes.map(node => node.value))) === JSON.stringify(['Car','Motorcycle','Truck','Others']), 'Registry exposes only the four requested type choices');
+    check(await page.locator('#add_vehicle_type').inputValue() === 'Car', 'New registration defaults to Car');
     await page.locator('[data-drawer-open="add-vehicle-drawer"]').first().click();
     await page.waitForFunction(() => document.getElementById('add-vehicle-drawer').classList.contains('is-open'));
     check(await page.locator('#add_registered_by').inputValue() === '', 'Fresh installation staff default remains blank');
@@ -78,6 +80,19 @@ try {
     await page.locator('#add_plate_number').fill('ab 00001');
     await page.locator('#add_registered_by').fill('First Registrar');
     await page.locator('#add_vehicle_type').selectOption('Car');
+    await page.locator('#add_vehicle_type').selectOption('Others');
+    const specify = page.locator('#add_vehicle_type_other');
+    check(await specify.isVisible() && await specify.evaluate(node => node.required), 'Others shows a required Specify field');
+    check(await page.getByRole('button', { name: 'Save Vehicle', exact: true }).isDisabled(), 'Blank specification prevents submission');
+    await specify.fill('---');
+    check(await page.locator('#add_type_other_error').isVisible(), 'Invalid specification has an inline error');
+    await specify.fill('School shuttle');
+    check(!await page.locator('#add_type_other_error').isVisible() && await specify.evaluate(node => node.checkValidity()), 'Corrected pasted text clears the specification error');
+    await specify.dispatchEvent('compositionstart');
+    check(await page.getByRole('button', { name: 'Save Vehicle', exact: true }).isDisabled(), 'IME composition prevents premature submission');
+    await specify.dispatchEvent('compositionend');
+    await page.locator('#add_vehicle_type').selectOption('Car');
+    check(!await specify.isVisible() && await specify.evaluate(node => node.checkValidity()), 'Switching to Car clears hidden-field validation');
     check(await page.locator('#add_available').inputValue() === '' && await page.locator('#add_scan').inputValue() === '', 'Optional RFID starts unassigned');
     await page.getByRole('button', { name: 'Save Vehicle', exact: true }).click();
     await page.getByText('AB 00001 was saved to the local vehicle registry.', { exact: true }).waitFor();
@@ -213,6 +228,17 @@ try {
     check(duplicateCrossing.status() === 200 && (await duplicateCrossing.json()).crossing.id === crossingBody.crossing.id, 'A retried crossing keeps its original identity');
     await page.goto(base + '/registry?state=outside');
     check(await page.locator('[data-vehicle-row]').count() === 1, 'Registry occupancy filter sees the reconciled state');
+    await page.goto(base + '/vehicle-registry/' + id + '/edit');
+    await page.locator('#vehicle_type').selectOption('Others');
+    await page.locator('#vehicle_type_other').fill('School shuttle');
+    await page.getByRole('button', { name: 'Update Vehicle', exact: true }).click();
+    await page.waitForURL(/\/registry/);
+    check((await getVehicle()).vehicle_type === 'School shuttle', 'Custom specification saves through the real edit endpoint');
+    check((await getVehicle()).current_state === 'outside' && (await getVehicle()).entries_today === 1, 'Type-only edit preserves recorded occupancy');
+    await page.goto(base + '/vehicle-registry/' + id + '/edit');
+    check(await page.locator('#vehicle_type').inputValue() === 'Others' && await page.locator('#vehicle_type_other').inputValue() === 'School shuttle', 'Custom type reopens under Others without losing its value');
+    await page.setViewportSize({width:390,height:844});
+    check(await page.locator('#vehicle_type_other').evaluate(node => node.getBoundingClientRect().right <= innerWidth), 'Specify input fits a narrow screen');
     check(errors.length === 0, 'No browser script errors');
     console.log(`Optional RFID browser checks: ${checks} passed.`);
 } finally {

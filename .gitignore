@@ -43,3 +43,13 @@ __pycache__/
 **/first-admin.txt
 **/install-result.txt
 **/install.json
+
+# Offline Mac candidates and build cache, never installation data in source.
+/build/macos/dist/
+/build/macos/cache/
+
+# D3 update-preparation sidecars/evidence; never source or an active updater.
+/build/updates/dist/
+
+# D4 client-only candidate bundles.
+/build/clients/dist/

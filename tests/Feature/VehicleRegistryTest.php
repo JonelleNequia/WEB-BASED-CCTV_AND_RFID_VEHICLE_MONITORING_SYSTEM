@@ -46,12 +46,14 @@ class VehicleRegistryTest extends TestCase
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $tag = RfidTag::query()->create([
             'uid' => 'DEMO-TAG-8899',
+            'tag_number' => 8899,
             'status' => RfidTag::STATUS_AVAILABLE,
         ]);
 
         $this->actingAs($user)
             ->post(route('vehicle-registry.store'), [
                 'registered_by' => 'Test Registrar',
+                'display_number' => $tag->number_label,
                 'rfid_tag_id' => $tag->id,
                 'plate_number' => ' tst-8899 ',
                 'owner_name' => 'Test Owner',
@@ -68,6 +70,7 @@ class VehicleRegistryTest extends TestCase
         $this->assertSame('Test Owner', $vehicle->owner_name);
         $this->assertDatabaseHas('vehicle_rfid_tags', [
             'uid' => 'DEMO-TAG-8899',
+            'tag_number' => 8899,
             'status' => RfidTag::STATUS_ASSIGNED,
             'vehicle_id' => $vehicle->id,
         ]);
@@ -80,10 +83,12 @@ class VehicleRegistryTest extends TestCase
         $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
         $tag = RfidTag::query()->create([
             'uid' => 'RFID-CUSTOM-3001',
+            'tag_number' => 3001,
             'status' => RfidTag::STATUS_AVAILABLE,
         ]);
         $form = [
             'registered_by' => 'Test Registrar',
+            'display_number' => $tag->number_label,
             'rfid_tag_id' => $tag->id,
             'plate_number' => 'CUS-3001',
             'vehicle_owner_name' => 'Custom Owner',
@@ -128,6 +133,7 @@ class VehicleRegistryTest extends TestCase
         $assignedTag->forceFill(['vehicle_id' => $vehicle->id])->save();
         $newTag = RfidTag::query()->create([
             'uid' => 'RFID-DUP-1001-B',
+            'tag_number' => 1002,
             'status' => RfidTag::STATUS_AVAILABLE,
         ]);
 
@@ -135,6 +141,7 @@ class VehicleRegistryTest extends TestCase
             ->from(route('registry.index'))
             ->post(route('vehicle-registry.store'), [
                 'registered_by' => 'Test Registrar',
+                'display_number' => $newTag->number_label,
                 'rfid_tag_id' => $newTag->id,
                 'plate_number' => 'dup 1001',
                 'vehicle_owner_name' => ' duplicate   owner ',
@@ -163,12 +170,14 @@ class VehicleRegistryTest extends TestCase
         ]);
         $tag = RfidTag::query()->create([
             'uid' => 'RFID-OWN-2002',
+            'tag_number' => 2002,
             'status' => RfidTag::STATUS_AVAILABLE,
         ]);
 
         $this->actingAs($user)
             ->post(route('vehicle-registry.store'), [
                 'registered_by' => 'Test Registrar',
+                'display_number' => $tag->number_label,
                 'rfid_tag_id' => $tag->id,
                 'plate_number' => 'OWN-2002',
                 'vehicle_owner_name' => 'Shared Owner',

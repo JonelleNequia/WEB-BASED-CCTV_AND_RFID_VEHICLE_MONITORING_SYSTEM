@@ -1,5 +1,8 @@
 import os
 import sys
+import durable_delivery
+
+durable_delivery.wait_for_resume()
 
 
 def close_inherited_descriptors():

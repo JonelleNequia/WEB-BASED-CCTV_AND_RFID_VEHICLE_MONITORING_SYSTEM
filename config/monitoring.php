@@ -160,6 +160,7 @@ return [
         'enabled' => (bool) env('LIVE_VIEW_WEBRTC', true),
         'api_port' => (int) env('GO2RTC_API_PORT', 1984),
         'webrtc_port' => (int) env('GO2RTC_WEBRTC_PORT', 8555),
+        'webrtc_host' => env('GO2RTC_WEBRTC_HOST', ''),
         'version' => '1.9.14',
         'bundles' => [
             'mac_arm64' => ['file' => 'go2rtc_mac_arm64.zip', 'sha256' => '919b78adc759d6b3883d1e1b2ac915ac0985bb903ff1897b4d228527bd64690c'],

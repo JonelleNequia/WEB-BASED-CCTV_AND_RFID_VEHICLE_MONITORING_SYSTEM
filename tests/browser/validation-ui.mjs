@@ -68,8 +68,9 @@ try {
         headers, data: { uid: '0000-FIXTURE', auto_number: 1 },
     });
     check(tagResponse.status() === 201, 'Fixture RFID tag is created');
+    const fixtureTag = await tagResponse.json();
     const vehicleResponse = await page.request.post(base + '/vehicle-registry', {
-        headers, data: { rfid_uid: '0000-FIXTURE', plate_number: 'UIV-0001',
+        headers, data: { rfid_uid: '0000-FIXTURE', display_number: fixtureTag.number_label, plate_number: 'UIV-0001',
             registered_by: 'UI Test Registrar',
             vehicle_owner_name: 'Validation Owner', category: 'faculty_staff', vehicle_type: 'Car' },
     });
@@ -100,10 +101,11 @@ try {
         headers, data: { uid: '0000-DRAWER', auto_number: 1 },
     });
     check(drawerTagResponse.status() === 201, 'Drawer fixture tag is created');
-    const { rfid_tag_id: drawerTagId } = await drawerTagResponse.json();
+    const { rfid_tag_id: drawerTagId, number_label: drawerTagNumber } = await drawerTagResponse.json();
     await page.goto(base + '/registry?tab=vehicles');
     await page.locator('[data-drawer-open="add-vehicle-drawer"]').first().click();
     await page.locator('#add_available').selectOption(String(drawerTagId));
+    await page.locator('#add_tag_number').fill(drawerTagNumber);
     await page.locator('#add_plate_number').fill('UIV-0002');
     await page.locator('#add_vehicle_type').selectOption('Car');
     await page.locator('#add_owner').fill('Drawer 123');

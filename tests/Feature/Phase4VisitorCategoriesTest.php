@@ -70,8 +70,8 @@ class Phase4VisitorCategoriesTest extends TestCase
             ->assertDontSee('<option value="others"', false)
             ->assertSee('Unregistered Guest is set by the system');
 
-        $tag = RfidTag::query()->create(['uid' => 'CAT-TAG-1', 'status' => RfidTag::STATUS_AVAILABLE]);
-        $form = ['registered_by' => 'Test Registrar', 'rfid_tag_id' => $tag->id, 'plate_number' => 'CAT 1001', 'vehicle_owner_name' => 'Visitor', 'vehicle_type' => 'Car'];
+        $tag = RfidTag::query()->create(['uid' => 'CAT-TAG-1', 'tag_number' => 1, 'status' => RfidTag::STATUS_AVAILABLE]);
+        $form = ['display_number' => $tag->number_label, 'registered_by' => 'Test Registrar', 'rfid_tag_id' => $tag->id, 'plate_number' => 'CAT 1001', 'vehicle_owner_name' => 'Visitor', 'vehicle_type' => 'Car'];
 
         $this->actingAs($this->admin)->post(route('vehicle-registry.store'), $form + ['category' => 'unregistered_visitor'])
             ->assertSessionHasErrors(['category' => 'Unregistered Guest cannot be picked here: the system sets it for vehicles the camera sees without a registered tag. Choose Faculty & Staff or Registered Guest.']);

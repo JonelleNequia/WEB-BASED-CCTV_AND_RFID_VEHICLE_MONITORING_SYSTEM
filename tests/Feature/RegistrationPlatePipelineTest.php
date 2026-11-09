@@ -42,7 +42,7 @@ class RegistrationPlatePipelineTest extends TestCase
     {
         return app(VehicleRegistryService::class)->register([
             'plate_number' => $plate, 'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => $staff, 'vehicle_type' => 'Motorcycle',
-            'rfid_uid' => 'PHASE-TWO-'.(++$this->sequence), 'auto_register_tag' => true,
+            'rfid_uid' => 'PHASE-TWO-'.(++$this->sequence), 'display_number' => (string) $this->sequence, 'auto_register_tag' => true,
         ])->fresh();
     }
 
@@ -203,7 +203,7 @@ class RegistrationPlatePipelineTest extends TestCase
         $this->patchJson(route('visitors.records.review', $record), ['action' => 'correct_plate', 'plate' => 'ABC 0001'])->assertOk()->assertJsonPath('needs.plate', true);
         $this->assertNull($record->fresh()->vehicle_id);
         $this->postJson(route('vehicle-registry.store'), ['plate_number' => 'ABC0001', 'vehicle_type' => 'Car',
-            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Other Staff', 'rfid_uid' => 'COLLIDING-TAG', 'auto_register_tag' => true])->assertUnprocessable()->assertJsonValidationErrors('plate_number');
+            'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Other Staff', 'rfid_uid' => 'COLLIDING-TAG', 'display_number' => '123', 'auto_register_tag' => true])->assertUnprocessable()->assertJsonValidationErrors('plate_number');
         $this->assertSame([$first->plate_number, $legacy->plate_number], Vehicle::query()->orderBy('id')->pluck('plate_number')->all());
         $this->assertSame('Phase Two Registrar', app(VehicleRegistryService::class)->rememberedStaffName());
     }

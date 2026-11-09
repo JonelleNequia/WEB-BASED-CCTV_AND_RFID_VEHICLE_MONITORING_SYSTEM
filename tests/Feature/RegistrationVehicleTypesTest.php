@@ -60,18 +60,68 @@ class RegistrationVehicleTypesTest extends TestCase
         return $plate !== null ? \Tests\fixtures\ConfirmedActualPlate::for($record, $plate) : $record;
     }
 
-    public function test_every_supported_choice_can_register_and_requested_choices_are_on_existing_forms(): void
+    public function test_supported_values_remain_compatible_but_registry_pickers_have_four_choices(): void
     {
         foreach (VehicleType::TYPES as $type) {
             $vehicle = $this->register($type);
             $this->assertSame($type, $vehicle->vehicle_type);
         }
-        foreach ([route('registry.index'), route('visitors.index'), route('vehicle-events.create'), route('vehicle-registry.edit', $vehicle)] as $url) {
+        foreach ([route('registry.index') => 'add_vehicle_type', route('vehicle-registry.edit', $vehicle) => 'vehicle_type'] as $url => $id) {
+            $html=$this->get($url)->assertOk()->getContent();
+            $dom=new \DOMDocument;@$dom->loadHTML($html);$xpath=new \DOMXPath($dom);
+            $values=[];foreach ($xpath->query('//select[@id="'.$id.'"]/option') as $option) $values[]=$option->getAttribute('value');
+            $this->assertSame(['Car','Motorcycle','Truck','Others'],$values);
+        }
+        foreach ([route('visitors.index'), route('vehicle-events.create')] as $url) {
             $response = $this->get($url)->assertOk();
             foreach (['E-bike', 'E-trike', 'E-car', 'Car', 'Truck', 'Tricycle', 'Motorcycle', 'Bus', 'Van'] as $type) {
                 $response->assertSee('value="'.$type.'"', false);
             }
         }
+    }
+
+    public function test_others_requires_specification_and_preserves_custom_text_with_optional_rfid(): void
+    {
+        $this->postJson(route('vehicle-registry.store'), ['vehicle_owner_name'=>'Fixture Owner','registered_by'=>'Registrar',
+            'plate_number'=>'CUS-1001','vehicle_type'=>'Others','vehicle_type_other'=>'School shuttle'])
+            ->assertCreated();
+        $vehicle=Vehicle::where('plate_number','CUS-1001')->firstOrFail();
+        $this->assertSame('School shuttle',$vehicle->vehicle_type);$this->assertNull($vehicle->rfid_tag_id);
+        $this->get(route('vehicle-registry.edit',$vehicle))->assertOk()->assertSee('value="Others" selected',false)
+            ->assertSee('value="School shuttle"',false);
+        $direct=app(VehicleRegistryService::class)->register(['vehicle_owner_name'=>'Fixture Owner','registered_by'=>'Registrar',
+            'plate_number'=>'CUS-1002','vehicle_type'=>'Others','vehicle_type_other'=>'Delivery van']);
+        $this->assertSame('Delivery van',$direct->vehicle_type);
+        $this->assertDatabaseCount('vehicle_events',0);$this->assertDatabaseCount('vehicle_rfid_tags',0);
+    }
+
+    public function test_invalid_specification_cannot_create_vehicle_tag_or_change_staff_default(): void
+    {
+        $before=app(VehicleRegistryService::class)->rememberedStaffName();
+        foreach ([null,'   ','1234','---','Others','Unknown','Bus 🚀',str_repeat('A',51)] as $value) {
+            $this->postJson(route('vehicle-registry.store'), ['vehicle_owner_name'=>'Fixture Owner','registered_by'=>'New Registrar',
+                'plate_number'=>'BAD-1001','vehicle_type'=>'Others','vehicle_type_other'=>$value,'rfid_uid'=>'NEW-UID',
+                'display_number'=>'001','auto_register_tag'=>true])->assertUnprocessable()->assertJsonValidationErrors('vehicle_type_other');
+        }
+        try {
+            app(VehicleRegistryService::class)->register(['vehicle_owner_name'=>'Fixture Owner','registered_by'=>'Registrar',
+                'plate_number'=>'BAD-1002','vehicle_type'=>'Others']);
+            $this->fail('Direct registration must require specification.');
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            $this->assertArrayHasKey('vehicle_type_other',$exception->errors());
+        }
+        $this->assertDatabaseCount('vehicles',0);$this->assertDatabaseCount('vehicle_rfid_tags',0);
+        $this->assertSame($before,app(VehicleRegistryService::class)->rememberedStaffName());
+    }
+
+    public function test_stale_hidden_specification_does_not_override_a_standard_choice(): void
+    {
+        $this->postJson(route('vehicle-registry.store'), ['vehicle_owner_name'=>'Fixture Owner','registered_by'=>'Registrar',
+            'plate_number'=>'CUS-1003','vehicle_type'=>'Car','vehicle_type_other'=>'---'])->assertCreated();
+        $this->assertSame('Car',Vehicle::where('plate_number','CUS-1003')->value('vehicle_type'));
+        $this->from(route('registry.index'))->post(route('vehicle-registry.store'), ['_form'=>'add','vehicle_owner_name'=>'123','registered_by'=>'Registrar',
+            'plate_number'=>'CUS-1004','vehicle_type'=>'Others','vehicle_type_other'=>'School shuttle'])->assertRedirect()->assertSessionHasErrors('vehicle_owner_name');
+        $this->get(route('registry.index'))->assertOk()->assertSee('value="Others" selected',false)->assertSee('value="School shuttle"',false);
     }
 
     public function test_aliases_remain_distinct_and_unsupported_submissions_are_rejected(): void

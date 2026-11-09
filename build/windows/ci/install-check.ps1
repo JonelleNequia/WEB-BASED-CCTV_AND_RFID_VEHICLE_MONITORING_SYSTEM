@@ -5,8 +5,9 @@ path a technician takes when fixing something), check again, uninstall
 with the data, check nothing is left. Prints the install log on failure.
     pwsh build/windows/ci/install-check.ps1 -Setup <PHILCST-VMS-Setup-*.exe>
 #>
-param([Parameter(Mandatory = $true)][string]$Setup, [string]$Dir = 'C:\PHILCST-VMS')
+param([Parameter(Mandatory = $true)][string]$Setup, [string]$Dir = 'C:\PHILCST-D2-Acceptance', [switch]$ConfirmIsolatedRunner)
 $ErrorActionPreference = 'Stop'
+if (-not $ConfirmIsolatedRunner -or $env:OS -ne 'Windows_NT' -or $Dir -notmatch '^C:\\PHILCST-D2-') { throw 'Acceptance harness requires an explicitly confirmed isolated Windows runner/VM and C:\PHILCST-D2-* root. Never use a working installation.' }
 
 function Show-InstallLog {
     $log = Get-ChildItem (Join-Path $Dir 'logs') -Filter 'install-*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
@@ -43,11 +44,24 @@ function Install-Once([int]$Round) {
 }
 
 $info = Install-Once 1
+# Explicit trust enrollment only inside the already-confirmed disposable runner.
+$publicRoot=Join-Path $Dir 'state\public-root.crt'
+. (Join-Path $Dir 'app\deploy\clients\client-common.ps1')
+$rootPem=[IO.File]::ReadAllText($publicRoot)
+$rootDer=[Convert]::FromBase64String(([regex]::Match($rootPem,'-----BEGIN CERTIFICATE-----([A-Za-z0-9+/=\s]+)-----END CERTIFICATE-----').Groups[1].Value -replace '\s',''))
+$rootCert=New-Object Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList @(,$rootDer)
+$rootHash=Get-RootFingerprint $rootCert
+& (Join-Path $Dir 'runtime\python\python.exe') -B (Join-Path $Dir 'app\deploy\network\server.py') trust-root --root $Dir --fingerprint $rootHash
+if ($LASTEXITCODE -ne 0) { throw 'Explicit fixture issuer trust enrollment failed.' }
+
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dir 'app\deploy\windows\readiness.ps1') -Root $Dir -VerifyContent -Inference -Json
+if ($LASTEXITCODE -ne 0) { throw 'Actual installed runtime/model readiness failed.' }
+$keyBefore = (Get-FileHash (Join-Path $Dir 'app\.env') -Algorithm SHA256).Hash
 
 # Consume the locally delivered setup credential; never print it or a password.
 $setupCode = (Select-String -Path (Join-Path $Dir 'config\setup\first-admin.txt') -Pattern 'Code: (.+)').Matches[0].Groups[1].Value.Trim()
 $password = 'Private test phrase ' + [guid]::NewGuid().ToString('N')
-$base = "http://127.0.0.1:$($info.web_port)"
+$base = 'https://philcst.vms.internal'
 $setupPage = Invoke-WebRequest "$base/setup" -SessionVariable setupSession -UseBasicParsing
 $setupToken = [regex]::Match($setupPage.Content, 'name="_token" value="([^"]+)"').Groups[1].Value
 $null = Invoke-WebRequest "$base/setup" -Method Post -WebSession $setupSession -UseBasicParsing -Body @{ _token = $setupToken; code = $setupCode; password = $password; password_confirmation = $password }
@@ -67,6 +81,11 @@ foreach ($name in 'PHILCST-Detector', 'PHILCST-Devices', 'PHILCST-LiveView', 'PH
 }
 
 Install-Once 2 | Out-Null
+if ((Get-FileHash (Join-Path $Dir 'app\.env') -Algorithm SHA256).Hash -ne $keyBefore) { throw 'Reinstall changed installation secrets/configuration.' }
+$again = Invoke-WebRequest "$base/login" -SessionVariable verifySession -UseBasicParsing
+$againToken = [regex]::Match($again.Content, 'name="_token" value="([^"]+)"').Groups[1].Value
+$verified = Invoke-WebRequest "$base/login" -Method Post -WebSession $verifySession -UseBasicParsing -Body @{_token=$againToken;email=$info.admin_email;password=$password}
+if ($verified.Content -match 'name="password"') { throw 'Reinstall did not retain the personal account.' }
 
 Write-Host '===== uninstall (with the data)'
 $uninstaller = Get-ChildItem (Join-Path $Dir 'uninstall') -Filter 'unins*.exe' | Select-Object -First 1

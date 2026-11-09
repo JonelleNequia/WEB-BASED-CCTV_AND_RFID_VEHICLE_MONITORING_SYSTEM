@@ -1,6 +1,7 @@
 import json
 
 import requests
+import durable_delivery
 
 from config import API_TIMEOUT_SECONDS, RFID_MATCH_TIMEOUT_SECONDS
 
@@ -33,6 +34,18 @@ class LaravelEventClient:
             self.event_ingest_url.rsplit("/", 1)[0] + "/visitor-plates" if self.event_ingest_url else ""
         )
         self.api_key = str(system_settings.get("python_api_key", "")).strip()
+        self.delivery_url = durable_delivery.delivery_url(self.event_ingest_url or self.crossing_url)
+        durable_delivery.start_worker(self.delivery_url, self.api_key)
+
+    def durable(self, kind, payload, image_bytes=None, field='snapshot'):
+        if durable_delivery.configured() is None:
+            return None
+        try:
+            return durable_delivery.submit(kind, payload, self.delivery_url, self.api_key,
+                {field: image_bytes} if image_bytes else {})
+        except (ValueError, OSError, RuntimeError):
+            return {'accepted': False, 'durably_queued': False, 'created': False,
+                'message': 'Delivery could not be persisted; capture paused. Check protected delivery status.'}
 
     def integration_headers(self, include_json=False):
         """
@@ -97,6 +110,8 @@ class LaravelEventClient:
                 "message": str
             }
         """
+        if (queued := self.durable('event', payload)) is not None:
+            return queued
         if not self.event_ingest_url:
             return {
                 "accepted": False,
@@ -239,6 +254,8 @@ class LaravelEventClient:
         Phase 2: store one crossing (gate, IN / OUT / UNKNOWN, time, track ID,
         confidence, snapshot). The same external_event_key twice is one row.
         """
+        if (queued := self.durable('crossing', payload, image_bytes)) is not None:
+            return queued
         if not self.crossing_url:
             return {"accepted": False, "created": False, "message": "Laravel crossing endpoint is not configured."}
 
@@ -270,6 +287,8 @@ class LaravelEventClient:
         Phase 5: the plate vote of one no-pass crossing (plate or "unreadable",
         confidence, vote details) and the plate image.
         """
+        if (queued := self.durable('plate', payload, image_bytes, 'plate_image')) is not None:
+            return queued
         if not self.visitor_plate_url:
             return {"accepted": False, "message": "Laravel visitor plate endpoint is not configured."}
 
@@ -299,6 +318,8 @@ class LaravelEventClient:
         """
         Submit an Unregistered Visitor camera record after the RFID window expires.
         """
+        if (queued := self.durable('guest', payload, image_bytes)) is not None:
+            return queued
         if not self.guest_observation_url:
             return {
                 "accepted": False,

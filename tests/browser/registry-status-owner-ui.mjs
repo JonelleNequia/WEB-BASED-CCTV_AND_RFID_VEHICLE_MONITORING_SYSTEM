@@ -138,6 +138,7 @@ try {
     await page.locator('.toast-close').evaluateAll(nodes => nodes.forEach(node => node.click()));
     await page.screenshot({ path: path.join(screenshotDir, 'registry-desktop.png'), fullPage: true });
     const openAdd = async () => {
+        await page.locator('.toast-close').evaluateAll(nodes => nodes.forEach(node => node.click()));
         await page.locator('[data-drawer-open="add-vehicle-drawer"]').click();
         await page.waitForFunction(() => document.querySelector('#add-vehicle-drawer').classList.contains('is-open'));
     };
@@ -184,11 +185,89 @@ try {
         await row.locator('.row-menu summary').click(); await row.getByRole('menuitem', { name: 'Edit details', exact: true }).click();
         await page.locator('#edit-vehicle-drawer').waitFor({ state: 'visible' });
         check(await page.locator('#edit_owner').inputValue() === (index ? '3M & Sons, Inc.' : ''), 'Legacy owner remains readable in edit');
-        await page.locator('#edit_vehicle_type').selectOption('Bus');
+        await page.locator('#edit_vehicle_type').selectOption('Others');
+        await page.locator('#edit_vehicle_type_other').fill('Bus');
         await page.locator('[data-vehicle-form=edit] button[type=submit]').click();
         await page.getByText('LEG-' + (index + 1) + ' was updated.', { exact: true }).waitFor();
         check((await (await page.request.get(base + '/registry/vehicles/' + ids['legacy-' + index])).json()).vehicle_type === 'Bus', 'Legacy owner permits unrelated edit');
     }
+    await page.goto(base + '/registry'); await openAdd();
+    const tagNumber = page.locator('#add_tag_number');
+    const tagError = page.locator('#add_tag_number_error');
+    const scan = page.locator('#add_scan');
+    await staff.fill('Anne-Marie'); await owner.fill('Ma. José Dela Cruz');
+    await page.locator('#add_plate_number').fill('TAG-7001');
+    await page.locator('#add_vehicle_type').selectOption('Car');
+    check(!(await page.locator('#add-vehicle-drawer').innerText()).includes('RFID (optional)')
+        && await tagNumber.getAttribute('required') === null && await save.isEnabled(), 'RFID step omits Optional; a blank untagged registration remains valid');
+    await scan.fill('MANUAL-NUMBER-UID'); await scan.press('Enter');
+    await page.locator('[data-tag-picker][data-tag-optional] [data-tag-result][data-state=ok]').waitFor();
+    check(await tagNumber.getAttribute('required') !== null && await save.isDisabled(), 'Adding RFID makes Tag number required and blocks Save');
+    check((await page.locator('[data-tag-optional] [data-tag-result]').innerText()).includes('Enter its printed tag number'), 'New UID feedback requests manual number rather than promising automatic numbering');
+    for (const value of ['0', '-1', '1e3', '12/3', '123😀', '1000000', '000000000000000000001']) {
+        await tagNumber.fill(value);
+        check(await save.isDisabled() && await tagError.isVisible() && await tagNumber.getAttribute('aria-invalid') === 'true', 'Invalid Add Vehicle tag number is rejected inline: ' + value);
+    }
+    await tagNumber.evaluate(input => {
+        input.value = '000123'; input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
+    });
+    check(await tagNumber.inputValue() === '000123' && await save.isEnabled() && await tagError.isHidden(), 'Pasted number retains zeros and recovers from inline error');
+    await tagNumber.fill('invalid');
+    await tagNumber.evaluate(input => { input.value = '000123'; input.dispatchEvent(new Event('change', { bubbles: true })); });
+    check(await save.isEnabled() && await tagError.isHidden(), 'Autofill-style change validates the manually entered tag number');
+    await tagNumber.evaluate(input => input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
+    check(await save.isDisabled(), 'Tag-number IME composition blocks premature Save');
+    await tagNumber.evaluate(input => { input.value = '１２３'; input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })); });
+    check(await save.isDisabled() && await tagError.isVisible(), 'Unsupported composed tag number stays invalid');
+    await tagNumber.fill('000123');
+    await save.click(); await page.getByText('TAG-7001 was saved to the local vehicle registry.', { exact: true }).waitFor();
+    const taggedURL = await page.locator('[data-vehicle-row]').filter({ hasText: 'TAG-7001' }).getAttribute('data-vehicle-url');
+    const tagged = await (await page.request.get(taggedURL)).json();
+    check(tagged.tag.number_label === '000123' && tagged.tag.uid === 'MANUAL-NUMBER-UID'
+        && tagged.entries_today === 0 && tagged.exits_today === 0, 'Manual tag number and UID save separately without a movement');
+
+    const headers = { Accept: 'application/json', 'X-CSRF-TOKEN': await page.locator('meta[name=csrf-token]').getAttribute('content') };
+    const available = await page.request.post(base + '/rfid-inventory', { headers, data: { display_number: '000124', uid: 'EXISTING-MANUAL-UID' } });
+    assert.equal(available.status(), 201);
+    const availableTag = await available.json();
+    await page.reload(); await openAdd();
+    await staff.fill('Anne-Marie'); await owner.fill('O’Connor');
+    await page.locator('#add_plate_number').fill('TAG-7002'); await page.locator('#add_vehicle_type').selectOption('Car');
+    await page.locator('#add_available').selectOption(String(availableTag.rfid_tag_id));
+    check(await tagNumber.inputValue() === '' && await save.isDisabled(), 'Selecting existing inventory still requires manually entering its number');
+    await tagNumber.fill('000125'); await save.click();
+    await tagError.waitFor({ state: 'visible' });
+    check(await tagNumber.inputValue() === '000125' && await page.locator('#add_available').inputValue() === String(availableTag.rfid_tag_id)
+        && (await tagError.innerText()).includes('match the saved number'), 'Server rejects mismatched existing number and preserves the form for correction');
+    await tagNumber.fill('000124');
+    check(await tagError.isHidden() && await save.isEnabled(), 'Correcting existing number clears server error');
+    await save.click(); await page.getByText('TAG-7002 was saved to the local vehicle registry.', { exact: true }).waitFor();
+    const existingURL = await page.locator('[data-vehicle-row]').filter({ hasText: 'TAG-7002' }).getAttribute('data-vehicle-url');
+    check((await (await page.request.get(existingURL)).json()).tag.id === availableTag.rfid_tag_id, 'Existing numbered tag is assigned without creating another inventory record');
+    await openAdd();
+    await page.locator('#add_available').selectOption({ label: '#G-01 · LEGACY-NUMBER-UID' });
+    await tagNumber.fill('G-01'); await staff.fill('Anne-Marie'); await owner.fill('O’Connor');
+    await page.locator('#add_plate_number').fill('TAG-7003'); await page.locator('#add_vehicle_type').selectOption('Car');
+    check(await save.isEnabled() && await tagError.isHidden(), 'An unchanged existing legacy label remains valid when confirming its inventory tag');
+    await save.click(); await page.getByText('TAG-7003 was saved to the local vehicle registry.', { exact: true }).waitFor();
+    const legacyURL = await page.locator('[data-vehicle-row]').filter({ hasText: 'TAG-7003' }).getAttribute('data-vehicle-url');
+    check((await (await page.request.get(legacyURL)).json()).tag.number_label === 'G-01', 'Legacy label is assigned without renumbering or rewriting its saved text');
+    await openAdd(); await tagNumber.fill('000126');
+    check(await tagError.isVisible() && await save.isDisabled(), 'A number alone cannot fabricate an RFID assignment');
+    await tagNumber.fill(''); await scan.fill('NEW-NARROW-UID'); await scan.press('Enter');
+    await page.locator('[data-tag-optional] [data-tag-result][data-state=ok]').waitFor();
+    await tagNumber.fill('invalid');
+    for (const width of [390, 320]) {
+        await page.setViewportSize({ width, height: 844 });
+        await tagNumber.scrollIntoViewIfNeeded();
+        check(await tagError.isVisible() && await tagNumber.evaluate(input => input.getBoundingClientRect().left >= 0 && input.getBoundingClientRect().right <= innerWidth), width + 'px tag-number field and inline error remain readable');
+        await page.screenshot({ path: path.join(screenshotDir, 'add-tag-number-' + width + '.png') });
+    }
+    await page.goto(base + '/registry'); await openAdd();
+    await staff.fill('Anne-Marie'); await owner.fill('O’Connor'); await page.locator('#add_plate_number').fill('UNT-7003');
+    await page.locator('#add_vehicle_type').selectOption('Car');
+    check(await tagNumber.getAttribute('required') === null && await save.isEnabled(), 'Returning to blank RFID clears the tag-number requirement');
+    await page.locator('#add-vehicle-drawer [data-drawer-close]').last().click();
     await page.setViewportSize({ width: 768, height: 900 }); await page.goto(base + '/registry');
     check(await page.locator('#vehicle_status_filter').evaluate(node => node.clientWidth >= 140), 'Tablet filters retain readable widths');
     await page.screenshot({ path: path.join(screenshotDir, 'registry-tablet.png'), fullPage: true });

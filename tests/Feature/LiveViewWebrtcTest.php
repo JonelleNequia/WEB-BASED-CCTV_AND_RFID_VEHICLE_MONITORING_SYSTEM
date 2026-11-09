@@ -71,6 +71,14 @@ class LiveViewWebrtcTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_packaged_webrtc_listener_can_be_limited_to_loopback(): void
+    {
+        config(['monitoring.live.webrtc_host' => '127.0.0.1']);
+        app(Go2rtcService::class)->writeConfig();
+        $text = File::get(app(Go2rtcService::class)->configPath());
+        $this->assertStringContainsString('listen: "127.0.0.1:'.config('monitoring.live.webrtc_port').'"', $text);
+    }
+
     public function test_go2rtc_config_comes_from_the_gate_cameras_and_follows_changes(): void
     {
         $go2rtc = app(Go2rtcService::class);

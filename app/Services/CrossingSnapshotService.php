@@ -56,7 +56,7 @@ class CrossingSnapshotService
             $stream = fopen($image->getRealPath(), 'rb');
             try {
                 $bytes = stream_copy_to_stream($stream, $output, 10 * 1024 * 1024 + 1);
-                if ($bytes !== $image->getSize() || ! fflush($output)) {
+                if ($bytes !== $image->getSize() || ! fflush($output) || ! fsync($output)) {
                     throw new \RuntimeException('Occurrence image write failed.');
                 }
             } finally {
@@ -68,6 +68,7 @@ class CrossingSnapshotService
                 }
             }
 
+            app(DeliveryMediaJournal::class)->track(OccurrenceMedia::PREFIX.$file);
             return ['path' => OccurrenceMedia::PREFIX.$file, 'status' => 'available', 'sha256' => $sha,
                 'uploaded_at' => now()->toIso8601String()];
         } catch (\Throwable $exception) {

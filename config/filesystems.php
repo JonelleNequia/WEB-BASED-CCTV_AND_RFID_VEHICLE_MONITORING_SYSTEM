@@ -40,7 +40,9 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            // Private occurrence/historical routes enforce exact references and account state.
+            // Laravel's generic local-disk /storage/{path} route would shadow that boundary.
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],

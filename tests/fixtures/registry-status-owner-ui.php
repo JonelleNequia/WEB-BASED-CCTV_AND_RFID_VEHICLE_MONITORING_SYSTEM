@@ -2,6 +2,7 @@
 
 // The shared fixture enforces a private testing database before any mutation.
 require __DIR__.'/ui-workspace.php';
+App\Models\RfidTag::create(['uid' => 'LEGACY-NUMBER-UID', 'tag_number' => 52, 'display_number' => 'G-01', 'status' => 'available']);
 $ids = [];
 foreach (['active', 'inactive'] as $status) {
     foreach (['INSIDE', 'OUTSIDE'] as $state) {

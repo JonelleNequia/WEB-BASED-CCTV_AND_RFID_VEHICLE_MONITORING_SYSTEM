@@ -1,106 +1,44 @@
-# Windows install kit: the bundle
+# Windows D2 complete offline candidate builder
 
-`build-release.ps1` builds one ZIP with everything the gate PC needs. The
-technician installs nothing else (no XAMPP, PHP, Python or Composer), and
-the system runs offline.
+Read [OFFLINE-INSTALL.md](OFFLINE-INSTALL.md) for target installation and limits,
+and [ci/NATIVE-ACCEPTANCE.md](ci/NATIVE-ACCEPTANCE.md) for actual packaged acceptance.
+No target Git/Composer/Node/Python/PHP downloads are needed. Build machines may use
+internet and require PowerShell 7, Git, Composer/PHP, Node 22.18+, Python/pip and
+(optional, Windows only) Inno Setup 6.3+. Native acceptance is separate from build.
 
-```text
-PHILCST-VMS/
-  app/                         Laravel app (git HEAD) + vendor (composer --no-dev)
-    school-vehicle-monitoring-detector/models/   yolov8n.pt, yolov8s.pt, easyocr/*.pth,
-                                                license_plate_detector.pt, plate_ocr/*
-  runtime/php/                 PHP 8.4 NTS x64 (php-cgi.exe for FastCGI)
-  runtime/python/              embeddable Python 3.12 + all packages (requirements-windows.txt)
-  runtime/caddy/caddy.exe      web server
-  runtime/go2rtc/go2rtc.exe    live view (WebRTC)
-  runtime/nssm/nssm.exe        Windows services
-  runtime/vc_redist.x64.exe    Microsoft VC++ runtime (PHP and torch need it)
-  config/                      php.ini / Caddyfile templates (the installer fills them in)
-  BUILD-INFO.json              versions, commit, model hashes
-```
-
-## Build
-
-On Windows (or in CI, `.github/workflows/windows-kit.yml` on `windows-latest`):
+Dirty release builds are refused. Nothing is staged, committed or discarded by
+the builder. All app/build/template/lock inputs are captured into one external
+snapshot before assembly. Development snapshots include current approved-for-test
+working files and carry exact content hashes, explicitly marked NON-RELEASE.
 
 ```powershell
-pwsh build/windows/build-release.ps1
+# Non-release cross-assembly / local candidate; never operate the live install.
+pwsh build/windows/build-release.ps1 -Version 0.1.0-d2.1 -DevelopmentSnapshot -Python python3 -OutDir C:\build\candidate -CacheDir C:\build\cache
+# Windows only: add -Installer (ISCC.exe in PATH) for the EXE.
+# Release requires a CLEAN explicitly approved source commit, native checks,
+# institutional redistribution approval and a publisher certificate in the build
+# machine's CurrentUser certificate store. Private keys never enter artifacts.
+pwsh build/windows/build-release.ps1 -Version 1.0.0-rc.1 -SourceCommit FULL_SHA -Python python -RedistributionApproved -SigningCertificateThumbprint APPROVED_THUMBPRINT -Installer
 ```
 
-Output: `build/windows/dist/PHILCST-VMS-<date>-<commit>-win64.zip` and its `.sha256`.
-With `-Installer` (Windows, Inno Setup 6.3+) also
-`PHILCST-VMS-Setup-<date>-<commit>.exe`; the CI workflow builds both.
-Needs git, PHP 8.2+ with Composer, and Python 3 with pip. On macOS the same
-script builds the folder (with `pip --platform win_amd64`) to check it; the
-self-check of the Windows programs runs only on Windows.
+Default outputs are `build/windows/dist/PHILCST-VMS/`, a versioned `*-win64.zip`,
+its SHA-256 sidecar and (when native Inno is available) Setup EXE/checksum.
+Development version names include `-dev.<source-hash>`. Existing staging folders
+are refused rather than deleted. Use a new OutDir. A cross-built ZIP has native
+validation **NOT RUN**, not a Windows compatibility claim. No automatic publish.
 
-Downloads are cached in `build/windows/cache/` and **every file is checked**
-against `runtimes.json`: SHA-256 for each runtime and model, the Microsoft
-signature for the VC++ runtime (its link always serves the newest build).
-To update a runtime, change its version, URLs and hash together.
+Package contents: production app/vendor/static and built assets; PHP + DLLs;
+embeddable Python + 57 locked SHA-verified Windows distributions; deterministic
+headless cv2 payload; local YOLO/EasyOCR/plate ONNX models; Caddy/go2rtc/NSSM;
+immutable Microsoft VC++ redistributable; readiness scripts/recorded fixture;
+input/source/content manifests, dependency/license inventory and notices.
+Optional Tesseract/standalone FFmpeg/GPU capabilities are unavailable in D2.
 
-Nothing here is committed: `cache/` and `dist/` are ignored; releases go to
-GitHub Releases.
-
-## Installer (`installer/PHILCST-VMS.iss`)
-
-`PHILCST-VMS-Setup.exe` asks for admin rights once, copies the bundle to
-`C:\PHILCST-VMS` (any folder without spaces), then runs
-`app\deploy\windows\install.ps1`, which:
-
-| Step | What |
-|---|---|
-| VC++ runtime | installs `vc_redist.x64.exe` when missing |
-| Web port | 80, or 8080/8081/8090 when 80 is taken (said at the end) |
-| Config | `config\php.ini`, `config\Caddyfile` from the templates |
-| `.env` | new APP_KEY and API key, `APP_ENV=production`, `APP_DEBUG=false`, Asia/Manila; kept on a reinstall |
-| Database | migrations; fresh databases get gates/settings (`InstallSeeder`) and a protected, expiring first-admin setup code (`system:first-admin`); accounts are created only after personal password setup |
-| Caches | `storage:link`, detector settings, `go2rtc.yaml`, config/route/view cache |
-| Services (NSSM) | PHILCST-PHP1..4 (php-cgi 9001-9004), PHILCST-Web (Caddy), PHILCST-LiveView (go2rtc), PHILCST-Devices, PHILCST-Detector: automatic start, restart when they stop, rotated logs |
-| Task Scheduler | `schedule:run` every minute, `backup:run` daily at 02:00 (as SYSTEM) |
-| Firewall | private/domain networks: web port, WebRTC 8555 TCP/UDP, the bundled Python (camera/reader search). 8765 stays closed: Caddy passes `/detector/...` on for signed-in users |
-| Power | no sleep/hibernate while plugged in |
-| Optional | network set to Private; computer renamed to PHILCST-VMS (`http://philcst-vms.local`) |
-
-The last page shows the addresses to open and the location of the protected setup delivery file (never its code)
-(`config\install-result.txt`, `config\install.json`). There is no queue
-worker: the app has no queued jobs (`QUEUE_CONNECTION=sync`).
-
-The uninstaller removes the services, tasks and firewall rules and asks
-whether to delete the data (default: keep it; installing again brings it
-back). Silent: `/VERYSILENT /SUPPRESSMSGBOXES /DIR=C:\PHILCST-VMS` and
-`unins000.exe /VERYSILENT /REMOVEDATA=yes`.
-
-Scripts in `app\deploy\windows` (also in the Start Menu): `status`,
-`start-all`, `stop-all`, `restart-all`, `backup-now`, `restore`, `update`
-(backup, swap app and runtime, keep `.env`/database/storage, roll back when
-the new version does not start), `collect-logs` (secrets removed),
-`gate-kiosk-shortcut`. Tests: `pwsh tests/windows/common.tests.ps1`.
-
-## Why Caddy + php-cgi (not `php artisan serve`)
-
-- `php artisan serve` is a development server: one request at a time and
-  not meant to be exposed on a network.
-- PHP has no php-fpm on Windows. `php-cgi.exe` speaks FastCGI but handles
-  one request at a time, so the kit runs **four php-cgi services** (ports
-  9001–9004) and Caddy shares the requests between them.
-- Caddy is one signed exe without DLLs or other runtimes, its config is a
-  short text file, it keeps long connections (live view, polling) open
-  without tying up PHP, and NSSM runs it as a service. nginx would also work
-  but needs more config and does not restart workers by itself.
-- HTTP only, on the school LAN: no certificates to renew offline.
-
-## Python
-
-The embeddable Python reads only the paths in `python312._pth` (isolated
-mode): its zip, `Lib\site-packages` and the detector folder. Packages are
-the exact versions of `requirements-windows.txt` (the ones tested on the
-development Mac); the PyPI torch wheels for Windows are CPU-only.
-
-## Development (macOS)
-
-The models and go2rtc are not in git. Fetch them once (checked by SHA-256):
-
-```sh
-php artisan runtime:fetch
-```
+Runtime inputs are immutable/hash-pinned in `runtimes.json`. CPU wheel URLs/hashes
+are in `wheels-win64.json` and the install lock; the builder checks dependency
+closure and then installs only from its verified wheelhouse. VC++ additionally
+requires its Microsoft Authenticode signature on Windows, even when cached.
+The assembled boundary and extracted ZIP bytes are checked. Detached manifest
+RSA signing and EXE Authenticode signing are available; unsigned development
+artifacts are not publisher authenticated. Redistribution/model licensing and
+D4/D5 acceptance remain gates, even if a ZIP was successfully assembled.

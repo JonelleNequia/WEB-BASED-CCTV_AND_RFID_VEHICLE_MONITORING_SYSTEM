@@ -7,6 +7,7 @@ snapshots and APP_KEY (the current data is backed up first), starts again.
 param([string]$File = '', [switch]$Yes)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib\common.ps1')
+if (Test-VmsLifecycleEnabled (Get-VmsPaths $(if (Get-Variable Root -ValueOnly -ErrorAction SilentlyContinue) { $Root } else { Get-VmsRoot }))) { throw 'Uncertified legacy lifecycle path is disabled for D5A; use the authorized later subphase.' }
 $forward = @(); if ($File) { $forward += @('-File', $File) }; if ($Yes) { $forward += '-Yes' }
 Assert-VmsAdmin -ScriptPath $PSCommandPath -Arguments $forward
 $paths = Get-VmsPaths (Get-VmsRoot)

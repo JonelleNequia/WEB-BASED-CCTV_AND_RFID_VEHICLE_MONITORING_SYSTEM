@@ -33,9 +33,9 @@ class ExistingFieldValidationTest extends TestCase
 
     private function registration(array $extra = []): array
     {
-        $tag = RfidTag::query()->create(['uid' => '0000'.(RfidTag::query()->count() + 123), 'status' => RfidTag::STATUS_AVAILABLE]);
+        $tag = RfidTag::query()->create(['tag_number' => RfidTag::query()->count() + 123, 'uid' => '0000'.(RfidTag::query()->count() + 123), 'status' => RfidTag::STATUS_AVAILABLE]);
 
-        return array_replace(['rfid_tag_id' => $tag->id, 'plate_number' => 'TST-0001',
+        return array_replace(['display_number' => $tag->number_label, 'rfid_tag_id' => $tag->id, 'plate_number' => 'TST-0001',
             'registered_by' => 'Test Registrar',
             'vehicle_owner_name' => 'Ma. José Dela Cruz', 'category' => 'faculty_staff', 'vehicle_type' => 'Car'], $extra);
     }

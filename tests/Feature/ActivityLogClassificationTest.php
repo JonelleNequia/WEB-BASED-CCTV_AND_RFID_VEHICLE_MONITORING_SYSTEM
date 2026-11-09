@@ -66,9 +66,9 @@ class ActivityLogClassificationTest extends TestCase
 
     private function vehicle(string $plate = 'REG-1234', string $category = 'faculty_staff'): Vehicle
     {
-        $tag = RfidTag::query()->create(['uid' => 'CLASS-TAG-'.RfidTag::query()->count(), 'status' => 'available']);
+        $tag = RfidTag::query()->create(['uid' => 'CLASS-TAG-'.RfidTag::query()->count(), 'tag_number' => RfidTag::query()->count() + 1, 'status' => 'available']);
 
-        return app(VehicleRegistryService::class)->register(['rfid_tag_id' => $tag->id, 'plate_number' => $plate,
+        return app(VehicleRegistryService::class)->register(['display_number' => $tag->number_label, 'rfid_tag_id' => $tag->id, 'plate_number' => $plate,
             'registered_by' => 'Test Registrar',
             'vehicle_owner_name' => 'Classification Owner', 'category' => $category, 'vehicle_type' => 'Car'])->fresh();
     }

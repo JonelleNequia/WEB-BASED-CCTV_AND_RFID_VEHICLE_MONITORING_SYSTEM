@@ -110,6 +110,7 @@ class SystemResetService
      */
     public function backup(): string
     {
+        \App\Services\LegacyLifecycleGuard::reject();
         $folder = $this->backupDatabase('reset');
 
         $zip = new ZipArchive;
@@ -139,6 +140,7 @@ class SystemResetService
      */
     public function backupDatabase(string $prefix): string
     {
+        \App\Services\LegacyLifecycleGuard::reject();
         $folder = storage_path('backups/'.$prefix.'-'.now()->format('Ymd-His'));
         File::ensureDirectoryExists($folder);
 
@@ -160,6 +162,7 @@ class SystemResetService
      */
     public function reset(string $level = self::LEVEL_ACTIVITY): array
     {
+        \App\Services\LegacyLifecycleGuard::reject();
         $done = $this->plan($level);
         $tables = $this->tables($level);
 
@@ -231,6 +234,7 @@ class SystemResetService
      */
     public function resetDevices(): array
     {
+        \App\Services\LegacyLifecycleGuard::reject();
         $done = array_slice($this->plan(self::LEVEL_ACTIVITY, true), 0, 3);
         $registry = app(DeviceRegistryService::class);
 

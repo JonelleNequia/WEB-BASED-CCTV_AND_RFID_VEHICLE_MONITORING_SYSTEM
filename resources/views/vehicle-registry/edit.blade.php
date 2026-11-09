@@ -11,7 +11,7 @@
         @php($categorySelectValue = \App\Support\VehicleCategory::normalize($selectedCategory))
         @php($selectedVehicleType = old('vehicle_type', $vehicle->vehicle_type))
         @php($vehicleTypeOtherValue = old('vehicle_type_other', ! in_array($selectedVehicleType, $vehicleTypes, true) && $selectedVehicleType !== 'Others' ? $selectedVehicleType : '') ?? '')
-        @php($vehicleTypeSelectValue = $vehicleTypeOtherValue !== '' ? 'Others' : $selectedVehicleType)
+        @php($vehicleTypeSelectValue = in_array($selectedVehicleType, $vehicleTypes, true) ? $selectedVehicleType : 'Others')
         @php($selectedRfidTagId = (string) old('rfid_tag_id', $vehicle->rfid_tag_id))
         <form method="POST" action="{{ route('vehicle-registry.update', ['vehicle' => $vehicle->getKey()]) }}" class="stack-form" data-rfid-registration-form>
             @csrf
@@ -85,23 +85,25 @@
                         @endforeach
                         <option value="Others" @selected($vehicleTypeSelectValue === 'Others')>Others</option>
                     </select>
+                    <label for="vehicle_type_other" data-type-specify-label @if ($vehicleTypeSelectValue !== 'Others') hidden @endif>Specify vehicle type</label>
                     <input
                         id="vehicle_type_other"
-                        aria-label="Custom vehicle type"
+                        aria-label="Specify vehicle type"
+                        aria-describedby="vehicle_type_other_error"
                         type="text"
                         name="vehicle_type_other"
                         value="{{ $vehicleTypeOtherValue }}"
-                        placeholder="Enter custom vehicle type"
+                        placeholder="Specify vehicle type"
                         maxlength="50"
                         data-other-field
+                        data-registration-type-other data-type-legacy="{{ $vehicle->vehicle_type }}"
+                        @required($vehicleTypeSelectValue === 'Others')
                         @if ($vehicleTypeSelectValue !== 'Others') hidden @endif
                     >
                     @error('vehicle_type')
                         <span class="field-error">{{ $message }}</span>
                     @enderror
-                    @error('vehicle_type_other')
-                        <span class="field-error">{{ $message }}</span>
-                    @enderror
+                    <span id="vehicle_type_other_error" class="field-error" data-type-specify-error aria-live="polite" @if (!$errors->has('vehicle_type_other')) hidden @endif>{{ $errors->first('vehicle_type_other') }}</span>
                 </div>
             </div>
 
@@ -114,25 +116,5 @@
 @endsection
 
 @push('scripts')
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            document.querySelectorAll('[data-other-select]').forEach((select) => {
-                const field = document.getElementById(select.dataset.otherTarget);
-                const otherValues = ['others', 'Others'];
-
-                if (!field) {
-                    return;
-                }
-
-                const syncOtherField = () => {
-                    const show = otherValues.includes(select.value);
-                    field.hidden = !show;
-                    field.toggleAttribute('required', show);
-                };
-
-                select.addEventListener('change', syncOtherField);
-                syncOtherField();
-            });
-        });
-    </script>
+    <script src="{{ asset('js/registration-type.js') }}?v={{ filemtime(public_path('js/registration-type.js')) }}"></script>
 @endpush

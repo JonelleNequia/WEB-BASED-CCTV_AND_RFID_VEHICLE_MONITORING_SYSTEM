@@ -23,13 +23,8 @@ if (-not $Gate) {
 $selected = $gates | Where-Object { $_.code -eq $Gate } | Select-Object -First 1
 if (-not $selected) { throw "No gate '$Gate'." }
 
-if (-not $Server) {
-    $suggested = @(Get-VmsLanAddresses) | Select-Object -First 1
-    if (-not $suggested) { $suggested = $env:COMPUTERNAME.ToLowerInvariant() + '.local' }
-    $typed = Read-Host "Address of this server as the gate PC reaches it [$suggested]"
-    $Server = if ($typed) { $typed } else { $suggested }
-}
-$url = (Format-VmsUrl $Server $port).TrimEnd('/') + $selected.kiosk_path
+if ($Server -and $Server -ne 'philcst.vms.internal') { throw 'Enroll this client with Connect to PHILCST Server first. Kiosks use the canonical HTTPS name.' }
+$url = 'https://philcst.vms.internal' + $selected.kiosk_path
 
 $chrome = @(
     (Join-VmsPath $env:ProgramFiles 'Google' 'Chrome' 'Application' 'chrome.exe'),

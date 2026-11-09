@@ -16,7 +16,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->append(\App\Http\Middleware\DiscardVehicleColor::class);
         $middleware->append(\App\Http\Middleware\NormalizePlateInput::class);
         $middleware->trimStrings(except: ['password', 'password_confirmation', 'current_password', 'code', 'registered_by', 'plate_number', 'plate_text', 'plate']);
-        if (env('APP_ENV') === 'local') {
+        $middleware->prepend(\App\Http\Middleware\EnforceDeploymentOrigin::class);
+        $middleware->prepend(\App\Http\Middleware\LifecycleWriterBarrier::class);
+        if (env('APP_ENV') === 'local' && ! env('PHILCST_NAMED_HTTPS', false)) {
             $middleware->trustProxies(at: '*');
         }
 

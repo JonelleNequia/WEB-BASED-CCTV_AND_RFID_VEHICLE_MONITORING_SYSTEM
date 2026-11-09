@@ -8,6 +8,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlparse, urlunparse
 
+import durable_delivery
+if __name__ == '__main__' and not durable_delivery.admission():
+    print('Maintenance persists; standalone detector execution is paused.',flush=True)
+    raise SystemExit(75)
+
 import cv2
 import numpy as np
 
@@ -193,6 +198,8 @@ class MjpegStreamHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def stream_role(self, role):
+        if os.environ.get('PHILCST_PACKAGED_OFFLINE') == '1':
+            self.connection.settimeout(2.0)  # Bound a stalled socket write as well as the viewer lease.
         self.send_response(200)
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
@@ -211,13 +218,19 @@ class MjpegStreamHandler(BaseHTTPRequestHandler):
                 STREAM_CLIENTS[role] -= 1
 
     def _send_frames(self, role, last_frame_id):
-        while True:
+        # Packaged D4 streams periodically reconnect through authenticated HTTPS.
+        # This server-side bound applies even if a browser disables its timers.
+        deadline = time.monotonic() + 30 if os.environ.get('PHILCST_PACKAGED_OFFLINE') == '1' else float('inf')
+        while time.monotonic() < deadline:
             with STREAM_CONDITION:
                 STREAM_CONDITION.wait_for(
                     lambda: STREAM_FRAMES.get(role) is not None and id(STREAM_FRAMES.get(role)) != last_frame_id,
                     timeout=1.0,
                 )
                 frame = STREAM_FRAMES.get(role)
+
+            if time.monotonic() >= deadline:
+                return
 
             if frame is None:
                 continue
@@ -232,7 +245,7 @@ class MjpegStreamHandler(BaseHTTPRequestHandler):
                 self.wfile.write(frame)
                 self.wfile.write(b"\r\n")
                 self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
+            except OSError:
                 return
             metrics.rate(role, "stream_sent")
             if frame_time:
@@ -1237,9 +1250,13 @@ def status_payload(runtime_config, camera_states, detector_models, service_runni
     Build the combined detector status JSON for Laravel.
     """
     station_activity = station_activity_status()
+    delivery = durable_delivery.configured().status() if durable_delivery.configured() else None
+    if delivery and not delivery['delivery_ready']:
+        service_message += f" Delivery needs attention: {delivery['counts'].get('dead',0)} dead; {delivery['counts'].get('pending',0)} pending."
     payload = {
         "service_running": service_running,
         "service_message": service_message,
+        "delivery": delivery,
         "updated_at": datetime.now().astimezone().isoformat(),
         "detector_model_path": MODEL_PATH,
         # The code this detector loaded (Laravel compares it with the files on disk).
@@ -2328,7 +2345,7 @@ def second_pass_model(model_path):
     if _SECOND_PASS["path"] != str(path):
         from ultralytics import YOLO
 
-        model = YOLO(str(path))
+        model = YOLO(offline_model_path(str(path)))
         _SECOND_PASS.update({"path": str(path), "model": model, "labels": resolve_allowed_vehicle_classes(model)})
     return _SECOND_PASS["model"], _SECOND_PASS["labels"]
 
@@ -2547,11 +2564,6 @@ def record_pass(role, state, track_id, window, rfid_status, laravel_client):
         payload["detection_metadata"]["picture"] = picture_details(window, snapshot_frame, snapshot_box)
         direction = payload["direction"]
         window["recorded_direction"] = direction
-        state["direction_counts"][direction] = state["direction_counts"].get(direction, 0) + 1
-        state["recent_records"].append({"track_id": window.get("track_id", track_id), "direction": direction, "at": time.monotonic()})
-        del state["recent_records"][:-5]
-        state["passes_recorded"] += 1
-        state["crossings_logged"] += 1
 
     print(f"{role} pass track {window.get('track_id', track_id)}: Recorded {direction} ({payload['direction_reason']}), "
           f"{payload['detected_vehicle_type']} ({type_decision['rule']}), RFID {rfid_status}", flush=True)
@@ -2561,8 +2573,17 @@ def record_pass(role, state, track_id, window, rfid_status, laravel_client):
     if submit is None:
         return
     result = submit(payload, snapshot["bytes"] if snapshot else None, snapshot["filename"] if snapshot else None)
+    if result.get("accepted") or result.get("durably_queued"):
+        with state["lock"]:
+            if not window.get("delivery_recorded"):
+                state["direction_counts"][direction] = state["direction_counts"].get(direction, 0) + 1
+                state["recent_records"].append({"track_id": window.get("track_id", track_id), "direction": direction, "at": time.monotonic()})
+                del state["recent_records"][:-5]
+                state["passes_recorded"] += 1
+                state["crossings_logged"] += 1
+                window["delivery_recorded"] = True
 
-    if not result.get("accepted"):
+    if not result.get("accepted") and not result.get("queued"):
         with state["lock"]:
             state["last_error"] = result.get("message", "Vehicle record could not be saved.")
     elif (result.get("body") or {}).get("image_update") == "failed":
@@ -2604,7 +2625,7 @@ def update_record_after_left_zone(role, state, track_id, window, matched, larave
     submit = getattr(laravel_client, "submit_crossing", None)
     if submit is not None:
         result = submit(payload, snapshot["bytes"] if snapshot else None, snapshot["filename"] if snapshot else None)
-        if not result.get("accepted") or (result.get("body") or {}).get("image_update") == "failed":
+        if (not result.get("accepted") and not result.get("queued")) or (result.get("body") or {}).get("image_update") == "failed":
             with state["lock"]:
                 state["last_error"] = "The occurrence image update was not saved; the existing record is retained."
         else:
@@ -2620,6 +2641,7 @@ def update_record_after_left_zone(role, state, track_id, window, matched, larave
         {
             "external_event_key": window["event_key"],
             "camera_role": role,
+            "camera_id": window.get("camera_id"),
             "event_time": window["event_time"],
             **review_submission(vote, analysis_details),
             "detected_vehicle_type": payload["detected_vehicle_type"],
@@ -2840,7 +2862,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
         state["track_overlays"][track_id] = initial_result.get("overlay") or state["track_overlays"].get(track_id) or default_overlay()
         remember_recent_resolution_locked(state, track_id, window_payload.get("live_xyxy", window_payload["xyxy"]), state["track_overlays"][track_id], time.monotonic())
 
-        if initial_result.get("accepted"):
+        if initial_result.get("accepted") or initial_result.get("durably_queued"):
             if initial_result.get("created"):
                 state["crossings_logged"] += 1
             state["last_error"] = ""
@@ -2873,6 +2895,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             {
                 "external_event_key": window_payload["event_key"],
                 "camera_role": role,
+                "camera_id": window_payload["camera_id"],
                 "event_time": window_payload["event_time"],
                 **submission,
                 "detected_vehicle_type": window_payload["detected_vehicle_type"],
@@ -2880,7 +2903,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
             plate_image["bytes"] if plate_image else None,
             plate_image["filename"] if plate_image else None,
         )
-        if not visitor_result.get("accepted"):
+        if not visitor_result.get("accepted") and not visitor_result.get("queued"):
             with state["lock"]:
                 state["last_error"] = visitor_result.get("message", "Visitor plate could not be saved.")
 
@@ -2902,7 +2925,7 @@ def submit_guest_observation_for_window(role, state, track_id, laravel_client):
         state["track_overlays"][track_id] = result.get("overlay") or state["track_overlays"].get(track_id) or default_overlay()
         remember_recent_resolution_locked(state, track_id, window_payload.get("live_xyxy", window_payload["xyxy"]), state["track_overlays"][track_id], time.monotonic())
 
-        if not result.get("accepted"):
+        if not result.get("accepted") and not result.get("queued"):
             state["last_error"] = result.get("message", "Unregistered visitor record could not be saved.")
 
 
@@ -3489,7 +3512,7 @@ def build_models():
     detector_models = {}
 
     for role in camera_roles(load_runtime_config()):
-        model = YOLO(MODEL_PATH)
+        model = YOLO(offline_model_path(MODEL_PATH))
         vehicle_labels = resolve_allowed_vehicle_classes(model)
         detector_models[role] = {
             "model": model,
@@ -3528,7 +3551,7 @@ def ensure_detector_model_loaded(role, state, model_info):
         from ultralytics import YOLO
 
         limit_inference_threads()
-        model = YOLO(MODEL_PATH)
+        model = YOLO(offline_model_path(MODEL_PATH))
         vehicle_labels = resolve_allowed_vehicle_classes(model)
     except Exception as error:
         state["detection_ready"] = False
@@ -3717,10 +3740,19 @@ def next_detection_frame(state, min_interval=None):
 _YOLO_DEVICE = {"resolved": None}
 
 
+def offline_model_path(path):
+    """Fail before Ultralytics can download a missing packaged model."""
+    if os.environ.get("PHILCST_PACKAGED_OFFLINE") == "1" and not Path(path).is_file():
+        raise FileNotFoundError(f"Packaged model missing: {Path(path).name}; re-extract the verified offline package. No download attempted.")
+    return path
+
+
 def yolo_device(setting):
     """
     auto: NVIDIA GPU (cuda), then Apple Silicon GPU (mps), else CPU (e.g. Windows without CUDA).
     """
+    if os.environ.get("PHILCST_PACKAGED_CPU") == "1":
+        return "cpu"
     if setting and setting != "auto":
         return setting
     if _YOLO_DEVICE["resolved"] is None:
@@ -3961,6 +3993,10 @@ def camera_detection_worker(role, state, model_info, stop_event):
     Run YOLO tracking in a separate worker so live MJPEG publishing stays smooth.
     """
     while not stop_event.is_set():
+        if not durable_delivery.can_capture():
+            with state['lock']:state['last_error']='Capture paused: maintenance or delivery capacity. Persisted work retained.'
+            stop_event.wait(.5)
+            continue
         # Phase 1: removed the "no Station page open" gate. Detection runs
         # whenever the detector is on.
         perf = performance_settings(load_runtime_config())
@@ -4073,6 +4109,7 @@ def run_detector_loop():
     until its code is updated on disk: then it stops so that the new code
     starts (Laravel starts it again; on Windows the service does).
     """
+    durable_delivery.wait_for_resume()
     ensure_output_directories()
     stream_server = start_stream_server()
 
@@ -4219,6 +4256,9 @@ def main():
         raise SystemExit(video_test.run(args))
     run_detector_loop()
 
+
+for _delivery_work in ('record_pass','update_record_after_left_zone','submit_guest_observation_for_window'):
+    globals()[_delivery_work] = durable_delivery.capture_work(globals()[_delivery_work])
 
 if __name__ == "__main__":
     main()

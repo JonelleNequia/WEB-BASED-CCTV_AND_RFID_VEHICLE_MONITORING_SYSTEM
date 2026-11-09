@@ -1,0 +1,10 @@
+{
+  "schema": "philcst.update-build-policy.v1",
+  "product": "philcst-vms",
+  "status": "D3 preparation only; no upgrade origin is authorized until D5 review",
+  "platforms": {
+    "windows-x64": {"supported_upgrade_origins": [], "schema_accepted": [], "runtime_accepted": []},
+    "macos-x86_64": {"supported_upgrade_origins": [], "schema_accepted": [], "runtime_accepted": []},
+    "macos-arm64": {"supported_upgrade_origins": [], "schema_accepted": [], "runtime_accepted": []}
+  }
+}

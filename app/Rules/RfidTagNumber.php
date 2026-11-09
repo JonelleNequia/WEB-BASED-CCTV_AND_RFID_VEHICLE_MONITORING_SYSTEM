@@ -14,6 +14,9 @@ class RfidTagNumber implements ValidationRule
 
     public const MESSAGE = 'Enter a tag number from 1 to 999999 using digits only. Leading zeros are kept, up to 20 digits in total.';
 
+    /** Registration may confirm an existing inventory label without relabelling it. */
+    public function __construct(private readonly ?string $existingLabel = null) {}
+
     public static function normalize(mixed $value): ?string
     {
         return is_string($value) || is_int($value) ? trim((string) $value) : null;
@@ -32,6 +35,9 @@ class RfidTagNumber implements ValidationRule
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
+        if (filled($this->existingLabel) && self::normalize($value) === $this->existingLabel) {
+            return;
+        }
         if (! self::valid($value)) {
             $fail(self::MESSAGE);
         }

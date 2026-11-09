@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "upstream_version": "1.9.14",
+  "version": "1.9.14-philcst.lease1",
+  "source": {
+    "url": "https://codeload.github.com/AlexxIT/go2rtc/tar.gz/b5948cfb25404cc5cb37b166ecaa2dca20b11d4b",
+    "commit": "b5948cfb25404cc5cb37b166ecaa2dca20b11d4b",
+    "sha256": "78aa79bcedec8f155e4060a379613979b0b3ee48ff62ee5164bafc0ac6532386"
+  },
+  "patch_sha256": "ee2c833264abf5761803b8a3c34858f4c22667219235bce3d3759849c0cc3ef6",
+  "go_version": "go1.27.3",
+  "toolchains": {
+    "darwin-amd64": {
+      "url": "https://go.dev/dl/go1.27.3.darwin-amd64.tar.gz",
+      "sha256": "b6f8e931e4ab497fcde6da8ae4499a58f9d258e55c8a80824a516eae5950a750"
+    },
+    "darwin-arm64": {
+      "url": "https://go.dev/dl/go1.27.3.darwin-arm64.tar.gz",
+      "sha256": "dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2"
+    },
+    "windows-amd64": {
+      "url": "https://go.dev/dl/go1.27.3.windows-amd64.zip",
+      "sha256": "f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff"
+    }
+  },
+  "viewer_lease_seconds": 30
+}

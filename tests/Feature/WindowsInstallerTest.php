@@ -101,14 +101,17 @@ class WindowsInstallerTest extends TestCase
         $iss = File::get(base_path('build/windows/installer/PHILCST-VMS.iss'));
 
         foreach (['PrivilegesRequired=admin', 'DefaultDirName=C:\PHILCST-VMS', 'ArchitecturesInstallIn64BitMode=x64compatible', 'MinVersion=10.0',
-            'OutputBaseFilename=PHILCST-VMS-Setup-{#AppVersion}', '\app\deploy\windows\install.ps1', '\app\deploy\windows\uninstall.ps1',
-            '{param:REMOVEDATA|no}', 'MB_DEFBUTTON2', "' -ComputerName PHILCST-VMS'", "' -SetNetworkPrivate'", 'install-result.txt'] as $part) {
+            'OutputBaseFilename=PHILCST-VMS-Setup-{#AppVersion}', '\app\deploy\windows\install-package.ps1', '\app\deploy\windows\uninstall.ps1',
+            '{param:REMOVEDATA|no}', 'MB_DEFBUTTON2', 'preflight.ps1', '-AllowDevelopmentCandidate', '-ExpectedPublisherThumbprint'] as $part) {
             $this->assertStringContainsString($part, $iss);
         }
 
+        $this->assertStringNotContainsString('-ComputerName PHILCST-VMS', $iss);
+        $this->assertStringNotContainsString('-SetNetworkPrivate', $iss);
+
         // Every Start Menu entry is a script that exists, and each .bat runs its .ps1.
         preg_match_all('#\\\\app\\\\deploy\\\\windows\\\\([a-z-]+)\.bat#', $iss, $matches);
-        $this->assertCount(9, array_unique($matches[1]));
+        $this->assertCount(3, array_unique($matches[1]));
         foreach (array_unique($matches[1]) as $script) {
             $this->assertFileExists(base_path("deploy/windows/$script.ps1"));
             $this->assertStringContainsString("%~dp0$script.ps1", File::get(base_path("deploy/windows/$script.bat")));

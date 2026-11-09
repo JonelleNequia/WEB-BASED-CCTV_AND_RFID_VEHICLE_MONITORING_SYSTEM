@@ -106,7 +106,7 @@ class RfidStickerNumberTest extends TestCase
         $registry = app(VehicleRegistryService::class);
         $tag = $registry->registerRfidTag(['display_number' => '000123', 'uid' => '0000EPC789']);
         $vehicle = $registry->register(['plate_number' => '395ISX', 'vehicle_type' => 'Car', 'vehicle_owner_name' => 'Fixture Owner',
-            'registered_by' => 'Fixture Staff', 'rfid_tag_id' => $tag->id]);
+            'registered_by' => 'Fixture Staff', 'rfid_tag_id' => $tag->id, 'display_number' => '000123']);
         $this->assertSame($tag->id, $vehicle->rfid_tag_id);
         $this->assertSame('0000EPC789', $vehicle->rfid_tag_uid);
         $this->assertNull(RfidTag::findUid('000123'));

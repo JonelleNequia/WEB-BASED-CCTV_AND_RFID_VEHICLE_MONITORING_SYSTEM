@@ -6,7 +6,7 @@ $registry = app(App\Services\VehicleRegistryService::class);
 $currentTime = now();
 Illuminate\Support\Carbon::setTestNow($currentTime->copy()->subHour());
 $registry->register(['plate_number' => 'RFV-1001', 'vehicle_type' => 'Car', 'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Fixture Registrar',
-    'rfid_uid' => 'SNAPSHOT-BROWSER-UID', 'auto_register_tag' => true]);
+    'rfid_uid' => 'SNAPSHOT-BROWSER-UID', 'display_number' => '1', 'auto_register_tag' => true]);
 $registry->register(['plate_number' => '395ISX', 'vehicle_type' => 'E-bike', 'vehicle_owner_name' => 'Fixture Owner', 'registered_by' => 'Fixture Registrar']);
 Illuminate\Support\Carbon::setTestNow($currentTime);
 $ids = [];

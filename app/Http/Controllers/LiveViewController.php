@@ -26,6 +26,11 @@ class LiveViewController extends Controller
         $code = Gate::resolveCode($gate) ?? abort(404);
         $offer = (string) $request->getContent();
         abort_unless(str_starts_with(ltrim($offer), 'v=0'), 422, 'A WebRTC offer is expected.');
+        if (config('deployment.named_https')) {
+            abort_unless(strlen($offer) <= 65536 && preg_match('/^m=video /m', $offer)
+                && preg_match('/^a=recvonly\r?$/m', $offer)
+                && ! preg_match('/^a=(?:sendonly|sendrecv)\r?$/m', $offer), 422, 'A receive-only video offer is required.');
+        }
 
         $go2rtc->ensureRunning();
         try {
@@ -42,7 +47,7 @@ class LiveViewController extends Controller
     public function hls(Request $request, string $file): Response
     {
         abort_unless(in_array($file, self::HLS_FILES, true), 404);
-        $query = $request->query();
+        $query = $request->only(['src', 'id']);
         if ($request->has('src')) {
             $gate = Gate::resolveCode((string) $request->query('src')) ?? abort(404);
             // Shared camera work: the gate plays its camera's one stream.
@@ -55,7 +60,18 @@ class LiveViewController extends Controller
             return response('The live view is not available right now.', 503);
         }
 
-        return response($upstream->body(), $upstream->status(), [
+        $body = $upstream->body();
+        // Never hand a browser an upstream origin, credentials or a raw service URL.
+        if (str_ends_with($file, '.m3u8') && $upstream->successful()) {
+            foreach (explode("\n", $body) as $line) {
+                if (($line !== '' && ! str_starts_with($line, '#') && preg_match('~(?:[a-z][a-z0-9+.-]*:|//|\.\.|\\\\)~i', $line))
+                    || preg_match('~URI=["\'](?:[a-z][a-z0-9+.-]*:|//|/|.*\.\.)~i', $line)) {
+                    return response('The live playlist contains an unsupported media address.', 502);
+                }
+            }
+        }
+
+        return response($body, $upstream->status(), [
             'Content-Type' => $upstream->header('Content-Type') ?: 'application/octet-stream',
             'Cache-Control' => 'no-store',
         ]);

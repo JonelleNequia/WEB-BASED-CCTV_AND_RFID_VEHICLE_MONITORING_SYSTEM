@@ -53,6 +53,7 @@ from logging.handlers import RotatingFileHandler
 
 import psutil
 import requests
+import durable_delivery
 
 from devices import netinfo, uhf
 from devices.paths import (
@@ -109,8 +110,16 @@ def log(message):
     logger.info(message)
 
 
+@durable_delivery.capture_work(tuple_result=True)
 def post_scan(result, runtime):
     app = runtime.get("app") or {}
+    if durable_delivery.configured() is not None:
+        result.setdefault('event_time',(result.get('scan') or {}).get('finished_at') or (result.get('scan') or {}).get('completed_at') or utc_now())
+        payload=dict(result)
+        try:
+            saved=durable_delivery.submit('devices',payload,durable_delivery.delivery_url(app.get('devices_url','')),app.get('api_key',''))
+            return bool(saved.get('accepted') or saved.get('durably_queued')),None
+        except (OSError,ValueError,RuntimeError):return False,'Device result could not be persisted; check delivery status.'
     url = app.get("devices_url")
     if not url:
         return False, "Laravel devices URL is not configured yet."
@@ -533,6 +542,7 @@ class DeviceService:
             }
 
         write_json_atomic(STATUS_PATH, {
+            'delivery': durable_delivery.configured().status() if durable_delivery.configured() else None,
             "service_running": True,
             "updated_at": utc_now(),
             "pid": os.getpid(),
@@ -568,6 +578,7 @@ class DeviceService:
 
     # -- main loop ------------------------------------------------------
     def run(self):
+        durable_delivery.wait_for_resume()
         self.poster.start()
         for link in self.links.values():
             link.start()
@@ -583,6 +594,7 @@ class DeviceService:
         last_network_check = last_status = last_post_retry = 0.0
 
         while True:
+            durable_delivery.wait_for_resume()
             now = time.monotonic()
             self.reload_runtime()
 
@@ -989,6 +1001,9 @@ def main():
     parser.add_argument("--transport", choices=["tcp", "udp"], default="tcp")
     parser.add_argument("--seconds", type=int, default=30)
     args = parser.parse_args()
+    if not durable_delivery.admission():
+        print('Maintenance persists; standalone device writers are paused. Use the owned resume control.',flush=True)
+        return 75
 
     # Diagnostics print to the console only (they may run with sudo, and a
     # root-owned log file would block the background service).
