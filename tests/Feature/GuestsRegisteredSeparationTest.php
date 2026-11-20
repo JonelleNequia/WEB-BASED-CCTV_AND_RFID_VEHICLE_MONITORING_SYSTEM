@@ -77,7 +77,7 @@ class GuestsRegisteredSeparationTest extends TestCase
         }
     }
 
-    public function test_untagged_registry_vehicle_is_registered_after_actual_plate_confirmation_and_stays_out_of_guests(): void
+    public function test_untagged_registry_vehicle_is_registered_automatically_and_stays_out_of_guests(): void
     {
         $vehicle = $this->register('395ISX');
         $this->assertNull($vehicle->rfid_tag_id);
@@ -94,8 +94,9 @@ class GuestsRegisteredSeparationTest extends TestCase
             'plate_image' => UploadedFile::fake()->image('plate.jpg'),
         ])->assertOk();
         $record = VisitorRecord::where('external_event_key', 'separation-real-path')->sole();
-        $this->assertSame('review', $record->registration_status);
-        $this->get(route('visitors.index', ['tab' => 'review']))->assertOk()->assertSee('395ISX');
+        $this->assertSame('registered', $record->registration_status);
+        $this->assertNull($record->reviewed_at);
+        $this->assertFalse(VisitorRecord::needsReview()->whereKey($record->id)->exists());
         $identity = $record->only(['id', 'external_event_key', 'seen_at', 'gate', 'direction', 'snapshot_path', 'plate_image_path']);
         $url = route('visitors.records.review', $record);
         $this->patchJson($url, ['action' => 'correct_plate', 'plate' => '395ISX'])->assertOk()->assertJsonPath('registration_status', 'registered');

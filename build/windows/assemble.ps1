@@ -74,6 +74,7 @@ Move-Item (Join-Path $stage 'runtime/go2rtc/GO2RTC-SOURCE-NOTICES') (Join-Path $
 $manifest.runtimes.go2rtc | Add-Member -NotePropertyName packaged_derivative -NotePropertyValue (Get-Content (Join-Path $stage 'GO2RTC-SOURCE-INFO.json') -Raw | ConvertFrom-Json)
 Copy-Item (Join-Path $SourceRoot 'deploy/network/NETWORK-SETUP.md') (Join-Path $stage 'NETWORK-SETUP.md')
 Copy-Item (Join-Path $SourceRoot 'deploy/lifecycle/MAINTENANCE.md') (Join-Path $stage 'MAINTENANCE.md')
+Copy-Item (Join-Path $SourceRoot 'deploy/lifecycle/RECOVERY.md') (Join-Path $stage 'RECOVERY.md')
 Copy-Item (Join-Path $SourceRoot 'deploy/clients') (Join-Path $stage 'Connect-to-Server') -Recurse
 $wheelhouse = Join-Path $CacheDir ('wheelhouse-' + (Get-FileHash (Join-Path $PSScriptRoot 'wheels-win64.json')).Hash.Substring(0,12))
 Run-Python @((Join-Path $PSScriptRoot 'fetch-wheels.py'), (Join-Path $PSScriptRoot 'wheels-win64.json'), $wheelhouse)

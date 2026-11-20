@@ -2,116 +2,79 @@
 
 namespace Tests\Feature;
 
-use App\Models\VehicleCrossing;
 use App\Services\BackupService;
-use App\Support\CameraFiles;
-use Database\Seeders\InstallSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
 
-/**
- * Windows install kit, Phase 3: backup:run / backup:restore on a real
- * SQLite file (VACUUM INTO and the file swap need one; no RefreshDatabase).
- */
+/** Legacy APIs must not bypass the external owned D5B controller. */
 class BackupRestoreTest extends TestCase
 {
-    protected string $work;
+    use RefreshDatabase;
 
-    protected function setUp(): void
+    public function test_legacy_commands_refuse_even_force_without_mutating_records_or_environment(): void
     {
-        parent::setUp();
-
-        $this->work = sys_get_temp_dir().'/vms-backup-test-'.uniqid();
-        File::ensureDirectoryExists($this->work);
-        touch($this->work.'/database.sqlite');
-        config(['database.connections.sqlite.database' => $this->work.'/database.sqlite']);
-        DB::purge('sqlite');
-        $this->artisan('migrate', ['--force' => true])->assertSuccessful();
-        $this->seed(InstallSeeder::class);
-        // Restoring the APP_KEY writes .env: this test's own, never the project's.
-        File::put($this->work.'/.env', "APP_NAME=x\nAPP_KEY=base64:current\n");
-        $this->app->useEnvironmentPath($this->work);
+        $path = sys_get_temp_dir().'/d5b-legacy-'.bin2hex(random_bytes(8));
+        File::ensureDirectoryExists($path);
+        File::put($path.'/.env', 'SYNTHETIC_SECRET=retained');
+        $this->app->useEnvironmentPath($path);
+        try {
+            $before = DB::table('migrations')->get()->toJson();
+            $this->artisan('backup:run', ['--to' => $path])->expectsOutputToContain('D5B')->assertFailed();
+            $this->artisan('backup:restore', ['file' => $path.'/incoming.zip', '--force' => true, '--no-safety-backup' => true])
+                ->expectsOutputToContain('D5B')->assertFailed();
+            $this->assertSame($before, DB::table('migrations')->get()->toJson());
+            $this->assertSame('SYNTHETIC_SECRET=retained', File::get($path.'/.env'));
+            $this->assertSame(['.env'], array_map(fn ($file) => $file->getFilename(), File::allFiles($path, true)));
+        } finally { File::deleteDirectory($path); }
     }
 
-    protected function tearDown(): void
+    public function test_direct_service_call_cannot_run_the_old_restore_or_backup(): void
     {
-        File::deleteDirectory($this->work);
-        File::deleteDirectory(CameraFiles::path('frames'));
-
-        parent::tearDown();
-    }
-
-    public function test_a_backup_restores_the_database_snapshots_and_app_key(): void
-    {
-        $work = $this->work;
-        $privateFile = '11111111-1111-4111-8111-111111111111.jpg';
-        \Illuminate\Support\Facades\Storage::disk('occurrences')->put($privateFile, 'private occurrence picture');
-        VehicleCrossing::query()->create(['gate' => 'gate-1', 'direction' => 'IN', 'crossed_at' => now(), 'external_event_key' => 'kept-1',
-            'snapshot_path' => \App\Support\OccurrenceMedia::PREFIX.$privateFile]);
-        File::ensureDirectoryExists(CameraFiles::path('frames'));
-        File::put(CameraFiles::path('frames/gate-1_latest_frame.jpg'), 'picture');
-        config(['app.key' => 'base64:from-the-backup']);
-
-        $this->artisan('backup:run', ['--to' => $work.'/backups'])->assertSuccessful();
-        $zip = app(BackupService::class)->list($work.'/backups')[0]['path'];
-        $this->assertMatchesRegularExpression('/PHILCST-backup-\d{8}-\d{6}\.zip$/', $zip);
-
-        // Things change (or a new PC with a new key), then the backup comes back.
-        VehicleCrossing::query()->delete();
-        \Illuminate\Support\Facades\Storage::disk('occurrences')->put($privateFile, 'changed');
-        File::put(CameraFiles::path('frames/gate-1_latest_frame.jpg'), 'changed');
-        config(['app.key' => 'base64:current']);
-
-        $this->artisan('backup:restore', ['file' => $zip, '--force' => true, '--no-safety-backup' => true])
-            ->expectsOutputToContain('APP_KEY restored')
-            ->assertSuccessful();
-
-        DB::purge('sqlite');
-        $this->assertSame(['kept-1'], VehicleCrossing::query()->pluck('external_event_key')->all());
-        $this->assertSame('picture', File::get(CameraFiles::path('frames/gate-1_latest_frame.jpg')));
-        $this->assertSame('private occurrence picture', \Illuminate\Support\Facades\Storage::disk('occurrences')->get($privateFile));
-        $this->assertStringContainsString('APP_KEY=base64:from-the-backup', File::get($work.'/.env'));
-        $this->assertStringContainsString('APP_NAME=x', File::get($work.'/.env'));
-
-        $this->artisan('backup:restore', ['file' => __FILE__, '--force' => true])->assertFailed();
-    }
-
-    public function test_backups_retain_deprecated_color_columns_and_historical_relationships(): void
-    {
-        $event = \App\Models\VehicleEvent::query()->create([
-            'event_type' => 'ENTRY', 'event_time' => now(), 'vehicle_type' => 'Car', 'vehicle_color' => 'Legacy event color',
-            'detection_metadata_json' => ['vehicle_color' => 'Legacy metadata color'],
-        ]);
-        $session = \App\Models\ActiveSession::query()->create([
-            'entry_event_id' => $event->id, 'entry_time' => now(), 'status' => 'open', 'vehicle_color' => 'Legacy session color',
-        ]);
-        $profile = \App\Models\PlateProfile::query()->create([
-            'plate_key' => 'LEG1234', 'plate_number' => 'LEG 1234', 'vehicle_color' => 'Legacy profile color',
-        ]);
-        $record = \App\Models\VisitorRecord::query()->create([
-            'external_event_key' => 'legacy-color-backup', 'gate' => 'gate-1', 'direction' => 'IN', 'seen_at' => now(),
-            'plate_profile_id' => $profile->id, 'vehicle_color' => 'Legacy visitor color',
-        ]);
-        $observation = \App\Models\GuestVehicleObservation::query()->create([
-            'location' => 'gate-1', 'observed_at' => now(), 'visitor_record_id' => $record->id,
-            'vehicle_color' => 'Legacy observation color',
-        ]);
-        $models = [$event, $session, $profile, $record, $observation];
-        $colors = array_map(fn ($model) => $model->vehicle_color, $models);
-        $zip = app(BackupService::class)->create($this->work.'/backups');
-        foreach ($models as $model) {
-            $model->forceFill(['vehicle_color' => null])->save();
+        foreach (['create', 'restore'] as $method) {
+            try {
+                app(BackupService::class)->$method('/never-used-d5b-path');
+                $this->fail('Legacy privileged mutation accepted.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString('D5B', $exception->getMessage());
+            }
         }
-        app(BackupService::class)->restore($zip);
-        DB::purge('sqlite');
-        foreach ($models as $index => $model) {
-            $this->assertSame($colors[$index], $model->fresh()->vehicle_color);
-        }
-        $this->assertSame(['vehicle_color' => 'Legacy metadata color'], $event->fresh()->detection_metadata_json);
-        $this->assertSame($event->id, $session->fresh()->entryEvent->id);
-        $this->assertSame($profile->id, $record->fresh()->plateProfile->id);
-        $this->assertSame($record->id, $observation->fresh()->visitor_record_id);
     }
 
+    public function test_owned_regeneration_writes_configuration_without_starting_or_probing_live_services(): void
+    {
+        $this->seed(\Database\Seeders\InstallSeeder::class);
+        $path = sys_get_temp_dir().'/d5b-controlled-'.bin2hex(random_bytes(8));
+        File::ensureDirectoryExists($path.'/coordination');
+        $installation = (string) \Illuminate\Support\Str::uuid(); $generation = (string) \Illuminate\Support\Str::uuid();
+        $operation = (string) \Illuminate\Support\Str::uuid(); $set = '00000000-0000-0000-0000-000000000000';
+        File::put($path.'/identity.json', json_encode(['schema'=>1,'installation'=>$installation,'generation'=>$generation]));
+        File::put($path.'/maintenance.json', json_encode(['schema'=>1,'phase'=>'resuming','operation'=>$operation,'recovery_required'=>true]));
+        File::put($path.'/recovery-guard.json', json_encode(['schema'=>1,'status'=>'validated']));
+        File::put($path.'/recovery-security.json', json_encode(['schema'=>'philcst.recovery-security.v1','installation'=>$installation,'generation'=>$generation,
+            'epoch'=>0,'active_set'=>$set,'blocked_by_set'=>[$set=>[]],'lost_uids'=>[],'revoked_update_keys'=>[],'update_generation'=>0]));
+        $pdo = new \PDO('sqlite:'.$path.'/coordination/barrier.sqlite'); $pdo->exec('CREATE TABLE barrier(id INTEGER PRIMARY KEY)'); unset($pdo);
+        DB::table('delivery_installations')->insert(['id'=>1,'installation'=>$installation,'generation'=>$generation]);
+        config(['lifecycle.root'=>$path]); putenv('PHILCST_LIFECYCLE_CONTROL='.$operation);
+        $this->mock(\App\Services\Go2rtcService::class, function ($mock): void {
+            $mock->shouldNotReceive('ensureRunning');
+            $mock->shouldReceive('writeConfig')->once()->andReturn(true);
+        });
+        try {
+            $this->artisan('system:recovery-prepare')->assertSuccessful();
+            $this->assertDatabaseCount('vehicle_events', 0);
+            $this->assertDatabaseCount('users', 0);
+        } finally {
+            app(\App\Services\LifecycleBarrier::class)->release(); config(['lifecycle.root'=>null]);
+            putenv('PHILCST_LIFECYCLE_CONTROL'); File::deleteDirectory($path);
+        }
+    }
+
+    public function test_runtime_regeneration_requires_exact_owned_recovery(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Installed owned recovery');
+        $this->artisan('system:recovery-prepare');
+    }
 }

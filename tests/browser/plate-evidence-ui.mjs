@@ -66,6 +66,20 @@ try {
     const errors = []; page.on('pageerror', error => errors.push(error.message));
 
     const records = JSON.parse(fs.readFileSync(directory + '/plate-evidence.json', 'utf8'));
+    await page.goto(base + '/logs?plate_text=REG007');
+    let automaticRows = await page.locator('#event-log-modal-data').evaluate(node => JSON.parse(node.textContent));
+    check(automaticRows.length === 1 && automaticRows[0].log_type === 'registered'
+        && automaticRows[0].visitor_record_id === records.automatic_registered, 'Clear untagged Registry plate is automatically Registered');
+    check(!automaticRows[0].is_alert && !automaticRows[0].plate_review_reason, 'Successful automatic plate has no false Review warning');
+    await page.goto(base + '/visitors?status=all');
+    check(await page.locator('#visitor-record-' + records.automatic_registered).count() === 0, 'Automatic Registered occurrence is excluded from Guests');
+    check(await page.locator('#visitor-record-' + records.automatic_guest).count() === 1, 'Clear unmatched plate appears in Guests');
+    await page.goto(base + '/logs?plate_text=GUE007');
+    automaticRows = await page.locator('#event-log-modal-data').evaluate(node => JSON.parse(node.textContent));
+    check(automaticRows.length === 1 && automaticRows[0].log_type === 'unregistered_visitor', 'Clear unmatched plate automatically stays Guest in Activity Logs');
+    await page.goto(base + '/visitors?tab=review');
+    check(await page.locator('#review-card-' + records.automatic_registered).count() === 0
+        && await page.locator('#review-card-' + records.automatic_guest).count() === 0, 'Clear known-direction readings do not create Review cards');
     await page.goto(base + '/logs?plate_text=395ISX');
     const candidateLogs = await page.locator('#event-log-modal-data').evaluate(node => JSON.parse(node.textContent));
     const candidateIndex = candidateLogs.findIndex(row => row.id === records.actual && row.record_type === 'visitor_record');

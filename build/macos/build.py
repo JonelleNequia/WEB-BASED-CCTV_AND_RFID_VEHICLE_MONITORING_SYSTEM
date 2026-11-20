@@ -92,6 +92,7 @@ def assemble(source,args):
     shutil.copyfile(source/'build/macos/OFFLINE-INSTALL.md',stage/'OFFLINE-INSTALL.md')
     shutil.copyfile(source/'deploy/network/NETWORK-SETUP.md',stage/'NETWORK-SETUP.md')
     shutil.copyfile(source/'deploy/lifecycle/MAINTENANCE.md',stage/'MAINTENANCE.md')
+    shutil.copyfile(source/'deploy/lifecycle/RECOVERY.md',stage/'RECOVERY.md')
     shutil.copytree(source/'deploy/clients',stage/'Connect-to-Server')
     (stage/'Connect-to-Server/Connect-to-PHILCST.command').chmod(0o755)
     for n in ['runtimes','wheels']:

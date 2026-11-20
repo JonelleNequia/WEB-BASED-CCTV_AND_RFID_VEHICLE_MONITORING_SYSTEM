@@ -239,6 +239,8 @@ class Coordinator:
             return self.status()
     def resume(self,operation,prepare=None):
         with self.owned(operation):
+            from recovery_guard import check
+            check(self.base,verify_journal=True,operation=operation,has_prepare=prepare is not None)
             state=phase(self.base)
             if state['operation']==operation and state['phase']=='quiescing' and not state.get('services_touched'):
                 # No OS writers were stopped and no D5B transaction began. Abort admission-only

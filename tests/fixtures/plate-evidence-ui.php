@@ -30,8 +30,24 @@ foreach (['actual', 'temporary', 'conduction', 'mv', 'no_plate', 'dismiss', 'dir
     $record = app(VisitorRecordService::class)->applyPlateReading(['external_event_key' => $crossing->external_event_key,
         'camera_role' => 'gate-1', 'event_time' => $at->toIso8601String(), 'plate_status' => 'read',
         'plate_number' => '395ISX', 'plate_confidence' => .99,
-        'ocr_details' => ['raw_reads' => [['text' => $kind === 'conduction' ? 'CONDUCTION STICKER 395ISX' : '395ISX', 'confidence' => .99]]],
+        'ocr_details' => ['identifier_evidence' => ['kind' => 'uncertain', 'source' => 'fixture_uncertain_region'], 'raw_reads' => [['text' => $kind === 'conduction' ? 'CONDUCTION STICKER 395ISX' : '395ISX', 'confidence' => .99]]],
     ], new UploadedFile($path, 'evidence.png', 'image/png', null, true));
+    $records[$kind] = $record->id;
+}
+$automatic = $registry->register(['plate_number' => 'REG007', 'registered_by' => 'Fixture Registrar',
+    'vehicle_owner_name' => 'Fixture Owner', 'vehicle_type' => 'Car']);
+$automatic->fresh()->forceFill(['created_at' => now()->subHour()])->save();
+foreach (['automatic_registered' => 'REG007', 'automatic_guest' => 'GUE007'] as $kind => $plate) {
+    $at = now()->subMinute()->startOfSecond();
+    $crossing = VehicleCrossing::create(['external_event_key' => 'automatic-ui-'.$kind, 'gate' => 'gate-1',
+        'camera_id' => Camera::forRole('gate-1')->value('id'), 'direction' => 'IN', 'crossed_at' => $at,
+        'detection_metadata_json' => ['rfid_status' => 'no_pass']]);
+    app(VisitorRecordService::class)->createFromCrossing($crossing);
+    $record = app(VisitorRecordService::class)->applyPlateReading(['external_event_key' => $crossing->external_event_key,
+        'camera_role' => 'gate-1', 'event_time' => $at->toIso8601String(), 'plate_status' => 'read',
+        'plate_number' => $plate, 'plate_confidence' => .95,
+        'ocr_details' => ['identifier_evidence' => ['kind' => 'plate_region', 'source' => 'ocr_plate_region'],
+            'vote' => ['plate' => $plate, 'status' => 'read', 'confidence' => .95]]]);
     $records[$kind] = $record->id;
 }
 file_put_contents($directory.'/plate-evidence.json', json_encode($records));

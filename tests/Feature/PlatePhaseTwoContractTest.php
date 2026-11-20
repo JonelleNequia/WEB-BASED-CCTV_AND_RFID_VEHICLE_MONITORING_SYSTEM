@@ -79,8 +79,8 @@ class PlatePhaseTwoContractTest extends TestCase
     {
         $vehicle = $this->register(strtolower($plate));
         $record = $this->read(str_replace(' ', '-', strtolower($plate)));
-        $this->assertSame('review', $record->registration_status);
-        $record = \Tests\fixtures\ConfirmedActualPlate::for($record, $plate);
+        $this->assertSame('registered', $record->registration_status);
+        $this->assertNull($record->reviewed_at);
         $this->assertSame($vehicle->id, $record->vehicle_id);
         $this->assertSame('registered', $record->registration_status);
         $event = $record->movementEvent;

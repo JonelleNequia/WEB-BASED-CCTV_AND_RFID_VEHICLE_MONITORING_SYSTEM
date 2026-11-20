@@ -36,10 +36,10 @@ class PlateEvidenceService
             $evidence['later_reads'] = array_slice($evidence['later_reads'], -10);
         }
         if (($evidence['source'] ?? null) !== 'staff') {
-            $evidence['kind'] = 'uncertain';
             $evidence['source'] = 'detector';
             $evidence['latest'] = $observation;
             $decision = $this->reviewDecision($data);
+            $evidence['kind'] = isset($decision['plate']) ? 'actual_plate' : 'uncertain';
             if (self::candidateFromData($data) !== null) {
                 $evidence['candidate_confidence'] = $data['plate_confidence'] ?? null;
             } elseif (self::candidate($record) !== null) {
@@ -53,7 +53,13 @@ class PlateEvidenceService
 
     public function reviewReason(array $data): string
     {
-        return $this->reviewDecision($data)['reason'];
+        return $this->reviewDecision($data)['reason'] ?? '';
+    }
+
+    /** Operational plate-region acceptance, not a claim of legal identifier-type detection. */
+    public function automaticPlate(array $data): ?string
+    {
+        return $this->reviewDecision($data)['plate'] ?? null;
     }
 
     private function reviewDecision(array $data): array
@@ -71,18 +77,38 @@ class PlateEvidenceService
             $why = is_string($vote['reason'] ?? null) ? mb_substr($vote['reason'], 0, 240) : 'OCR observations are uncertain.';
             return ['code' => 'ocr_vote_uncertain', 'reason' => $why.' Confirm the candidate and identifier type from the images.'];
         }
-        if (! isset($data['plate_confidence']) || $data['plate_confidence'] < VisitorRecord::LOW_PLATE_CONFIDENCE || $data['plate_confidence'] > 1) {
+        if (! isset($data['plate_confidence']) || ! is_numeric($data['plate_confidence'])
+            || $data['plate_confidence'] < VisitorRecord::LOW_PLATE_CONFIDENCE || $data['plate_confidence'] > 1
+            || (isset($vote['confidence']) && (! is_numeric($vote['confidence']) || $vote['confidence'] < VisitorRecord::LOW_PLATE_CONFIDENCE || $vote['confidence'] > 1))) {
             return ['code' => 'ocr_low_confidence', 'reason' => 'OCR confidence is missing or below the existing review threshold. Confirm the candidate and identifier type.'];
         }
         $observedKind = data_get($data, 'ocr_details.identifier_evidence.kind');
-        if (is_string($observedKind) && isset(self::TEMPORARY[$observedKind])) {
+        $raw = (array) data_get($data, 'ocr_details.raw_reads', []);
+        foreach ((array) data_get($data, 'ocr_details.frame_results', []) as $frame) {
+            if (is_array($frame)) $raw = array_merge($raw, (array) ($frame['raw_reads'] ?? []));
+        }
+        $temporaryLabel = collect($raw)->contains(fn ($read) => is_array($read) && is_string($read['text'] ?? null)
+            && preg_match('/\b(?:CONDUCTION(?:\s+STICKER)?|MV[\s-]+FILE|TEMPORARY[\s-]+PLATE)\b/i', $read['text']));
+        if ((is_string($observedKind) && isset(self::TEMPORARY[$observedKind])) || $temporaryLabel) {
             return ['code' => 'temporary_identifier_evidence', 'reason' => 'The observed text is marked as a temporary identifier: evidence only, not an accepted actual plate. Confirm the identifier type from the images.'];
         }
-        if (($vote['status'] ?? $data['plate_status'] ?? null) !== 'read') {
+        if (($observedKind !== null && ! in_array($observedKind, ['actual_plate', 'plate_region'], true))
+            || in_array(data_get($data, 'ocr_details.identifier_evidence.source'), ['staff', 'registry_match', 'pattern', 'length'], true)) {
+            return ['code' => 'identifier_type_unconfirmed', 'reason' => 'Identifier type is unconfirmed. Inspect the images: confirm an actual plate or record a temporary identifier. Text confidence and a Registry match do not prove the type.'];
+        }
+        if (($data['plate_status'] ?? null) !== 'read') {
             return ['code' => 'ocr_uncertain', 'reason' => 'OCR produced a candidate but did not accept the text. Confirm the candidate and identifier type from the images.'];
         }
+        $plate = $data['plate_number'] ?? null;
+        $plateKey = is_string($plate) ? \App\Support\PlateNumber::storageKey($plate) : null;
+        if (! $plateKey || mb_strlen(\App\Support\PlateNumber::display($plate) ?? '') > 30) {
+            return ['code' => 'ocr_invalid_text', 'reason' => 'OCR did not supply a valid accepted plate. Confirm the literal text from the images.'];
+        }
+        if (isset($vote['plate']) && (! is_string($vote['plate']) || \App\Support\PlateNumber::storageKey($vote['plate']) !== $plateKey)) {
+            return ['code' => 'ocr_vote_conflict', 'reason' => 'Submitted plate conflicts with the OCR vote. Confirm the literal plate from the occurrence images.'];
+        }
 
-        return ['code' => 'identifier_type_unconfirmed', 'reason' => 'Identifier type is unconfirmed. Inspect the images: confirm an actual plate or record a temporary identifier. Text confidence and a Registry match do not prove the type.'];
+        return ['code' => 'ocr_accepted', 'reason' => null, 'plate' => \App\Support\PlateNumber::display($plate)];
     }
 
     /** Display evidence without promoting it into plate_number or a matching key. */

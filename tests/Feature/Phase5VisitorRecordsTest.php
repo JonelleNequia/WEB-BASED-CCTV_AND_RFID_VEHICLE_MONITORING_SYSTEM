@@ -58,7 +58,7 @@ class Phase5VisitorRecordsTest extends TestCase
         $this->assertSame(['gate-1', 'IN', VisitorRecord::PLATE_PENDING, VisitorRecord::STATUS_ACTIVE], [$record->gate, $record->direction, $record->plate_status, $record->status]);
         $this->assertNotNull($record->snapshot_path); // the crossing's (full-resolution) snapshot
 
-        $this->plate('k-1', 'read', 'ABC-1234', 0.82, image: true)->assertOk()->assertJsonPath('visitor_record.registration_status', 'review');
+        $this->plate('k-1', 'read', 'ABC-1234', 0.82, image: true)->assertOk()->assertJsonPath('visitor_record.registration_status', 'guest');
 
         $record->refresh();
         $profile = PlateProfile::query()->sole();

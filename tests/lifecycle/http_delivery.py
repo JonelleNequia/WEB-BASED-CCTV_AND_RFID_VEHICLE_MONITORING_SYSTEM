@@ -54,6 +54,13 @@ def main():
     url='http://127.0.0.1:'+str(port)+'/api/v1/integration/'
     settings={'system_settings':{'event_ingest_url':url+'events','python_api_key':'synthetic-d5a-key'}}
     now=datetime.now(timezone.utc).isoformat()
+    # This fixture models one camera-backed occurrence. Without a running-camera
+    # status the real RFID path correctly takes the independent offline/state
+    # fallback; that is not authoritative evidence linking it to a later crossing.
+    camera_status=Path(env['CAMERA_FILES_PATH'])/'camera_status.json'
+    camera_status.parent.mkdir(parents=True,exist_ok=True)
+    camera_status.write_text(json.dumps({'service_running':True,'updated_at':now,
+        'cameras':{'gate-1':{'camera_running':True,'calibration_ready':True}}}))
     payload={'external_event_key':'d5a-real-helper-pass','camera_role':'gate-1','camera_id':initial['camera_id'],'event_time':now,
         'direction':'IN','detected_vehicle_type':'Car','detection_metadata':{'rfid_status':'matched'}}
     png=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lp8AAAAASUVORK5CYII=')

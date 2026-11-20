@@ -93,7 +93,7 @@ class PlateContractTests(unittest.TestCase):
 
 
 class DetectorHandoffTests(unittest.TestCase):
-    def test_actual_submission_keeps_literal_plate_and_review_evidence(self):
+    def test_actual_submission_accepts_clear_literal_plate_and_retains_evidence(self):
         from test_vehicle_pass import Gate, RecordingClient, FIRST_PASS
         gate = Gate()
         gate.setUp()
@@ -107,10 +107,10 @@ class DetectorHandoffTests(unittest.TestCase):
             with mock.patch.object(detector, 'analyze_guest_vehicle_details', return_value=actual):
                 detector.submit_guest_observation_for_window('gate-1', gate.state, FIRST_PASS, client)
             self.assertEqual(len(client.plates), 1)
-            self.assertIsNone(client.plates[0]['plate_number'])
+            self.assertEqual(client.plates[0]['plate_number'], '395ISX')
             self.assertEqual(client.plates[0]['best_guess'], '395ISX')
-            self.assertEqual(client.plates[0]['plate_status'], 'unreadable')
+            self.assertEqual(client.plates[0]['plate_status'], 'read')
             self.assertEqual(client.plates[0]['ocr_details']['raw_reads'][0]['text'], '395isx')
-            self.assertIsNone(client.guest_observations[-1]['plate_number'])
+            self.assertEqual(client.guest_observations[-1]['plate_number'], '395ISX')
         finally:
             gate.doCleanups()

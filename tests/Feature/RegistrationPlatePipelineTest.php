@@ -94,7 +94,8 @@ class RegistrationPlatePipelineTest extends TestCase
         $vehicle = $this->register($input);
         $this->assertSame($normalized, $vehicle->plate_number);
         $record = $this->read($this->crossing(), $input);
-        $this->assertSame(['review', null, null, null], [$record->registration_status, $record->vehicle_id, $record->plate_number, $record->plate_key]);
+        $this->assertSame(['registered', $vehicle->id, $display, $key], [$record->registration_status, $record->vehicle_id, $record->plate_number, $record->plate_key]);
+        $this->assertNull($record->reviewed_at);
         $this->assertSame($display, $record->ocr_plate_number);
         $this->patchJson(route('visitors.records.review', $record), ['action' => 'correct_plate', 'plate' => strtolower($input)])->assertOk();
         $this->assertSame([$display, $key, $vehicle->id], [$record->fresh()->plate_number, $record->fresh()->plate_key, $record->fresh()->vehicle_id]);
@@ -126,13 +127,13 @@ class RegistrationPlatePipelineTest extends TestCase
     public function test_readable_unmatched_and_unreliable_results_follow_the_decision_table(): void
     {
         $this->register('ABC-0001');
-        foreach ([['XYZ-9876', 0.95, 'read', 'review'], ['ABC-0001', 0.2, 'read', 'review'],
+        foreach ([['XYZ-9876', 0.95, 'read', 'guest'], ['ABC-0001', 0.2, 'read', 'review'],
             ['ABC-0001', null, 'read', 'review'], ['ABC-0001', 0.95, 'unreadable', 'review'], [null, 0.0, 'unreadable', 'review']] as [$plate, $confidence, $status, $expected]) {
             $record = $this->read($this->crossing(), $plate, $confidence, $status);
             $this->assertSame($expected, $record->registration_status);
             $this->assertNull($record->vehicle_id);
         }
-        $this->assertSame(5, VisitorRecord::query()->needsReview()->count());
+        $this->assertSame(4, VisitorRecord::query()->needsReview()->count());
     }
 
     public function test_manual_correction_updates_one_pass_audit_profiles_and_outputs_without_replaying_state(): void

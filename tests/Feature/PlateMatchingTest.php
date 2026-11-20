@@ -174,7 +174,7 @@ class PlateMatchingTest extends TestCase
             'external_event_key' => $key,
             'camera_role' => $gate,
             'event_time' => now()->toIso8601String(),
-            'plate_status' => $status,
+            'plate_status' => 'unreadable',
             'plate_number' => $plate,
             'plate_confidence' => 0.9,
             'best_guess' => $plate,
@@ -182,9 +182,8 @@ class PlateMatchingTest extends TestCase
             'detected_vehicle_type' => 'Car',
         ]))->assertSuccessful();
 
-        // Historical snapshot fixture: Phase 3's new ingestion correctly waits
-        // for type confirmation. Exercise the retained legacy matcher directly
-        // rather than permitting new OCR to create actual-plate profiles.
+        // Withheld evidence avoids creating current automatic profiles before
+        // this fixture reconstructs the historical fuzzy-matcher snapshot.
         $record = VisitorRecord::where('external_event_key', $key)->sole();
         $literal = \App\Support\PlateNumber::display($plate);
         $service = app(\App\Services\VisitorRecordService::class);

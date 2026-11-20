@@ -88,6 +88,9 @@ def barrier(base=None,kind='operational',timeout=30):
     try:
         connection.execute('BEGIN IMMEDIATE')
         current=phase(base);identity(base)
+        if kind != 'control':
+            from recovery_guard import check
+            check(base)
         allowed=current['phase']==RUNNING or kind=='delivery' and current['phase']=='quiescing' or kind=='control'
         if not allowed:raise Paused('Maintenance active: '+current['phase'])
         yield connection
@@ -97,7 +100,12 @@ def barrier(base=None,kind='operational',timeout=30):
 
 def admission(base=None):
     base=base or root()
-    return base is None or phase(base)['phase']==RUNNING
+    if base is None:return True
+    try:
+        from recovery_guard import check
+        check(base)
+        return phase(base)['phase']==RUNNING
+    except (ValueError,OSError,KeyError):return False
 
 
 def wait_for_resume():

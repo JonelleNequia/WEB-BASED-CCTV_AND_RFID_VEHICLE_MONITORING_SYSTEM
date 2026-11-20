@@ -45,14 +45,14 @@ class PlateEvidenceReviewTest extends TestCase
         $this->postJson(route('api.integration.visitor-plates'), ['external_event_key' => $key,
             'camera_role' => 'gate-1', 'event_time' => now()->toIso8601String(), 'plate_status' => $status,
             'plate_number' => $status === 'read' ? $plate : null, 'best_guess' => $plate, 'plate_confidence' => $confidence,
-            'ocr_details' => ['raw_reads' => [['text' => $plate, 'confidence' => $confidence]], 'vote' => ['reason' => 'Fixture character vote.']],
+            'ocr_details' => ['raw_reads' => [['text' => $plate, 'confidence' => $confidence]], 'vote' => ['reason' => 'Fixture character vote.'], 'identifier_evidence' => ['kind' => 'uncertain', 'source' => 'fixture_uncertain_region']],
             'plate_image' => UploadedFile::fake()->image('identifier.jpg'),
         ])->assertOk();
 
         return VisitorRecord::where('external_event_key', $key)->sole();
     }
 
-    public function test_clear_text_and_an_exact_registry_match_do_not_establish_identifier_type(): void
+    public function test_explicitly_uncertain_type_and_an_exact_registry_match_still_require_review(): void
     {
         $this->vehicle('395ISX');
         $record = $this->observation();

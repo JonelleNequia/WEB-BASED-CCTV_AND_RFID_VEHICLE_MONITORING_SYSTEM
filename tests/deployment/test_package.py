@@ -14,7 +14,7 @@ pkg = importlib.util.module_from_spec(spec);spec.loader.exec_module(pkg)
 class PackageBoundary(unittest.TestCase):
     def test_source_exclusions(self):
         for name in ['.env', '.env.backup', 'storage/backups/data.sqlite', 'storage/app/camera/config.json', 'public/storage/x.jpg', 'x/.venv/bin/python', 'first-admin.txt',
-                     'state/lifecycle/identity.json','shared/lifecycle/maintenance.json','any/lifecycle/operation.lock','any/lifecycle/delivery/outbox.sqlite-journal']:
+                     'state/lifecycle/identity.json','shared/lifecycle/maintenance.json','any/lifecycle/operation.lock','any/lifecycle/delivery/outbox.sqlite-journal','any/lifecycle/recovery-security.json','any/lifecycle/recovery-guard.json','recovery/operations/example/journal.json']:
             self.assertFalse(pkg.source_allowed(name), name)
         for name in ['.env.example', 'public/vendor/hls/hls.light.min.js', 'build/windows/runtimes.json', 'tests/Feature/X.php', 'storage/framework/sessions/.gitignore','deploy/lifecycle/maintenance.py','deploy/lifecycle/coordination.py']:
             self.assertTrue(pkg.source_allowed(name), name)
@@ -23,13 +23,14 @@ class PackageBoundary(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             source=Path(d)/'source';stage=Path(d)/'stage';(source/'build/windows/checks').mkdir(parents=True)
             files={}
-            for name,body in [('public/vendor/hls/hls.light.min.js','local browser fixture'),('public/vendor/hls/LICENSE','retained notice')]:
+            for name,body in [('public/vendor/hls/hls.light.min.js','local browser fixture'),('public/vendor/hls/LICENSE','retained notice'),('build/updates/contract.py','trusted contract fixture')]:
                 f=source/name;f.parent.mkdir(parents=True,exist_ok=True);f.write_text(body);files[name]=pkg.sha(f)
                 self.assertTrue(pkg.source_allowed(name))
             (source/'SOURCE-INFO.json').write_text(json.dumps({'files':files}))
             pkg.stage_source(source,stage)
             self.assertEqual((stage/'app/public/vendor/hls/hls.light.min.js').read_text(),'local browser fixture')
             self.assertEqual((stage/'app/public/vendor/hls/LICENSE').read_text(),'retained notice')
+            self.assertEqual((stage/'app/deploy/lifecycle/update_contract.py').read_text(),'trusted contract fixture')
 
     def test_manifest_verifies_extracted_bytes_and_rejects_mutation(self):
         with tempfile.TemporaryDirectory() as d:
@@ -53,7 +54,7 @@ class PackageBoundary(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'Missing or corrupt'):pkg.verify(root)
 
     def test_assembled_boundary_rejects_installation_data_and_private_paths(self):
-        for name,body in [('app/.env','APP_KEY=secret'),('app/storage/app/media.jpg','x'),('app/database/x.sqlite','x'),('runtime/config.json','{"python":"/Users/fixture/dev/.venv/bin/python"}')]:
+        for name,body in [('app/.env','APP_KEY=secret'),('app/deploy/lifecycle/recovery-security.json','private-state'),('app/recovery/journal.json','private-journal'),('app/storage/app/media.jpg','x'),('app/database/x.sqlite','x'),('runtime/config.json','{"python":"/Users/fixture/dev/.venv/bin/python"}')]:
             with tempfile.TemporaryDirectory() as d:
                 f=Path(d)/name;f.parent.mkdir(parents=True);f.write_text(body)
                 with self.assertRaises(ValueError):pkg.scan(d)

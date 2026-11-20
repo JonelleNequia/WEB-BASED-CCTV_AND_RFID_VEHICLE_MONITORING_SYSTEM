@@ -37,7 +37,7 @@ class AppServiceProvider extends ServiceProvider
             if (preg_match('/^(?:migrate|db:|backup:|system:reset|visitors:cleanup|rfid:cleanup|runtime:fetch)/', $command)) {
                 throw new \RuntimeException('Uncertified lifecycle operation disabled. Use the authorized D5 subphase.');
             }
-            $barrier->acquire(control: in_array($command, ['config:clear', 'config:cache', 'detector:start', 'go2rtc:start'], true));
+            $barrier->acquire(control: in_array($command, ['config:clear', 'config:cache', 'detector:start', 'go2rtc:start', 'system:recovery-prepare'], true));
             $this->lifecycleCommands[] = true;
         });
         $this->app['events']->listen(\Illuminate\Console\Events\CommandFinished::class, function ($event) {

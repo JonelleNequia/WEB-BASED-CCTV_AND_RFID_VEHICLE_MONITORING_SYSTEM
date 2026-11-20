@@ -6,17 +6,12 @@ use App\Services\BackupService;
 use Illuminate\Console\Command;
 use Throwable;
 
-/**
- * Windows install kit: a one-file backup (database, snapshots, APP_KEY).
- * Task Scheduler runs it every day; deploy/windows/backup-now.bat on demand.
- *
- *   php artisan backup:run [--to=D:\Backups] [--label=before-update]
- */
+/** Deprecated CLI; installed D5B backups use the owned external controller. */
 class BackupRun extends Command
 {
     protected $signature = 'backup:run {--to= : Folder for the backup (default storage/backups)} {--label= : Added to the file name}';
 
-    protected $description = 'Back up the database, snapshots and APP_KEY into one zip file';
+    protected $description = 'Explain the required D5B consistent-backup workflow (legacy writer disabled)';
 
     public function handle(BackupService $backups): int
     {

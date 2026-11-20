@@ -7,6 +7,10 @@ $ErrorActionPreference='Stop'
 if ($env:OS -ne 'Windows_NT' -or -not (Test-VmsAdmin) -or -not (Test-VmsInstallFolder $Root)) { throw 'Native Windows administrator and valid local installation required.' }
 $paths=Get-VmsPaths $Root
 $receipt=$ReceiptJson | ConvertFrom-Json
+. (Join-Path $PSScriptRoot 'lib\recovery-task.ps1')
+function Current-BackupTask($Task) {
+ return Test-VmsRecoveryScheduledOwner $paths $Task @(Get-CimInstance Win32_Process) ([int]$env:PHILCST_LIFECYCLE_CONTROLLER_PID) ($env:PHILCST_RECOVERY_SCHEDULED -eq '1')
+}
 $specs=@(Get-VmsServices $paths)
 function Owned-Service([string]$Name) {
  if ($Name -notin $specs.Name -or -not (Test-VmsServiceOwned $paths $Name)) { throw 'Missing/unowned service. No process was killed.' }
@@ -40,14 +44,14 @@ switch ($Action) {
   @{services=$services;tasks=$tasks} | ConvertTo-Json -Depth 6 -Compress
  }
  'Quiesce' {
-  foreach ($task in $receipt.tasks) { $null=Owned-Task $task.name;Disable-ScheduledTask -TaskName $task.name | Out-Null;Stop-ScheduledTask -TaskName $task.name }
+  foreach ($task in $receipt.tasks) { $owned=Owned-Task $task.name;Disable-ScheduledTask -TaskName $task.name | Out-Null;if (-not (Current-BackupTask $owned)) { Stop-ScheduledTask -TaskName $task.name } }
   foreach ($service in $receipt.services) { $null=Owned-Service $service.name;Set-Service $service.name -StartupType Disabled }
   Stop-Owned @('PHILCST-Devices','PHILCST-Detector');'{}'
  }
  'Stop' { Stop-Owned @('PHILCST-LiveView','PHILCST-Web','PHILCST-PHP1','PHILCST-PHP2','PHILCST-PHP3','PHILCST-PHP4');'{}' }
  'Verify' {
   foreach ($spec in $specs) { if ((Owned-Service $spec.Name).Status -ne 'Stopped') { throw 'An owned service remains running.' } }
-  foreach ($task in $receipt.tasks) { $t=Owned-Task $task.name;if ($t.Settings.Enabled -or $t.State -eq 'Running') { throw 'Owned scheduled writer remains enabled/running.' } }
+  foreach ($task in $receipt.tasks) { $t=Owned-Task $task.name;if ($t.Settings.Enabled -or ($t.State -eq 'Running' -and -not (Current-BackupTask $t))) { throw 'Owned scheduled writer remains enabled/running.' } }
   foreach ($process in Get-CimInstance Win32_Process) {
    $packaged=$process.ExecutablePath -and $process.ExecutablePath.StartsWith($paths.Runtime+'\',[StringComparison]::OrdinalIgnoreCase)
    $standalone=$process.Name -match '^(python[0-9.w-]*|php(-cgi)?)\.exe$' -and $process.CommandLine -and $process.CommandLine.Replace('/','\').Contains($paths.App+'\') -and $process.CommandLine -match '(camera_service\.py|device_service\.py|detector_service\.py|[\\/]artisan)'

@@ -222,7 +222,7 @@ try {
     Write-VmsStep 'Scheduled tasks'
     Register-VmsTask -Name 'PHILCST VMS Scheduler' -Schedule @('/SC', 'MINUTE', '/MO', '1') -Command (Join-VmsPath $paths.Scripts 'lib' 'scheduler.cmd')
     Register-VmsTask -Name 'PHILCST VMS Backup' -Schedule @('/SC', 'DAILY', '/ST', '02:00') -Command (Join-VmsPath $paths.Scripts 'lib' 'daily-backup.cmd')
-    Disable-ScheduledTask -TaskName 'PHILCST VMS Backup' | Out-Null # D5B coherent backup engine is not implemented.
+    Disable-ScheduledTask -TaskName 'PHILCST VMS Backup' | Out-Null # Enable only after native D5B scheduled-backup acceptance; same shared engine.
 
     # D2 browser access is loopback only. No network profile, hostname, power or LAN firewall changes.
     $hostname = '127.0.0.1'

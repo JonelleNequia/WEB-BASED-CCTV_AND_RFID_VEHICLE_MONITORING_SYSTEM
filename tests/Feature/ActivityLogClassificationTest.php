@@ -194,11 +194,11 @@ class ActivityLogClassificationTest extends TestCase
         $this->assertNull($record->vehicle_id);
         $this->assertNull($record->plateProfile?->vehicle_id);
         $this->actingAs($this->admin)->getJson(route('logs.index'))->assertOk()
-            ->assertJsonPath('logs.0.log_type', 'review')
-            ->assertJsonPath('logs.0.category_label', 'Review')
-            ->assertJsonPath('logs.0.is_guest', false)->assertJsonPath('summary.guests', 0);
+            ->assertJsonPath('logs.0.log_type', $status === 'read' ? 'unregistered_visitor' : 'review')
+            ->assertJsonPath('logs.0.category_label', $status === 'read' ? 'Unregistered Guest' : 'Review')
+            ->assertJsonPath('logs.0.is_guest', $status === 'read')->assertJsonPath('summary.guests', $status === 'read' ? 1 : 0);
         $this->getJson(route('logs.index', ['log_type' => 'registered']))->assertJsonPath('total', 0);
-        $this->getJson(route('logs.index', ['log_type' => 'unregistered_visitor']))->assertJsonPath('total', 0);
+        $this->getJson(route('logs.index', ['log_type' => 'unregistered_visitor']))->assertJsonPath('total', $status === 'read' ? 1 : 0);
         $this->assertSame($before, $record->fresh()->getRawOriginal());
         $this->assertDatabaseCount('vehicle_events', 0);
     }

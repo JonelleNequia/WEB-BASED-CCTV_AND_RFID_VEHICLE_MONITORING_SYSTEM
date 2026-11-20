@@ -104,3 +104,10 @@ enroll the generated installation root, then open https://philcst.vms.internal.
 Fresh installs default to this computer only. LAN sharing requires explicit mode
 selection; Connect-to-Server contains client-only Windows/Mac instructions.
 Never use the internal HTTP integration listener as the browser address.
+
+D5B coherent backup/recovery is described in the packaged `RECOVERY.md`. Old
+`backup:run`/`backup:restore` writers are disabled. Use only a newly built, verified
+same-source D5B installation with its additive recovery schema and initialized D5A
+state. Existing D2/D3/D4 archives do not contain these controls. Native recovery
+acceptance and D5C upgrade approval remain required; do not copy this source over
+an existing installation or run live migrations as an implicit upgrade.

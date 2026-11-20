@@ -120,8 +120,8 @@ class VisitorRecordService
                 }
 
                 $oldProfileId = $record->plate_profile_id;
-                $plate = PlateNumber::display($data['plate_number'] ?? null);
-                $read = ($data['plate_status'] ?? null) === VisitorRecord::PLATE_READ && $plate !== null;
+                $plate = app(PlateEvidenceService::class)->automaticPlate($data);
+                $read = $plate !== null;
 
                 $record->fill([
                     // Effective type is resolved separately from detector evidence below.
@@ -135,21 +135,29 @@ class VisitorRecordService
                 app(PlateEvidenceService::class)->observe($record, $data);
 
                 if ($record->plate_status !== VisitorRecord::PLATE_CORRECTED && $record->reviewed_at === null) {
-                    // Current readers recognize characters in a generic plate
-                    // region, not actual vs temporary identifiers. Neither a
-                    // layout nor a Registry match establishes that distinction.
+                    // Clear plate-region OCR follows the normal exact matching
+                    // path. Explicit uncertainty/temporary evidence and poor
+                    // readings still cannot establish an actual plate.
+                    $match = $read ? $this->tieToProfile($record, $plate)
+                        : ['profile' => null, 'confidence' => null, 'reason' => null, 'suggested' => null];
+                    // Learned/fuzzy aliases are suggestions, never automatic identity.
+                    if ($match['profile'] && $match['profile']->plate_key !== PlateNumber::key($plate)) {
+                        $match = ['profile' => null, 'confidence' => PlateMatchService::LOW,
+                            'reason' => 'A different plate profile was suggested. Confirm the literal plate.',
+                            'suggested' => $match['profile']->id];
+                    }
                     $record->fill([
-                        'plate_status' => VisitorRecord::PLATE_UNREADABLE,
-                        'plate_number' => null,
-                        'plate_key' => null,
+                        'plate_status' => $read ? VisitorRecord::PLATE_READ : VisitorRecord::PLATE_UNREADABLE,
+                        'plate_number' => $plate,
+                        'plate_key' => $read ? PlateNumber::key($plate) : null,
                         'plate_confidence' => isset($data['plate_confidence']) ? (float) $data['plate_confidence'] : null,
-                        'match_confidence' => null,
-                        'match_reason' => null,
+                        'match_confidence' => $match['confidence'],
+                        'match_reason' => $match['reason'],
                     ]);
-                    $record->plate_profile_id = null;
+                    $record->plate_profile_id = $match['profile']?->id;
                     $record->vehicle_id = null;
-                    $record->suggested_profile_id = null;
-                    $this->classifyPlate($record, null, false);
+                    $record->suggested_profile_id = $match['suggested'];
+                    $this->classifyPlate($record, $plate, $read);
                     if (in_array($record->registration_reason, ['Plate unreadable or invalid. Check the plate.', 'OCR confidence is missing or below the review threshold.'], true)) {
                         $record->registration_reason = data_get($record->ocr_details_json, PlateEvidenceService::KEY.'.reason');
                     }
@@ -158,10 +166,8 @@ class VisitorRecordService
                 app(VehicleTypeEvidenceService::class)->resolve($record, $data['detected_vehicle_type'] ?? null, array_key_exists('detected_vehicle_type', $data));
                 $record->save();
 
-                if ($read && $record->status === VisitorRecord::STATUS_ACTIVE && $record->registration_status !== 'review'
-                    && $record->plate_status !== VisitorRecord::PLATE_CORRECTED && $record->reviewed_at === null) {
-                    $this->markDuplicateOfSamePlate($record);
-                }
+                // Equal text alone is not proof of a duplicate occurrence.
+                // Keep external-key retries and the crossing's geometric guard.
 
                 $this->refreshProfiles([$oldProfileId, $record->plate_profile_id]);
                 app(MovementReconciliationService::class)->syncPlate($record);
@@ -666,6 +672,9 @@ class VisitorRecordService
             default => null,
         };
         $scan = $record->crossing?->rfidScanLog;
+        if (! $scan && data_get($record->crossing?->detection_metadata_json, 'rfid_status') === 'matched') {
+            $reason = 'Reported RFID match has no authoritative scan link. Check the occurrence in Review before applying another movement.';
+        }
         if ($scan && $scan->verification_status !== 'verified') {
             $reason = 'The linked RFID evidence is flagged. Plate identification cannot bypass that restriction; check Review.';
         }

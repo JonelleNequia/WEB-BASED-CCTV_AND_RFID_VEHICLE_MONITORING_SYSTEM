@@ -14,15 +14,15 @@ import test_plate_contract as contract
 
 
 class IdentifierEvidenceTests(unittest.TestCase):
-    def test_agreement_is_text_evidence_and_never_independent_proof_of_identifier_type(self):
+    def test_agreement_still_requires_existing_confidence_floor(self):
         for score in (.2,.99):
             vote=vote_plate([{'plate':'395ISX','score':score} for _ in range(8)])
             self.assertEqual(vote['status'],'read')
             self.assertIn('8 of 8 OCR reads',vote['reason'])
             payload=review_submission(vote,{'raw_reads':[{'text':'395ISX','confidence':score}]})
-            self.assertIsNone(payload['plate_number']);self.assertEqual(payload['best_guess'],'395ISX')
-            self.assertEqual(payload['ocr_details']['identifier_evidence']['reason_code'],'identifier_type_unconfirmed')
-            self.assertIn('Identifier type unconfirmed',payload['ocr_details']['identifier_evidence']['reason'])
+            self.assertEqual(payload['plate_number'], '395ISX' if score >= .6 else None)
+            self.assertEqual(payload['best_guess'], '395ISX')
+            self.assertEqual(payload['ocr_details']['identifier_evidence']['reason_code'], 'ocr_accepted' if score >= .6 else 'ocr_low_confidence')
     def test_no_text_and_uncertain_votes_report_the_actual_text_blocker(self):
         empty=review_submission(vote_plate([]),{})
         self.assertEqual(empty['ocr_details']['identifier_evidence']['reason_code'],'ocr_no_text')
@@ -44,15 +44,15 @@ class IdentifierEvidenceTests(unittest.TestCase):
         self.assertEqual(details['crops_read'],2)
         self.assertIn('2 of 2 OCR reads',vote['reason'])
 
-    def test_clear_supported_formats_are_review_evidence_not_type_proof(self):
+    def test_clear_supported_formats_are_accepted_without_staff_confirmation(self):
         for text in ['ABC 1234', 'ABC 123', '123ABC', 'A123BC', 'AB-00123', '395ISX', 'ISX395', 'AO0123', 'A00123', 'AI0123', 'A10123']:
             vote = vote_plate([{'plate': text, 'score': .99}])
             details = {'raw_reads': [{'text': text, 'confidence': .99}]}
             payload = review_submission(vote, details)
-            self.assertEqual((payload['plate_number'], payload['plate_status']), (None, 'unreadable'))
+            self.assertEqual((payload['plate_number'], payload['plate_status']), (vote['plate'], 'read'))
             self.assertEqual(payload['best_guess'], vote['plate'])
             self.assertEqual(payload['ocr_details']['vote'], vote)
-            self.assertEqual(payload['ocr_details']['identifier_evidence']['kind'], 'uncertain')
+            self.assertEqual(payload['ocr_details']['identifier_evidence']['kind'], 'plate_region')
             self.assertNotIn('identifier_evidence', details)  # No mutation of original vote/evidence.
 
     def test_weak_incomplete_invalid_and_conflicting_reads_keep_diagnostics(self):
@@ -77,8 +77,20 @@ class IdentifierEvidenceTests(unittest.TestCase):
             vote, _, details, crop = contract.PlateContractTests().fast_pass(text)
             payload = review_submission(vote, details)
             self.assertIsNotNone(crop)
-            self.assertIsNone(payload['plate_number'])
+            self.assertEqual(payload['plate_number'], vote['plate'] if text == '395ISX' else None)
             self.assertEqual(payload['ocr_details']['raw_reads'][0]['text'], text)
+
+    def test_same_characters_with_explicit_type_uncertainty_or_temporary_evidence_stay_review(self):
+        vote = vote_plate([{'plate': '395ISX', 'score': .99}])
+        self.assertEqual(review_submission(vote, {})['plate_number'], '395ISX')
+        for kind in ['uncertain', 'temporary_plate', 'conduction_sticker', 'mv_file']:
+            payload = review_submission(vote, {'identifier_evidence': {'kind': kind}})
+            self.assertIsNone(payload['plate_number'])
+            self.assertEqual(payload['best_guess'], '395ISX')
+        for label in ['CONDUCTION STICKER 395ISX', 'MV FILE 395ISX', 'TEMPORARY PLATE 395ISX']:
+            payload = review_submission(vote, {'raw_reads': [{'text': label}]})
+            self.assertIsNone(payload['plate_number'])
+            self.assertEqual(payload['ocr_details']['identifier_evidence']['reason_code'], 'temporary_identifier_evidence')
 
     def test_fallback_reader_retains_a_crop_even_when_text_is_invalid(self):
         image = np.zeros((60, 180, 3), dtype=np.uint8)

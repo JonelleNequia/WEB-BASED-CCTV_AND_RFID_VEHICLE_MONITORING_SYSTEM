@@ -17,6 +17,8 @@ def allowed(base,role):
         # it deliberately cannot inspect the application coordination/spool island.
         if role!='web' and not all((base/name).is_file() for name in ('coordination/barrier.sqlite','delivery/outbox.sqlite')):return False
         state=json.loads((base/'maintenance.json').read_text())
+        from recovery_guard import check
+        check(base)
         return state['schema']==1 and (state['phase']=='running' or state['phase']=='resuming' and role in ['web','live','php'])
     except Exception:return False
 

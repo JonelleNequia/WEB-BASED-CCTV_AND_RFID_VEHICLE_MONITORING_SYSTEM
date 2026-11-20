@@ -1,8 +1,6 @@
 @echo off
-rem PHILCST VMS - daily backup at 02:00, run by Task Scheduler (as SYSTEM).
-set ROOT=%~dp0..\..\..\..
-if exist "%ROOT%\state\lifecycle" (
- "%ROOT%\runtime\python\python.exe" -B "%ROOT%\app\deploy\lifecycle\service_host.py" --root "%ROOT%" --check-only
- if errorlevel 1 exit /b 75
-)
-"%ROOT%\runtime\php\php.exe" -c "%ROOT%\config\php.ini" "%ROOT%\app\artisan" backup:run >> "%ROOT%\logs\backup.log" 2>&1
+rem D5B scheduled backups use exactly the same owned, verified recovery contract.
+rem Task remains disabled by default until native service/ACL acceptance.
+set "ROOT=%~dp0..\..\..\.."
+"%ROOT%\runtime\python\python.exe" -B "%ROOT%\app\deploy\lifecycle\recovery.py" backup --root "%ROOT%" --scheduled >> "%ROOT%\logs\backup.log" 2>&1
+exit /b %errorlevel%

@@ -32,8 +32,8 @@ def source_allowed(name):
                 or (p.name.startswith('.env') and p.name != '.env.example')
                 or (name.startswith(('storage/', 'bootstrap/cache/', 'public/camera/')) and p.name != '.gitignore')
                 or name.startswith(('public/storage', 'build/windows/cache/', 'build/windows/dist/', 'build/macos/cache/', 'build/macos/dist/', 'build/updates/dist/', 'build/clients/dist/', 'tools/go2rtc/bin/'))
-                or name.startswith(('state/', 'shared/', 'releases/'))
-                or ('lifecycle' in p.parts and any(x in p.parts for x in ('identity.json','maintenance.json','operation.lock','coordination','delivery')))
+                or name.startswith(('state/', 'shared/', 'releases/', 'recovery/'))
+                or ('lifecycle' in p.parts and any(x in p.parts for x in ('identity.json','maintenance.json','operation.lock','coordination','delivery','recovery-security.json','recovery-guard.json')))
                 or p.suffix.lower() in ['.sqlite', '.db', '.sql', '.log', '.pyc', '.pt', '.onnx', '.pth', '.zip', '.exe']
                 or p.name in ['first-admin.txt', 'install-result.txt', 'install.json', '.DS_Store', 'Thumbs.db'])
 
@@ -99,7 +99,7 @@ def stage_source(source, stage):
             raise ValueError('Snapshot changed after capture: ' + name)
         if name.startswith(('build/', 'tests/', '.github/', 'database/factories/')) or name in ['phpunit.xml', 'package-lock.json', 'package.json', '.gitattributes', '.gitignore']:
             continue
-        if name.endswith('.md') and name not in ['README.md', 'DEPLOYMENT.md', 'ACCOUNT-SECURITY.md', 'school-vehicle-monitoring-detector/models/README.md']:
+        if name.endswith('.md') and name not in ['README.md', 'DEPLOYMENT.md', 'ACCOUNT-SECURITY.md', 'school-vehicle-monitoring-detector/models/README.md', 'deploy/lifecycle/RECOVERY.md']:
             continue
         if name.startswith('database/seeders/') and Path(name).stem not in ['InstallSeeder', 'CameraSeeder', 'RoiSeeder', 'SystemSettingSeeder', 'DatabaseSeeder']:
             continue
@@ -110,6 +110,9 @@ def stage_source(source, stage):
     for f in (source / 'build/windows/checks').iterdir():
         if f.is_file():
             shutil.copyfile(f, stage / 'checks' / f.name)
+    # D5B uses the same trusted D3 trust/state parser; incoming backups supply no code.
+    (stage / 'app/deploy/lifecycle').mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source / 'build/updates/contract.py', stage / 'app/deploy/lifecycle/update_contract.py')
     shutil.copyfile(source / 'SOURCE-INFO.json', stage / 'SOURCE-INFO.json')
 
 
@@ -179,7 +182,7 @@ def scan(root):
         name = f.relative_to(root).as_posix()
         if name.startswith('app/'):
             rel = name[4:]
-            if ((Path(rel).name.startswith('.env') and Path(rel).name != '.env.example') or (rel.startswith(('storage/', 'bootstrap/cache/')) and Path(rel).name != '.gitignore') or rel.startswith(('tests/', 'database/factories/', 'public/storage', 'public/camera/')) or Path(rel).suffix.lower() in ['.sqlite', '.db', '.sql', '.log'] or Path(rel).name in ['first-admin.txt', 'install-result.txt', 'install.json']):
+            if ((Path(rel).name.startswith('.env') and Path(rel).name != '.env.example') or (rel.startswith(('storage/', 'bootstrap/cache/')) and Path(rel).name != '.gitignore') or rel.startswith(('tests/', 'database/factories/', 'public/storage', 'public/camera/', 'state/', 'shared/', 'releases/', 'recovery/')) or ('lifecycle' in Path(rel).parts and Path(rel).name in ('recovery-security.json','recovery-guard.json','maintenance.json','identity.json','operation.lock')) or Path(rel).suffix.lower() in ['.sqlite', '.db', '.sql', '.log'] or Path(rel).name in ['first-admin.txt', 'install-result.txt', 'install.json']):
                 raise ValueError('Installation/development data in assembled app: ' + rel)
         if f.suffix.lower() in ['.php', '.ini', '.json', '.pth', '.ps1', '.cmd', '.bat', '.yaml', '.yml'] and f.stat().st_size < 4_000_000:
             text = f.read_text(errors='replace')

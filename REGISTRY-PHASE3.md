@@ -1,5 +1,10 @@
 # Registry Phase 3 — OCR evidence and identifier review
 
+**9 November policy update:** the blanket staff-confirmation rule below is historical.
+The user's later approved correction enables normal automatic classification for clear
+plate-region OCR. Explicit uncertain/temporary evidence and identity conflicts still
+require Review. See [OCR-AUTOMATIC-CLASSIFICATION.md](OCR-AUTOMATIC-CLASSIFICATION.md).
+
 Implemented locally on 2026-11-05 (Asia/Manila), after reading REGISTRY-PHASE2.md and tracing the current readers, character voting, both detector submission callbacks, Laravel ingestion, Review and canonical-event/RFID reconciliation. No applicable AGENTS.md was found in the repository or its ancestors. The existing Phase 2 working-tree changes were preserved.
 
 ## Decision rules

@@ -1,5 +1,10 @@
 # Readable OCR shown as “Plate unreadable” — focused fix
 
+**Subsequent 9 November correction:** this report describes the earlier presentation fix.
+Its blanket identifier-type Review policy has since been superseded at the user's request;
+see [OCR-AUTOMATIC-CLASSIFICATION.md](OCR-AUTOMATIC-CLASSIFICATION.md). Candidate/reason,
+history-preservation and source-availability corrections remain in place.
+
 9 November 2026, Asia/Manila. This batch is separate from deployment. D5A and the
 Registry work were preserved; no deployment subphase was advanced. No applicable
 AGENTS.md was found in the checkout or ancestors. No live migration, reset,

@@ -214,7 +214,7 @@ class SettingsService
      *
      * @param  array<string, string>|null  $settings
      */
-    public function exportCameraRuntimeConfig(?array $settings = null): void
+    public function exportCameraRuntimeConfig(?array $settings = null, bool $syncLive = true): void
     {
         $settings ??= $this->all();
         $cameraConfigurations = $this->cameraConfigurations();
@@ -260,7 +260,7 @@ class SettingsService
 
         // Live view work: a new camera address or login reaches go2rtc too
         // (it rewrites its config and reloads only when something changed).
-        if (Cache::add('go2rtc-config-sync', true, 2)) {
+        if ($syncLive && Cache::add('go2rtc-config-sync', true, 2)) {
             app(\App\Services\Go2rtcService::class)->ensureRunning();
         }
     }

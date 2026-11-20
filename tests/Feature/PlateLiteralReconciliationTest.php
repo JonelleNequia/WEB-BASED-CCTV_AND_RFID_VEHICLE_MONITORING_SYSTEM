@@ -213,7 +213,7 @@ class PlateLiteralReconciliationTest extends TestCase
         app(VisitorRecordService::class)->applyPlateReading(['external_event_key' => $record->external_event_key,
             'camera_role' => 'gate-1', 'event_time' => $record->seen_at->toIso8601String(),
             'plate_status' => 'read', 'plate_number' => '395ISX', 'plate_confidence' => 0.99]);
-        $this->assertNull($record->fresh()->plate_number);
+        $this->assertSame('395ISX', $record->fresh()->plate_number);
         $this->assertSame('395ISX', $record->fresh()->ocr_plate_number);
         $this->assertSame('review', $record->fresh()->registration_status);
         $this->assertNull($record->fresh()->plate_profile_id);

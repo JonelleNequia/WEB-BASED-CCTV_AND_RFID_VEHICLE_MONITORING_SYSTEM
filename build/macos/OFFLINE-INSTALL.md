@@ -60,3 +60,10 @@ changes and client-only enrollment; no OS computer rename is used. D5 must imple
 coherent backups, failure recovery and transfer. D5A adds durable persisted delivery
 and maintenance controls; native acceptance is still required. Do not
 use these candidates to upgrade a working school installation.
+
+D5B coherent backup/recovery is described in the packaged `RECOVERY.md`. Old
+`backup:run`/`backup:restore` writers are disabled. Use only a newly built, verified
+same-source D5B installation with its additive recovery schema and initialized D5A
+state. Existing D2/D3/D4 archives do not contain these controls. Native recovery
+acceptance and D5C upgrade approval remain required; do not copy this source over
+an existing installation or run live migrations as an implicit upgrade.

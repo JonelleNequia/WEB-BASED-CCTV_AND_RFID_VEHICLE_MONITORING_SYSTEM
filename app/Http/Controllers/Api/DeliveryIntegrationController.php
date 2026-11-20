@@ -60,6 +60,7 @@ class DeliveryIntegrationController extends Controller
                     abort_unless(hash_equals($old->sha256, $data['sha256']) && $old->installation === $envelope['installation'] && $old->generation === $envelope['generation'], 409, 'Operation identity conflicts with committed content.');
                     return array_replace(json_decode($old->result_json, true, flags: JSON_THROW_ON_ERROR), ['ack_effect' => 'verified', 'created' => false, 'duplicate' => true]);
                 }
+                app(\App\Services\LifecycleBarrier::class)->assertRecoveryDeliveryAllowed($envelope['operation']);
                 $targets = ['crossing' => [CrossingIntegrationController::class, 'store'], 'plate' => [VisitorIntegrationController::class, 'storePlate'],
                     'rfid' => [FutureIntegrationController::class, 'receiveRfidScan'], 'event' => [FutureIntegrationController::class, 'receive'],
                     'guest' => [\App\Http\Controllers\GuestObservationController::class, 'store'], 'devices' => [DeviceIntegrationController::class, 'store']];
