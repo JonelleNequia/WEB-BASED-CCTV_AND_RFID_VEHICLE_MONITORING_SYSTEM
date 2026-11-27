@@ -1,0 +1,334 @@
+{{--
+    B1 (Settings › Gates): one card per gate with its Camera, RFID Reader and
+    Detection zone. Plain words, a status dot and one line each; the "⋯"
+    menus rename, test or remove. Technical settings are in Advanced.
+--}}
+@php($lanProblem = $gateCards[0]['lan_problem'] ?? null)
+<p class="settings-intro">Configure each gate's camera, RFID reader and detection zone. Use Manage gate to rename, activate or remove it.</p>
+{{-- One form retains the existing all-gates activation validation. Controls
+     inside each management section associate with it using form="...". --}}
+<form id="gate-settings-form" method="POST" action="{{ route('settings.update') }}">
+    @csrf
+    @method('PUT')
+    <input type="hidden" name="section" value="gates">
+</form>
+@error('gates')<p class="field-error" role="alert">{{ $message }}</p>@enderror
+@error('gate')<p class="field-error" role="alert">{{ $message }}</p>@enderror
+@error('confirm')<p class="field-error" role="alert">{{ $message }}</p>@enderror
+@if ($lanProblem)
+    {{-- No camera or reader can answer: the LAN itself (said once, in plain words). --}}
+    <div class="devices-banner" role="status" data-lan-problem>
+        <strong>{{ $lanProblem['line'] }}</strong>
+        <span>{{ $lanProblem['next_step'] }}</span>
+    </div>
+@endif
+<div class="gate-setup-grid">
+    @foreach ($gateCards as $gate)
+        <article class="gate-setup-card" data-gate-card="{{ $gate['code'] }}">
+            <header class="gate-setup-head">
+                <h2>{{ $gate['name'] }}</h2>
+                <x-badge :tone="$gate['active'] ? 'success' : 'neutral'" :label="$gate['active'] ? 'Active' : 'Inactive'" />
+                <a href="{{ $gate['kiosk_url'] }}" target="_blank" rel="noopener" class="gate-setup-kiosk">Open kiosk</a>
+            </header>
+            @unless ($gate['active'])
+                <p class="gate-inactive-note">Inactive gate · excluded from active monitoring. Device status is shown separately below.</p>
+            @endunless
+
+            {{-- Camera --}}
+            <section class="setup-part" data-part="camera">
+                <h3 class="setup-part-title">Camera</h3>
+                @if (! $gate['camera'])
+                    <a href="{{ route('settings.index', ['tab' => 'devices', 'gate' => $gate['code'], 'role' => 'camera']) }}" class="add-device-button" data-add-device="camera" data-gate="{{ $gate['code'] }}">+ Add camera</a>
+                    {{-- Testing: this PC's webcam until the CCTV is ready. --}}
+                    <form method="POST" action="{{ route('settings.gate.camera.webcam', $gate['code']) }}" class="setup-webcam-form">
+                        @csrf
+                        <input type="hidden" name="enabled" value="1">
+                        <button type="submit" class="link-button" data-use-webcam>or use this PC's webcam for testing</button>
+                    </form>
+                @else
+                    @php($camera = $gate['camera'])
+                    <div class="setup-device">
+                        <div class="setup-preview">
+                            @if ($camera['online'] && $camera['preview_url'])
+                                <img src="{{ $camera['preview_url'] }}" alt="{{ $gate['name'] }} camera" loading="lazy" data-setup-preview>
+                            @else
+                                <span class="setup-preview-off" aria-hidden="true">
+                                    <svg viewBox="0 0 24 24"><path d="M3.3 2.3a1 1 0 0 0-1.4 1.4L4.2 6H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h11.2l4.5 4.5a1 1 0 0 0 1.4-1.4zM16 15.2 6.8 6H14a2 2 0 0 1 2 2zm2-1.4V9.6l3.4-2.3A1 1 0 0 1 23 8.1v7.8a1 1 0 0 1-1.6.8z"/></svg>
+                                </span>
+                            @endif
+                        </div>
+                        <div class="setup-device-text">
+                            <strong>{{ $camera['name'] }}</strong>
+                            <span class="status-line"><span @class(['status-dot', 'is-online' => $camera['state'] === 'online', 'is-warning' => $camera['state'] === 'starting']) aria-hidden="true"></span>{{ $lanProblem && str_contains($camera['line'], $lanProblem['line']) ? 'Offline · see the network warning above.' : $camera['line'] }}</span>
+                            @if ($camera['next_step'] !== '' && (! $lanProblem || $camera['next_step'] !== $lanProblem['next_step']))
+                                <span class="next-step">→ {{ $camera['next_step'] }}</span>
+                            @endif
+                            @if ($camera['lan_note'] ?? null)
+                                {{-- Shared camera work: the likely cause when the LAN is not steady. --}}
+                                <span class="status-line lan-note" data-lan-note><span class="status-dot is-warning" aria-hidden="true"></span>Likely cause: {{ $camera['lan_note']['line'] }}</span>
+                                <span class="next-step">→ {{ $camera['lan_note']['next_step'] }}</span>
+                            @endif
+                            @if ($camera['codec_warning'])
+                                <span class="status-line codec-warning"><span class="status-dot is-warning" aria-hidden="true"></span>{{ $camera['codec_warning']['line'] }}</span>
+                                <span class="next-step">→ {{ $camera['codec_warning']['next_step'] }}</span>
+                            @endif
+                            <small class="text-muted">{{ $camera['source'] }}</small>
+                            @if ($camera['shared_with'] !== [])
+                                {{-- Shared camera work: one camera, one connection; each gate keeps its own zone and records. --}}
+                                <span class="shared-camera" data-shared-camera><span class="badge badge-secondary">Shared camera</span> also on {{ implode(', ', $camera['shared_with']) }} · one connection, each gate has its own zone and records</span>
+                            @endif
+                            @if ($camera['detected'])
+                                {{-- Camera source work: added by hand, but the scan found it. --}}
+                                <form method="POST" action="{{ route('settings.gate.camera.automatic', $gate['code']) }}" class="setup-detected" data-camera-detected>
+                                    @csrf
+                                    <span class="next-step">→ This camera was found on the network ({{ $camera['detected']['name'] }}). Use it automatically so it keeps working when its address changes.</span>
+                                    <button type="submit" class="button button-primary button-sm">Use automatically</button>
+                                </form>
+                            @endif
+                        </div>
+                        <details class="menu row-menu">
+                            <summary class="button button-secondary" aria-label="Camera actions for {{ $gate['name'] }}">⋯</summary>
+                            <div class="menu-panel" role="menu">
+                                <button type="button" role="menuitem" data-setup-dialog="camera-name" data-action-url="{{ route('settings.gate.camera.name', $gate['code']) }}" data-value="{{ $camera['name'] }}">Rename</button>
+                                <button type="button" role="menuitem" data-setup-dialog="camera-login" data-action-url="{{ route('settings.gate.camera.login', $gate['code']) }}" data-value="{{ $camera['username'] }}">Change login</button>
+                                {{-- Testing: this PC's webcam instead of the CCTV, and back. --}}
+                                <form method="POST" action="{{ route('settings.gate.camera.webcam', $gate['code']) }}">
+                                    @csrf
+                                    <input type="hidden" name="enabled" value="{{ $camera['webcam'] ? '0' : '1' }}">
+                                    <button type="submit" role="menuitem" data-use-webcam>{{ $camera['webcam'] ? ($camera['managed'] ? 'Use the CCTV again' : 'Stop using the webcam') : "Use this PC's webcam (testing)" }}</button>
+                                </form>
+                                @if ($camera['can_test'] && ! $camera['webcam'])
+                                    <button type="button" role="menuitem" data-camera-test="{{ route('settings.gate.camera.test', $gate['code']) }}">Test</button>
+                                @endif
+                                <form method="POST" action="{{ route('settings.gate.camera.remove', $gate['code']) }}" data-confirm-title="Remove the camera?" data-confirm-label="Remove camera" data-confirm="Remove the camera from {{ $gate['name'] }}? Vehicles at this gate are not detected until you add a camera again. The detection zone is kept.">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit" role="menuitem" class="menu-item-danger">Remove…</button>
+                                </form>
+                                @if ($camera['device_id'])
+                                    {{-- Delete device work: the device and its settings go; records stay. --}}
+                                    <button type="button" role="menuitem" class="menu-item-danger" data-device-delete
+                                            data-summary-url="{{ route('settings.devices.delete-summary', $camera['device_id']) }}"
+                                            data-delete-url="{{ route('settings.devices.destroy', $camera['device_id']) }}">Delete device…</button>
+                                @endif
+                            </div>
+                        </details>
+                    </div>
+                @endif
+            </section>
+
+            {{-- RFID reader --}}
+            <section class="setup-part" data-part="reader">
+                <h3 class="setup-part-title">RFID Reader</h3>
+                @if (! $gate['reader'])
+                    <a href="{{ route('settings.index', ['tab' => 'devices', 'gate' => $gate['code'], 'role' => 'reader']) }}" class="add-device-button" data-add-device="reader" data-gate="{{ $gate['code'] }}">+ Add reader</a>
+                @else
+                    @php($reader = $gate['reader'])
+                    <div class="setup-device">
+                        <div class="setup-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24"><path d="M5 5a1 1 0 0 1 1 1v12a1 1 0 1 1-2 0V6a1 1 0 0 1 1-1m4 2a1 1 0 0 1 1 1v8a1 1 0 1 1-2 0V8a1 1 0 0 1 1-1m4-2a1 1 0 0 1 1 1v12a1 1 0 1 1-2 0V6a1 1 0 0 1 1-1m4 3a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0V9a1 1 0 0 1 1-1"/></svg>
+                        </div>
+                        <div class="setup-device-text">
+                            <strong>{{ $reader['name'] }}</strong>
+                            <span class="status-line"><span @class(['status-dot', 'is-online' => $reader['state'] === 'online', 'is-warning' => $reader['state'] === 'starting']) aria-hidden="true"></span>{{ $lanProblem && str_contains($reader['line'], $lanProblem['line']) ? 'Offline · see the network warning above.' : $reader['line'] }}</span>
+                            @if ($reader['next_step'] !== '' && (! $lanProblem || $reader['next_step'] !== $lanProblem['next_step']))
+                                <span class="next-step">→ {{ $reader['next_step'] }}</span>
+                            @endif
+                            @if ($reader['lan_note'] ?? null)
+                                {{-- Shared camera work: the likely cause when the LAN is not steady. --}}
+                                <span class="status-line lan-note" data-lan-note><span class="status-dot is-warning" aria-hidden="true"></span>Likely cause: {{ $reader['lan_note']['line'] }}</span>
+                                <span class="next-step">→ {{ $reader['lan_note']['next_step'] }}</span>
+                            @endif
+                            @php($network = $reader['network'])
+                            @if ($network && $network['outside'])
+                                <div class="reader-network" data-reader-network="{{ $gate['code'] }}">
+                                    <span class="status-line"><span class="status-dot is-warning" aria-hidden="true"></span>The reader is set up for another network than this PC.</span>
+                                    <span class="next-step">→ Move it into this PC's network once; then nothing else is needed.</span>
+                                    <span class="button-row">
+                                        <button type="button" class="button button-primary button-sm" data-reader-move data-label="{{ $gate['name'] }}"
+                                                data-status-url="{{ route('settings.gate.reader.network', $gate['code']) }}"
+                                                data-read-url="{{ route('settings.gate.reader.network.read', $gate['code']) }}"
+                                                data-apply-url="{{ route('settings.gate.reader.network.apply', $gate['code']) }}">Move reader to this network</button>
+                                        <a class="button button-secondary button-sm" href="{{ route('settings.index', ['tab' => 'reader-network']) }}">Other ways</a>
+                                    </span>
+                                </div>
+                            @endif
+                            @if ($reader['rfid_only'])
+                                <span class="next-step" data-rfid-only>RFID only (camera offline): registered tags are recorded without the camera, IN/OUT from the vehicle's state.</span>
+                            @endif
+                            <small class="text-muted">{{ $reader['last_tag'] ? 'Last tag '.$reader['last_tag'].' at '.$reader['last_tag_time'] : 'No tag read yet' }}{{ $reader['manual'] ? ' · added by hand (Advanced)' : '' }}</small>
+                        </div>
+                        <details class="menu row-menu">
+                            <summary class="button button-secondary" aria-label="Reader actions for {{ $gate['name'] }}">⋯</summary>
+                            <div class="menu-panel" role="menu">
+                                <button type="button" role="menuitem" data-setup-dialog="reader-name" data-action-url="{{ route('settings.gate.reader.name', $gate['code']) }}" data-value="{{ $reader['name'] }}">Rename</button>
+                                <button type="button" role="menuitem" data-reader-test="{{ $gate['code'] }}" data-label="{{ $gate['name'] }}">Test</button>
+                                <form method="POST" action="{{ route('settings.gate.reader.remove', $gate['code']) }}" data-confirm-title="Remove the reader?" data-confirm-label="Remove reader" data-confirm="Remove the RFID reader from {{ $gate['name'] }}? Tags at this gate are not read until you add a reader again.">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit" role="menuitem" class="menu-item-danger">Remove…</button>
+                                </form>
+                                @if ($reader['device_id'])
+                                    <button type="button" role="menuitem" class="menu-item-danger" data-device-delete
+                                            data-summary-url="{{ route('settings.devices.delete-summary', $reader['device_id']) }}"
+                                            data-delete-url="{{ route('settings.devices.destroy', $reader['device_id']) }}">Delete device…</button>
+                                @endif
+                            </div>
+                        </details>
+                    </div>
+                @endif
+            </section>
+
+            {{-- Detection zone --}}
+            <section class="setup-part" data-part="zone">
+                <h3 class="setup-part-title">Detection zone</h3>
+                <div class="setup-device">
+                    <div class="setup-preview zone-preview">
+                        @if ($gate['zone']['ready'])
+                            <img src="{{ $gate['zone']['frame_url'] }}" alt="" loading="lazy" onerror="this.remove()">
+                            <svg viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
+                                <polygon points="{{ $gate['zone']['points'] }}" class="zone-area" />
+                            </svg>
+                        @else
+                            <span class="setup-preview-off" aria-hidden="true">
+                                <svg viewBox="0 0 24 24"><path d="M6 4a2 2 0 0 0-2 2v3a1 1 0 1 0 2 0V6h3a1 1 0 1 0 0-2zm9 0a1 1 0 1 0 0 2h3v3a1 1 0 1 0 2 0V6a2 2 0 0 0-2-2zm4 11a1 1 0 0 0-1 1v3h-3a1 1 0 1 0 0 2h3a2 2 0 0 0 2-2v-3a1 1 0 0 0-1-1M5 15a1 1 0 0 0-1 1v3a2 2 0 0 0 2 2h3a1 1 0 1 0 0-2H6v-3a1 1 0 0 0-1-1"/></svg>
+                            </span>
+                        @endif
+                    </div>
+                    {{-- ROI work: the zone, and which way is IN (a vehicle moving away from the camera is IN or OUT). --}}
+                    @php($awaySet = $gate['zone']['away_direction'] !== null)
+                    <div class="setup-device-text">
+                        <strong>{{ $gate['zone']['ready'] ? ($awaySet ? 'Zone set · '.\App\Models\Gate::directionMapping($gate['zone']['away_direction']) : 'Zone set · IN / OUT not set') : 'Not set up yet' }}</strong>
+                        <span class="status-line"><span @class(['status-dot', 'is-online' => $gate['zone']['ready'] && $awaySet, 'is-warning' => ! ($gate['zone']['ready'] && $awaySet)]) aria-hidden="true"></span>{{ match (true) {
+                            ! $gate['zone']['ready'] => 'Vehicles are not counted yet.',
+                            ! $awaySet => 'Vehicles are still Detected and Recorded, but as "Direction unknown" (registered ones use their state) until IN / OUT is set.',
+                            default => 'Every vehicle passing through the zone is recorded.',
+                        } }}</span>
+                        @if (! $gate['zone']['ready'])
+                            <span class="next-step">→ Draw where vehicles pass.</span>
+                        @elseif (! $awaySet)
+                            <span class="next-step" data-away-warning>→ In Calibration, choose where a vehicle moving away from the camera is going: into or out of campus.</span>
+                        @endif
+                    </div>
+                    <a href="{{ $gate['zone']['setup_url'] }}" class="button {{ $gate['zone']['ready'] && $awaySet ? 'button-secondary' : 'button-primary' }}">{{ $gate['zone']['ready'] && $awaySet ? 'Edit' : 'Set up' }}</a>
+                </div>
+            </section>
+            <details class="gate-management" @if ($errors->has('gates') || $errors->has('gates.'.$gate['code'].'.name') || $errors->has('gates.'.$gate['code'].'.is_active')) open @endif>
+                <summary>Manage {{ $gate['name'] }}</summary>
+                @include('settings.partials.gate-names', ['managedGates' => $gates->where('code', $gate['code'])])
+                <div class="gate-removal-area">
+                    @if ($gates->count() > 2)
+                        <form method="POST" action="{{ route('settings.gates.destroy', $gate['code']) }}" class="stack-form"
+                              data-confirm-title="Remove {{ $gate['name'] }}?" data-confirm-label="Remove gate"
+                              data-confirm="Remove {{ $gate['name'] }}? Monitoring will stop and its camera and reader assignments will be released. Devices, calibration and historical records will be kept.">
+                            @csrf
+                            @method('DELETE')
+                            <p class="field-help">Removal archives this gate and releases its camera and reader assignments. Devices, calibration and historical records are kept.</p>
+                            <label class="checkbox-row"><input type="checkbox" name="confirm" value="1" required> Confirm removal of {{ $gate['name'] }}</label>
+                            <button type="submit" class="button button-danger">Remove gate…</button>
+                        </form>
+                    @else
+                        <p class="field-help">At least two gates are required.</p>
+                    @endif
+                </div>
+            </details>
+        </article>
+    @endforeach
+
+    {{-- Phase 1: another gate gets a kiosk, a camera slot and a reader slot. --}}
+    <form method="POST" action="{{ route('settings.gates.store') }}" class="gate-setup-add" id="add-gate">
+        @csrf
+        <label for="new_gate_name" class="sr-only">New gate name</label>
+        <input id="new_gate_name" type="text" name="name" placeholder="Gate {{ substr(\App\Models\Gate::nextCode(), 5) }}" maxlength="100">
+        <button type="submit" class="add-device-button">+ Add gate</button>
+    </form>
+</div>
+
+{{-- B2: the add-device wizard ("+ Add camera" / "+ Add reader"), drawn by public/js/add-device.js. --}}
+<x-modal id="add-device-modal" title="Add device" size="md">
+    <div class="add-device" data-add-device-box aria-live="polite"></div>
+    <x-slot:footer><div data-add-device-footer></div></x-slot:footer>
+</x-modal>
+<script id="add-device-data" type="application/json">{!! json_encode([
+    'indexUrl' => route('settings.devices.index'),
+    'scanUrl' => route('settings.devices.scan'),
+    'uhfStatusUrl' => route('devices.uhf-status'),
+    'gatesStateUrl' => route('gates.state'),
+    'manualUrl' => route('settings.index', ['tab' => 'manual']),
+    'gates' => collect($gateCards)->mapWithKeys(fn (array $gate): array => [$gate['code'] => ['name' => $gate['name'], 'stream_url' => $gate['stream_url']]]),
+], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!}</script>
+
+{{-- Dialogs behind the "⋯" menus (filled by public/js/gate-setup.js). --}}
+<x-modal id="setup-camera-name" title="Rename camera" size="sm">
+    <form method="POST" action="" class="stack-form" data-setup-form>
+        @csrf
+        @method('PATCH')
+        <div class="field">
+            <label for="setup_camera_name">Camera name</label>
+            <input id="setup_camera_name" type="text" name="camera_name" maxlength="100" required data-setup-value>
+        </div>
+        <div class="button-row button-row-end">
+            <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
+            <button type="submit" class="button button-primary">Save</button>
+        </div>
+    </form>
+</x-modal>
+
+<x-modal id="setup-camera-login" title="Change camera login" size="sm">
+    <form method="POST" action="" class="stack-form" data-setup-form autocomplete="off">
+        @csrf
+        @method('PATCH')
+        <p class="field-help">The username and password of the camera itself (printed on it or set when it was installed). The password is saved encrypted and never shown again.</p>
+        <div class="field">
+            <label for="setup_camera_username">Username</label>
+            <input id="setup_camera_username" type="text" name="source_username" maxlength="255" required data-setup-value autocomplete="off">
+        </div>
+        <div class="field">
+            <label for="setup_camera_password">Password</label>
+            <input id="setup_camera_password" type="password" name="source_password" maxlength="255" autocomplete="new-password" placeholder="Leave blank to keep the saved one">
+        </div>
+        <div class="button-row button-row-end">
+            <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
+            <button type="submit" class="button button-primary">Save and test</button>
+        </div>
+    </form>
+</x-modal>
+
+<x-modal id="setup-reader-name" title="Rename reader" size="sm">
+    <form method="POST" action="" class="stack-form" data-setup-form>
+        @csrf
+        @method('PATCH')
+        <div class="field">
+            <label for="setup_reader_name">Reader name</label>
+            <input id="setup_reader_name" type="text" name="reader_name" maxlength="100" required data-setup-value>
+        </div>
+        <div class="button-row button-row-end">
+            <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
+            <button type="submit" class="button button-primary">Save</button>
+        </div>
+    </form>
+</x-modal>
+
+<x-modal id="setup-reader-test" title="Test the RFID reader" size="sm">
+    <div class="reader-test" data-reader-test-box data-status-url="{{ route('devices.uhf-status') }}">
+        <p class="reader-test-step"><strong>Hold an RFID tag near the reader of <span data-reader-test-gate></span>.</strong></p>
+        <p class="reader-test-result" data-reader-test-result role="status" aria-live="polite">Waiting for a tag…</p>
+    </div>
+    <div class="button-row button-row-end">
+        <button type="button" class="button button-secondary" data-drawer-close>Close</button>
+    </div>
+</x-modal>
+
+{{-- Phase 2: "Move reader to this network" (public/js/reader-network.js). --}}
+<x-modal id="reader-move" title="Move the reader to this network" size="md">
+    <p class="field-help">Reader of <strong data-reader-move-gate></strong></p>
+    <div data-reader-move-body aria-live="polite"></div>
+</x-modal>
+
+@include('settings.partials.device-delete')
+
+@push('scripts')
+    <script src="{{ asset('js/gate-setup.js') }}?v={{ filemtime(public_path('js/gate-setup.js')) }}"></script>
+    <script src="{{ asset('js/reader-network.js') }}"></script>
+    <script src="{{ asset('js/add-device.js') }}?v={{ filemtime(public_path('js/add-device.js')) }}"></script>
+@endpush

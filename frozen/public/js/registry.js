@@ -1,0 +1,441 @@
+/*
+ * UI Phase 3: Registry › Vehicles.
+ * - Tag picker: UHF read, type/paste a UID (+ Enter), or choose an available tag.
+ * - Row click: side panel with details and the last 10 movements.
+ * - Edit / Replace Tag drawers filled from the same JSON.
+ */
+(function () {
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const dataNode = document.getElementById('registry-vehicle-data');
+    const options = dataNode ? JSON.parse(dataNode.textContent || '{}') : {};
+
+    /* ---------- "Others" free-text fields ---------- */
+
+    function syncOther(select) {
+        const field = document.getElementById(select.dataset.otherTarget);
+        if (!field) {
+            return;
+        }
+        const show = ['others', 'Others'].includes(select.value);
+        field.hidden = !show;
+        field.toggleAttribute('required', show);
+        field.dispatchEvent(new Event('type:sync'));
+    }
+
+    document.querySelectorAll('[data-other-select]').forEach(function (select) {
+        select.addEventListener('change', function () {
+            syncOther(select);
+            if (!document.getElementById(select.dataset.otherTarget)?.hidden) {
+                document.getElementById(select.dataset.otherTarget).focus();
+            }
+        });
+        syncOther(select);
+    });
+
+    /* ---------- Tag picker ---------- */
+
+    const tagNumbers = new WeakMap();
+    const lookups = new WeakMap();
+    const existingTagNumbers = new WeakMap();
+
+    function initTagNumber(picker) {
+        const input = picker.querySelector('[data-registration-tag-number]');
+        if (!input) return;
+        const form = picker.closest('form');
+        const error = picker.querySelector('#add_tag_number_error');
+        const scan = picker.querySelector('[data-tag-scan]');
+        const select = picker.querySelector('[data-tag-select]');
+        existingTagNumbers.set(picker, select.selectedOptions[0]?.dataset.numberLabel || '');
+        let touched = input.getAttribute('aria-invalid') === 'true';
+        let serverError = error.textContent.trim();
+        let composing = false;
+        const sync = () => {
+            const hasTag = Boolean(scan.value.trim() || select.value || picker.querySelector('[data-tag-uid]').value);
+            const value = input.value.trim();
+            const significant = value.replace(/^0+/, '');
+            input.required = hasTag;
+            let message = '';
+            if (composing) message = 'Finish entering the tag number.';
+            else if (serverError) message = serverError;
+            else if (!value && hasTag) message = 'Enter the printed tag number when assigning an RFID tag.';
+            else if (value && value !== existingTagNumbers.get(picker) && (!/^[0-9]+$/.test(value) || value.length > Number(input.dataset.numberMaxLength)
+                || !significant || significant.length > input.dataset.numberMaxValue.length
+                || Number(significant) > Number(input.dataset.numberMaxValue))) message = input.dataset.numberError;
+            else if (value && !hasTag) message = 'Scan or choose the RFID tag for this number, or leave both RFID and Tag number blank.';
+            input.setCustomValidity(message);
+            const show = Boolean(message) && touched && !composing;
+            input.setAttribute('aria-invalid', show ? 'true' : 'false');
+            error.textContent = show ? message : '';
+            error.hidden = !show;
+            form.dispatchEvent(new CustomEvent('registration:validity'));
+        };
+        input.addEventListener('input', () => { if (!composing) { touched = true; serverError = ''; sync(); } });
+        input.addEventListener('change', () => { if (!composing) { touched = true; serverError = ''; sync(); } });
+        input.addEventListener('blur', () => { touched = true; sync(); });
+        input.addEventListener('invalid', () => { touched = true; sync(); });
+        input.addEventListener('compositionstart', () => { composing = true; sync(); });
+        input.addEventListener('compositionend', () => { composing = false; touched = true; serverError = ''; sync(); });
+        [scan, select].forEach(field => {
+            field.addEventListener('input', () => { serverError = ''; sync(); });
+            field.addEventListener('change', () => { serverError = ''; sync(); });
+        });
+        form.addEventListener('reset', () => window.setTimeout(() => { serverError = ''; touched = false; composing = false; sync(); }, 0));
+        window.addEventListener('pageshow', sync);
+        tagNumbers.set(picker, sync);
+        sync();
+    }
+
+    function setResult(picker, text, state) {
+        const result = picker.querySelector('[data-tag-result]');
+        if (!result) {
+            return;
+        }
+        result.textContent = text;
+        result.dataset.state = state || '';
+        const scan = picker.querySelector('[data-tag-scan]');
+        if (tagNumbers.has(picker)) scan?.setCustomValidity(['pending', 'error'].includes(state) ? text : '');
+        tagNumbers.get(picker)?.();
+    }
+
+    async function lookup(picker, rawUid) {
+        const version = (lookups.get(picker) || 0) + 1;
+        lookups.set(picker, version);
+        const uid = String(rawUid || '').replace(/\s+/g, '').toUpperCase();
+        const hidden = picker.querySelector('[data-tag-uid]');
+        const select = picker.querySelector('[data-tag-select]');
+
+        if (!uid) {
+            hidden.value = '';
+            setResult(picker, 'Waiting for a tag…', '');
+            return;
+        }
+
+        select.value = '';
+        hidden.value = '';
+        setResult(picker, `Checking ${uid}…`, 'pending');
+
+        try {
+            const body = new FormData();
+            body.append('uid', uid);
+            if (picker.dataset.vehicleId) {
+                body.append('vehicle_id', picker.dataset.vehicleId);
+            }
+
+            const response = await fetch(picker.dataset.lookupUrl, {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf },
+                body: body,
+            });
+            const result = await response.json();
+            if (lookups.get(picker) !== version) return;
+
+            if (!response.ok) {
+                setResult(picker, result.message || 'Could not check this tag.', 'error');
+                return;
+            }
+
+            if (result.ok) {
+                hidden.value = uid;
+            }
+            existingTagNumbers.set(picker, result.ok ? (result.tag?.number_label || '') : '');
+            const message = result.state === 'new' && tagNumbers.has(picker)
+                ? 'New tag. Enter its printed tag number; it will be added to the inventory and assigned when you save.'
+                : result.message;
+            setResult(picker, `${uid}: ${message}`, result.ok ? 'ok' : 'error');
+        } catch (error) {
+            if (lookups.get(picker) !== version) return;
+            setResult(picker, 'Could not reach the server to check this tag.', 'error');
+        }
+    }
+
+    function initPicker(picker) {
+        const scan = picker.querySelector('[data-tag-scan]');
+        const select = picker.querySelector('[data-tag-select]');
+        const hidden = picker.querySelector('[data-tag-uid]');
+        initTagNumber(picker);
+
+        if (tagNumbers.has(picker)) scan?.addEventListener('input', () => {
+            existingTagNumbers.set(picker, '');
+            lookups.set(picker, (lookups.get(picker) || 0) + 1);
+            hidden.value = '';
+            select.value = '';
+            setResult(picker, scan.value.trim() ? 'Press Enter or leave the UID field to check this tag.' : 'No RFID assigned. Registration will use the plate.', scan.value.trim() ? 'pending' : '');
+        });
+
+        scan?.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                // The reader ends each UID with Enter; do not submit the form.
+                event.preventDefault();
+                lookup(picker, scan.value);
+            }
+        });
+        scan?.addEventListener('change', function () {
+            lookup(picker, scan.value);
+        });
+
+        // UHF: take the next EPC the network reader reads.
+        const uhf = picker.querySelector('[data-uhf-read]');
+        let stopUhf = null;
+        uhf?.addEventListener('click', function () {
+            if (stopUhf) {
+                stopUhf();
+                return;
+            }
+            uhf.textContent = 'Stop listening';
+            stopUhf = window.uhfTagReader.listen(uhf.dataset.uhfRead, {
+                seconds: 30,
+                onStatus: (text, state) => setResult(picker, text, state),
+                onRead: function (read) {
+                    stopUhf?.();
+                    scan.value = read.epc;
+                    lookup(picker, read.epc);
+                },
+                onEnd: function () {
+                    stopUhf = null;
+                    uhf.textContent = 'Read with UHF reader';
+                },
+            });
+        });
+
+        picker.closest('.drawer')?.addEventListener('drawer:close', () => stopUhf?.());
+
+        // Phase 3: "Register this tag" filled the UID in; check it right away.
+        if (picker.dataset.prefill && scan?.value) {
+            lookup(picker, scan.value);
+        }
+
+        select?.addEventListener('change', function () {
+            existingTagNumbers.set(picker, select.selectedOptions[0]?.dataset.numberLabel || '');
+            lookups.set(picker, (lookups.get(picker) || 0) + 1);
+            if (select.value) {
+                scan.value = '';
+                hidden.value = '';
+                setResult(picker, `${select.options[select.selectedIndex].text} will be assigned.`, 'ok');
+            } else {
+                setResult(picker, 'Waiting for a tag…', '');
+            }
+        });
+
+        // Re-check a value restored after a validation error.
+        if (scan?.value) {
+            lookup(picker, scan.value);
+        } else if (select?.value) {
+            setResult(picker, `${select.options[select.selectedIndex].text} will be assigned.`, 'ok');
+        }
+
+        picker.closest('form')?.addEventListener('submit', function (event) {
+            if (!hidden.value && !select.value && (!picker.hasAttribute('data-tag-optional') || scan.value.trim() !== '')) {
+                event.preventDefault();
+                setResult(picker, 'Scan a tag or choose an available one first.', 'error');
+                scan?.focus();
+            }
+        });
+    }
+
+    function resetPicker(picker, vehicleId) {
+        lookups.set(picker, (lookups.get(picker) || 0) + 1);
+        picker.dataset.vehicleId = vehicleId || '';
+        picker.querySelector('[data-tag-scan]').value = '';
+        picker.querySelector('[data-tag-uid]').value = '';
+        picker.querySelector('[data-tag-select]').value = '';
+        setResult(picker, 'Waiting for a tag…', '');
+    }
+
+    document.querySelectorAll('[data-tag-picker]').forEach(initPicker);
+
+    /* ---------- Vehicle JSON → panel and drawers ---------- */
+
+    async function loadVehicle(url) {
+        const response = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!response.ok) {
+            throw new Error('Vehicle could not be loaded.');
+        }
+        return response.json();
+    }
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) {
+            node.className = className;
+        }
+        if (text !== undefined && text !== null) {
+            node.textContent = text;
+        }
+        return node;
+    }
+
+    function badge(status, label) {
+        const tone = {
+            inside: 'success', active: 'success', assigned: 'success',
+            outside: 'neutral', inactive: 'neutral', available: 'neutral', disabled: 'neutral',
+            lost: 'critical', entry: 'info', exit: 'info',
+        }[String(status).toLowerCase()] || 'neutral';
+        return el('span', `badge badge-tone-${tone}`, label || status);
+    }
+
+    function renderPanel(vehicle) {
+        const panel = document.querySelector('[data-vehicle-panel]');
+        document.getElementById('vehicle-panel-title').textContent = vehicle.plate_number;
+
+        const head = el('div', 'vehicle-panel-head');
+        head.append(badge(vehicle.status, `Registration: ${vehicle.status === 'active' ? 'Active' : 'Inactive'}`),
+            badge(vehicle.current_state, `Campus: ${String(vehicle.current_state).toLowerCase() === 'inside' ? 'Inside' : 'Outside'}`));
+
+        const details = el('dl', 'vehicle-panel-details');
+        [
+            ['Owner', vehicle.vehicle_owner_name || '—'],
+            ['Registered by', vehicle.registered_by || 'Not recorded'],
+            ['Category', vehicle.category_label],
+            ['Vehicle type', vehicle.vehicle_type],
+            ['RFID tag', vehicle.tag ? `#${vehicle.tag.number_label ?? vehicle.tag.tag_number ?? '—'} · ${vehicle.tag.uid} · ${vehicle.tag.status_label || vehicle.tag.status}` : 'No RFID assigned'],
+            ['Last seen', vehicle.last_seen],
+            ['Today', `${vehicle.entries_today} in · ${vehicle.exits_today} out`],
+        ].forEach(function ([label, value]) {
+            details.append(el('dt', null, label), el('dd', null, value));
+        });
+
+        // Phase 6: visits the camera recorded with no tag read (e.g. before registration).
+        if (vehicle.camera_visits > 0) {
+            const visits = el('dd');
+            const text = `${vehicle.camera_visits} as an unregistered guest`;
+            if (vehicle.plate_profile_url) {
+                const link = el('a', null, text);
+                link.href = vehicle.plate_profile_url;
+                visits.append(link);
+            } else {
+                visits.textContent = text;
+            }
+            details.append(el('dt', null, 'Camera visits'), visits);
+        }
+
+        if (vehicle.previous_tags?.length) {
+            details.append(
+                el('dt', null, 'Old tags'),
+                el('dd', null, vehicle.previous_tags.map((tag) => `#${tag.number_label ?? tag.tag_number ?? '—'} · ${tag.uid} (${tag.status_label || tag.status})`).join(', '))
+            );
+        }
+
+        const actions = el('div', 'button-row');
+        const edit = el('button', 'button button-secondary button-sm', 'Edit');
+        edit.type = 'button';
+        edit.addEventListener('click', () => openEdit(vehicle));
+        const replace = el('button', 'button button-secondary button-sm', vehicle.tag ? 'Replace Tag' : 'Assign Tag');
+        replace.type = 'button';
+        replace.addEventListener('click', () => openReplace(vehicle));
+        actions.append(edit, replace);
+
+        const movementsTitle = el('h3', 'vehicle-panel-subtitle', 'Last 10 movements');
+        const list = el('ul', 'vehicle-movements');
+        if (!vehicle.movements?.length) {
+            list.append(el('li', 'text-muted', 'No movements yet.'));
+        } else {
+            vehicle.movements.forEach(function (movement) {
+                const item = el('li');
+                const link = el('a', null);
+                link.href = movement.url;
+                link.append(badge(movement.event_type.toLowerCase(), movement.event_type));
+                item.append(link, el('span', null, movement.time), el('span', 'text-muted', movement.note || movement.source));
+                list.append(item);
+            });
+        }
+
+        panel.replaceChildren(head, details, actions, movementsTitle, list);
+    }
+
+    function setField(form, name, value) {
+        const input = form.querySelector(`[data-field="${name}"]`);
+        if (input) {
+            input.value = value ?? '';
+        }
+    }
+
+    function openEdit(vehicle) {
+        const form = document.querySelector('[data-vehicle-form="edit"]');
+        form.action = vehicle.urls.update;
+        setField(form, 'id', vehicle.id);
+        setField(form, 'tag_id', vehicle.tag ? vehicle.tag.id : '');
+        setField(form, 'plate_number', vehicle.plate_number);
+        form.querySelector('[name="plate_number"]').dataset.plateLegacy = vehicle.plate_number || '';
+        setField(form, 'vehicle_owner_name', vehicle.vehicle_owner_name);
+
+        // Phase 4: Faculty & Staff or Registered Visitor (no custom categories).
+        setField(form, 'category', (options.categories || []).includes(vehicle.category) ? vehicle.category : 'registered_visitor');
+
+        const knownType = (options.vehicleTypes || []).includes(vehicle.vehicle_type);
+        setField(form, 'vehicle_type', knownType ? vehicle.vehicle_type : 'Others');
+        setField(form, 'vehicle_type_other', knownType ? '' : vehicle.vehicle_type);
+        form.querySelector('[name="vehicle_type_other"]').dataset.typeLegacy = vehicle.vehicle_type || '';
+
+        form.querySelectorAll('[data-other-select]').forEach(syncOther);
+        form.querySelector('[data-edit-tag-note]').textContent = vehicle.tag
+            ? `Tag #${vehicle.tag.number_label ?? vehicle.tag.tag_number ?? '—'} (${vehicle.tag.uid}). Change it with Replace Tag.`
+            : 'No RFID assigned. Plate registration remains active; use Assign Tag when a tag is available.';
+
+        window.ui.closeDrawer('vehicle-panel');
+        window.ui.openDrawer('edit-vehicle-drawer');
+    }
+
+    function openReplace(vehicle) {
+        const form = document.querySelector('[data-vehicle-form="replace"]');
+        form.action = vehicle.urls.replace_tag;
+        setField(form, 'expected_tag_id', vehicle.tag?.id || 0);
+        setField(form, 'id', vehicle.id);
+        form.querySelector('[data-replace-current]').textContent = `${vehicle.plate_number} · current tag ${vehicle.tag ? `#${vehicle.tag.number_label ?? vehicle.tag.tag_number ?? '—'} · ${vehicle.tag.uid}` : 'none'}`;
+        form.querySelector('[data-old-tag-fieldset]').hidden = !vehicle.tag;
+        document.getElementById('replace-tag-drawer-title').textContent = vehicle.tag ? 'Replace Tag' : 'Assign Tag';
+        form.querySelector('button[type="submit"]').textContent = vehicle.tag ? 'Replace Tag' : 'Assign Tag';
+        resetPicker(form.querySelector('[data-tag-picker]'), vehicle.id);
+
+        window.ui.closeDrawer('vehicle-panel');
+        window.ui.openDrawer('replace-tag-drawer');
+    }
+
+    async function withVehicle(url, callback) {
+        try {
+            callback(await loadVehicle(url));
+        } catch (error) {
+            window.ui.toast(error.message, 'error');
+        }
+    }
+
+    function openRow(row) {
+        const panel = document.querySelector('[data-vehicle-panel]');
+        const loading = document.createElement('p');
+        loading.className = 'text-muted skeleton-line';
+        loading.textContent = 'Loading…';
+        panel.replaceChildren(loading);
+        window.ui.openDrawer('vehicle-panel');
+        withVehicle(row.dataset.vehicleUrl, renderPanel);
+    }
+
+    // Delegation keeps row actions working after server-rendered results change.
+    document.addEventListener('click', async function (event) {
+        if (event.defaultPrevented) return;
+        const button = event.target.closest('[data-vehicle-action]');
+        if (button) {
+            button.closest('details')?.removeAttribute('open');
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            await withVehicle(button.dataset.vehicleUrl, function (vehicle) {
+                if (button.isConnected) (button.dataset.vehicleAction === 'edit' ? openEdit : openReplace)(vehicle);
+            });
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+            return;
+        }
+        const row = event.target.closest('[data-vehicle-row]');
+        if (row && !event.target.closest('button, a, form, input, select, summary, details')) openRow(row);
+    });
+
+    document.addEventListener('keydown', function (event) {
+        const row = event.target.closest('[data-vehicle-row]');
+        if (!row || event.target !== row || !['Enter', ' '].includes(event.key)) return;
+        event.preventDefault();
+        openRow(row);
+    });
+
+    // Focus the scan field whenever a tag picker drawer opens.
+    document.addEventListener('drawer:open', function (event) {
+        event.target.querySelector('[data-tag-scan]')?.focus({ preventScroll: true });
+    });
+})();

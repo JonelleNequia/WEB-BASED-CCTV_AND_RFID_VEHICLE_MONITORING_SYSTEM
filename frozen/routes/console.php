@@ -1,0 +1,240 @@
+<?php
+
+use App\Models\NetworkDevice;
+use App\Services\DetectorRuntimeService;
+use App\Services\DeviceRegistryService;
+use App\Services\DeviceServiceRuntime;
+use App\Support\DeviceFiles;
+use App\Support\PythonLauncher;
+use Illuminate\Foundation\Inspiring;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
+use Symfony\Component\Process\Process;
+
+// Phase 1: start (or confirm) the detector without opening a Station page,
+// e.g. from Windows Task Scheduler at startup.
+Artisan::command('detector:start', function (DetectorRuntimeService $detectorRuntimeService) {
+    Cache::forget('detector-runtime-heartbeat');
+    $status = $detectorRuntimeService->ensureRunning();
+
+    $this->info((string) ($status['auto_start_message'] ?? 'Detector check finished.'));
+    $this->line('Service running: '.(($status['service_running'] ?? false) ? 'yes' : 'no'));
+})->purpose('Start the Python vehicle detector in the background');
+
+// A1 (detection): restart the detector if it stopped, even when no page is
+// open. Run `php artisan schedule:work` at Windows startup (Task Scheduler).
+Schedule::call(fn () => app(\App\Services\LifecycleBarrier::class)->run(fn () => app(DetectorRuntimeService::class)->ensureRunning()))
+    ->everyMinute()->name('detector:start')->withoutOverlapping();
+
+// Live view work: go2rtc (WebRTC live view) starts and follows camera changes without an open page.
+Artisan::command('go2rtc:start', function (\App\Services\Go2rtcService $go2rtc) {
+    if (! $go2rtc->enabled()) {
+        $this->warn('The WebRTC live view is off or not available on this system; pages use the basic (MJPEG) view.');
+
+        return;
+    }
+    $this->info($go2rtc->ensureRunning(force: true) ? 'Live view service (go2rtc) running.' : 'Live view service (go2rtc) could not be started; see storage/logs/go2rtc.log.');
+})->purpose('Start the go2rtc live view service (WebRTC)');
+Schedule::call(fn () => app(\App\Services\LifecycleBarrier::class)->run(fn () => app(\App\Services\Go2rtcService::class)->ensureRunning(force: true)))
+    ->everyMinute()->name('go2rtc:start')->withoutOverlapping();
+
+// Live view work: the device service (UHF readers) also restarts without an open page.
+Schedule::call(fn () => app(\App\Services\LifecycleBarrier::class)->run(fn () => app(DeviceServiceRuntime::class)->ensureRunning()))->everyMinute()->name('devices:ensure-running')->withoutOverlapping();
+
+Artisan::command('system:delivery-init', function () {
+    $barrier = app(\App\Services\LifecycleBarrier::class);
+    if (! $barrier->enabled()) throw new \RuntimeException('Explicit lifecycle root required.');
+    $identity = $barrier->metadata('identity.json');
+    if (\Illuminate\Support\Facades\DB::table('delivery_installations')->exists()) {
+        $barrier->checkIdentity();
+    } else {
+        \Illuminate\Support\Facades\DB::table('delivery_installations')->insert(['id' => 1, 'installation' => $identity['installation'], 'generation' => $identity['generation']]);
+    }
+    $this->info('Delivery identity initialized; existing identity was not replaced.');
+});
+
+Artisan::command('system:delivery-initializable', function () {
+    if (\Illuminate\Support\Facades\DB::table('delivery_installations')->exists()) {
+        throw new \RuntimeException('Database already has an installation/generation identity; never regenerate it.');
+    }
+    $this->info('Fresh database can receive its first delivery identity.');
+});
+
+Artisan::command('system:delivery-check', function () {
+    app(\App\Services\LifecycleBarrier::class)->checkIdentity();
+    if (\Illuminate\Support\Facades\DB::getDriverName() !== 'sqlite'
+        || (array_values((array) \Illuminate\Support\Facades\DB::selectOne('PRAGMA quick_check'))[0] ?? null) !== 'ok'
+        || ! app(\App\Services\SettingsService::class)->detectorApiKey() || ! config('app.key')) {
+        throw new \RuntimeException('Local database/identity/secrets readiness failed.');
+    }
+    $this->info('Local database/identity/secrets readiness passed.');
+});
+
+// Phase 3 (visitor model): close tag reads whose camera crossing never came
+// (also done on every web request; this is for a scheduler or a manual run).
+Artisan::command('rfid:finalize-pending', function (\App\Services\RfidCameraFusionService $fusionService) {
+    $this->info($fusionService->finalizeExpired().' waiting tag read(s) closed.');
+})->purpose('Close RFID reads that waited too long for the camera crossing');
+
+/*
+ * Plug-and-detect diagnostics. Both run the Python device service code
+ * directly, so they work even when the background service is stopped.
+ */
+$runDeviceTool = function (array $arguments, callable $output): int {
+    $process = new Process(
+        [PythonLauncher::pythonExecutable(), 'device_service.py', ...$arguments],
+        PythonLauncher::directory(),
+        ['DEVICE_FILES_PATH' => DeviceFiles::directory(), 'PYTHONUNBUFFERED' => '1'],
+        null,
+        600
+    );
+
+    return $process->run(fn (string $type, string $buffer) => $output($buffer));
+};
+
+Artisan::command('devices:scan {--target=* : Also probe this IP} {--allow-temp-ip : Use a temporary IP for devices on another subnet (needs admin)}', function (DeviceRegistryService $registry) use ($runDeviceTool) {
+    $arguments = ['--scan-once', '--verbose'];
+    foreach ((array) $this->option('target') as $target) {
+        $arguments[] = '--target';
+        $arguments[] = $target;
+    }
+    if ($this->option('allow-temp-ip')) {
+        $arguments[] = '--allow-temp-ip';
+    }
+
+    $this->info('Scanning the network for cameras and UHF readers...');
+    $verbose = $this->output->isVerbose();
+    $exitCode = $runDeviceTool($arguments, function (string $buffer) use ($verbose) {
+        if ($verbose) {
+            $this->output->write($buffer);
+        }
+    });
+
+    if ($exitCode !== 0) {
+        $this->error('The scan failed. Run with --verbose to see why.');
+
+        return 1;
+    }
+
+    $summary = $registry->ingestLastScanFile() ?? [];
+    $this->newLine();
+    $this->table(
+        ['Type', 'Name', 'IP', 'MAC', 'Status', 'Details'],
+        NetworkDevice::query()->orderBy('kind')->orderBy('ip')->get()->map(fn (NetworkDevice $device) => [
+            $device->kindLabel().($device->confidence === 'possible' ? ' (possible)' : ''),
+            $device->name ?: ($device->brand ?: $device->vendor ?: '-'),
+            $device->ip,
+            $device->mac ?: '-',
+            $device->status,
+            $device->kind === NetworkDevice::KIND_CAMERA
+                ? 'RTSP '.($device->cameraDetails()['rtsp_port'] ?? '-').($device->cameraDetails()['onvif_xaddr'] ?? null ? ' · ONVIF' : '')
+                : ($device->kind === NetworkDevice::KIND_READER
+                    ? strtoupper($device->readerDetails()['transport'] ?? '?').' '.($device->readerDetails()['port'] ?? '-')
+                        .' · '.($device->readerDetails()['protocol'] ?? 'format unknown')
+                        .' · '.($device->readerDetails()['work_mode'] ?? 'mode unknown')
+                    : ($device->vendor ?: '-')),
+        ])->all()
+    );
+    $this->line(sprintf('New: %d · Updated: %d · Moved to a new IP: %d · Now offline: %d',
+        $summary['created'] ?? 0, $summary['updated'] ?? 0, $summary['moved'] ?? 0, $summary['offline'] ?? 0));
+
+    return 0;
+})->purpose('Find cameras and UHF RFID readers on the network (use --verbose to see every step)');
+
+Artisan::command('devices:listen {address : Reader IP:PORT} {--udp : Use UDP instead of TCP} {--seconds=30}', function () use ($runDeviceTool) {
+    $arguments = ['--listen', (string) $this->argument('address'), '--seconds', (string) (int) $this->option('seconds')];
+    if ($this->option('udp')) {
+        $arguments[] = '--transport';
+        $arguments[] = 'udp';
+    }
+
+    return $runDeviceTool($arguments, fn (string $buffer) => $this->output->write($buffer));
+})->purpose('Print the raw data a UHF reader sends (hold a tag near it)');
+
+// Detector test without a camera or a real vehicle: the same pipeline
+// (detection -> zone -> line crossing -> RFID window -> alert) on a video file.
+Artisan::command('detector:test-video {file : Video file (e.g. a clip of vehicles passing)}
+    {--role=entrance : Station whose settings (and, with --use-calibration, zone and direction) to use}
+    {--use-calibration : Use the station\'s saved zone and direction}
+    {--roi= : Zone polygon, normalized "x,y x,y x,y ..."}
+    {--away= : A vehicle moving away from the camera is IN or OUT}
+    {--min-move= : Share of the zone\'s height to move up / down for a sure IN / OUT (e.g. 0.2)}
+    {--post : Send events and alerts to Laravel for real (default: dry run)}
+    {--app-url= : With --post, send to this Laravel instead (e.g. a test copy)}
+    {--out= : Write the video with the debug overlay here}
+    {--fast : Do not wait for real time}', function () {
+    $arguments = [PythonLauncher::pythonExecutable(), 'detector_service.py', '--video', (string) realpath((string) $this->argument('file')) ?: (string) $this->argument('file'), '--role', (string) $this->option('role')];
+    foreach (['roi', 'away', 'min-move', 'app-url', 'out'] as $option) {
+        if (filled($this->option($option))) {
+            $arguments[] = '--'.$option;
+            $arguments[] = (string) $this->option($option);
+        }
+    }
+    foreach (['use-calibration', 'post', 'fast'] as $flag) {
+        if ($this->option($flag)) {
+            $arguments[] = '--'.$flag;
+        }
+    }
+
+    $process = new Process($arguments, PythonLauncher::directory(), ['PYTHONUNBUFFERED' => '1'], null, 3600);
+
+    return $process->run(fn (string $type, string $buffer) => $this->output->write($buffer));
+})->purpose('Run the vehicle detector on a video file: vehicle passes through the zone, IN / OUT');
+
+// Raw hex dump from a UHF reader (troubleshooting an unknown data format).
+// When the background service is connected to the reader, it copies what it
+// receives: the reader accepts only one TCP client. Nothing is sent to it.
+Artisan::command('devices:rawdump {target? : entrance, exit or IP:PORT (default: the assigned reader)} {--seconds=30}', function () use ($runDeviceTool) {
+    $target = (string) ($this->argument('target') ?: 'auto');
+    $arguments = ['--dump', $target, '--seconds', (string) max(1, (int) $this->option('seconds'))];
+
+    return $runDeviceTool($arguments, fn (string $buffer) => $this->output->write($buffer));
+})->purpose('Print the raw bytes (hex) a UHF reader sends, with the decoded tags');
+
+// Find my reader in the terminal. Passive listening (readers on another
+// network) needs admin rights: on macOS/Linux this asks for your password.
+Artisan::command('devices:find {--seconds=90} {--no-passive : Skip raw packet listening (no password needed)}', function () {
+    $python = PythonLauncher::pythonExecutable();
+    $arguments = [$python, 'device_service.py', '--find', '--post', '--seconds', (string) (int) $this->option('seconds')];
+    $environment = [
+        'DEVICE_FILES_PATH' => DeviceFiles::directory(),
+        'PYTHONUNBUFFERED' => '1',
+        'PYTHONDONTWRITEBYTECODE' => '1',
+    ];
+
+    if ($this->option('no-passive')) {
+        $arguments[] = '--no-passive';
+    } elseif (PHP_OS_FAMILY !== 'Windows' && function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+        // Only the Python part runs as admin, with its own temp folder, so no
+        // root-owned files end up in the project.
+        $this->line('Passive listening needs admin rights; enter your computer password if asked.');
+        $arguments = ['sudo', 'env',
+            'PYTHONUNBUFFERED=1', 'PYTHONDONTWRITEBYTECODE=1',
+            'DEVICE_FILES_PATH='.sys_get_temp_dir().'/philcst-find',
+            'DEVICE_RUNTIME_CONFIG_PATH='.DeviceFiles::runtimeConfigPath(),
+            ...$arguments];
+    } elseif (PHP_OS_FAMILY === 'Windows') {
+        $this->line('Tip: run this in an Administrator window (with Npcap installed) to also hear readers on another network.');
+    }
+
+    $process = new Process($arguments, PythonLauncher::directory(), $environment, null, 900);
+    if (Process::isTtySupported()) {
+        $process->setTty(true);
+    }
+
+    return $process->run(fn (string $type, string $buffer) => $this->output->write($buffer));
+})->purpose('Find the UHF reader by plugging it in (before/after scan, passive listening, port scan)');
+
+Artisan::command('devices:start', function (DeviceServiceRuntime $runtime) {
+    Cache::forget('device-service-launch');
+    $runtime->ensureRunning();
+    sleep(3);
+    $status = $runtime->readStatus();
+    $this->info($status['message'] ?? '');
+    $this->line('Device service running: '.(($status['service_running'] ?? false) ? 'yes' : 'no'));
+})->purpose('Start the plug-and-detect device service in the background');
+
+Artisan::command('inspire', function () {
+    $this->comment(Inspiring::quote());
+})->purpose('Display an inspiring quote');

@@ -1,0 +1,1165 @@
+/*
+ * Plug-and-detect: Settings › Gates & Readers › Devices.
+ * - Polls the device list (faster while a scan runs) and re-renders it.
+ * - New devices are highlighted and announced with a toast.
+ * - Click a device: details, then assign it to a gate as camera or
+ *   reader. A camera login is asked only when the saved one does not work.
+ */
+(function () {
+    const panel = document.querySelector('[data-devices-panel]');
+    if (!panel) {
+        return;
+    }
+
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const drawerBody = document.querySelector('[data-device-drawer-body]');
+    const drawerTitle = document.getElementById('device-drawer-title');
+    const initialNode = document.getElementById('devices-panel-data');
+    let data = initialNode ? JSON.parse(initialNode.textContent || '{}') : {};
+    const known = new Set();
+    let firstRender = true;
+    let acknowledgeTimer = null;
+    let pollTimer = null;
+    let openDeviceId = null;
+
+    const STATE = {
+        ready: ['success', 'Connected'],
+        scanning: ['info', 'Scanning…'],
+        waiting_for_lan: ['warning', 'Waiting for LAN connection'],
+        link_local: ['warning', 'Direct cable (no DHCP)'],
+        stopped: ['critical', 'Device service stopped'],
+    };
+    const STATUS_TONE = { online: 'success', offline: 'neutral', unreachable: 'warning' };
+    const KIND_TONE = { camera: 'brand', rfid_reader: 'info', router: 'neutral', unknown: 'neutral' };
+    const LINK_LABEL = {
+        connected: 'Connected', connecting: 'Connecting…', disconnected: 'Not answering', error: 'Waiting for address', unassigned: 'Not connected',
+    };
+
+    /* ---------- helpers ---------- */
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) {
+            node.className = className;
+        }
+        if (text !== undefined && text !== null) {
+            node.textContent = text;
+        }
+        return node;
+    }
+
+    function badge(tone, label) {
+        return el('span', `badge badge-tone-${tone}`, label);
+    }
+
+    function button(label, className, onClick) {
+        const node = el('button', className || 'button button-secondary button-sm', label);
+        node.type = 'button';
+        node.addEventListener('click', onClick);
+        return node;
+    }
+
+    async function post(url, body) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
+            body: JSON.stringify(body || {}),
+        });
+        let json = {};
+        try {
+            json = await response.json();
+        } catch (error) {
+            json = {};
+        }
+        // 409: already on another gate (Phase 6): the form asks "Move it here?".
+        if (!response.ok && response.status !== 422 && response.status !== 409) {
+            throw new Error(json.message || `The request failed (error ${response.status}).`);
+        }
+        return { ok: response.ok, status: response.status, json: json };
+    }
+
+    function deviceById(id) {
+        return (data.devices || []).find((device) => device.id === id);
+    }
+
+    function deviceTitle(device) {
+        return [device.name, device.model && !String(device.name).includes(device.model) ? device.model : null].filter(Boolean).join(' ');
+    }
+
+    /* ---------- network bar ---------- */
+
+    // UI Phase 4: no LAN (Wi-Fi only, or nothing): one clear banner at the top.
+    function noLan() {
+        const service = data.service || {};
+        return service.running && service.state === 'waiting_for_lan';
+    }
+
+    function renderBanner() {
+        const banner = panel.querySelector('[data-devices-banner]');
+        if (!banner) {
+            return;
+        }
+        const interfaces = (data.network || {}).interfaces || [];
+        banner.hidden = !noLan();
+        banner.replaceChildren(
+            el('strong', null, interfaces.length ? 'Only Wi-Fi is connected' : 'No network connected'),
+            el('span', null, 'Plug the LAN cable from the cameras and UHF readers (their switch or router) into this PC, or use a USB LAN adapter. They appear here by themselves.')
+        );
+    }
+
+    function renderNetwork() {
+        const box = panel.querySelector('[data-devices-network]');
+        const service = data.service || {};
+        const scan = data.scan || {};
+        const state = service.running ? (scan.running ? 'scanning' : service.state) : 'stopped';
+        const [tone, label] = STATE[state] || ['neutral', state];
+
+        renderBanner();
+        const head = el('div', 'devices-network-head');
+        // The banner already says it when there is no LAN.
+        if (!noLan() || scan.running) {
+            head.append(badge(tone, label), el('span', null, scan.running ? (scan.progress || 'Scanning the network…') : service.message));
+        }
+        panel.querySelector('[data-devices-scan]').disabled = !!scan.running;
+
+        const chips = el('div', 'devices-interfaces');
+        const interfaces = (data.network || {}).interfaces || [];
+        if (!interfaces.length) {
+            chips.append(el('span', 'text-muted', 'No network connected on this PC.'));
+        }
+        interfaces.forEach(function (item) {
+            const kind = item.kind === 'ethernet' ? 'LAN' : item.kind === 'wifi' ? 'Wi-Fi' : item.label || item.name;
+            const text = `${kind} · ${item.ip}/${item.prefix}${item.gateway ? ' · router ' + item.gateway : ''}${item.link_local ? ' · no DHCP' : ''}`;
+            chips.append(el('span', `chip ${item.kind === 'ethernet' ? 'chip-brand' : 'chip-soft'}`, text));
+        });
+
+        const meta = el('p', 'field-help');
+        const counts = data.counts || {};
+        meta.textContent = `Last scan: ${scan.last_finished_display || 'not yet'} · ${counts.cameras || 0} camera(s) · ${counts.readers || 0} reader(s) · ${counts.other || 0} other`;
+
+        box.replaceChildren(...(head.childNodes.length ? [head] : []), chips, meta);
+        if (scan.error) {
+            box.append(el('p', 'field-error', scan.error));
+        }
+    }
+
+    /* ---------- station assignments ---------- */
+
+    function renderStations() {
+        const box = panel.querySelector('[data-devices-stations]');
+        const cards = Object.entries(data.stations || {}).map(function ([station, info]) {
+            const card = el('article', 'devices-station');
+            card.append(el('h3', null, info.label || station));
+            card.append(slot(station, 'camera', 'Camera', info.camera));
+            card.append(slot(station, 'reader', 'UHF Reader', info.reader, info.manual_reader));
+            return card;
+        });
+        box.replaceChildren(...cards);
+    }
+
+    function slot(station, role, label, assigned, manual) {
+        const row = el('div', 'devices-slot');
+        row.append(el('span', 'devices-slot-label', label));
+        const body = el('div', 'devices-slot-body');
+
+        if (manual && role === 'reader') {
+            body.append(el('strong', null, 'Manual address (Advanced)'));
+            body.append(el('span', 'text-muted', 'Switch it off below to use a detected reader.'));
+            row.append(body);
+            return row;
+        }
+
+        if (!assigned) {
+            body.append(el('span', 'text-muted', role === 'camera' ? 'No camera assigned. Pick one in the list above.' : 'No UHF reader assigned. Pick one in the list above.'));
+            row.append(body);
+            return row;
+        }
+
+        const title = el('div', 'devices-slot-title');
+        title.append(el('strong', null, assigned.name), badge(STATUS_TONE[assigned.status] || 'neutral', assigned.status));
+        body.append(title, el('span', 'text-muted', `${assigned.ip || '—'} · ${assigned.mac || 'MAC unknown'}`));
+
+        if (role === 'reader' && assigned.link) {
+            const link = assigned.link;
+            const state = LINK_LABEL[link.state] || link.state || 'Starting…';
+            const parts = [state];
+            if (link.state === 'connected' && link.ip) {
+                parts.push(`${String(link.transport || 'tcp').toUpperCase()} ${link.ip}:${link.port}`);
+            }
+            if (link.protocol) {
+                parts.push(`format ${link.protocol}`);
+            }
+            body.append(el('span', link.state === 'connected' ? 'devices-link devices-link-ok' : 'devices-link', parts.join(' · ')));
+            if (link.last_tag) {
+                const tag = el('div', 'devices-last-tag');
+                tag.append(el('span', 'text-muted', 'Last tag '), el('code', null, link.last_tag));
+                const extra = [];
+                if (link.last_rssi !== null && link.last_rssi !== undefined) {
+                    extra.push(`RSSI ${link.last_rssi} dBm`);
+                }
+                if (link.last_tag_display) {
+                    extra.push(link.last_tag_display);
+                }
+                extra.push(`${link.events_sent || 0} event(s) from ${link.tags_read || 0} read(s)`);
+                tag.append(el('span', 'field-help', extra.join(' · ')));
+                body.append(tag);
+            } else if (link.state === 'connected') {
+                body.append(el('span', 'field-help', 'No tag read yet. Hold a UHF tag near the reader.'));
+            }
+            if (link.unknown_frames) {
+                body.append(el('span', 'field-help', `${link.unknown_frames} unknown frame(s), last: ${link.last_unknown_hex || '—'} (see php artisan devices:rawdump)`));
+            }
+            if (link.last_error && link.state !== 'connected') {
+                body.append(el('span', 'field-help', link.last_error));
+            }
+            if (assigned.network_warning) {
+                body.append(networkWarning(assigned.network_warning));
+            }
+        }
+        if (role === 'camera') {
+            const stream = (assigned.options || {}).stream === 'sub' ? 'Sub' : 'Main';
+            const shared = assigned.shared_with
+                ? ` · same physical camera as ${gateName(assigned.shared_with.station)} (${assigned.shared_with.stream === 'sub' ? 'sub' : 'main'} stream)`
+                : '';
+            body.append(el('span', 'field-help', `${stream} stream${shared}`));
+
+            // Live state from the detector, with the real reason when there is no video.
+            if (assigned.camera_running) {
+                body.append(el('span', 'devices-link devices-link-ok', 'Live video'));
+            } else if (!assigned.detector_running) {
+                body.append(el('span', 'devices-link', 'No video: the detector is not running yet (it starts by itself).'));
+            } else if (assigned.camera_error) {
+                body.append(el('span', 'devices-link', `No video: ${assigned.camera_error}`));
+            }
+            body.append(cameraLoginForm(station, assigned));
+        }
+
+        row.append(body, button('Unassign', 'button button-secondary button-sm', () => unassign(station, role)));
+        return row;
+    }
+
+    // UI Phase 4: a short warning; the long explanation is under "How to fix".
+    function networkWarning(warning) {
+        const box = el('div', 'devices-guidance devices-guidance-warning');
+        const line = el('p', 'devices-guidance-line');
+        line.append(el('strong', null, warning.title), document.createTextNode(` · ${warning.summary || ''}`));
+        const fix = el('details', 'how-to-fix');
+        fix.append(el('summary', null, 'How to fix'), el('p', null, warning.text));
+        const steps = el('ol');
+        (warning.steps || []).forEach((step) => steps.append(el('li', null, step)));
+        fix.append(steps);
+        box.append(line, fix);
+        return box;
+    }
+
+    function gateName(code) {
+        return (data.stations?.[code]?.label) || capitalize(code);
+    }
+
+    function capitalize(text) {
+        return String(text || '').charAt(0).toUpperCase() + String(text || '').slice(1);
+    }
+
+    // Camera login: opened by itself when the camera rejects the saved one.
+    function cameraLoginForm(station, assigned) {
+        const details = el('details', 'devices-login-inline');
+        details.open = assigned.error_code === 'unauthorized';
+        details.append(el('summary', null, assigned.error_code === 'unauthorized' ? 'Enter the camera login' : 'Change camera login'));
+        const form = el('form', 'devices-login-form');
+        form.noValidate = true;
+        form.append(
+            field(`login-${station}-user`, 'username', 'Username', 'text', 'off'),
+            field(`login-${station}-pass`, 'password', 'Password', 'password', 'new-password')
+        );
+        const message = el('p', 'devices-assign-message');
+        const submit = el('button', 'button button-primary button-sm', 'Save and retry');
+        submit.type = 'submit';
+        form.append(message, submit);
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            const username = form.querySelector('[name="username"]').value.trim();
+            if (!username) {
+                message.textContent = 'Enter the camera username.';
+                message.dataset.state = 'error';
+                return;
+            }
+            submit.disabled = true;
+            message.textContent = 'Checking the camera…';
+            message.dataset.state = 'pending';
+            try {
+                const result = await post(assigned.assign_url, {
+                    station: station,
+                    role: 'camera',
+                    stream: (assigned.options || {}).stream || 'main',
+                    username: username,
+                    password: form.querySelector('[name="password"]').value,
+                });
+                if (!result.ok) {
+                    message.textContent = result.json.message || 'The camera rejected this login.';
+                    message.dataset.state = 'error';
+                    return;
+                }
+                window.ui.toast('Camera login saved (encrypted). Connecting…', 'success');
+                apply(result.json.devices);
+            } catch (error) {
+                message.textContent = error.message;
+                message.dataset.state = 'error';
+            } finally {
+                submit.disabled = false;
+            }
+        });
+        details.append(form);
+        return details;
+    }
+
+    /* ---------- device tables ---------- */
+
+    /* ---------- diagnostics ---------- */
+
+    const WARNING_TONE = { critical: 'critical', warning: 'warning', info: 'info' };
+
+    function renderDiagnostics() {
+        const diag = data.diagnostics || {};
+        const box = panel.querySelector('[data-devices-diagnostics]');
+        const details = panel.querySelector('[data-devices-diagnostics-box]');
+        const warnings = diag.warnings || [];
+        const serious = warnings.filter((warning) => warning.level !== 'info');
+        const found = ((data.counts || {}).cameras || 0) + ((data.counts || {}).readers || 0);
+
+        panel.querySelector('[data-devices-diagnostics-count]').textContent = serious.length
+            ? `(${serious.length} warning${serious.length === 1 ? '' : 's'})` : '(no problems)';
+        // Open by itself when nothing was found and there is a reason to show
+        // (not for "no LAN": the banner at the top already says it).
+        if (serious.length && !found && !noLan() && !details.dataset.touched) {
+            details.open = true;
+        }
+
+        const nodes = [];
+        if (warnings.length) {
+            const list = el('ul', 'devices-warnings');
+            warnings.forEach(function (warning) {
+                const item = el('li');
+                item.append(badge(WARNING_TONE[warning.level] || 'neutral', warning.level), el('span', null, warning.message));
+                list.append(item);
+            });
+            nodes.push(list);
+        }
+
+        const interfaces = diag.interfaces || [];
+        const wrap = el('div', 'table-responsive');
+        const tableNode = el('table', 'devices-table');
+        const headRow = el('tr');
+        ['Interface', 'Type', 'This PC', 'Router', 'Addresses scanned', 'Seen by the OS'].forEach((label) => headRow.append(el('th', null, label)));
+        const head = el('thead');
+        head.append(headRow);
+        const body = el('tbody');
+        if (!interfaces.length) {
+            const tr = el('tr');
+            const td = el('td', 'text-muted', 'No scan yet, or no connected interface.');
+            td.colSpan = 6;
+            tr.append(td);
+            body.append(tr);
+        }
+        interfaces.forEach(function (item) {
+            const tr = el('tr');
+            const hosts = item.os_hosts || [];
+            const seen = el('td');
+            seen.append(el('strong', null, String(hosts.length)));
+            if (hosts.length) {
+                seen.append(el('div', 'table-subtext mono', hosts.map((host) => `${host.ip} · ${host.mac}`).join('\n')));
+            }
+            tr.append(
+                el('td', null, `${item.label || item.name} (${item.name})`),
+                el('td', null, item.kind === 'ethernet' ? 'LAN' : item.kind === 'wifi' ? 'Wi-Fi' : item.kind),
+                el('td', 'nowrap', `${item.ip} · ${item.network}${item.link_local ? ' · no DHCP' : ''}`),
+                el('td', 'nowrap', item.gateway || '—'),
+                el('td', null, String(item.hosts_swept)),
+                seen
+            );
+            body.append(tr);
+        });
+        tableNode.append(head, body);
+        wrap.append(tableNode);
+        nodes.push(wrap);
+
+        const firewall = diag.firewall || {};
+        const checks = el('p', 'field-help');
+        checks.textContent = [
+            `Last scan: ${diag.scanned_display || '—'}${diag.trigger ? ` (${diag.trigger})` : ''}${diag.duration ? ` · ${diag.duration}s` : ''}`,
+            `Local network access: ${diag.local_network || 'unknown'}`,
+            `Firewall: ${firewall.enabled === true ? 'on' : firewall.enabled === false ? 'off' : 'unknown'}${firewall.python_allowed === true ? ' (Python allowed)' : firewall.python_allowed === false ? ' (Python NOT allowed)' : ''}`,
+            `Admin rights: ${diag.admin ? 'yes' : 'no'}`,
+            `ONVIF replies: ${diag.onvif_replies || 0}`,
+            `Reader-module replies: ${diag.module_replies || 0}`,
+        ].join(' · ');
+        nodes.push(checks);
+
+        box.replaceChildren(...nodes);
+    }
+
+    panel.querySelector('[data-devices-diagnostics-box]').addEventListener('toggle', function () {
+        this.dataset.touched = '1';
+    });
+
+    function renderLists() {
+        const devices = data.devices || [];
+        const main = devices.filter((device) => ['camera', 'rfid_reader'].includes(device.kind));
+        const other = devices.filter((device) => !['camera', 'rfid_reader'].includes(device.kind));
+
+        // "Other" devices: only the networks this PC is on now, unless asked.
+        const networks = ((data.network || {}).interfaces || []).map((item) => item.network);
+        const onCurrentNetwork = (device) => device.status === 'online' || networks.includes(device.subnet);
+        const showOld = panel.querySelector('[data-devices-show-old]')?.checked;
+        const oldCount = other.filter((device) => !onCurrentNetwork(device)).length;
+        panel.querySelector('[data-devices-old-count]').textContent = oldCount;
+        const otherShown = showOld ? other : other.filter(onCurrentNetwork);
+
+        const list = panel.querySelector('[data-devices-list]');
+        if (!main.length) {
+            const empty = el('div', 'empty-block');
+            empty.append(
+                el('strong', null, (data.scan || {}).running ? 'Looking for cameras and readers…' : 'No camera or UHF reader found yet'),
+                el('p', null, noLan() ? 'Connect the LAN cable (see above).' : 'Plug them into the router or switch. Still nothing? Open Diagnostics below.')
+            );
+            list.replaceChildren(empty);
+        } else {
+            list.replaceChildren(table(main));
+        }
+
+        panel.querySelector('[data-devices-other-count]').textContent = otherShown.length;
+        panel.querySelector('[data-devices-other]').replaceChildren(otherShown.length ? table(otherShown) : el('p', 'text-muted', 'None on the current network.'));
+    }
+
+    function table(devices) {
+        const wrap = el('div', 'table-responsive');
+        const tableNode = el('table', 'devices-table');
+        const head = el('thead');
+        const headRow = el('tr');
+        // Maker and open ports are in the device panel ("Manage"): the table fits without scrolling sideways.
+        ['Device', 'Address', 'Status', 'Gate', ''].forEach((label) => headRow.append(el('th', null, label)));
+        head.append(headRow);
+
+        const body = el('tbody');
+        devices.forEach(function (device) {
+            const tr = el('tr', `devices-row${device.is_new ? ' is-new' : ''}`);
+            tr.tabIndex = 0;
+            tr.dataset.deviceId = device.id;
+
+            // The type badge sits above the name (no separate column: the table fits the page).
+            const name = el('td', 'devices-name');
+            const type = el('div', 'devices-type');
+            type.append(badge(KIND_TONE[device.kind] || 'neutral', device.kind_label));
+            if (device.confidence === 'possible') {
+                type.append(el('span', 'table-subtext', 'not confirmed'));
+            }
+            name.append(type, el('strong', null, device.friendly_name || deviceTitle(device)));
+            const maker = device.vendor || device.brand;
+            if (maker && maker !== device.friendly_name) {
+                name.append(el('div', 'table-subtext', maker));
+            }
+            if (device.is_new) {
+                name.append(badge('info', 'New'));
+            }
+
+            // IP with the MAC under it (one column, so the table fits the page).
+            const ip = el('td', 'nowrap', device.ip || '—');
+            ip.append(el('div', 'table-subtext mono', device.mac || 'MAC unknown'));
+            if (device.ip_changed) {
+                ip.append(el('div', 'table-subtext', `new IP since ${device.ip_changed}`));
+            }
+
+            const status = el('td');
+            status.append(badge(STATUS_TONE[device.status] || 'neutral', device.status_label));
+            if (device.guidance) {
+                status.append(el('div', 'table-subtext', 'other subnet'));
+            } else if (device.network_warning) {
+                status.append(el('div', 'table-subtext', 'other subnet (extra address)'));
+            }
+
+            const station = el('td');
+            (device.assigned || []).forEach((item) => station.append(badge('success', item.label)));
+            if (!(device.assigned || []).length) {
+                station.append(el('span', 'text-muted', '—'));
+            }
+
+            const actions = el('td', 'row-actions');
+            const group = el('div', 'devices-row-actions');
+            group.append(button('Manage', 'button button-secondary button-sm', () => openDevice(device.id)), rowMenu(device));
+            actions.append(group);
+
+            tr.append(name, ip, status, station, actions);
+            // The "⋯" menu (and its items) never opens the device panel.
+            const fromControl = (event) => event.target.closest('button, details, summary, a, input');
+            tr.addEventListener('click', function (event) {
+                if (!fromControl(event)) {
+                    openDevice(device.id);
+                }
+            });
+            tr.addEventListener('keydown', function (event) {
+                if (fromControl(event)) {
+                    return;
+                }
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    openDevice(device.id);
+                }
+            });
+            body.append(tr);
+        });
+
+        tableNode.append(head, body);
+        wrap.append(tableNode);
+        return wrap;
+    }
+
+    // Delete device work: "⋯" with "Delete device…" and "Hide this device".
+    function rowMenu(device) {
+        const menu = el('details', 'menu row-menu');
+        const summary = el('summary', 'button button-secondary button-sm', '⋯');
+        summary.setAttribute('aria-label', `More actions for ${deviceTitle(device)}`);
+        const items = el('div', 'menu-panel');
+        items.setAttribute('role', 'menu');
+        const remove = button('Delete device…', 'menu-item-danger', () => {
+            menu.removeAttribute('open');
+            window.deviceDelete?.open(device.delete_summary_url, device.delete_url);
+        });
+        remove.setAttribute('role', 'menuitem');
+        items.append(remove);
+        if (!(device.assigned || []).length) {
+            const hide = button('Hide this device', 'menu-item', async () => {
+                menu.removeAttribute('open');
+                try {
+                    const result = await post(device.hide_url, {});
+                    if (!result.ok) {
+                        throw new Error(result.json.message || 'Not hidden.');
+                    }
+                    window.ui.toast(result.json.message, 'success');
+                    apply(result.json.devices);
+                } catch (error) {
+                    window.ui.toast(error.message, 'error');
+                }
+            });
+            hide.setAttribute('role', 'menuitem');
+            items.append(hide);
+        }
+        menu.append(summary, items);
+        // Open upwards when the table (which scrolls) has no room below the row.
+        menu.addEventListener('toggle', function () {
+            if (!menu.open) {
+                return;
+            }
+            const box = menu.closest('.table-responsive')?.getBoundingClientRect();
+            const below = box ? box.bottom - menu.getBoundingClientRect().bottom : Infinity;
+            menu.classList.toggle('opens-up', below < items.offsetHeight + 12);
+        });
+        return menu;
+    }
+
+    function renderHidden() {
+        const hidden = data.hidden_devices || [];
+        panel.querySelector('[data-devices-hidden-count]').textContent = hidden.length;
+        const box = panel.querySelector('[data-devices-hidden]');
+        if (!hidden.length) {
+            box.replaceChildren(el('p', 'text-muted', 'No hidden device.'));
+            return;
+        }
+        const list = el('ul', 'devices-hidden-list');
+        hidden.forEach(function (device) {
+            const item = el('li');
+            item.append(
+                el('span', null, `${device.name} · ${device.ip || '—'} · ${device.mac || '—'} · hidden ${device.hidden}`),
+                button('Show again', 'button button-secondary button-sm', async () => {
+                    try {
+                        const result = await post(device.unhide_url, {});
+                        window.ui.toast(result.json.message, 'success');
+                        apply(result.json.devices);
+                    } catch (error) {
+                        window.ui.toast(error.message, 'error');
+                    }
+                })
+            );
+            list.append(item);
+        });
+        box.replaceChildren(list);
+    }
+
+    function renderRemovals() {
+        const removals = data.removals || [];
+        panel.querySelector('[data-devices-removals-count]').textContent = removals.length;
+        const box = panel.querySelector('[data-devices-removals]');
+        if (!removals.length) {
+            box.replaceChildren(el('p', 'text-muted', 'No device deleted yet.'));
+            return;
+        }
+        const list = el('ul', 'devices-hidden-list');
+        removals.forEach((row) => list.append(el('li', null,
+            `${row.when} · ${row.device}${row.gates ? ` (${row.gates})` : ''} · deleted by ${row.by} · ${row.records_kept} record${row.records_kept === 1 ? '' : 's'} kept`)));
+        box.replaceChildren(list);
+    }
+
+    /* ---------- device drawer ---------- */
+
+    function openDevice(id) {
+        const device = deviceById(id);
+        if (!device) {
+            return;
+        }
+        openDeviceId = id;
+        drawerTitle.textContent = deviceTitle(device);
+        drawerBody.replaceChildren(...deviceDetails(device), assignForm(device), currentAssignments(device));
+        window.ui.openDrawer('device-drawer');
+    }
+
+    function deviceDetails(device) {
+        const nodes = [];
+        const dl = el('dl', 'vehicle-panel-details');
+        const rows = [
+            ['Type', device.kind_label + (device.confidence === 'possible' ? ' (not confirmed yet)' : '')],
+            ['Brand / maker', device.brand || device.vendor || 'Unknown'],
+            ['Model', device.model],
+            ['IP address', device.ip],
+            ['MAC address', device.mac || 'Unknown (other subnet)'],
+            ['Status', device.status_label],
+            ['Last seen', device.last_seen],
+        ];
+        if (device.camera) {
+            rows.push(['Video', `RTSP port ${device.camera.rtsp_port || '—'}${device.camera.onvif_xaddr ? ' · ONVIF' : ''}`]);
+        }
+        if (device.reader) {
+            const r = device.reader;
+            rows.push(['Connection', r.port ? `${String(r.transport || 'tcp').toUpperCase()} port ${r.port}` : 'Unknown']);
+            rows.push(['Data format', r.protocol || 'Not known yet (learned from the first tag)']);
+            if (r.confirmed) {
+                rows.push(['Confirmed by', r.confirmed_by === 'signature' ? `Maker + port (${r.signature || 'known reader'})` : (r.confirmed_by === 'tag' ? 'Tag data' : 'Reader reply')]);
+            }
+            rows.push(['Work mode', { active: 'Active (sends tags by itself)', answer: 'Answer (polled by this PC)', client: 'Client (connects to this PC)' }[r.work_mode] || 'Unknown']);
+            if (r.sample_tags && r.sample_tags.length) {
+                rows.push(['Tags seen', r.sample_tags.join(', ')]);
+            }
+        }
+        if (device.open_ports && device.open_ports.length) {
+            rows.push(['Open ports', device.open_ports.join(', ')]);
+        }
+        rows.forEach(function ([label, value]) {
+            if (value) {
+                dl.append(el('dt', null, label), el('dd', null, value));
+            }
+        });
+        nodes.push(dl);
+
+        if (device.network_warning) {
+            nodes.push(networkWarning(device.network_warning));
+        }
+        if (device.guidance) {
+            const box = el('div', 'devices-guidance');
+            const line = el('p', 'devices-guidance-line');
+            line.append(el('strong', null, 'Not reachable'), document.createTextNode(` · ${device.guidance.summary || ''}`));
+            const fix = el('details', 'how-to-fix');
+            fix.append(el('summary', null, 'How to fix'), el('p', null, device.guidance.text));
+            if (device.guidance.pc_ip && device.guidance.commands) {
+                fix.append(el('p', null, `Or give this PC a second address on ${device.guidance.network} (for example ${device.guidance.pc_ip}) with admin rights:`));
+                fix.append(el('pre', 'devices-command', `${device.guidance.commands.add}\n\n# remove it afterwards:\n${device.guidance.commands.remove}`));
+            }
+            box.append(line, fix);
+            nodes.push(box);
+        }
+        return nodes;
+    }
+
+    function radioGroup(name, legend, options, selected) {
+        const fieldset = el('fieldset', 'devices-choice');
+        fieldset.append(el('legend', null, legend));
+        options.forEach(function ([value, label]) {
+            const wrap = el('label', 'devices-choice-option');
+            const input = el('input');
+            input.type = 'radio';
+            input.name = name;
+            input.value = value;
+            input.checked = value === selected;
+            wrap.append(input, el('span', null, label));
+            fieldset.append(wrap);
+        });
+        return fieldset;
+    }
+
+    function assignForm(device) {
+        const form = el('form', 'stack-form devices-assign');
+        form.noValidate = true;
+        form.append(el('h3', 'vehicle-panel-subtitle', 'Assign to a gate'));
+
+        const defaultRole = device.kind === 'rfid_reader' ? 'reader' : 'camera';
+        const roles = device.kind === 'camera' ? [['camera', 'Camera']]
+            : device.kind === 'rfid_reader' ? [['reader', 'UHF Reader']]
+                : [['camera', 'Camera'], ['reader', 'UHF Reader']];
+        form.append(radioGroup('role', 'Use as', roles, defaultRole));
+
+        // Phase 1: one choice per gate; suggest the first gate this device is not on yet.
+        const gates = Object.entries(data.stations || {}).map(([code, info]) => [code, info.label || code]);
+        const taken = new Set((device.assigned || []).map((item) => item.station));
+        const freeStation = (gates.find(([code]) => !taken.has(code)) || gates[0] || [''])[0];
+        form.append(radioGroup('station', 'Gate', gates, freeStation));
+
+        const streams = el('div', 'field devices-camera-only');
+        const streamLabel = el('label', null, 'Video stream');
+        streamLabel.htmlFor = 'device-stream';
+        const select = el('select');
+        select.id = 'device-stream';
+        select.name = 'stream';
+        [['sub', 'Sub stream (low delay, recommended)'], ['main', 'Main stream (sharper, about 0.4 s more delay)']].forEach(function ([value, label]) {
+            const option = el('option', null, label);
+            option.value = value;
+            select.append(option);
+        });
+        streams.append(streamLabel, select);
+        form.append(streams);
+
+        // One camera for both stations (testing): the other station gets the other stream.
+        const cameraUse = (device.assigned || []).find((item) => item.role === 'camera');
+        if (device.kind === 'camera' && cameraUse) {
+            streams.append(el('span', 'field-help', `Already the ${gateName(cameraUse.station)} camera. You can use it for another gate too; it will show as the same device.`));
+        }
+        streams.append(el('span', 'field-help', 'Snapshots and plate reading still use the full-resolution main stream when a vehicle is detected.'));
+
+        // Asked only when the saved login does not work (needs_credentials).
+        const login = el('fieldset', 'devices-login');
+        login.hidden = true;
+        login.append(el('legend', null, 'Camera login'));
+        login.append(field('device-username', 'username', 'Username', 'text', 'off'));
+        login.append(field('device-password', 'password', 'Password', 'password', 'new-password'));
+        login.append(el('p', 'field-help', 'Saved encrypted and used for both stations. You are asked only once.'));
+        form.append(login);
+
+        const message = el('p', 'devices-assign-message');
+        message.setAttribute('role', 'status');
+        const submit = el('button', 'button button-primary', 'Assign');
+        submit.type = 'submit';
+        const rowButtons = el('div', 'button-row');
+        rowButtons.append(submit);
+        // Phase 6: "Move it here" / "Use it for both gates", shown when the device is on another gate.
+        // (Declared before it is used: a const used earlier stops the whole panel.)
+        let choice = {};
+        const conflictRow = el('div', 'button-row');
+        conflictRow.hidden = true;
+        form.append(message, conflictRow, rowButtons);
+
+        function syncRole() {
+            const role = form.querySelector('input[name="role"]:checked')?.value;
+            form.querySelectorAll('.devices-camera-only').forEach((node) => { node.hidden = role !== 'camera'; });
+            if (role !== 'camera') {
+                login.hidden = true;
+            }
+        }
+        form.addEventListener('change', syncRole);
+        syncRole();
+
+        // Phase 6: the answer to "Already on Gate 1. Move it here?" (move / share).
+        function ask(result) {
+            conflictRow.replaceChildren(...[
+                result.json.conflict?.can_share ? button('Use it for both gates', 'button button-secondary button-sm', () => { choice = { share: true }; form.requestSubmit(); }) : null,
+                button('Move it here', 'button button-primary button-sm', () => { choice = { move: true }; form.requestSubmit(); }),
+            ].filter(Boolean));
+            conflictRow.hidden = false;
+        }
+        form.addEventListener('change', () => { choice = {}; conflictRow.hidden = true; });
+
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            const body = {
+                role: form.querySelector('input[name="role"]:checked')?.value,
+                station: form.querySelector('input[name="station"]:checked')?.value,
+                stream: select.value,
+                ...choice,
+            };
+            if (!login.hidden) {
+                body.username = form.querySelector('[name="username"]').value.trim();
+                body.password = form.querySelector('[name="password"]').value;
+                if (!body.username) {
+                    message.textContent = 'Enter the camera username.';
+                    message.dataset.state = 'error';
+                    return;
+                }
+            }
+
+            submit.disabled = true;
+            submit.setAttribute('aria-busy', 'true');
+            message.textContent = body.role === 'camera' ? 'Checking the camera…' : 'Assigning…';
+            message.dataset.state = 'pending';
+            try {
+                const result = await post(device.assign_url, body);
+                if (result.json.needs_credentials) {
+                    login.hidden = false;
+                    message.textContent = result.json.message;
+                    message.dataset.state = 'error';
+                    form.querySelector('[name="username"]').focus();
+                    return;
+                }
+                if (result.status === 409 && result.json.conflict) {
+                    message.textContent = result.json.message;
+                    message.dataset.state = 'error';
+                    ask(result);
+                    return;
+                }
+                if (!result.ok) {
+                    message.textContent = result.json.message || Object.values(result.json.errors || {}).flat()[0] || 'Could not assign this device.';
+                    message.dataset.state = 'error';
+                    return;
+                }
+                choice = {};
+                window.ui.toast(result.json.message, 'success');
+                if (result.json.warning) {
+                    window.ui.toast(result.json.warning, 'warning', { timeout: 8000 });
+                }
+                apply(result.json.devices);
+                window.ui.closeDrawer('device-drawer');
+            } catch (error) {
+                message.textContent = error.message;
+                message.dataset.state = 'error';
+            } finally {
+                submit.disabled = false;
+                submit.removeAttribute('aria-busy');
+            }
+        });
+        return form;
+    }
+
+    function field(id, name, label, type, autocomplete) {
+        const wrap = el('div', 'field');
+        const labelNode = el('label', null, label);
+        labelNode.htmlFor = id;
+        const input = el('input');
+        input.id = id;
+        input.name = name;
+        input.type = type;
+        input.autocomplete = autocomplete;
+        wrap.append(labelNode, input);
+        return wrap;
+    }
+
+    function currentAssignments(device) {
+        const box = el('div', 'devices-current');
+        if (!(device.assigned || []).length) {
+            return box;
+        }
+        box.append(el('h3', 'vehicle-panel-subtitle', 'Currently used by'));
+        device.assigned.forEach(function (item) {
+            const row = el('div', 'devices-current-row');
+            row.append(badge('success', item.label), button('Unassign', 'button button-secondary button-sm', () => unassign(item.station, item.role)));
+            box.append(row);
+        });
+        return box;
+    }
+
+    /* ---------- actions ---------- */
+
+    async function unassign(station, role) {
+        try {
+            const result = await post(panel.dataset.unassignUrl, { station: station, role: role });
+            window.ui.toast(result.json.message, 'success');
+            apply(result.json.devices);
+            window.ui.closeDrawer('device-drawer');
+        } catch (error) {
+            window.ui.toast(error.message, 'error');
+        }
+    }
+
+    panel.querySelector('[data-devices-scan]').addEventListener('click', async function () {
+        const scanButton = this;
+        scanButton.disabled = true;
+        try {
+            const result = await post(panel.dataset.scanUrl);
+            window.ui.toast(result.json.message, 'info');
+            data.scan = Object.assign({}, data.scan, { running: true, progress: 'Waiting for the device service…' });
+            rendered.network = null;
+            renderNetwork();
+            schedule(1500);
+        } catch (error) {
+            window.ui.toast(error.message, 'error');
+            scanButton.disabled = false;
+        }
+    });
+
+    /* ---------- render + poll ---------- */
+
+    function apply(payload) {
+        if (!payload) {
+            return;
+        }
+        data = payload;
+        // Re-render a part only when it changed, so keyboard focus and
+        // scrolling are not reset by every poll.
+        renderIfChanged('network', [data.service, data.network, data.scan, data.counts], renderNetwork);
+        // Do not redraw the station cards while someone types a camera login there.
+        if (!panel.querySelector('[data-devices-stations]').contains(document.activeElement)) {
+            renderIfChanged('stations', data.stations, renderStations);
+        }
+        renderIfChanged('devices', data.devices, renderLists);
+        renderIfChanged('diagnostics', data.diagnostics, renderDiagnostics);
+        renderIfChanged('hidden', data.hidden_devices, renderHidden);
+        renderIfChanged('removals', data.removals, renderRemovals);
+        renderIdentify();
+        renderFind();
+        announceNewDevices();
+    }
+
+    const rendered = {};
+
+    function renderIfChanged(key, value, render) {
+        const json = JSON.stringify(value);
+        if (rendered[key] !== json) {
+            rendered[key] = json;
+            render();
+        }
+    }
+
+    function announceNewDevices() {
+        const fresh = [];
+        (data.devices || []).forEach(function (device) {
+            if (!known.has(device.id)) {
+                known.add(device.id);
+                if (device.is_new && (device.kind === 'camera' || device.kind === 'rfid_reader')) {
+                    fresh.push(device);
+                }
+            }
+        });
+
+        if (fresh.length && !firstRender) {
+            fresh.forEach(function (device) {
+                window.ui.toast(`${device.kind_label} found: ${deviceTitle(device)} at ${device.ip}`, 'info', { title: 'New device', timeout: 7000 });
+            });
+        } else if (fresh.length && firstRender) {
+            window.ui.toast(`${fresh.length} new device(s) found since your last visit.`, 'info');
+        }
+        firstRender = false;
+
+        // Keep the "New" highlight for this visit only.
+        if ((data.counts || {}).new && !acknowledgeTimer) {
+            acknowledgeTimer = window.setTimeout(function () {
+                acknowledgeTimer = null;
+                post(panel.dataset.acknowledgeUrl).catch(function () {});
+            }, 10000);
+        }
+    }
+
+    async function refresh() {
+        if (document.hidden) {
+            schedule(5000);
+            return;
+        }
+        try {
+            const response = await window.ui.liveFetch(panel.dataset.indexUrl, { headers: { Accept: 'application/json' } });
+            if (response.ok) {
+                apply(await response.json());
+                // Keep the open drawer's details current without resetting its form.
+                if (openDeviceId && !document.getElementById('device-drawer').hidden) {
+                    const device = deviceById(openDeviceId);
+                    if (device) {
+                        const details = drawerBody.querySelector('dl');
+                        const fresh = deviceDetails(device)[0];
+                        details?.replaceWith(fresh);
+                    }
+                }
+            }
+        } catch (error) {
+            // Keep the last list during short hiccups.
+        }
+        schedule((data.scan || {}).running || (data.identify || {}).running || (data.find || {}).running || identifyPending || findPending ? 1000 : 5000);
+    }
+
+    /* ---------- identify reader ---------- */
+
+    function renderIdentify() {
+        const box = panel.querySelector('[data-devices-identify-box]');
+        const identify = data.identify;
+        const identifyButton = panel.querySelector('[data-devices-identify]');
+        identifyButton.disabled = !!(identify && identify.running) || identifyPending;
+        if (!identify && !identifyPending) {
+            box.hidden = true;
+            return;
+        }
+        box.hidden = false;
+        const nodes = [];
+        const title = el('div', 'devices-network-head');
+
+        if (identifyPending && !(identify && identify.running)) {
+            title.append(badge('info', 'Identify reader'), el('span', null, 'Starting… Hold a UHF tag close to the reader.'));
+            box.replaceChildren(title);
+            return;
+        }
+
+        if (identify.running) {
+            const ends = new Date(identify.started_at).getTime() + (identify.seconds || 45) * 1000;
+            const left = Math.max(0, Math.round((ends - Date.now()) / 1000));
+            title.append(badge('info', `Listening · ${left}s`), el('strong', null, 'Hold a UHF tag close to the reader now.'));
+            nodes.push(title, el('p', 'field-help', `${identify.phase || ''}. Checking ${(identify.candidates || []).length} device(s): ${(identify.candidates || []).join(', ') || 'none found on this network'}.`));
+        } else if ((identify.found || []).length) {
+            const found = identify.found[0];
+            title.append(badge('success', 'Reader found'), el('strong', null, `${found.ip} · ${String(found.transport).toUpperCase()} port ${found.port || '—'} · format ${found.protocol || '—'}`));
+            nodes.push(title, el('p', 'field-help', `Tag read: ${(found.tags || []).join(', ') || '—'}. It is now listed as an RFID Reader: open it below and assign it to a station.`));
+        } else {
+            title.append(badge('warning', 'No reader found'), el('span', null, identify.message || ''));
+            nodes.push(title);
+            nodes.push(el('p', 'field-help', `Checked: ${(identify.candidates || []).join(', ') || 'no candidate devices on this network'}. If the reader is not in the device list at all, it is not on this network (power, cable, or a fixed IP on another network).`));
+        }
+
+        if ((identify.unknown_data || []).length) {
+            const list = el('ul', 'devices-warnings');
+            identify.unknown_data.forEach(function (item) {
+                const li = el('li');
+                li.append(badge('warning', 'data'), el('span', 'mono', `${item.ip} ${item.transport}/${item.port}: ${item.bytes} bytes in an unknown format: ${item.raw_hex}`));
+                list.append(li);
+            });
+            nodes.push(el('p', 'field-help', 'These ports sent data the system cannot read yet (send this to the developer):'), list);
+        }
+        box.replaceChildren(...nodes);
+    }
+
+    /* ---------- find my reader (before/after) ---------- */
+
+    let findPending = false;
+    const FIND_TONE = {
+        reader_found: 'success', reader_answered: 'success', other_subnet: 'warning', dhcp_no_address: 'warning',
+        not_a_reader: 'warning', only_phones: 'warning', nothing: 'critical', nothing_no_passive: 'warning',
+    };
+
+    function renderFind() {
+        const box = panel.querySelector('[data-devices-find-box]');
+        const find = data.find;
+        const findButton = panel.querySelector('[data-devices-find]');
+        findButton.disabled = !!(find && find.running) || findPending;
+        if (!find && !findPending) {
+            box.hidden = true;
+            return;
+        }
+        box.hidden = false;
+        const nodes = [];
+        const head = el('div', 'devices-network-head');
+
+        if (!find || (findPending && !find.running && find.phase === 'done' && !find.finished_at)) {
+            head.append(badge('info', 'Find my reader'), el('span', null, 'Starting…'));
+            box.replaceChildren(head);
+            return;
+        }
+
+        const steps = el('ol', 'devices-find-steps');
+        [['baseline', '1. Record the devices already on the network'], ['waiting', '2. Plug in or power on the reader'],
+            ['finishing', '3. Check the new device'], ['done', '4. Result']].forEach(function ([phase, label]) {
+            const order = ['baseline', 'waiting', 'finishing', 'done'];
+            const li = el('li', order.indexOf(phase) < order.indexOf(find.phase) ? 'is-done' : (phase === find.phase ? 'is-current' : ''), label);
+            steps.append(li);
+        });
+        nodes.push(steps);
+
+        if (find.phase === 'baseline') {
+            head.append(badge('info', 'Please wait'), el('strong', null, 'Recording the devices already on the network… Do not plug the reader in yet.'));
+        } else if (find.phase === 'waiting') {
+            const left = Math.max(0, Math.round((new Date(find.waiting_until).getTime() - Date.now()) / 1000));
+            head.append(badge('warning', `Now · ${left}s`), el('strong', null, 'Plug in the reader\'s LAN cable or switch its power on NOW.'));
+        } else if (find.phase === 'finishing') {
+            head.append(badge('info', 'Checking'), el('strong', null, 'Checking the new device: all ports, reader commands. Hold a UHF tag near the reader.'));
+        } else {
+            head.append(badge(FIND_TONE[find.result] || 'info', 'Result'), el('strong', null, find.message || ''));
+        }
+        nodes.unshift(head);
+
+        const passive = find.passive || {};
+        nodes.push(el('p', 'field-help', `Devices already on the network: ${find.baseline_count ?? '—'} · Passive listening: ${passive.available ? 'on (' + passive.interface + ')' : 'off. ' + (passive.reason || '')}`));
+
+        if (find.other_subnet && find.other_subnet.commands) {
+            const platform = (data.service || {}).platform || 'darwin';
+            const commands = find.other_subnet.commands[platform] || find.other_subnet.commands.darwin;
+            nodes.push(el('p', null, `To reach it now, give this PC the address ${find.other_subnet.pc_ip} on ${find.other_subnet.network} (admin rights):`));
+            nodes.push(el('pre', 'devices-command', `${commands.add}\n\n# remove it afterwards:\n${commands.remove}`));
+        }
+
+        const devices = find.new_devices || [];
+        if (devices.length) {
+            const list = el('ul', 'devices-warnings');
+            devices.forEach(function (device) {
+                const probe = device.probe || {};
+                const reader = probe.reader || {};
+                const li = el('li');
+                const parts = [
+                    `${device.mac} (${device.vendor || 'unknown maker'})`,
+                    device.ips && device.ips.length ? `IP ${device.ips.join(', ')}` : 'no IP yet',
+                    device.reachable ? 'on this network' : 'not on this network',
+                    `seen by ${(device.seen_by || []).join(' + ')}`,
+                ];
+                if (probe.open_tcp) {
+                    parts.push(`TCP ports ${probe.open_tcp.join(', ') || 'none'}`);
+                }
+                if (device.passive) {
+                    parts.push(`${device.passive.packets} packet(s), DHCP requests ${device.passive.dhcp_requests}`);
+                }
+                if (reader.message) {
+                    parts.push(reader.message);
+                }
+                li.append(badge(device.randomized_mac ? 'neutral' : 'info', device.randomized_mac ? 'phone?' : 'new'), el('span', null, parts.join(' · ')));
+                list.append(li);
+                (reader.unknown_data || []).concat(reader.replies || []).forEach(function (item) {
+                    const hex = el('li');
+                    hex.append(badge('warning', 'hex'), el('span', 'mono', `${item.ip} ${item.transport}/${item.port}: ${item.raw_hex}`));
+                    list.append(hex);
+                });
+            });
+            nodes.push(list);
+        }
+
+        const found = devices.find((device) => ((device.probe || {}).reader || {}).found?.length || ((device.probe || {}).reader || {}).replies?.length);
+        if (found && !find.running) {
+            const saved = (data.devices || []).find((device) => device.mac === found.mac);
+            if (saved) {
+                nodes.push(button('Assign this reader to a gate', 'button button-primary button-sm', () => openDevice(saved.id)));
+            }
+        }
+
+        if ((find.events || []).length) {
+            const details = el('details', 'advanced-section');
+            details.append(el('summary', null, 'Step-by-step log'), el('pre', 'devices-command', find.events.join('\n')));
+            nodes.push(details);
+        }
+        box.replaceChildren(...nodes);
+    }
+
+    panel.querySelector('[data-devices-find]').addEventListener('click', async function () {
+        findPending = true;
+        data.find = null;
+        renderFind();
+        try {
+            const result = await post(panel.dataset.findUrl);
+            window.ui.toast(result.json.message, 'info', { timeout: 8000 });
+            schedule(1000);
+        } catch (error) {
+            window.ui.toast(error.message, 'error');
+        } finally {
+            window.setTimeout(function () { findPending = false; }, 8000);
+        }
+    });
+
+    let identifyPending = false;
+    panel.querySelector('[data-devices-identify]').addEventListener('click', async function () {
+        identifyPending = true;
+        renderIdentify();
+        try {
+            const result = await post(panel.dataset.identifyUrl);
+            window.ui.toast(result.json.message, 'info', { timeout: 8000 });
+            schedule(1500);
+        } catch (error) {
+            window.ui.toast(error.message, 'error');
+        } finally {
+            window.setTimeout(function () { identifyPending = false; }, 6000);
+        }
+    });
+
+    panel.querySelector('[data-devices-show-old]')?.addEventListener('change', function () {
+        rendered.devices = null;
+        renderIfChanged('devices', data.devices, renderLists);
+    });
+
+    function schedule(delay) {
+        window.clearTimeout(pollTimer);
+        pollTimer = window.setTimeout(refresh, delay);
+    }
+
+    apply(data);
+    schedule(2000);
+})();

@@ -1,0 +1,235 @@
+<?php
+
+return [
+
+    /*
+    |--------------------------------------------------------------------------
+    | Offline Deployment Profile
+    |--------------------------------------------------------------------------
+    |
+    | This capstone is intentionally designed for offline-only deployment on
+    | the client PC. Media, runtime files, backups, and logs stay on local
+    | storage so the system can be demonstrated without cloud services.
+    |
+    */
+
+    'offline_only' => true,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Media Storage
+    |--------------------------------------------------------------------------
+    |
+    | Files that need to be visible in the browser use the public disk so the
+    | standard `storage:link` flow can expose them locally.
+    |
+    */
+
+    'media_disk' => env('MONITORING_MEDIA_DISK', 'public'),
+
+    'media_directories' => [
+        'vehicle_images' => env('MONITORING_VEHICLE_IMAGES_DIR', 'vehicle-images'),
+        'plate_images' => env('MONITORING_PLATE_IMAGES_DIR', 'plate-images'),
+        'detected_vehicle_images' => env('MONITORING_DETECTED_IMAGES_DIR', 'detected-vehicle-images'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Archive Storage
+    |--------------------------------------------------------------------------
+    |
+    | Simulation payload exports and local backups use the private local disk.
+    | These files stay on the workstation hard drive and do not need public
+    | URLs during this development stage.
+    |
+    */
+
+    'archive_disk' => env('MONITORING_ARCHIVE_DISK', 'local'),
+
+    'archive_directories' => [
+        'rfid_exports' => env('MONITORING_RFID_EXPORTS_DIR', 'rfid-scan-exports'),
+        'backups' => env('MONITORING_BACKUP_DIR', 'backups'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Camera Runtime Files (Phase 6)
+    |--------------------------------------------------------------------------
+    |
+    | camera_status.json and the latest/annotated frames the detector writes.
+    | They live outside public/ and are served only through signed-in routes.
+    |
+    */
+
+    'camera_files_path' => env('CAMERA_FILES_PATH', storage_path('app/camera')),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Printed Reports (ROI work, Phase 7)
+    |--------------------------------------------------------------------------
+    |
+    | The header of the Vehicle Activity Report (Activity Logs › Print).
+    |
+    */
+
+    'report' => [
+        'school_name' => env('REPORT_SCHOOL_NAME', 'Philippine College of Science and Technology'),
+        'system_name' => env('REPORT_SYSTEM_NAME', 'Web-Based CCTV and RFID Vehicle Monitoring System'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Detector Live Stream
+    |--------------------------------------------------------------------------
+    |
+    | The Python detector serves the live MJPEG view on this PC. The port is
+    | set here once (and exported to Python), not repeated in the code.
+    |
+    */
+
+    'stream' => [
+        'host' => env('DETECTOR_STREAM_HOST', '127.0.0.1'),
+        'port' => (int) env('DETECTOR_STREAM_PORT', 8765),
+        // Windows install kit: the web server (Caddy) passes /detector/... to
+        // the detector on this PC for signed-in users only, so pages use that
+        // same-origin path and the detector's port stays closed to the LAN.
+        'proxy' => (bool) env('DETECTOR_STREAM_PROXY', false),
+        'proxy_prefix' => '/detector',
+    ],
+
+    /*
+    | Python for the detector and the device service (the kit's bundled one,
+    | else the project's .venv), and the address Python posts events to.
+    | Read here, not with env() in the code, so "php artisan config:cache"
+    | (used by the install kit) keeps them.
+    */
+
+    'python' => env('DETECTOR_PYTHON'),
+    'integration_url' => env('PYTHON_INTEGRATION_URL', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | RFID Only With a Vehicle
+    |--------------------------------------------------------------------------
+    |
+    | UHF reads wait in the device service's memory buffer and are recorded
+    | only when the camera sees a vehicle cross the line. A tag read again
+    | within absent_seconds is the same pass; the buffer keeps passes for
+    | buffer_seconds after their last read. Settings › Timing has the
+    | stationary time and the camera-offline fallback.
+    |
+    */
+
+    /*
+    |--------------------------------------------------------------------------
+    | Who Runs the Background Programs
+    |--------------------------------------------------------------------------
+    |
+    | "app" (development, macOS): pages and the scheduler start the detector,
+    | the device service and go2rtc when they are not running.
+    | "managed" (Windows install kit): Windows services (NSSM) run them; the
+    | web app never starts a process, it only shows their status.
+    |
+    */
+
+    'services' => [
+        'managed' => env('MONITORING_SERVICES', 'app') === 'managed',
+    ],
+
+    'rfid' => [
+        'buffer_seconds' => (float) env('RFID_BUFFER_SECONDS', 15),
+        'absent_seconds' => (float) env('RFID_ABSENT_SECONDS', 5),
+        // The buffer file is ignored when the device service stopped writing it.
+        'buffer_stale_seconds' => 5,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Live View (go2rtc)
+    |--------------------------------------------------------------------------
+    |
+    | go2rtc passes each camera's main stream to the browser over WebRTC
+    | without re-encoding. Its API listens on this PC only; pages reach it
+    | through signed-in Laravel routes. The video itself uses the WebRTC port.
+    | The binaries are bundled in tools/go2rtc and checked against these
+    | SHA-256 hashes before they are unpacked (offline install).
+    |
+    */
+
+    'live' => [
+        'enabled' => (bool) env('LIVE_VIEW_WEBRTC', true),
+        'api_port' => (int) env('GO2RTC_API_PORT', 1984),
+        'webrtc_port' => (int) env('GO2RTC_WEBRTC_PORT', 8555),
+        'webrtc_host' => env('GO2RTC_WEBRTC_HOST', ''),
+        'version' => '1.9.14',
+        'bundles' => [
+            'mac_arm64' => ['file' => 'go2rtc_mac_arm64.zip', 'sha256' => '919b78adc759d6b3883d1e1b2ac915ac0985bb903ff1897b4d228527bd64690c'],
+            'mac_amd64' => ['file' => 'go2rtc_mac_amd64.zip', 'sha256' => '9b0b9a27a4dc3a5b8b93376e7e8fc2787c6af624a512842622be84aec0171c7a'],
+            'win64' => ['file' => 'go2rtc_win64.zip', 'sha256' => 'dd4167d75cb04abe618855b7c71f8658bd009f60c1a71835d134d2c11c939907'],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Detection Tuning (not shown to users)
+    |--------------------------------------------------------------------------
+    |
+    | Proven values from the detection work (A2-A4, 2026-10): exported to the
+    | Python detector as system_settings.performance. Change them here only
+    | with a measurement (php artisan detection:accuracy).
+    |
+    */
+
+    'detection' => [
+        // The MJPEG fallback view (the main live view is WebRTC).
+        'stream_fps' => 15.0,
+        'stream_width' => 960,
+        'jpeg_quality' => 75,
+        // Detection on each camera's sub stream. Phase 4: YOLO runs 15 times
+        // per second while something moves in the zone or a vehicle is in it,
+        // 5 while the zone is quiet; its input is 640 px on a GPU (CUDA,
+        // Apple) and 480 on a CPU only ("auto"). Measured on a harder test
+        // video (fast cars, convoys, both ways, a post in front): vehicles
+        // with a record 66.7% -> 98.1%, Detected 0.88 -> 0.32 s (median).
+        'detection_fps' => 15.0,
+        'detection_idle_fps' => 5.0,
+        'yolo_imgsz' => 'auto',
+        'yolo_device' => env('DETECTOR_YOLO_DEVICE', 'auto'),
+        'roi_crop' => 1,
+        'hires_on_trigger' => 1,
+        // A2/A4: vehicle type (truck rule measured on rear views of pickups).
+        'type_second_pass' => 1,
+        'type_model' => 'yolov8s.pt',
+        'type_truck_min_height' => 0.35,
+        'type_car_min_aspect' => 1.05,
+        // ROI work: one vehicle = one pass through the zone. pass_min_move:
+        // share of the zone's height it moves away from / toward the camera
+        // for a sure IN / OUT. 15% was best on the test videos (Phase 2:
+        // 100% direction accuracy, nothing missed; 20% 96-100%, 25-30%
+        // 76-92%). A gate can override it in Settings > Advanced > Timing.
+        'pass_min_frames' => 2,
+        'pass_lost_seconds' => 0.75,
+        'pass_min_move' => 0.15,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Plug-and-detect Devices
+    |--------------------------------------------------------------------------
+    |
+    | The device service (school-vehicle-monitoring-detector/device_service.py)
+    | finds cameras and UHF readers on the network. Ports, discovery packets
+    | and camera stream paths live in the editable profiles file.
+    |
+    */
+
+    'devices' => [
+        'files_path' => env('DEVICE_FILES_PATH', storage_path('app/devices')),
+        'profiles_path' => env('DEVICE_PROFILES_PATH', base_path('school-vehicle-monitoring-detector/devices/data/discovery_profiles.json')),
+        'status_stale_after_seconds' => 20,
+        'probe_timeout_seconds' => 3,
+    ],
+
+    // Runtime logs of the Python services are rotated past this size.
+    'runtime_log_max_bytes' => (int) env('RUNTIME_LOG_MAX_BYTES', 5 * 1024 * 1024),
+];

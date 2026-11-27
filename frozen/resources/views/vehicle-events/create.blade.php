@@ -1,0 +1,82 @@
+@extends('layouts.app')
+
+@section('title', 'Quick Manual Log | PHILCST Vehicle Access Monitoring')
+@section('page-title', 'Quick Manual Log')
+
+@section('content')
+    <x-page-header title="Quick Manual Log" :back="route('logs.index')" back-label="Back to logs">
+        <x-slot:meta>Use only when the normal RFID flow cannot be completed</x-slot:meta>
+    </x-page-header>
+
+    <section class="panel">
+        <div class="panel-header">
+            <div>
+                <div class="panel-title-row">
+                    <h3>Manual Vehicle Log</h3>
+                    <p class="field-help">ENTRY logs open sessions. EXIT logs run the same matching rules used by the rest of the system. This page is a fallback workflow.</p>
+                </div>
+            </div>
+        </div>
+
+        <form method="POST" action="{{ route('vehicle-events.store') }}" enctype="multipart/form-data" class="form-grid">
+            @csrf
+
+            <div class="field">
+                <label for="event_type">Log Type</label>
+                <select id="event_type" name="event_type" required>
+                    <option value="ENTRY" @selected(old('event_type', $eventType) === 'ENTRY')>ENTRY</option>
+                    <option value="EXIT" @selected(old('event_type', $eventType) === 'EXIT')>EXIT</option>
+                </select>
+            </div>
+
+            <div class="field">
+                <label for="plate_text">Plate</label>
+                <input id="plate_text" type="text" name="plate_text" value="{{ old('plate_text') }}" placeholder="ABC-1234" required maxlength="50" data-normalize-plate>
+            </div>
+
+            <div class="field">
+                <label for="vehicle_type">Vehicle Type</label>
+                <select id="vehicle_type" name="vehicle_type" required>
+                    <option value="">Select vehicle type</option>
+                    @foreach ($vehicleTypes as $vehicleType)
+                        <option value="{{ $vehicleType }}" @selected(old('vehicle_type') === $vehicleType)>{{ $vehicleType }}</option>
+                    @endforeach
+                </select>
+            </div>
+
+            <div class="field">
+                <label for="camera_id">Camera</label>
+                <select id="camera_id" name="camera_id" required>
+                    <option value="">Select camera</option>
+                    @foreach ($cameras as $camera)
+                        <option value="{{ $camera->id }}" @selected((string) old('camera_id') === (string) $camera->id)>
+                            {{ $camera->camera_name }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+
+            <div class="field">
+                <label for="event_time">Date and Time</label>
+                <input id="event_time" type="datetime-local" name="event_time" value="{{ old('event_time', now()->format('Y-m-d\TH:i')) }}" required>
+            </div>
+
+            <div class="field">
+                <label for="vehicle_image">Vehicle Image</label>
+                <input id="vehicle_image" type="file" name="vehicle_image" accept="image/*">
+            </div>
+
+            <div class="field">
+                <label for="plate_image">Plate Image</label>
+                <input id="plate_image" type="file" name="plate_image" accept="image/*">
+            </div>
+
+            <div class="field field-actions span-full">
+                <div class="button-row">
+                    <button type="submit" class="button button-primary">Save Manual Log</button>
+                    <a href="{{ route('logs.index') }}" class="button button-secondary">Back to Logs</a>
+                </div>
+            </div>
+        </form>
+    </section>
+@endsection

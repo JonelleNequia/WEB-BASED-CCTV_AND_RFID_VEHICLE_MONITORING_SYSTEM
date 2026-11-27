@@ -1,0 +1,38 @@
+--- a/internal/webrtc/webrtc.go
++++ b/internal/webrtc/webrtc.go
+@@ -4,6 +4,7 @@
+ 	"errors"
+ 	"net"
+ 	"strings"
++	"time"
+ 
+ 	"github.com/AlexxIT/go2rtc/internal/api"
+ 	"github.com/AlexxIT/go2rtc/internal/api/ws"
+@@ -212,6 +213,7 @@
+ 			_ = conn.Close()
+ 			return err
+ 		}
++		applyViewerLease(conn)
+ 	case core.ModePassiveProducer:
+ 		stream.AddProducer(conn)
+ 	}
+@@ -282,6 +284,7 @@
+ 			_ = conn.Close()
+ 			return
+ 		}
++		applyViewerLease(conn)
+ 	} else {
+ 		conn.Mode = core.ModePassiveProducer
+ 
+@@ -319,3 +322,11 @@
+ 	}
+ 	return false
+ }
++
++// PHILCST D4: signaling authentication alone cannot revoke established media.
++// A bounded viewer lease is enforced by the server, even for modified browsers.
++var viewerLease = 30 * time.Second
++
++func applyViewerLease(conn *webrtc.Conn) {
++	time.AfterFunc(viewerLease, func() { _ = conn.Close() })
++}

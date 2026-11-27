@@ -1,0 +1,38 @@
+<?php
+
+use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Configuration\Exceptions;
+use Illuminate\Foundation\Configuration\Middleware;
+
+return Application::configure(basePath: dirname(__DIR__))
+    ->withRouting(
+        web: __DIR__.'/../routes/web.php',
+        api: __DIR__.'/../routes/api.php',
+        commands: __DIR__.'/../routes/console.php',
+        health: '/up',
+    )
+    ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->prepend(\App\Http\Middleware\CaptureNameInput::class);
+        $middleware->append(\App\Http\Middleware\DiscardVehicleColor::class);
+        $middleware->append(\App\Http\Middleware\NormalizePlateInput::class);
+        $middleware->trimStrings(except: ['password', 'password_confirmation', 'current_password', 'code', 'registered_by', 'plate_number', 'plate_text', 'plate']);
+        $middleware->prepend(\App\Http\Middleware\EnforceDeploymentOrigin::class);
+        $middleware->prepend(\App\Http\Middleware\LifecycleWriterBarrier::class);
+        if (env('APP_ENV') === 'local' && ! env('PHILCST_NAMED_HTTPS', false)) {
+            $middleware->trustProxies(at: '*');
+        }
+
+        $middleware->alias([
+            'admin' => \App\Http\Middleware\EnsureAdmin::class,
+            // Phase 1: added
+            'detector' => \App\Http\Middleware\EnsureDetectorRunning::class,
+        ]);
+
+        // Phase 3 (visitor model): close tag reads whose camera crossing never came.
+        $middleware->appendToGroup('web', \App\Http\Middleware\FinalizePendingScans::class);
+        $middleware->appendToGroup('web', \App\Http\Middleware\EnsureAccountReady::class);
+        $middleware->appendToGroup('api', \App\Http\Middleware\FinalizePendingScans::class);
+    })
+    ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->dontFlash(['code', 'current_password', 'password', 'password_confirmation']);
+    })->create();

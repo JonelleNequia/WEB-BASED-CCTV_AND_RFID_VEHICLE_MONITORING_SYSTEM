@@ -1,0 +1,70 @@
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\View\View;
+
+class LoginController extends Controller
+{
+    /**
+     * Show the individual-account login form.
+     */
+    public function create(): View|RedirectResponse
+    {
+        if (Auth::check()) {
+            return redirect()->route($this->homeRouteName());
+        }
+
+        return view('auth.login');
+    }
+
+    /**
+     * Handle an active account's login request.
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        $credentials = $request->validate([
+            'email' => ['required', 'email'],
+            'password' => ['required', 'string'],
+        ]);
+        $credentials['account_status'] = 'active';
+
+        // Serialize verification/rehashing with password changes and account
+        // deactivation, so a racing login cannot restore an obsolete hash.
+        if (! app(\App\Services\AccountSecurityService::class)->locked(fn () => Auth::attempt($credentials))) {
+            return back()
+                ->withErrors(['email' => 'The provided credentials are invalid.'])
+                ->onlyInput('email');
+        }
+
+        $request->session()->regenerate();
+        $request->session()->put('auth_version', Auth::user()->session_version);
+        if (Auth::user()->password_policy_version < 1) {
+            return redirect()->route('account.password.edit');
+        }
+
+        return redirect()->intended(route($this->homeRouteName()));
+    }
+
+    /**
+     * End the authenticated admin session.
+     */
+    public function destroy(Request $request): RedirectResponse
+    {
+        Auth::logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        return redirect()->route('login');
+    }
+
+    protected function homeRouteName(): string
+    {
+        // UI Phase 2: guards (non-admin) land on the Gate Monitor.
+        return auth()->user()?->isAdmin() === false ? 'gates.index' : 'dashboard.index';
+    }
+}

@@ -1,0 +1,88 @@
+# D4 generated configuration. Private issuer state is outside immutable releases.
+{
+	admin off
+	auto_https disable_redirects
+	skip_install_trust
+	storage file_system "{{TLS_DIR}}"
+	{{PINNED_ROOT}}
+	servers {
+		protocols h1 h2
+		timeouts {
+			read_header 15s
+			idle 1m
+		}
+	}
+}
+
+# Only collector integration, health and the cookie auth subrequest are available here.
+http://127.0.0.1:8080 {
+	bind 127.0.0.1
+	root * "{{APP_PUBLIC}}"
+	@internal path /api/v1/integration/* /api/latest-scan /api/check-latest-scan /api/guest-observation /up /live/proxy-auth
+	handle @internal {
+		rewrite * /index.php
+		php_fastcgi {{FASTCGI}}
+	}
+	handle {
+		respond 404
+	}
+}
+
+https://philcst.vms.internal {
+	bind {{BIND}}
+	tls internal
+	root * "{{APP_PUBLIC}}"
+	route {
+	@outside not remote_ip {{ALLOWED}}
+	respond @outside 403
+	@integration path /api/v1/integration/* /api/latest-scan /api/check-latest-scan /api/guest-observation
+	respond @integration 404
+	request_header -X-Forwarded-For
+	request_header -X-Forwarded-Host
+	request_header -X-Forwarded-Proto
+	request_header -Forwarded
+	header X-Content-Type-Options nosniff
+
+	handle /detector/* {
+		forward_auth 127.0.0.1:8080 {
+			uri /live/proxy-auth
+			header_up Host 127.0.0.1:8080
+		}
+		uri strip_prefix /detector
+		reverse_proxy 127.0.0.1:8765 {
+			flush_interval -1
+			stream_timeout 30s
+			header_down Cache-Control "private, no-store"
+			header_down -Access-Control-Allow-Origin
+		}
+	}
+	# Force historical media through Laravel, including an existing public/storage symlink.
+	@protected path_regexp (?i)^/+(storage|evidence|camera|live)(/|\\|$)
+	handle @protected {
+		rewrite * /index.php
+		php_fastcgi {{FASTCGI}}
+	}
+	@assets {
+		path /css/* /js/* /build/* /vendor/* /images/* /favicon.ico /robots.txt
+		path_regexp (?i)\.(css|js|mjs|map|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|txt)$
+	}
+	handle @assets {
+		file_server
+	}
+	handle {
+		encode gzip
+		rewrite * /index.php
+		php_fastcgi {{FASTCGI}} {
+			lb_policy least_conn
+			read_timeout 120s
+			write_timeout 120s
+		}
+	}
+	}
+	log {
+		output file "{{LOG_FILE}}" {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

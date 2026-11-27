@@ -1,0 +1,76 @@
+{{-- Registry › RFID Tags (full inventory, filters, Add RFID Tag, lost/disable). --}}
+    {{-- UI Phase 3: tag counts (click to filter). Every tag is a vehicle tag since Phase 0. --}}
+    <x-stat-row data-auto-update="summary">
+        <x-stat label="Available" :value="$tagStats['available']" tone="success" :href="route('registry.index', ['tab' => 'tags', 'status' => 'available'])" hint="Ready to assign" />
+        <x-stat label="Assigned" :value="$tagStats['assigned']" :href="route('registry.index', ['tab' => 'tags', 'status' => 'assigned'])" hint="On a registered vehicle" />
+        <x-stat label="Lost / Unavailable" :value="$tagStats['lost']" tone="danger" :href="route('registry.index', ['tab' => 'tags', 'status' => 'lost'])" />
+        <x-stat label="Disabled" :value="$tagStats['disabled']" :href="route('registry.index', ['tab' => 'tags', 'status' => 'disabled'])" />
+    </x-stat-row>
+
+    @include('registry.partials.add-tag-drawer')
+
+    <x-table data-auto-table class="registry-tags-table" title="Tag Inventory" :empty="$rfidTagInventory->isEmpty()"
+             :empty-title="$tagStatusFilter ? 'No tags match this filter.' : 'No RFID tags registered yet.'"
+             empty-text="Use Add RFID Tag to enter the printed tag number and electronic UID.">
+        <x-slot:toolbar>
+            <form method="GET" action="{{ route('registry.index') }}" class="toolbar-search" data-auto-filter>
+                <input type="hidden" name="tab" value="tags">
+                <label class="sr-only" for="tag_status_filter">Status</label>
+                <select id="tag_status_filter" name="status">
+                    <option value="">All statuses</option>
+                    @foreach (\App\Models\RfidTag::STATUSES as $status)
+                        <option value="{{ $status }}" @selected($tagStatusFilter === $status)>{{ $status === 'lost' ? 'Lost / Unavailable' : ucfirst($status) }}</option>
+                    @endforeach
+                </select>
+                <noscript><button type="submit" class="button button-secondary button-sm">Filter</button></noscript>
+                <span data-auto-update="reset">
+                @if ($tagStatusFilter)
+                    <a href="{{ route('registry.index', ['tab' => 'tags']) }}" class="button button-secondary button-sm" data-auto-reset>Reset</a>
+                @endif
+                </span>
+            </form>
+            <span class="text-muted" data-auto-update="count">{{ $rfidTagInventory->count() }} records</span>
+            @include('partials.list-report-actions', ['reportDataset' => 'tags'])
+        </x-slot:toolbar>
+                <thead>
+                    <tr>
+                        <th>Tag No.</th>
+                        <th>RFID UID</th>
+                        <th>Status</th>
+                        <th>Assigned To</th>
+                        <th>Last Scan</th>
+                        <th>Scans</th>
+                        <th><span class="sr-only">Actions</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ($rfidTagInventory as $tag)
+                        <tr>
+                            <td><strong>#{{ $tag->number_label ?: 'N/A' }}</strong></td>
+                            <td><strong>{{ $tag->uid }}</strong></td>
+                            <td>
+                                <x-badge :status="$tag->status" :label="$tag->status_label" />
+                            </td>
+                            <td>
+                                @if ($tag->vehicle && $tag->status !== 'assigned')
+                                    <span class="table-subtext">Was on {{ $tag->vehicle->plate_number }}</span>
+                                @elseif ($tag->vehicle)
+                                    <strong>{{ $tag->vehicle->plate_number }}</strong>
+                                    <div class="table-subtext">{{ $tag->vehicle->vehicle_owner_name ?: 'No owner' }}</div>
+                                @else
+                                    <span class="table-subtext">{{ match ($tag->status) {
+                                        'disabled' => 'Disabled: cannot be assigned',
+                                        'lost' => 'Lost / Unavailable: reads ignored',
+                                        default => 'Available for assignment',
+                                    } }}</span>
+                                @endif
+                            </td>
+                            <td><x-datetime :value="$tag->last_scanned_at" fallback="No scan yet" /></td>
+                            <td>{{ $tag->scan_logs_count }}</td>
+                            <td class="row-actions">@include('registry.partials.tag-actions', ['tag' => $tag])</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+    </x-table>
+
+

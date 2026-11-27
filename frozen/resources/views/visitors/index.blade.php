@@ -1,0 +1,163 @@
+{{-- Phase 5 (visitor model): Unregistered Guest records and plate profiles. --}}
+@extends('layouts.app')
+
+@section('title', 'Guests | PHILCST Vehicle Monitoring')
+
+@section('content')
+    @include('partials.filter-errors')
+    <x-page-header title="Guests">
+        <x-slot:actions>
+            <button type="button" class="button button-primary" data-drawer-open="add-visitor-drawer">Add guest manually</button>
+        </x-slot:actions>
+    </x-page-header>
+
+    <x-tabs :tabs="array_replace(\App\Http\Controllers\VisitorController::TABS, ['review' => 'Review'.($reviewCount ? ' ('.$reviewCount.')' : '')])" :active="$tab" />
+
+    @if ($tab !== 'review')
+        <div data-auto-list="visitors-{{ $tab }}" data-auto-default-tab="records">
+        @include('partials.auto-filter-status')
+    @endif
+    @if ($tab === 'plates')
+        @include('visitors.partials.plates')
+    @elseif ($tab === 'review')
+        @include('visitors.partials.review')
+    @else
+        {{-- Gate direction work, Phase C: IN today, no OUT yet (an estimate, not the official inside count). --}}
+        @if ($possiblyInside && ($possiblyInside['vehicles']->isNotEmpty() || $possiblyInside['without_plate'] > 0))
+            <section class="panel possibly-inside" data-possibly-inside>
+                <h3 class="panel-title">Possibly still inside <span class="badge badge-secondary">estimate only</span></h3>
+                <p class="field-help">Unregistered vehicles that came IN today and have no OUT yet. An estimate: a missed or unread OUT keeps a vehicle here. The official inside count is for registered vehicles only.</p>
+                @if ($possiblyInside['vehicles']->isNotEmpty())
+                    <ul class="possibly-inside-list">
+                        @foreach ($possiblyInside['vehicles'] as $item)
+                            <li>
+                                <a href="{{ route('visitors.profiles.show', $item['profile']) }}"><strong>{{ $item['profile']->plate_number }}</strong></a>
+                                <span class="table-subtext">IN · {{ \App\Models\Gate::labelFor($item['record']->gate) }} · {{ \App\Support\DisplayTime::time($item['record']->seen_at) }}{{ $item['record']->vehicle_type ? ' · '.$item['record']->vehicle_type : '' }}</span>
+                            </li>
+                        @endforeach
+                    </ul>
+                @endif
+                @if ($possiblyInside['without_plate'] > 0)
+                    <p class="table-subtext">Also {{ $possiblyInside['without_plate'] }} IN today without a readable plate (cannot be paired with an OUT).</p>
+                @endif
+            </section>
+        @endif
+
+        @php
+            $baseQuery = ['tab' => 'records'] + array_filter($filters, fn ($value) => filled($value));
+            $activeRecordFilter = (string) ($filters['record_filter'] ?? '');
+        @endphp
+        <x-table data-auto-table class="guest-records-table" title="Guest records" :paginator="$records" :empty="$records->isEmpty()" :empty-title="array_filter($filters, fn ($value) => filled($value)) ? 'No guests match these filters.' : 'No guest records yet'" empty-text="Camera observations and manually recorded occurrences appear here.">
+            <x-slot:toolbar>
+                <div class="chip-group" role="group" aria-label="Filter guest records" data-auto-update="record-filters">
+                    @foreach (\App\Http\Controllers\VisitorController::RECORD_FILTERS as $value => $label)
+                        <a href="{{ route('visitors.index', array_filter(array_merge($baseQuery, ['record_filter' => $value, 'page' => null]), fn ($v) => filled($v))) }}"
+                           @class(['chip', 'chip-brand' => $activeRecordFilter === $value, 'chip-soft' => $activeRecordFilter !== $value])
+                           @if ($activeRecordFilter === $value) aria-current="true" @endif>{{ $label }}</a>
+                    @endforeach
+                </div>
+                @include('partials.list-report-actions', ['reportDataset' => 'guests'])
+            </x-slot:toolbar>
+            <x-slot:filters>
+                <form method="GET" action="{{ route('visitors.index') }}" class="log-filter-form" data-auto-filter>
+                    <input type="hidden" name="tab" value="records">
+                    <input type="hidden" name="record_filter" value="{{ $activeRecordFilter }}">
+                    <div class="field">
+                        <label for="visitor_q">Plate</label>
+                        <input id="visitor_q" type="search" name="q" value="{{ $filters['q'] ?? '' }}" placeholder="ABC 1234" data-normalize-plate-search>
+                    </div>
+                    <x-gate-filter id="visitor_gate" :value="$filters['gate'] ?? ''" :options="$historicalGates" all="All" />
+                    <div class="field">
+                        <label for="visitor_plate_status">Plate result</label>
+                        <select id="visitor_plate_status" name="plate_status">
+                            <option value="">All</option>
+                            @foreach (\App\Services\ListReportService::PLATE_RESULTS as $value => $label)
+                                <option value="{{ $value }}" @selected(($filters['plate_status'] ?? '') === $value)>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="visitor_status">Show</label>
+                        <select id="visitor_status" name="status">
+                            @foreach (['active' => 'Counted records', 'duplicate' => 'Duplicates', 'dismissed' => 'Dismissed', 'all' => 'All'] as $value => $label)
+                                <option value="{{ $value }}" @selected(($filters['status'] ?? 'active') === $value)>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="log-filter-actions">
+                        <noscript><button type="submit" class="button button-secondary">Filter</button></noscript>
+                        <a href="{{ route('visitors.index') }}" class="button button-secondary" data-auto-reset>Reset</a>
+                    </div>
+                </form>
+            </x-slot:filters>
+            @include('visitors.partials.records', ['records' => $records])
+        </x-table>
+    @endif
+
+    @if ($tab !== 'review')
+        </div>
+        @include('partials.auto-filter-assets')
+    @endif
+    @include('visitors.partials.record-dialogs')
+
+    {{-- Phase 8 (visitor model): replaces "Add Guest Observation" (Activity Logs › Alerts). --}}
+    <x-drawer id="add-visitor-drawer" title="Add guest manually" :open="request()->boolean('add') || $errors->hasAny(['gate', 'direction', 'seen_at', 'plate_number', 'snapshot']) || (old('_form') === 'manual-guest' && $errors->has('vehicle_type'))">
+        <form method="POST" action="{{ route('visitors.records.store') }}" enctype="multipart/form-data" class="stack-form">
+            @csrf
+            <input type="hidden" name="_form" value="manual-guest">
+            <p class="field-help">For a vehicle the camera missed. Recognized registered vehicles appear in Activity Logs; guest records stay here. Leave the plate and type blank if unknown.</p>
+            <div class="field">
+                <label for="manual_gate">Gate</label>
+                <select id="manual_gate" name="gate" required>
+                    @foreach ($gates as $code => $name)
+                        <option value="{{ $code }}" @selected(old('gate') === $code)>{{ $name }}</option>
+                    @endforeach
+                </select>
+                @error('gate')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
+            <div class="field">
+                <label for="manual_direction">Direction</label>
+                <select id="manual_direction" name="direction" required>
+                    <option value="IN" @selected(old('direction', 'IN') === 'IN')>IN (coming into campus)</option>
+                    <option value="OUT" @selected(old('direction') === 'OUT')>OUT (leaving campus)</option>
+                </select>
+                @error('direction')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
+            <div class="field">
+                <label for="manual_seen_at">Time</label>
+                <input id="manual_seen_at" type="datetime-local" name="seen_at" value="{{ old('seen_at', now()->format('Y-m-d\TH:i')) }}" required>
+                @error('seen_at')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
+            <div class="field">
+                <label for="manual_plate">Plate number (optional)</label>
+                <input id="manual_plate" type="text" name="plate_number" value="{{ old('plate_number') }}" placeholder="ABC 1234" maxlength="30" autocomplete="off" data-normalize-plate
+                       aria-describedby="manual_plate_help manual_plate-plate-error" aria-invalid="{{ $errors->has('plate_number') ? 'true' : 'false' }}">
+                <span id="manual_plate_help" class="field-help">Letters or digits with spaces or hyphens. Leave blank if the plate is unknown.</span>
+                <span id="manual_plate-plate-error" class="field-error" aria-live="polite" @unless($errors->has('plate_number')) hidden @endunless>{{ $errors->first('plate_number') }}</span>
+            </div>
+            <div class="field">
+                <label for="manual_type">Vehicle type (optional)</label>
+                <select id="manual_type" name="vehicle_type">
+                    <option value="">Unknown / not recorded</option>
+                    @foreach (\App\Support\VehicleType::TYPES as $type)
+                        <option value="{{ $type }}" @selected(\App\Support\VehicleType::canonical(old('vehicle_type')) === $type)>{{ $type }}</option>
+                    @endforeach
+                </select>
+                @error('vehicle_type')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
+            <div class="field">
+                <label for="manual_note">Note (optional)</label>
+                <input id="manual_note" type="text" name="note" value="{{ old('note') }}" maxlength="200" placeholder="e.g. Delivery, camera was offline">
+            </div>
+            <div class="field">
+                <label for="manual_snapshot">Photo (optional)</label>
+                <input id="manual_snapshot" type="file" name="snapshot" accept="image/jpeg,image/png">
+                @error('snapshot')<span class="field-error">{{ $message }}</span>@enderror
+            </div>
+            <div class="button-row">
+                <button type="button" class="button button-secondary" data-drawer-close>Cancel</button>
+                <button type="submit" class="button button-primary">Save guest</button>
+            </div>
+        </form>
+    </x-drawer>
+@endsection

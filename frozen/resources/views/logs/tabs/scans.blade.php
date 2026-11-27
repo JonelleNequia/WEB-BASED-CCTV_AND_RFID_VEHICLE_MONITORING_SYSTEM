@@ -1,0 +1,90 @@
+{{-- UI Phase 2: Activity Logs › RFID Scans (the old RFID Desk history). --}}
+    <x-table data-auto-table title="RFID Scans" :paginator="$scanLogs" :empty="$scanLogs->isEmpty()" :empty-title="array_filter($filters, fn ($value) => filled($value)) ? 'No scans match these filters.' : 'No tag reads yet'" empty-text="Tags read at the gates appear here.">
+        <x-slot:filters>
+        <form method="GET" action="{{ route('logs.index') }}" class="form-grid filter-grid" data-auto-filter>
+            <input type="hidden" name="tab" value="scans">
+            <div class="field span-2">
+                <label for="history_q">Search RFID Scan History</label>
+                <div class="search-input-shell">
+                    <span class="search-input-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M10.5 4a6.5 6.5 0 0 1 5.1 10.5l4 4a1 1 0 0 1-1.4 1.4l-4-4A6.5 6.5 0 1 1 10.5 4m0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9"/></svg>
+                    </span>
+                    <input id="history_q" type="search" name="history_q" value="{{ $filters['history_q'] ?? '' }}" placeholder="Owner name, plate number, or RFID UID">
+                </div>
+            </div>
+
+            <x-gate-filter name="scan_location" id="history_scan_location" :value="$filters['scan_location'] ?? ''" all="All" />
+
+            <div class="field">
+                <label for="verification_status">Result</label>
+                <select id="verification_status" name="verification_status">
+                    <option value="">All</option>
+                    @foreach (['anomaly' => 'Needs attention (flagged)', 'verified' => 'Registered', 'pending' => 'Waiting for the camera', 'scan_only' => 'Scan only (no crossing)', 'unknown_tag' => 'Unknown tag', 'inactive_tag' => 'Inactive Tag', 'unassigned_tag' => 'Unassigned Tag', 'inactive_vehicle' => 'Inactive Vehicle', 'non_recurring_category' => 'Manual Review'] as $value => $label)
+                        <option value="{{ $value }}" @selected(($filters['verification_status'] ?? '') === $value)>{{ $label }}</option>
+                    @endforeach
+                </select>
+            </div>
+
+            <div class="field field-actions">
+                <div class="button-row">
+                    <noscript><button type="submit" class="button button-secondary">Filter History</button></noscript>
+                    <a href="{{ route('logs.index', ['tab' => 'scans']) }}" class="button button-secondary" data-auto-reset>Reset</a>
+                </div>
+            </div>
+        </form>
+        </x-slot:filters>
+
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Tag UID</th>
+                        <th>Vehicle</th>
+                        <th>Gate</th>
+                        <th>Event</th>
+                        <th>Result</th>
+                        <th>Vehicle Log</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ($scanLogs as $scan)
+                        <tr>
+                            <td><x-datetime :value="$scan->scan_time" /></td>
+                            <td><strong>{{ $scan->tag_uid }}</strong></td>
+                            <td>
+                                @if ($scan->isUnknownTag())
+                                    {{-- Phase 3: unknown tags are never guest records. --}}
+                                    <strong>Unknown tag</strong>
+                                    @if (auth()->user()?->isAdmin())
+                                        <div class="table-subtext"><a href="{{ route('registry.index', ['tab' => 'vehicles', 'register_tag' => $scan->tag_uid]) }}">Register this tag</a></div>
+                                    @endif
+                                @else
+                                    <strong>{{ $scan->vehicle?->plate_number ?? ($scan->vehicleRfidTag?->label ?? $scan->tag_uid) }}</strong>
+                                    <div class="table-subtext">{{ $scan->vehicle ? $scan->vehicle->vehicle_type.' · '.\App\Support\VehicleCategory::label($scan->vehicle->category) : 'No vehicle linked' }}</div>
+                                @endif
+                            </td>
+                            <td>
+                                <strong>{{ $scan->scanLocationLabel }}</strong>
+                                <div class="table-subtext">{{ $scan->scanDirectionLabel }}</div>
+                            </td>
+                            <td>
+                                {{ $scan->resolvedEventTypeLabel }}
+                                <div class="table-subtext">{{ $scan->resultingStateLabel }}</div>
+                                @if ($scan->fusionLabel)
+                                    <div class="table-subtext" title="{{ $scan->fusion_note }}">{{ $scan->fusionLabel }}</div>
+                                @endif
+                            </td>
+                            <td>
+                                <span class="badge badge-{{ $scan->verificationBadgeClass }}">{{ $scan->verificationLabel }}</span>
+                            </td>
+                            <td>
+                                @if ($scan->correlatedVehicleEvent)
+                                    <strong>#{{ $scan->correlatedVehicleEvent->id }}</strong>
+                                    <div class="table-subtext">{{ $scan->correlatedVehicleEvent->event_type }} • {{ $scan->correlatedVehicleEvent->plate_text ?: $scan->vehicle?->plate_number ?: 'GUEST' }}</div>
+                                @else
+                                    <span class="table-subtext">No linked vehicle log</span>
+                                @endif
+                            </td>
+                        </tr>
+                    @endforeach
+                </tbody>
+    </x-table>

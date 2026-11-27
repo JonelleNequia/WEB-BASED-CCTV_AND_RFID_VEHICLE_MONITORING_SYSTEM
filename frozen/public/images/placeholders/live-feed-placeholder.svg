@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="420" viewBox="0 0 820 420" fill="none">
+  <rect width="820" height="420" rx="28" fill="#0F172A"/>
+  <rect x="36" y="34" width="748" height="352" rx="22" fill="#111827" stroke="#1F2937" stroke-width="4"/>
+  <circle cx="90" cy="70" r="10" fill="#22C55E"/>
+  <text x="118" y="76" fill="#CBD5E1" font-family="Arial, sans-serif" font-size="18" font-weight="700">LIVE FEED PLACEHOLDER</text>
+  <path d="M255 248L376 168L509 252" stroke="#136F63" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M272 238L355 272L455 188L548 270" stroke="#C05621" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="286" y="118" width="244" height="138" rx="18" fill="#1E293B"/>
+  <path d="M392 184L446 216L392 248V184Z" fill="#E2E8F0"/>
+  <text x="410" y="330" fill="#94A3B8" font-family="Arial, sans-serif" font-size="18" text-anchor="middle">Future Python / CCTV stream will appear here</text>
+</svg>

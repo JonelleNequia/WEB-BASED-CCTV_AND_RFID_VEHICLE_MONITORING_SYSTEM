@@ -1,0 +1,128 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\RfidTag;
+use App\Models\User;
+use App\Models\Vehicle;
+use Tests\fixtures\PortalSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class DirectRfidRegistryTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_rfid_inventory_page_renders_standalone_workspace(): void
+    {
+        $this->seed(PortalSeeder::class);
+
+        $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+
+        $this->actingAs($user)
+            ->get(route('registry.index', ['tab' => 'tags']))
+            ->assertOk()
+            ->assertSee('RFID Tags')
+            ->assertSee('Add RFID Tag')
+            ->assertDontSee('Register Tags')
+            ->assertDontSee('data-drawer-open="register-tag-drawer"', false)
+            ->assertSee('No RFID tags registered yet.');
+    }
+
+    public function test_vehicle_registration_assigns_pre_registered_inventory_tag(): void
+    {
+        $this->seed(PortalSeeder::class);
+
+        $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+
+        $this->actingAs($user)
+            ->post(route('rfid-inventory.store'), [
+                'tag_number' => 1,
+                'uid' => ' direct-3003 ',
+            ])
+            ->assertRedirect(route('registry.index', ['tab' => 'tags']));
+
+        $tag = RfidTag::query()->where('uid', 'DIRECT-3003')->firstOrFail();
+
+        $this->assertSame(1, $tag->tag_number);
+
+        $this->actingAs($user)
+            ->post(route('vehicle-registry.store'), [
+                'registered_by' => 'Test Registrar',
+                'rfid_tag_id' => $tag->id,
+                'display_number' => $tag->number_label,
+                'plate_number' => ' dir-3003 ',
+                'vehicle_owner_name' => 'Direct Owner',
+                'category' => 'faculty_staff',
+                'vehicle_type' => 'Car',
+            ])
+            ->assertRedirect();
+
+        $vehicle = Vehicle::query()->where('plate_number', 'DIR-3003')->firstOrFail();
+
+        $this->assertSame('DIRECT-3003', $vehicle->rfid_tag_uid);
+        $this->assertDatabaseHas('vehicle_rfid_tags', [
+            'uid' => 'DIRECT-3003',
+            'status' => RfidTag::STATUS_ASSIGNED,
+            'vehicle_id' => $vehicle->id,
+        ]);
+    }
+
+    public function test_vehicle_registration_rejects_unregistered_direct_uid(): void
+    {
+        $this->seed(PortalSeeder::class);
+
+        $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+
+        $this->actingAs($user)
+            ->from(route('registry.index'))
+            ->post(route('vehicle-registry.store'), [
+                'registered_by' => 'Test Registrar',
+                'rfid_uid' => ' direct-4004 ',
+                'display_number' => '4004',
+                'plate_number' => ' dir-4004 ',
+                'vehicle_owner_name' => 'Direct Owner',
+                'category' => 'faculty_staff',
+                'vehicle_type' => 'Car',
+            ])
+            ->assertRedirect(route('registry.index'))
+            ->assertSessionHasErrors('rfid_uid');
+
+        $this->assertDatabaseMissing('vehicles', [
+            'plate_number' => 'DIR-4004',
+        ]);
+        $this->assertDatabaseMissing('vehicle_rfid_tags', [
+            'uid' => 'DIRECT-4004',
+        ]);
+    }
+
+    public function test_registry_lists_vehicle_assignment_tags_by_tag_number(): void
+    {
+        $this->seed(PortalSeeder::class);
+
+        $user = User::query()->where('email', 'admin@philcst.local')->firstOrFail();
+
+        RfidTag::query()->create([
+            'tag_number' => 10,
+            'uid' => 'RFID-TEN',
+            'status' => RfidTag::STATUS_AVAILABLE,
+        ]);
+        RfidTag::query()->create([
+            'tag_number' => 2,
+            'uid' => 'RFID-TWO',
+            'status' => RfidTag::STATUS_AVAILABLE,
+        ]);
+
+        $response = $this->actingAs($user)
+            ->get(route('registry.index', ['tab' => 'tags']))
+            ->assertOk()
+            ->assertSee('Tag No.')
+            ->assertSee('#2')
+            ->assertSee('#10');
+
+        $this->assertLessThan(
+            strpos($response->getContent(), '#10'),
+            strpos($response->getContent(), '#2')
+        );
+    }
+}

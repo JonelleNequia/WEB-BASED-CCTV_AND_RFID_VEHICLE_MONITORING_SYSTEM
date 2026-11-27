@@ -1,0 +1,13 @@
+{
+  "schema": "philcst.release-source-provenance.v1",
+  "candidate_version": "0.1.0-d6.4-dev.ecc499bd0d7a",
+  "build_identity": "D6-local-20261127.4",
+  "base_commit": "a471eed4a7186466114ff4ed0c80a634ca3d81c4",
+  "canonical_source_sha256": "ecc499bd0d7af5ef1309f5db7cd3e2eaac7f2c4fb7241fdc2135790428cf810e",
+  "file_count": 873,
+  "matching_source": "frozen/ includes every recorded SOURCE-INFO entry byte-for-byte; external provenance/licensing materials are post-build supplements",
+  "not_a_complete_installer": true,
+  "project_license": "AGPL-3.0-only",
+  "licensing_authorization": "Explicit project/school-owner route selected by requester,27 November2026",
+  "supplements": "LICENSE and PROJECT-LICENSING.md added for publication after build; all873 frozen source bytes remain unchanged"
+}

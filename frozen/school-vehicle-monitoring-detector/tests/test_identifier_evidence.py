@@ -1,0 +1,105 @@
+"""Character recognition and physical identifier type are separate decisions."""
+import sys
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import anpr
+from plate_identifier import review_submission
+from plate_voting import vote_plate
+import test_plate_contract as contract
+
+
+class IdentifierEvidenceTests(unittest.TestCase):
+    def test_agreement_still_requires_existing_confidence_floor(self):
+        for score in (.2,.99):
+            vote=vote_plate([{'plate':'395ISX','score':score} for _ in range(8)])
+            self.assertEqual(vote['status'],'read')
+            self.assertIn('8 of 8 OCR reads',vote['reason'])
+            payload=review_submission(vote,{'raw_reads':[{'text':'395ISX','confidence':score}]})
+            self.assertEqual(payload['plate_number'], '395ISX' if score >= .6 else None)
+            self.assertEqual(payload['best_guess'], '395ISX')
+            self.assertEqual(payload['ocr_details']['identifier_evidence']['reason_code'], 'ocr_accepted' if score >= .6 else 'ocr_low_confidence')
+    def test_no_text_and_uncertain_votes_report_the_actual_text_blocker(self):
+        empty=review_submission(vote_plate([]),{})
+        self.assertEqual(empty['ocr_details']['identifier_evidence']['reason_code'],'ocr_no_text')
+        self.assertIsNone(empty['best_guess'])
+        weak=review_submission(vote_plate([{'plate':'395ISX','score':.2}]),{})
+        self.assertEqual(weak['ocr_details']['identifier_evidence']['reason_code'],'ocr_vote_uncertain')
+        self.assertIn('weak',weak['ocr_details']['identifier_evidence']['reason'])
+    def test_real_reader_diagnostics_count_crops_separately_from_source_frames(self):
+        import plate_reader
+        crop=np.zeros((30,100,3),dtype=np.uint8)
+        regions=[{'frame':0,'confidence':.99,'crop':crop.copy()} for _ in range(2)]
+        with mock.patch.object(plate_reader,'available',return_value=True), \
+             mock.patch.object(plate_reader,'find_plates',return_value=regions), \
+             mock.patch.object(plate_reader,'plate_ocr',return_value=object()), \
+             mock.patch.object(plate_reader,'read_crop',return_value=[('395ISX',.99)]):
+            vote,_,details=plate_reader.read_pass([(crop,(0,0,100,30))],'Car')
+        self.assertEqual(details['ocr_read_unit'],'plate_crop')
+        self.assertEqual(details['source_frames_read'],1)
+        self.assertEqual(details['crops_read'],2)
+        self.assertIn('2 of 2 OCR reads',vote['reason'])
+
+    def test_clear_supported_formats_are_accepted_without_staff_confirmation(self):
+        for text in ['ABC 1234', 'ABC 123', '123ABC', 'A123BC', 'AB-00123', '395ISX', 'ISX395', 'AO0123', 'A00123', 'AI0123', 'A10123']:
+            vote = vote_plate([{'plate': text, 'score': .99}])
+            details = {'raw_reads': [{'text': text, 'confidence': .99}]}
+            payload = review_submission(vote, details)
+            self.assertEqual((payload['plate_number'], payload['plate_status']), (vote['plate'], 'read'))
+            self.assertEqual(payload['best_guess'], vote['plate'])
+            self.assertEqual(payload['ocr_details']['vote'], vote)
+            self.assertEqual(payload['ocr_details']['identifier_evidence']['kind'], 'plate_region')
+            self.assertNotIn('identifier_evidence', details)  # No mutation of original vote/evidence.
+
+    def test_weak_incomplete_invalid_and_conflicting_reads_keep_diagnostics(self):
+        for reads, raw in [([{'plate': 'ABC1234', 'score': .2}], 'ABC1234'),
+                           ([], 'ABC/1234'), ([], '123'),
+                           ([{'plate': 'ABC1234', 'score': .8}, {'plate': 'ABC1284', 'score': .8}], 'ABC1284')]:
+            vote = vote_plate(reads)
+            payload = review_submission(vote, {'raw_reads': [{'text': raw}]})
+            self.assertIsNone(payload['plate_number'])
+            self.assertEqual(payload['ocr_details']['raw_reads'][0]['text'], raw)
+            self.assertEqual(payload['ocr_details']['vote']['reason'], vote['reason'])
+
+    def test_equal_strength_different_layouts_are_ambiguous(self):
+        vote = vote_plate([{'plate': '395ISX', 'score': .95}, {'plate': 'ISX395', 'score': .95}])
+        self.assertEqual(vote['status'], 'unreadable')
+        self.assertIsNone(vote['plate'])
+        self.assertIn('layout', vote['reason'])
+        self.assertEqual(len(vote['candidates']), 2)
+
+    def test_the_real_reader_keeps_a_crop_and_raw_text_before_review_submission(self):
+        for text in ['395ISX', '395/ISX', 'MV FILE 001234']:
+            vote, _, details, crop = contract.PlateContractTests().fast_pass(text)
+            payload = review_submission(vote, details)
+            self.assertIsNotNone(crop)
+            self.assertEqual(payload['plate_number'], vote['plate'] if text == '395ISX' else None)
+            self.assertEqual(payload['ocr_details']['raw_reads'][0]['text'], text)
+
+    def test_same_characters_with_explicit_type_uncertainty_or_temporary_evidence_stay_review(self):
+        vote = vote_plate([{'plate': '395ISX', 'score': .99}])
+        self.assertEqual(review_submission(vote, {})['plate_number'], '395ISX')
+        for kind in ['uncertain', 'temporary_plate', 'conduction_sticker', 'mv_file']:
+            payload = review_submission(vote, {'identifier_evidence': {'kind': kind}})
+            self.assertIsNone(payload['plate_number'])
+            self.assertEqual(payload['best_guess'], '395ISX')
+        for label in ['CONDUCTION STICKER 395ISX', 'MV FILE 395ISX', 'TEMPORARY PLATE 395ISX']:
+            payload = review_submission(vote, {'raw_reads': [{'text': label}]})
+            self.assertIsNone(payload['plate_number'])
+            self.assertEqual(payload['ocr_details']['identifier_evidence']['reason_code'], 'temporary_identifier_evidence')
+
+    def test_fallback_reader_retains_a_crop_even_when_text_is_invalid(self):
+        image = np.zeros((60, 180, 3), dtype=np.uint8)
+        engine = type('OCR', (), {'readtext': lambda *args, **kwargs: [(None, '395/ISX', .99)]})()
+        with mock.patch.object(anpr, 'plate_like_crops', return_value=[image]), \
+             mock.patch.object(anpr, 'heuristic_plate_regions', return_value=[]), \
+             mock.patch.object(anpr, 'easyocr_reader', return_value=engine), \
+             mock.patch.object(anpr, 'read_with_tesseract_candidates', return_value=[]):
+            result = anpr.read_license_plate_details(image, (0, 0, 180, 60))
+        self.assertIsNone(result['plate'])
+        self.assertIsNotNone(result['crop'])
+        self.assertEqual(result['raw_reads'][0]['text'], '395/ISX')

@@ -1,0 +1,120 @@
+@extends('layouts.app')
+
+@section('title', 'Edit Vehicle | PHILCST Vehicle Access Monitoring')
+@section('page-title', 'Edit Vehicle')
+
+@section('content')
+    <x-page-header :title="'Edit '.$vehicle->plate_number" :back="route('registry.index')" back-label="Back to Registry" />
+
+    <section class="panel">
+        @php($selectedCategory = old('category', $vehicle->category))
+        @php($categorySelectValue = \App\Support\VehicleCategory::normalize($selectedCategory))
+        @php($selectedVehicleType = old('vehicle_type', $vehicle->vehicle_type))
+        @php($vehicleTypeOtherValue = old('vehicle_type_other', ! in_array($selectedVehicleType, $vehicleTypes, true) && $selectedVehicleType !== 'Others' ? $selectedVehicleType : '') ?? '')
+        @php($vehicleTypeSelectValue = in_array($selectedVehicleType, $vehicleTypes, true) ? $selectedVehicleType : 'Others')
+        @php($selectedRfidTagId = (string) old('rfid_tag_id', $vehicle->rfid_tag_id))
+        <form method="POST" action="{{ route('vehicle-registry.update', ['vehicle' => $vehicle->getKey()]) }}" class="stack-form" data-rfid-registration-form>
+            @csrf
+            @method('PUT')
+
+            <p class="field-help">Registered by: {{ $vehicle->registered_by ?: 'Not recorded' }}</p>
+
+            @error('vehicle')
+                <div class="alert alert-danger">{{ $message }}</div>
+            @enderror
+
+            <div class="form-grid">
+                <div class="field">
+                    <label for="rfid_tag_id">RFID Tag</label>
+                    <select id="rfid_tag_id" name="rfid_tag_id">
+                        <option value="">{{ $vehicle->rfid_tag_id ? 'Keep current RFID assignment' : 'No RFID assigned' }}</option>
+                        @foreach ($assignableTags as $tag)
+                            <option value="{{ $tag->id }}" @selected($selectedRfidTagId === (string) $tag->id)>
+                                RFID #{{ $tag->number_label ?: 'N/A' }} - {{ $tag->uid }}
+                                @if ($tag->vehicle && (int) $tag->vehicle_id === (int) $vehicle->id)
+                                    (current)
+                                @endif
+                            </option>
+                        @endforeach
+                    </select>
+                    <div class="table-subtext">Only registered inventory tags are listed. Options are sorted by RFID tag number.</div>
+                    @error('rfid_tag_id')
+                        <span class="field-error">{{ $message }}</span>
+                    @enderror
+                    @error('rfid_uid')
+                        <span class="field-error">{{ $message }}</span>
+                    @enderror
+                </div>
+
+                <div class="field">
+                    <label for="plate_number">Plate Number</label>
+                    <input id="plate_number" type="text" name="plate_number" value="{{ old('plate_number', $vehicle->plate_number) }}" required maxlength="50" data-normalize-plate data-plate-legacy="{{ $vehicle->plate_number }}">
+                    @error('plate_number')
+                        <span class="field-error">{{ $message }}</span>
+                    @enderror
+                </div>
+
+                <div class="field">
+                    <label for="vehicle_owner_name">Vehicle Owner Name</label>
+                    <input id="vehicle_owner_name" type="text" name="vehicle_owner_name" value="{{ old('vehicle_owner_name', $vehicle->vehicle_owner_name) }}">
+                    <span class="field-help">An existing blank or unchanged organization name can be kept. New names may use letters, spaces, apostrophes, hyphens and periods (up to 100 characters).</span>
+                    @error('vehicle_owner_name')
+                        <span class="field-error">{{ $message }}</span>
+                    @enderror
+                </div>
+
+                <div class="field">
+                    <label for="category">Category</label>
+                    <select id="category" name="category" required>
+                        @foreach ($vehicleCategories as $category)
+                            <option value="{{ $category }}" @selected($categorySelectValue === $category)>
+                                {{ \App\Support\VehicleCategory::label($category) }}
+                            </option>
+                        @endforeach
+                    </select>
+                    @error('category')
+                        <span class="field-error">{{ $message }}</span>
+                    @enderror
+                </div>
+
+                <div class="field">
+                    <label for="vehicle_type">Vehicle Type</label>
+                    <select id="vehicle_type" name="vehicle_type" required data-other-select data-other-target="vehicle_type_other">
+                        @foreach ($vehicleTypes as $vehicleType)
+                            <option value="{{ $vehicleType }}" @selected($vehicleTypeSelectValue === $vehicleType)>{{ $vehicleType }}</option>
+                        @endforeach
+                        <option value="Others" @selected($vehicleTypeSelectValue === 'Others')>Others</option>
+                    </select>
+                    <label for="vehicle_type_other" data-type-specify-label @if ($vehicleTypeSelectValue !== 'Others') hidden @endif>Specify vehicle type</label>
+                    <input
+                        id="vehicle_type_other"
+                        aria-label="Specify vehicle type"
+                        aria-describedby="vehicle_type_other_error"
+                        type="text"
+                        name="vehicle_type_other"
+                        value="{{ $vehicleTypeOtherValue }}"
+                        placeholder="Specify vehicle type"
+                        maxlength="50"
+                        data-other-field
+                        data-registration-type-other data-type-legacy="{{ $vehicle->vehicle_type }}"
+                        @required($vehicleTypeSelectValue === 'Others')
+                        @if ($vehicleTypeSelectValue !== 'Others') hidden @endif
+                    >
+                    @error('vehicle_type')
+                        <span class="field-error">{{ $message }}</span>
+                    @enderror
+                    <span id="vehicle_type_other_error" class="field-error" data-type-specify-error aria-live="polite" @if (!$errors->has('vehicle_type_other')) hidden @endif>{{ $errors->first('vehicle_type_other') }}</span>
+                </div>
+            </div>
+
+            <div class="button-row">
+                <button type="submit" class="button button-primary">Update Vehicle</button>
+                <a href="{{ route('registry.index') }}" class="button button-secondary">Cancel</a>
+            </div>
+        </form>
+    </section>
+@endsection
+
+@push('scripts')
+    <script src="{{ asset('js/registration-type.js') }}?v={{ filemtime(public_path('js/registration-type.js')) }}"></script>
+@endpush

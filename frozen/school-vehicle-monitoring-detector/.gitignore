@@ -1,0 +1,5 @@
+# Plug-and-detect: new Python folders keep their caches out of git.
+devices/__pycache__/
+tests/__pycache__/
+tools/__pycache__/
+__pycache__/

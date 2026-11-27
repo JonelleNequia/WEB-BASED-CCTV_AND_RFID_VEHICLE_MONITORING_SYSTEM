@@ -1,0 +1,40 @@
+{{--
+    UI Phase 3: "Register Tags" bulk scanning (Registry › RFID Tags).
+    Each tap on the reader adds one vehicle tag; numbers are assigned
+    automatically. Nothing else on the page listens to the reader.
+--}}
+<x-drawer id="register-tag-drawer" title="Register Tags">
+    <div class="stack-form" data-bulk-register data-store-url="{{ route('rfid-inventory.store') }}">
+        <div class="field">
+            <label for="bulk_scan">Scan tags one after another</label>
+            <input id="bulk_scan" type="text" autocomplete="off" placeholder="Focus here and tap each tag" data-bulk-scan autofocus>
+            <span class="field-help" data-bulk-number-help>
+                @if ($nextTagNumber <= \App\Rules\RfidTagNumber::MAX_NUMBER)
+                    Tag numbers are assigned automatically, starting at #<span data-bulk-next>{{ $nextTagNumber }}</span>.
+                @else
+                    Automatic numbering reached 999999. Use Add RFID Tag to enter an unused number.
+                @endif
+            </span>
+        </div>
+
+        <div class="tag-picker-uhf">
+            <button type="button" class="button button-secondary button-sm" data-bulk-uhf="{{ route('registry.tags.uhf-reads') }}" aria-pressed="false">Listen to UHF reader</button>
+            <span class="field-help">UHF tags: turn this on, then hold each tag near the UHF reader one at a time.</span>
+        </div>
+
+        <p class="text-muted" data-bulk-summary role="status" aria-live="polite">No tags added yet.</p>
+        <ul class="bulk-scan-list" data-bulk-list></ul>
+
+        <div class="button-row">
+            <button type="button" class="button button-secondary" data-drawer-close>Close</button>
+            <button type="button" class="button button-primary" data-bulk-done>Done</button>
+        </div>
+    </div>
+</x-drawer>
+
+@once
+    @push('scripts')
+        <script src="{{ asset('js/uhf-tag-reader.js') }}"></script>
+        <script src="{{ asset('js/registry-tags.js') }}?v={{ filemtime(public_path('js/registry-tags.js')) }}"></script>
+    @endpush
+@endonce

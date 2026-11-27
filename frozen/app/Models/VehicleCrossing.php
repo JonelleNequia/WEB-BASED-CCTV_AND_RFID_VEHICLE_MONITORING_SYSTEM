@@ -1,0 +1,98 @@
+<?php
+
+namespace App\Models;
+
+use App\Models\Concerns\RecordsSourceDevice;
+use App\Models\Concerns\StoresLocalTime;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+/**
+ * Phase 2 (visitor model): one vehicle the camera saw cross a gate's trigger
+ * line. The direction comes from which side of the line it moved to (the
+ * gate's calibration says which side is IN); UNKNOWN when the track was too
+ * short or never got to the other side.
+ */
+class VehicleCrossing extends Model
+{
+    // Phase 3: same timezone as rfid_scan_logs.scan_time (compared for fusion).
+    use StoresLocalTime;
+    // Delete device work: remembers the camera / reader that made the record.
+    use RecordsSourceDevice;
+
+    public const DIRECTION_IN = 'IN';
+
+    public const DIRECTION_OUT = 'OUT';
+
+    public const DIRECTION_UNKNOWN = 'UNKNOWN';
+
+    public const DIRECTIONS = [self::DIRECTION_IN, self::DIRECTION_OUT, self::DIRECTION_UNKNOWN];
+
+    protected $fillable = [
+        'gate',
+        'camera_id',
+        'rfid_scan_log_id',
+        'direction',
+        'direction_reason',
+        'crossed_at',
+        'track_id',
+        'confidence',
+        'vehicle_type',
+        'snapshot_path',
+        'external_event_key',
+        'detection_metadata_json',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'crossed_at' => 'datetime',
+            'track_id' => 'integer',
+            'confidence' => 'float',
+            'detection_metadata_json' => 'array',
+        ];
+    }
+
+    public function camera(): BelongsTo
+    {
+        return $this->belongsTo(Camera::class);
+    }
+
+    /**
+     * Phase 3: the registered tag read this crossing gave its direction to.
+     */
+    public function rfidScanLog(): BelongsTo
+    {
+        return $this->belongsTo(RfidScanLog::class);
+    }
+
+    public function scopeAtGate(Builder $query, string $gate): Builder
+    {
+        return $query->where('gate', $gate);
+    }
+
+    public function directionLabel(): string
+    {
+        return match ($this->direction) {
+            self::DIRECTION_IN => 'IN',
+            self::DIRECTION_OUT => 'OUT',
+            default => 'Direction unknown',
+        };
+    }
+
+    public function getSnapshotUrlAttribute(): ?string
+    {
+        return \App\Support\OccurrenceMedia::url($this->snapshot_path);
+    }
+
+    public function sourceDeviceGate(): ?string
+    {
+        return $this->gate;
+    }
+
+    public function sourceDeviceRole(): string
+    {
+        return DeviceAssignment::ROLE_CAMERA;
+    }
+}

@@ -1,0 +1,484 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\ActiveSession;
+use App\Models\Camera;
+use App\Models\Gate;
+use App\Models\RfidScanLog;
+use App\Models\VehicleEvent;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+
+class EventService
+{
+    public function __construct(
+        protected MatchingService $matchingService,
+        protected LocalStorageService $localStorageService,
+        protected VehicleRegistryService $vehicleRegistryService
+    ) {
+    }
+
+    /**
+     * Create a manual entry or exit event and immediately complete its workflow.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function create(array $data): VehicleEvent
+    {
+        return DB::transaction(function () use ($data): VehicleEvent {
+            $linkedVehicle = $this->vehicleRegistryService->resolveVehicleByPlate($data['plate_text']);
+
+            $event = VehicleEvent::query()->create([
+                'event_type' => $data['event_type'],
+                'event_status' => VehicleEvent::STATUS_COMPLETED,
+                'event_origin' => 'manual',
+                'plate_text' => $this->normalizeDisplayPlate($data['plate_text']),
+                'plate_confidence' => $data['plate_confidence'] ?? null,
+                'vehicle_id' => $linkedVehicle?->id,
+                'vehicle_type' => $this->normalizeVehicleType($data['vehicle_type']),
+                'detected_vehicle_type' => null,
+                'detection_metadata_json' => [VehicleTypeEvidenceService::KEY => ['source' => 'manual']],
+                'vehicle_category' => $linkedVehicle?->category,
+                'camera_id' => $data['camera_id'],
+                'roi_name' => $data['roi_name'] ?? null,
+                'event_time' => $data['event_time'],
+                'vehicle_image_path' => $this->storeImage($data['vehicle_image'] ?? null, 'vehicle'),
+                'plate_image_path' => $this->storeImage($data['plate_image'] ?? null, 'plate'),
+                'match_status' => $data['event_type'] === 'ENTRY' ? 'open' : 'unmatched',
+                'details_completed_at' => now(),
+            ]);
+
+            return $this->finalizeCompletedEvent($event);
+        });
+    }
+
+    /**
+     * Create one auto-detected event that still needs manual details.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function createDetectedEvent(array $data): VehicleEvent
+    {
+        $data = \App\Support\DeprecatedVehicleColor::without($data);
+
+        $existing = VehicleEvent::query()
+            ->where('external_event_key', $data['external_event_key'])
+            ->first();
+
+        if ($existing) {
+            return $existing->load(['camera', 'matchedEntry.camera', 'activeSession']);
+        }
+
+        return DB::transaction(function () use ($data): VehicleEvent {
+            $camera = $this->resolveCamera($data);
+            $eventType = VehicleEvent::eventTypeForDirection($data['direction'] ?? data_get($data, 'detection_metadata_json.direction'));
+            $detectedVehicleType = \App\Support\VehicleType::detector($data['detected_vehicle_type'] ?? null);
+
+            return VehicleEvent::query()->create([
+                'event_type' => $eventType,
+                'event_status' => VehicleEvent::STATUS_PENDING_DETAILS,
+                'event_origin' => 'cctv_detected',
+                'plate_text' => null,
+                'plate_confidence' => null,
+                'vehicle_id' => null,
+                'vehicle_type' => $detectedVehicleType,
+                'detected_vehicle_type' => $data['detected_vehicle_type'] ?? null,
+                'vehicle_color' => null,
+                'camera_id' => $camera->id,
+                'external_event_key' => $data['external_event_key'],
+                'detection_metadata_json' => array_replace((array) ($data['detection_metadata_json'] ?? []), [VehicleTypeEvidenceService::KEY => ['source' => 'detector', 'raw' => $data['detected_vehicle_type'] ?? null]]),
+                'roi_name' => $data['roi_name'] ?? Gate::labelFor($camera->camera_role).' Trigger Line',
+                'event_time' => $data['event_time'],
+                'vehicle_image_path' => $data['vehicle_image_path'],
+                'plate_image_path' => null,
+                'match_status' => VehicleEvent::STATUS_PENDING_DETAILS,
+            ])->load('camera');
+        });
+    }
+
+    /**
+     * Complete a pending auto-detected event with manual details.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function completePendingEvent(VehicleEvent $vehicleEvent, array $data): VehicleEvent
+    {
+        if ($vehicleEvent->event_status !== VehicleEvent::STATUS_PENDING_DETAILS) {
+            throw ValidationException::withMessages([
+                'vehicle_event' => 'Only incomplete records can be completed through this action.',
+            ]);
+        }
+
+        return DB::transaction(function () use ($vehicleEvent, $data): VehicleEvent {
+            $linkedVehicle = $this->vehicleRegistryService->resolveVehicleByPlate($data['plate_text']);
+
+            $vehicleEvent->fill([
+                'event_status' => VehicleEvent::STATUS_COMPLETED,
+                'event_origin' => $vehicleEvent->event_origin ?: 'cctv_detected',
+                'plate_text' => $this->normalizeDisplayPlate($data['plate_text']),
+                'plate_confidence' => $data['plate_confidence'] ?? null,
+                'vehicle_id' => $linkedVehicle?->id,
+                'vehicle_type' => \App\Support\VehicleType::validated($data['vehicle_type'], $vehicleEvent->vehicle_type),
+                'detection_metadata_json' => array_replace((array) $vehicleEvent->detection_metadata_json, [VehicleTypeEvidenceService::KEY => ['source' => 'manual', 'raw' => $vehicleEvent->detected_vehicle_type]]),
+                'vehicle_category' => $linkedVehicle?->category,
+                'match_status' => $vehicleEvent->event_type === 'ENTRY' ? 'open' : 'unmatched',
+                'details_completed_at' => now(),
+            ]);
+
+            // Manual completion never fabricates detector evidence.
+
+            if (! empty($data['plate_image'])) {
+                $vehicleEvent->plate_image_path = $this->storeImage($data['plate_image'], 'plate');
+            }
+
+            $vehicleEvent->save();
+
+            return $this->finalizeCompletedEvent($vehicleEvent);
+        });
+    }
+
+    /**
+     * Create one completed vehicle event directly from a verified RFID state transition.
+     *
+     * @param  array<string, mixed>  $transition
+     */
+    public function createFromRfidScan(RfidScanLog $scanLog, array $transition): ?VehicleEvent
+    {
+        $scanLog->loadMissing('vehicle');
+
+        if ($scanLog->verification_status !== 'verified' || ! $scanLog->vehicle) {
+            return null;
+        }
+
+        $existing = VehicleEvent::query()
+            ->where('rfid_scan_log_id', $scanLog->id)
+            ->first();
+
+        if ($existing) {
+            return $existing->load([
+                'camera',
+                'vehicle',
+                'rfidScanLog',
+                'matchedEntry.camera',
+                'activeSession',
+            ]);
+        }
+
+        return DB::transaction(function () use ($scanLog, $transition): VehicleEvent {
+            $vehicle = $scanLog->vehicle;
+            $cameraId = Camera::query()
+                ->forRole($scanLog->scan_location)
+                ->value('id');
+            $eventType = strtoupper((string) ($transition['event_type'] ?? 'ENTRY'));
+            $resultingState = (string) ($transition['resulting_state'] ?? '');
+
+            $event = VehicleEvent::query()->create([
+                'event_type' => $eventType,
+                'event_status' => VehicleEvent::STATUS_COMPLETED,
+                'event_origin' => $scanLog->source_mode === 'hardware_placeholder'
+                    ? 'rfid_hardware'
+                    : 'rfid_simulated',
+                'plate_text' => $this->normalizeDisplayPlate($vehicle->plate_number),
+                'plate_confidence' => null,
+                'vehicle_id' => $vehicle->id,
+                'rfid_scan_log_id' => $scanLog->id,
+                'vehicle_type' => $vehicle->vehicle_type,
+                'detected_vehicle_type' => $transition['detected_vehicle_type'] ?? null,
+                'detection_metadata_json' => [VehicleTypeEvidenceService::KEY => ['source' => 'registry', 'registry' => $vehicle->vehicle_type, 'vehicle_id' => $vehicle->id, 'raw' => $transition['detected_vehicle_type'] ?? null]],
+                'vehicle_color' => null,
+                'vehicle_category' => $vehicle->category,
+                'camera_id' => $cameraId,
+                'roi_name' => Gate::labelFor($scanLog->scan_location).' Reader',
+                // Phase 3: the moment the camera saw the crossing, when it did.
+                'event_time' => $transition['event_time'] ?? $scanLog->scan_time,
+                'vehicle_image_path' => null,
+                'plate_image_path' => null,
+                'match_status' => $eventType === 'ENTRY' ? 'open' : 'closed',
+                // ROI work: IN / OUT, or UNKNOWN until staff set it.
+                'direction' => VehicleEvent::directionForEventType($eventType),
+                // Gate direction work, Phase A: from the camera or the vehicle's state.
+                'direction_source' => $transition['direction_source'] ?? null,
+                'direction_confidence' => $transition['direction_confidence'] ?? null,
+                'resulting_state' => $resultingState,
+                'daily_entries_count' => $transition['daily_entries_count'] ?? null,
+                'daily_exits_count' => $transition['daily_exits_count'] ?? null,
+                // Phase 3: direction mismatch flagged for review.
+                'anomaly_reason' => $transition['anomaly_reason'] ?? null,
+                'details_completed_at' => now(),
+            ]);
+
+            $finalizedEvent = $this->applyRfidSessionState($event);
+
+            if ($scanLog->correlated_vehicle_event_id !== $finalizedEvent->id) {
+                $scanLog->update([
+                    'correlated_vehicle_event_id' => $finalizedEvent->id,
+                ]);
+            }
+
+            if ($finalizedEvent->rfid_scan_log_id !== $scanLog->id) {
+                $finalizedEvent->update([
+                    'rfid_scan_log_id' => $scanLog->id,
+                ]);
+            }
+
+            return $finalizedEvent->fresh([
+                'camera',
+                'vehicle',
+                'rfidScanLog',
+                'matchedEntry.camera',
+                'activeSession',
+            ]);
+        });
+    }
+
+    /**
+     * Apply lightweight session updates for state-based RFID events.
+     */
+    public function applyRfidSessionState(VehicleEvent $event): VehicleEvent
+    {
+        if (! in_array($event->event_type, ['ENTRY', 'EXIT'], true)) {
+            // ROI work: "Direction unknown" opens or closes no session (until it is set).
+            return $event->fresh(['camera']);
+        }
+
+        if ($event->event_type === 'ENTRY') {
+            // Phase 3: a new ENTRY for a vehicle that is still "inside" means
+            // its exit was missed. Close the old session so it is not counted twice.
+            ActiveSession::query()
+                ->where('status', 'open')
+                ->where('entry_event_id', '!=', $event->id)
+                ->where('entry_time', '<=', $event->event_time)
+                ->whereHas('entryEvent', fn ($query) => $query->where('vehicle_id', $event->vehicle_id))
+                ->update([
+                    'status' => 'closed',
+                    'archived_at' => now(),
+                    'archive_reason' => 'Superseded by a new entry scan (missed exit).',
+                    'updated_at' => now(),
+                ]);
+
+            ActiveSession::query()->firstOrCreate(
+                ['entry_event_id' => $event->id],
+                [
+                    'plate_text' => $event->plate_text,
+                    'plate_number' => \App\Support\PlateNumber::storageKey($event->plate_text),
+                    'vehicle_type' => $event->vehicle_type,
+                    'vehicle_color' => $event->vehicle_color,
+                    'entry_time' => $event->event_time,
+                    'status' => 'open',
+                ]
+            );
+
+            return $event->fresh(['camera', 'activeSession']);
+        }
+
+        $session = ActiveSession::query()
+            ->where('status', 'open')
+            ->where('entry_time', '<=', $event->event_time)
+            ->whereHas('entryEvent', function ($entryQuery): void {
+                $entryQuery->whereNotIn('event_origin', ['guest_cctv', 'guest_manual'])
+                    ->where(function ($categoryQuery): void {
+                        $categoryQuery->whereNull('vehicle_category')
+                            ->orWhere('vehicle_category', '!=', 'guest');
+                    });
+            })
+            ->where(function ($query) use ($event): void {
+                $query->whereHas('entryEvent', function ($entryQuery) use ($event): void {
+                    $entryQuery->where('vehicle_id', $event->vehicle_id);
+                });
+
+                if ($event->plate_text) {
+                    $query->orWhere('plate_text', $event->plate_text);
+                }
+            })
+            ->orderByDesc('entry_time')
+            ->first();
+
+        if (! $session) {
+            return $event->fresh(['camera']);
+        }
+
+        $session->update(['status' => 'closed']);
+
+        $event->forceFill([
+            'matched_entry_id' => $session->entry_event_id,
+            'match_status' => 'closed',
+        ])->save();
+
+        $session->entryEvent?->update(['match_status' => 'closed']);
+
+        return $event->fresh(['camera', 'matchedEntry.camera']);
+    }
+
+    /**
+     * Finish the session or matching workflow once a record has all required details.
+     */
+    protected function finalizeCompletedEvent(VehicleEvent $event): VehicleEvent
+    {
+        if ($event->event_type === 'ENTRY') {
+            ActiveSession::query()->firstOrCreate(
+                ['entry_event_id' => $event->id],
+                [
+                    'plate_text' => $event->plate_text,
+                    'plate_number' => \App\Support\PlateNumber::storageKey($event->plate_text),
+                    'vehicle_type' => $event->vehicle_type,
+                    'vehicle_color' => $event->vehicle_color,
+                    'entry_time' => $event->event_time,
+                    'status' => 'open',
+                ]
+            );
+
+            $event->forceFill([
+                'event_status' => VehicleEvent::STATUS_COMPLETED,
+                'match_status' => 'open',
+                'details_completed_at' => $event->details_completed_at ?? now(),
+            ])->save();
+
+            return $event->fresh(['camera', 'activeSession']);
+        }
+
+        $match = $this->resolveExitMatch($event);
+
+        $event->forceFill([
+            'event_status' => VehicleEvent::STATUS_COMPLETED,
+            'matched_entry_id' => $match['matched_entry_id'],
+            'match_score' => $match['match_score'],
+            'match_status' => $match['match_status'],
+            'details_completed_at' => $event->details_completed_at ?? now(),
+        ])->save();
+
+        if ($match['match_status'] === 'matched' && $match['session']) {
+            $match['session']->update(['status' => 'closed']);
+            $match['session']->entryEvent?->update(['match_status' => 'closed']);
+        }
+
+        return $event->fresh(['camera', 'matchedEntry.camera', 'activeSession']);
+    }
+
+    /**
+     * Route EXIT records through direct RFID matching first, then fall back to score-based matching.
+     *
+     * @return array{matched_entry_id:int|null,match_score:int|null,match_status:string,session:ActiveSession|null}
+     */
+    protected function resolveExitMatch(VehicleEvent $event): array
+    {
+        return $this->matchingService->matchExitEvent($event->load('camera'));
+    }
+
+    /**
+     * Resolve one manual-review EXIT decision.
+     */
+    public function resolveManualReview(VehicleEvent $event, string $decision): VehicleEvent
+    {
+        if ($event->event_type !== 'EXIT' || $event->match_status !== 'manual_review') {
+            throw ValidationException::withMessages([
+                'vehicle_event' => 'Only review queue EXIT records can be resolved through this action.',
+            ]);
+        }
+
+        if (! in_array($decision, ['matched', 'unmatched'], true)) {
+            throw ValidationException::withMessages([
+                'decision' => 'Invalid review decision.',
+            ]);
+        }
+
+        return DB::transaction(function () use ($event, $decision): VehicleEvent {
+            $event->refresh();
+
+            if ($decision === 'unmatched') {
+                $event->forceFill([
+                    'matched_entry_id' => null,
+                    'match_status' => 'unmatched',
+                    'event_status' => VehicleEvent::STATUS_COMPLETED,
+                ])->save();
+
+                return $event->fresh(['camera', 'matchedEntry.camera']);
+            }
+
+            $matchedEntryId = $event->matched_entry_id;
+
+            if (! $matchedEntryId) {
+                $rematch = $this->matchingService->matchExitEvent($event->load('camera'));
+                $matchedEntryId = $rematch['matched_entry_id'];
+
+                if (! $matchedEntryId) {
+                    throw ValidationException::withMessages([
+                        'vehicle_event' => 'No entry candidate is available to mark this record as matched.',
+                    ]);
+                }
+
+                $event->forceFill([
+                    'matched_entry_id' => $matchedEntryId,
+                    'match_score' => $rematch['match_score'],
+                ])->save();
+            }
+
+            $session = ActiveSession::query()
+                ->where('entry_event_id', $matchedEntryId)
+                ->where('status', 'open')
+                ->first();
+
+            if ($session) {
+                $session->update(['status' => 'closed']);
+            }
+
+            $event->forceFill([
+                'match_status' => 'matched',
+                'event_status' => VehicleEvent::STATUS_COMPLETED,
+            ])->save();
+
+            VehicleEvent::query()
+                ->whereKey($matchedEntryId)
+                ->update(['match_status' => 'closed']);
+
+            return $event->fresh(['camera', 'matchedEntry.camera']);
+        });
+    }
+
+    /**
+     * Resolve the configured camera from either a role or direct camera ID.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function resolveCamera(array $data): Camera
+    {
+        if (! empty($data['camera_id'])) {
+            return Camera::query()->findOrFail($data['camera_id']);
+        }
+
+        return Camera::query()
+            ->forRole(Gate::normalizeCode((string) ($data['camera_role'] ?? '')))
+            ->firstOrFail();
+    }
+
+    /**
+     * Store uploaded images on the public disk.
+     */
+    protected function storeImage(?UploadedFile $file, string $directory): ?string
+    {
+        if (! $file) {
+            return null;
+        }
+
+        $this->localStorageService->ensureBaseDirectories();
+
+        return $this->localStorageService->storeEventImage($file, $directory);
+    }
+
+    /**
+     * Keep saved plate text consistent without stripping the visible formatting.
+     */
+    protected function normalizeDisplayPlate(string $plateText): string
+    {
+        return (string) \App\Support\PlateNumber::normalize($plateText);
+    }
+
+    /**
+     * Keep vehicle type labels readable across manual and detected records.
+     */
+    protected function normalizeVehicleType(string $vehicleType): string
+    {
+        return \App\Support\VehicleType::validated($vehicleType);
+    }
+}

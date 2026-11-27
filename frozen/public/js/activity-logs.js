@@ -1,0 +1,368 @@
+/*
+ * UI Phase 4: Activity Logs › All Events.
+ * Details modal, snapshot viewer, toolbar print reports and a live refresh
+ * of page 1 that keeps the current filters. (ROI work, Phase 7: the print
+ * reports are their own page, logs/print; this file only adds the
+ * "Include images" choice to their links.)
+ */
+(function () {
+    const dataNode = document.getElementById('event-log-modal-data');
+    const realtimeNode = document.getElementById('event-log-realtime-data');
+    const list = document.querySelector('[data-event-log-list]');
+    const printSheet = document.querySelector('[data-event-log-print-sheet]');
+    const realtime = realtimeNode ? JSON.parse(realtimeNode.textContent || '{}') : {};
+    let logs = dataNode ? JSON.parse(dataNode.textContent || '[]') : [];
+    let activeLog = null;
+    // Automatic filtering owns refresh requests and pagination on this list.
+    document.addEventListener('auto-list:updated', function (event) {
+        if (event.detail.id === 'logs-events') {
+            logs = JSON.parse(document.getElementById('event-log-modal-data').textContent || '[]');
+        }
+    });
+
+    const detailFields = [
+        ['Owner', 'owner_name'],
+        ['Vehicle', 'vehicle_type'],
+        ['Type source', 'vehicle_type_source'],
+        ['Detector type', 'detected_vehicle_type'],
+        ['Category', 'category_label'],
+        ['Log type', 'log_type_label'],
+        ['Source', 'source_label'],
+        ['Gate', 'station_label'],
+        ['Direction from', 'direction_source_label'],
+        ['RFID Tag', 'rfid_tag_uid'],
+        ['State', 'state_label'],
+        ['Status', 'status_label'],
+        ['OCR candidate (unconfirmed)', 'plate_candidate'],
+        ['OCR confidence', 'plate_confidence_label'],
+        ['Plate review reason', 'plate_review_reason'],
+        ['Identifier type (evidence only)', 'identifier_type_label'],
+        ['Identifier text (evidence only)', 'identifier_text'],
+        ['Match', 'match_label'],
+        ['Alert', 'alert_reason'],
+        ['Vehicle snapshot', 'image_status'],
+        ['Time', 'display_time'],
+    ];
+
+    // UI Phase 3: IN / OUT blue, unregistered gray, needs a look yellow.
+    const tone = {
+        entry: 'info', exit: 'info', guest: 'neutral', unregistered: 'neutral', unknown: 'warning', rfid: 'neutral',
+    };
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) {
+            node.className = className;
+        }
+        if (text !== undefined && text !== null) {
+            node.textContent = text;
+        }
+        return node;
+    }
+
+    /* ---------- Rows (same markup as logs/partials/event-row) ---------- */
+
+    function buildRow(log, index) {
+        const tr = el('tr', log.is_alert ? 'is-alert-row' : '');
+
+        tr.append(el('td', 'nowrap', log.display_time));
+
+        const snap = el('td');
+        if (log.image_url) {
+            const button = el('button', 'thumb-button');
+            button.type = 'button';
+            button.dataset.snapshot = log.image_url;
+            button.setAttribute('aria-label', `Enlarge snapshot of ${log.plate_number || ''}`);
+            const img = el('img', 'thumb thumb-xs');
+            img.src = log.image_url;
+            img.alt = '';
+            img.loading = 'lazy';
+            button.append(img);
+            snap.append(button);
+        } else {
+            snap.append(el('span', 'thumb thumb-xs thumb-empty'));
+        }
+        tr.append(snap);
+
+        const plate = el('td');
+        const plateCell = el('div', 'plate-cell');
+        plateCell.append(el('strong', null, log.plate_number || '—'));
+        if (log.plate_image_url) {
+            const button = el('button', 'thumb-button');
+            button.type = 'button';
+            button.dataset.snapshot = log.plate_image_url;
+            button.dataset.snapshotLabel = 'Plate image';
+            button.setAttribute('aria-label', `Enlarge plate image of ${log.plate_number || ''}`);
+            const img = el('img', 'thumb thumb-plate activity-plate-image');
+            img.src = log.plate_image_url;
+            img.alt = 'Plate image';
+            img.loading = 'lazy';
+            button.append(img);
+            plateCell.append(button);
+        } else {
+            plateCell.append(el('span', 'table-subtext', 'No plate image'));
+        }
+        plate.append(plateCell);
+        if (log.owner_name && log.owner_name !== 'N/A') {
+            plate.append(el('div', 'table-subtext', log.owner_name));
+        }
+        tr.append(plate);
+
+        const vehicleTypeCell = el('td', null, log.vehicle_type || '');
+        if (log.vehicle_type_source) vehicleTypeCell.append(el('div', 'table-subtext', log.vehicle_type_source));
+        tr.append(vehicleTypeCell);
+
+        const movement = el('td');
+        movement.append(el('span', `badge badge-tone-${tone[String(log.event_type).toLowerCase()] || 'neutral'}`, log.movement_label || log.event_type));
+        if (log.direction_source === 'state') {
+            const note = el('div', 'table-subtext direction-source-state', 'from vehicle state');
+            note.title = "The camera could not tell; the vehicle's Inside / Outside state was used";
+            movement.append(note);
+        }
+        if (log.set_direction_url) {
+            movement.append(setDirectionForm(log.set_direction_url));
+        }
+        tr.append(movement);
+
+        const type = el('td');
+        type.append(el('span', log.is_alert ? 'log-type log-type-alert' : 'log-type', log.log_type_label || ''));
+        if (log.is_alert && log.alert_reason) {
+            const reason = el('div', 'table-subtext one-line', log.alert_reason);
+            reason.title = log.alert_reason;
+            type.append(reason);
+        }
+        tr.append(type);
+
+        tr.append(el('td', null, log.station_label));
+
+        const status = el('td');
+        status.append(el('span', `badge badge-${log.status_badge_class || 'secondary'}`, log.status_label));
+        tr.append(status);
+
+        const actions = el('td', 'row-actions');
+        const details = el('button', 'button button-secondary button-sm', 'Details');
+        details.type = 'button';
+        details.dataset.eventLogView = String(index);
+        actions.append(details);
+        tr.append(actions);
+
+        return tr;
+    }
+
+    /* ROI work: "Set IN" / "Set OUT" on a Direction unknown record (same form as the x-set-direction component). */
+    function setDirectionForm(url) {
+        const form = el('form', 'set-direction');
+        form.method = 'POST';
+        form.action = url;
+        form.dataset.setDirection = '';
+        const hidden = (name, value) => {
+            const input = el('input');
+            input.type = 'hidden';
+            input.name = name;
+            input.value = value;
+            return input;
+        };
+        form.append(hidden('_token', document.querySelector('meta[name="csrf-token"]')?.content || ''), hidden('_method', 'PATCH'));
+        ['IN', 'OUT'].forEach((direction) => {
+            const button = el('button', 'button button-secondary button-sm', `Set ${direction}`);
+            button.type = 'submit';
+            button.name = 'direction';
+            button.value = direction;
+            form.append(button);
+        });
+        return form;
+    }
+
+    function renderRows(items) {
+        if (!list || !Array.isArray(items)) {
+            return;
+        }
+
+        logs = items;
+
+        if (items.length === 0) {
+            const tr = el('tr');
+            const td = el('td');
+            td.colSpan = 9;
+            const empty = el('div', 'empty-block');
+            empty.append(
+                el('strong', null, list.dataset.emptyTitle || 'No records matched the current filters'),
+                el('p', null, list.dataset.emptyText || 'Adjust the filters to widen the list.')
+            );
+            td.append(empty);
+            tr.append(td);
+            list.replaceChildren(tr);
+            return;
+        }
+
+        list.replaceChildren(...items.map(buildRow));
+    }
+
+    /* ---------- Details modal and snapshot viewer ---------- */
+
+    function openDetails(log) {
+        activeLog = log;
+        document.getElementById('log-details-title').textContent = `${log.event_type} · ${log.plate_number || '—'} (${log.record_type_label} #${log.id})`;
+
+        const grid = document.querySelector('[data-log-details-grid]');
+        grid.replaceChildren();
+        detailFields.forEach(function ([label, key]) {
+            if (!log[key]) {
+                return;
+            }
+            grid.append(el('dt', null, label), el('dd', null, log[key]));
+        });
+
+        const wrap = document.querySelector('[data-log-details-image-wrap]');
+        const image = document.querySelector('[data-log-details-image]');
+        if (log.image_url) {
+            image.src = log.image_url;
+            wrap.hidden = false;
+        } else {
+            image.removeAttribute('src');
+            wrap.hidden = true;
+        }
+
+        document.querySelector('[data-log-details-link]').href = log.detail_url || '#';
+        document.querySelector('[data-log-details-export]').href = log.export_url || '#';
+        window.ui.openDrawer('log-details');
+    }
+
+    function openSnapshot(url, label = 'Snapshot') {
+        const image = document.querySelector('[data-snapshot-full]');
+        image.src = url;
+        image.alt = label;
+        document.getElementById('snapshot-viewer-title').textContent = label;
+        window.ui.openDrawer('snapshot-viewer');
+    }
+
+    /* ---------- Print ---------- */
+
+    function startPrint() {
+        printSheet.hidden = false;
+        document.body.classList.add('is-printing-event-log');
+
+        const cleanup = function () {
+            document.body.classList.remove('is-printing-event-log');
+            printSheet.hidden = true;
+            printSheet.replaceChildren();
+            window.removeEventListener('afterprint', cleanup);
+        };
+
+        window.addEventListener('afterprint', cleanup);
+        window.print();
+    }
+
+    function printHeader(title, meta) {
+        const header = el('div', 'event-log-print-header');
+        header.append(el('span', null, 'PHILCST Vehicle Monitoring'), el('h2', null, title), el('p', null, meta));
+        return header;
+    }
+
+    function printLog(log) {
+        if (!log) {
+            return;
+        }
+
+        printSheet.replaceChildren(printHeader(`${log.event_type} - ${log.plate_number || '—'}`, `${log.record_type_label} #${log.id}`));
+
+        const grid = el('div', 'event-log-print-grid');
+        [['Plate', 'plate_number'], ...detailFields].forEach(function ([label, key]) {
+            const item = el('div');
+            item.append(el('span', null, label), el('strong', null, log[key] || 'N/A'));
+            grid.append(item);
+        });
+        printSheet.append(grid);
+
+        if (log.image_url) {
+            const box = el('div', 'event-log-print-image');
+            const img = el('img');
+            img.src = log.image_url;
+            img.alt = 'Snapshot';
+            box.append(img);
+            printSheet.append(box);
+        }
+
+        startPrint();
+    }
+
+    /* ---------- Events ---------- */
+
+    document.addEventListener('click', function (event) {
+        const report = event.target.closest('[data-event-log-report-print]');
+        if (report) {
+            // The report opens in a new tab, with the snapshot column when asked for.
+            const url = new URL(report.href, window.location.href);
+            if (document.querySelector('[data-event-log-print-snapshots]')?.checked) {
+                url.searchParams.set('snapshots', '1');
+            } else {
+                url.searchParams.delete('snapshots');
+            }
+            report.href = url.toString();
+            report.closest('details')?.removeAttribute('open');
+            return;
+        }
+
+        const snapshot = event.target.closest('[data-snapshot]');
+        if (snapshot) {
+            openSnapshot(snapshot.dataset.snapshot, snapshot.dataset.snapshotLabel);
+            return;
+        }
+
+        const view = event.target.closest('[data-event-log-view]');
+        if (view) {
+            const log = logs[Number.parseInt(view.dataset.eventLogView, 10)];
+            if (log) {
+                openDetails(log);
+            }
+        }
+    });
+
+    document.querySelector('[data-log-details-print]')?.addEventListener('click', function () {
+        printLog(activeLog);
+    });
+
+    // Close the Print menu when clicking elsewhere.
+    document.addEventListener('click', function (event) {
+        document.querySelectorAll('details.menu[open]').forEach(function (menu) {
+            if (!menu.contains(event.target)) {
+                menu.removeAttribute('open');
+            }
+        });
+    });
+
+    /* ---------- Live refresh (page 1, same filters) ---------- */
+
+    let inFlight = false;
+
+    async function refresh() {
+        if (!realtime.refreshUrl || inFlight || document.querySelector('[data-drawer].is-open')) {
+            return;
+        }
+
+        inFlight = true;
+        try {
+            const response = await window.ui.liveFetch(realtime.refreshUrl, { headers: { Accept: 'application/json' } });
+            if (!response.ok) {
+                return;
+            }
+            const body = await response.json();
+            renderRows(body.logs || []);
+            Object.entries(body.summary || {}).forEach(function ([key, value]) {
+                const node = document.querySelector(`[data-log-summary="${key}"] .stat-value`);
+                if (node) {
+                    node.textContent = value;
+                }
+            });
+        } catch (error) {
+            // Keep the current rows during short network hiccups.
+        } finally {
+            inFlight = false;
+        }
+    }
+
+    if (!document.querySelector('[data-auto-list="logs-events"]')) {
+        refresh();
+        window.setInterval(refresh, 4000);
+    }
+})();

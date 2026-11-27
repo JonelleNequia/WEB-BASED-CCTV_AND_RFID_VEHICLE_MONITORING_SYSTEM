@@ -1,0 +1,459 @@
+<?php
+
+namespace App\Models;
+
+use App\Models\Concerns\RecordsSourceDevice;
+use App\Models\Concerns\StoresLocalTime;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+
+class VehicleEvent extends Model
+{
+    use HasFactory;
+    use StoresLocalTime;
+    // Delete device work: remembers the camera / reader that made the record.
+    use RecordsSourceDevice;
+
+    public const STATUS_PENDING_DETAILS = 'pending_details';
+
+    public const STATUS_COMPLETED = 'completed';
+
+    public const STATUS_REQUIRES_MANUAL_REVIEW = 'requires_manual_review';
+
+    /**
+     * ROI work, Phase 2: the camera could not tell IN from OUT. Not counted
+     * as IN or OUT, and the vehicle's state is not changed, until staff set
+     * it (Set IN / Set OUT).
+     */
+    public const TYPE_UNKNOWN = 'UNKNOWN';
+
+    /** Phase 5: match_status of a detector "Vehicle with no pass" alert. */
+    public const MATCH_NO_PASS_ALERT = 'no_pass_alert';
+
+    public const MATCH_NO_PASS_RESOLVED = 'no_pass_resolved';
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var list<string>
+     */
+    protected $fillable = [
+        'direction_source',
+        'direction_confidence',
+        'event_type',
+        'event_status',
+        'event_origin',
+        'direction',
+        'plate_number',
+        'plate_text',
+        'plate_confidence',
+        'vehicle_id',
+        'rfid_scan_log_id',
+        'visitor_record_id',
+        'occupancy_managed',
+        'vehicle_type',
+        'detected_vehicle_type',
+        'vehicle_color',
+        'vehicle_category',
+        'camera_id',
+        'external_event_key',
+        'detection_metadata_json',
+        'details_completed_at',
+        'roi_name',
+        'event_time',
+        'vehicle_image_path',
+        'plate_image_path',
+        'matched_entry_id',
+        'match_score',
+        'match_status',
+        'resulting_state',
+        'daily_entries_count',
+        'daily_exits_count',
+        // Phase 2: link to a guest pass visit.
+        'guest_visit_id',
+        // Phase 3: why this event needs review.
+        'anomaly_reason',
+    ];
+
+    protected static function booted(): void
+    {
+        // Gate direction work, Phase A: where IN / OUT came from (camera, state,
+        // manual) when the code that saved it did not say; none while unknown.
+        static::saving(function (VehicleEvent $event): void {
+            if (! in_array($event->event_type, ['ENTRY', 'EXIT'], true)) {
+                $event->direction_source = null;
+                $event->direction_confidence = null;
+
+                return;
+            }
+
+            $event->direction_source ??= in_array($event->event_origin, ['manual', 'guest_manual'], true)
+                ? \App\Support\DirectionSource::MANUAL
+                : \App\Support\DirectionSource::CAMERA;
+            if ($event->direction_source !== \App\Support\DirectionSource::CAMERA) {
+                $event->direction_confidence = null;
+            }
+        });
+    }
+
+    /**
+     * Get the attribute casts for the model.
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'occupancy_managed' => 'boolean',
+            'event_time' => 'datetime',
+            'plate_confidence' => 'decimal:2',
+            'match_score' => 'integer',
+            'detection_metadata_json' => 'array',
+            'details_completed_at' => 'datetime',
+            'daily_entries_count' => 'integer',
+            'daily_exits_count' => 'integer',
+        ];
+    }
+
+    /**
+     * Get the camera linked to the event.
+     */
+    public function camera(): BelongsTo
+    {
+        return $this->belongsTo(Camera::class);
+    }
+
+    /**
+     * Get the registered vehicle linked to this event.
+     */
+    public function vehicle(): BelongsTo
+    {
+        return $this->belongsTo(Vehicle::class);
+    }
+
+    /**
+     * Get the RFID scan correlated to this event.
+     */
+    public function rfidScanLog(): BelongsTo
+    {
+        return $this->belongsTo(RfidScanLog::class);
+    }
+
+    public function visitorRecord(): BelongsTo
+    {
+        return $this->belongsTo(VisitorRecord::class);
+    }
+
+    /**
+     * Phase 8 (visitor model): hide the camera "guest" log copies of archived
+     * guest records (unknown-tag reads); with $visitorCopies also those of
+     * crossings that are shown as Unregistered Visitor records instead.
+     */
+    public function scopeWithoutHiddenGuestCopies(Builder $query, bool $visitorCopies = false): Builder
+    {
+        return $query->where(function (Builder $inner) use ($visitorCopies): void {
+            $inner->whereNotIn('event_origin', ['guest_cctv', 'guest_manual'])
+                ->orWhereNull('external_event_key')
+                ->orWhere(function (Builder $copy) use ($visitorCopies): void {
+                    $copy->whereNotIn('external_event_key', GuestVehicleObservation::query()->withArchived()
+                        ->whereNotNull('archived_at')->whereNotNull('external_event_key')->select('external_event_key'));
+
+                    if ($visitorCopies) {
+                        $copy->whereNotIn('external_event_key', VisitorRecord::query()->select('external_event_key'));
+                    }
+                });
+        });
+    }
+
+    /**
+     * Phase 2: the guest pass visit this event belongs to.
+     */
+    public function guestVisit(): BelongsTo
+    {
+        return $this->belongsTo(GuestVisit::class);
+    }
+
+    /**
+     * Phase 4: log fields that replace "GUEST / Owner N/A" for guest pass events.
+     *
+     * @return array<string, string>
+     */
+    public static function guestPassLogFields(self $event): array
+    {
+        $visit = $event->guestVisit;
+
+        if (! $visit) {
+            return [];
+        }
+
+        $passLabel = $visit->rfidTag?->label ?? 'Old pass record';
+
+        return [
+            'plate_number' => $visit->plate ?: ($visit->rfidTag?->display_number ?? 'No plate'),
+            'owner_name' => $visit->driver_name ?: 'N/A',
+            'verification_label' => $passLabel,
+            'resulting_state' => $event->event_type === 'EXIT' ? 'Outside' : 'Inside',
+        ];
+    }
+
+    /**
+     * Phase 1 (gates): a camera event's type comes from the crossing
+     * direction the detector reports (IN / OUT), not from the gate, because
+     * every gate records both. ROI work, Phase 2: anything else is UNKNOWN,
+     * never ENTRY.
+     */
+    public static function eventTypeForDirection(mixed $direction): string
+    {
+        return match (strtoupper(trim((string) $direction))) {
+            'IN', 'ENTRY' => 'ENTRY',
+            'OUT', 'EXIT' => 'EXIT',
+            default => self::TYPE_UNKNOWN,
+        };
+    }
+
+    /** "IN" / "OUT" / "UNKNOWN" for an event type (ENTRY / EXIT / anything else). */
+    public static function directionForEventType(mixed $eventType): string
+    {
+        return match (strtoupper(trim((string) $eventType))) {
+            'ENTRY' => 'IN',
+            'EXIT' => 'OUT',
+            default => 'UNKNOWN',
+        };
+    }
+
+    /**
+     * Phase 5: station log fields for a detector "Vehicle with no pass" alert.
+     *
+     * @return array<string, mixed>
+     */
+    public static function noPassLogFields(self $event): array
+    {
+        if ($event->event_origin !== 'guest_cctv') {
+            return [];
+        }
+
+        return [
+            'plate_number' => $event->plate_text ?: 'NO PLATE READ',
+            'owner_name' => 'Unknown',
+            'verification_label' => 'Unregistered Guest',
+            'resulting_state' => 'N/A',
+            // Older CCTV guest rows (before Phase 5) keep their old status and do not alert.
+            'no_pass_alert' => $event->match_status === self::MATCH_NO_PASS_ALERT,
+            // Phase 1: the gate whose camera raised the alert.
+            'alert_location' => $event->camera?->camera_role,
+            'snapshot_url' => \App\Support\OccurrenceMedia::url($event->vehicle_image_path),
+        ];
+    }
+
+    /**
+     * Phase 4: "Guest Pass #G-03" instead of the generic origin label.
+     */
+    public function getSourceDisplayLabelAttribute(): string
+    {
+        if ($this->event_origin === 'guest_pass' && $this->guestVisit?->rfidTag) {
+            return $this->guestVisit->rfidTag->label;
+        }
+
+        return $this->event_origin_label;
+    }
+
+    /**
+     * Get the matched entry candidate for an exit event.
+     */
+    public function matchedEntry(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'matched_entry_id');
+    }
+
+    /**
+     * Get the active session created by an entry event.
+     */
+    public function activeSession(): HasOne
+    {
+        return $this->hasOne(ActiveSession::class, 'entry_event_id');
+    }
+
+    /**
+     * Resolve the public URL for the vehicle image with a safe fallback.
+     */
+    public function getVehicleImageUrlAttribute(): string
+    {
+        return \App\Support\OccurrenceMedia::url($this->vehicle_image_path) ?: asset('images/placeholders/vehicle-placeholder.svg');
+    }
+
+    /**
+     * Resolve the public URL for the plate image with a safe fallback.
+     */
+    public function getPlateImageUrlAttribute(): string
+    {
+        return \App\Support\OccurrenceMedia::url($this->plate_image_path) ?: asset('images/placeholders/plate-placeholder.svg');
+    }
+
+    /**
+     * Show the workflow status for log tables and badges.
+     */
+    public function getDisplayStatusAttribute(): string
+    {
+        if ($this->event_status === self::STATUS_PENDING_DETAILS) {
+            return self::STATUS_PENDING_DETAILS;
+        }
+
+        return $this->match_status ?: self::STATUS_COMPLETED;
+    }
+
+    /**
+     * Show movement-friendly labels instead of internal session states.
+     */
+    public function getDisplayStatusLabelAttribute(): string
+    {
+        return match ($this->display_status) {
+            'open' => 'Entry',
+            'closed' => 'Exit',
+            self::MATCH_NO_PASS_ALERT => 'Unregistered',
+            self::MATCH_NO_PASS_RESOLVED => 'Registered tag read',
+            default => str($this->display_status)->replace('_', ' ')->title()->value(),
+        };
+    }
+
+    /**
+     * Show the vehicle type that came from detection or manual completion.
+     */
+    public function getDisplayVehicleTypeAttribute(): string
+    {
+        $evidence = data_get($this->detection_metadata_json, \App\Services\VehicleTypeEvidenceService::KEY);
+        return $evidence !== null ? \App\Support\VehicleType::display($this->vehicle_type)
+            : ($this->detected_vehicle_type ?: $this->vehicle_type ?: 'Unknown');
+    }
+
+    public function getVehicleTypeSourceLabelAttribute(): string
+    {
+        return \App\Services\VehicleTypeEvidenceService::sourceLabel(data_get($this->detection_metadata_json, \App\Services\VehicleTypeEvidenceService::KEY.'.source'));
+    }
+
+    /**
+     * Determine if the log came from the RFID-first workflow.
+     */
+    public function getIsRfidEventAttribute(): bool
+    {
+        return $this->rfid_scan_log_id !== null || in_array($this->event_origin, ['rfid_simulated', 'rfid_hardware'], true);
+    }
+
+    /**
+     * Determine if actual visual evidence files are attached.
+     */
+    public function getHasVisualEvidenceAttribute(): bool
+    {
+        return \App\Support\OccurrenceMedia::exists($this->vehicle_image_path)
+            || \App\Support\OccurrenceMedia::exists($this->plate_image_path);
+    }
+
+    /**
+     * Show a compact match label for logs and detail pages.
+     */
+    public function getMatchDisplayAttribute(): string
+    {
+        if ($this->event_status === self::STATUS_PENDING_DETAILS) {
+            return 'Pending';
+        }
+        if ($this->visitor_record_id && ! $this->rfid_scan_log_id) {
+            return 'Registered by plate';
+        }
+
+        if ($this->event_origin === 'guest_cctv' || $this->vehicle_category === 'guest' || $this->event_origin === 'guest_manual') {
+            return 'Unregistered';
+        }
+
+        if ($this->event_type === 'ENTRY') {
+            return $this->is_rfid_event ? 'State based' : 'N/A';
+        }
+
+        if ($this->is_rfid_event) {
+            return 'State based';
+        }
+
+        return $this->match_score !== null ? (string) $this->match_score : 'N/A';
+    }
+
+    /**
+     * Show a readable event origin label for the UI.
+     */
+    public function getEventOriginLabelAttribute(): string
+    {
+        return match ($this->event_origin) {
+            'plate_ocr' => 'OCR plate'.($this->rfid_scan_log_id ? ' · RFID confirmed' : ''),
+            'plate_review' => 'Staff-confirmed plate'.($this->rfid_scan_log_id ? ' · RFID confirmed' : ''),
+            'cctv_detected' => 'CCTV Observation',
+            'guest_manual' => 'Manual · no registered tag',
+            'guest_cctv' => 'Camera · no registered tag',
+            'rfid_simulated' => 'RFID Scan',
+            'rfid_hardware' => 'RFID Reader',
+            'guest_pass' => 'Old pass record',
+            default => 'Manual Log',
+        };
+    }
+
+    /**
+     * Show one readable state result for vehicle movement summaries.
+     */
+    public function getResultingStateLabelAttribute(): string
+    {
+        if (! $this->resulting_state) {
+            return 'N/A';
+        }
+
+        return ucfirst(strtolower($this->resulting_state));
+    }
+
+    /**
+     * Resolve a simple camera role label for display.
+     */
+    public function getCameraRoleLabelAttribute(): string
+    {
+        $role = $this->camera?->camera_role;
+
+        if (! $role) {
+            return 'No Camera Linked';
+        }
+
+        return Gate::labelFor($role).' Camera';
+    }
+
+    /**
+     * Resolve a badge class name for the current workflow status.
+     */
+    public function getStatusBadgeClassAttribute(): string
+    {
+        return match ($this->display_status) {
+            self::STATUS_PENDING_DETAILS => 'pending-details',
+            'manual_review' => 'manual-review',
+            // UI Phase 3: an unregistered visitor is gray (normal traffic), not red.
+            'guest' => 'secondary',
+            self::MATCH_NO_PASS_ALERT => 'secondary',
+            self::MATCH_NO_PASS_RESOLVED => 'matched',
+            'matched' => 'matched',
+            'unmatched' => 'manual-review',
+            'closed' => 'closed',
+            'open' => 'open',
+            default => 'secondary',
+        };
+    }
+
+    public function sourceDeviceGate(): ?string
+    {
+        return $this->camera_id ? Camera::query()->whereKey($this->camera_id)->value('camera_role') : null;
+    }
+
+    public function sourceDeviceRole(): string
+    {
+        return DeviceAssignment::ROLE_CAMERA;
+    }
+
+    /** Delete device work: the camera that made it ("… (removed)" once deleted), else the gate's camera. */
+    public function getCameraLabelAttribute(): string
+    {
+        return $this->camera_device_label ?: ($this->camera?->camera_name ?? 'No camera linked');
+    }
+}

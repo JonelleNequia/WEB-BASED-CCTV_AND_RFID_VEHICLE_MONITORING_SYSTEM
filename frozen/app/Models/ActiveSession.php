@@ -1,0 +1,63 @@
+<?php
+
+namespace App\Models;
+
+use App\Models\Concerns\StoresLocalTime;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class ActiveSession extends Model
+{
+    use HasFactory;
+    use StoresLocalTime;
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var list<string>
+     */
+    protected $fillable = [
+        'entry_event_id',
+        'plate_number',
+        'plate_text',
+        'vehicle_type',
+        'vehicle_color',
+        'entry_time',
+        'time_out',
+        'status',
+        // Phase 2: stale-session cleanup audit.
+        'archived_at',
+        'archive_reason',
+    ];
+
+    /**
+     * Get the attribute casts for the model.
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'entry_time' => 'datetime',
+            'time_out' => 'datetime',
+            'archived_at' => 'datetime',
+        ];
+    }
+
+    /**
+     * Get the entry event linked to this session.
+     */
+    public function entryEvent(): BelongsTo
+    {
+        return $this->belongsTo(VehicleEvent::class, 'entry_event_id');
+    }
+
+    /**
+     * Scope to filter only active sessions (no time_out yet).
+     */
+    public function scopeActive($query)
+    {
+        return $query->where('status', 'open');
+    }
+}

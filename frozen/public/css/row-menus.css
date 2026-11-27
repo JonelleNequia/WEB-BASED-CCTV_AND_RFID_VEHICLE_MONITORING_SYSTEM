@@ -1,0 +1,18 @@
+/* Popovers leave table overflow/scrolling intact. The portal fallback uses the same nodes. */
+.menu-panel[data-row-menu-panel] {
+    position: fixed;
+    box-sizing: border-box;
+    margin: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    z-index: 1000;
+}
+.menu-panel[data-row-menu-panel][popover]:not(:popover-open),
+details:not([open]) > .menu-panel[data-row-menu-panel] {
+    display: none;
+}
+.menu-panel[data-row-menu-panel]::backdrop {
+    background: transparent;
+    pointer-events: none;
+}

@@ -1,0 +1,438 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\Camera;
+use App\Models\DeviceAssignment;
+use App\Models\Gate;
+use App\Support\CameraFiles;
+use App\Models\SystemSetting;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\File;
+
+class SettingsService
+{
+    public function __construct(
+        protected CalibrationService $calibrationService,
+        protected LocalStorageService $localStorageService
+    ) {
+    }
+
+    /**
+     * Get the known default settings for the prototype.
+     *
+     * @return array<string, string>
+     */
+    public function defaults(): array
+    {
+        return [
+            'matching_threshold_matched' => '75',
+            'matching_threshold_manual_review' => '50',
+            'operating_mode' => 'manual',
+            'deployment_mode' => 'offline_local',
+            'cctv_simulation_mode' => 'enabled',
+            'rfid_simulation_mode' => 'enabled',
+            'camera_source_placeholder' => 'rtsp://future-camera-source',
+            'retention_days' => '30',
+            // Phase 3: RFID cooldown (guest pass rules removed in Phase 0).
+            // Phase 1 (gates): names and readers are per gate in the gates table.
+            'rfid_cooldown_seconds' => '60',
+            // Phase 3 (visitor model): a tag read belongs to a camera crossing
+            // from this long before it to this long after it.
+            'rfid_lookback_seconds' => '10',
+            'rfid_lookahead_seconds' => '2',
+            // RFID only with a vehicle: a tag read for longer than this is a
+            // parked vehicle (never given to a passing one); with the camera
+            // offline longer than the grace, registered tags are recorded
+            // "RFID only" (direction from the vehicle's state).
+            'rfid_stationary_seconds' => '60',
+            'rfid_offline_fallback' => '1',
+            'rfid_offline_grace_seconds' => '10',
+            // Phase 2 (reader without a terminal): the temporary extra address
+            // for a reader on another subnet is off; "Move reader to this
+            // network" is the way (the Settings switch was removed).
+            'reader_workaround' => '0',
+            // Detector debug view (Settings › Calibration): raw detections on the live view.
+            'detector_debug_overlay' => '0',
+        ];
+    }
+
+    /**
+     * Get all settings merged with defaults.
+     *
+     * @return array<string, string>
+     */
+    public function all(): array
+    {
+        $stored = SystemSetting::query()
+            ->pluck('setting_value', 'setting_key')
+            ->map(fn (?string $value): string => $value ?? '')
+            ->all();
+
+        return array_merge($this->defaults(), $stored);
+    }
+
+    /**
+     * Get a setting value with a fallback.
+     */
+    public function get(string $key, ?string $default = null): ?string
+    {
+        return $this->all()[$key] ?? $default;
+    }
+
+    /**
+     * Phase 6: the detector / RFID adapter key comes from .env (DETECTOR_API_KEY).
+     */
+    public function detectorApiKey(): string
+    {
+        return trim((string) config('services.detector.api_key', ''));
+    }
+
+    /**
+     * Without a key, only this PC may call the integration API, and never in production.
+     */
+    public function allowsKeylessLocalIntegration(): bool
+    {
+        return $this->detectorApiKey() === ''
+            && ! config('deployment.named_https')
+            && ! app()->isProduction()
+            && $this->get('deployment_mode', 'offline_local') === 'offline_local';
+    }
+
+    /**
+     * Get a numeric setting as an integer.
+     */
+    public function getInt(string $key, int $default): int
+    {
+        return (int) ($this->get($key, (string) $default) ?? $default);
+    }
+
+    /**
+     * Persist system settings and camera source settings.
+     *
+     * @param  array<string, mixed>  $values
+     */
+    public function save(array $values): void
+    {
+        $this->localStorageService->ensureBaseDirectories();
+
+        foreach ($this->defaults() as $key => $default) {
+            if (! array_key_exists($key, $values)) {
+                continue;
+            }
+
+            SystemSetting::query()->updateOrCreate(
+                ['setting_key' => $key],
+                ['setting_value' => (string) ($values[$key] ?? $default)]
+            );
+        }
+
+        $this->saveGates($values['gates'] ?? []);
+        // ROI work (Settings › Advanced › Timing): minimum movement per gate, percent (empty = default).
+        foreach ((array) ($values['pass_min_move'] ?? []) as $code => $percent) {
+            Gate::query()->retained()->where('code', $code)->update(['pass_min_move' => filled($percent) ? (int) $percent : null]);
+        }
+        $this->saveCameraConfigurations($values['camera_configs'] ?? []);
+        $this->exportCameraRuntimeConfig($this->all());
+    }
+
+    /**
+     * Phase 1: gate names, reader type and manual reader address
+     * (Settings › Gates & Readers), keyed by gate code.
+     *
+     * @param  array<string, array<string, mixed>>  $gates
+     */
+    protected function saveGates(array $gates): void
+    {
+        foreach ($gates as $code => $values) {
+            $gate = Gate::query()->retained()->where('code', $code)->first();
+
+            if (! $gate || ! is_array($values)) {
+                continue;
+            }
+
+            $type = (string) ($values['reader_type'] ?? $gate->reader_type);
+            $suffix = fn (?string $readerType): string => match ($readerType) {
+                'uhf_ethernet' => 'UHF Reader',
+                'simulated' => 'Reader (Simulated)',
+                default => 'Reader',
+            };
+            // B1: a reader renamed on the Gates tab keeps its name; the default name follows the gate.
+            $defaultName = $gate->reader_name === null || $gate->reader_name === $gate->name.' '.$suffix($gate->reader_type);
+            $gate->fill(array_filter([
+                'name' => isset($values['name']) ? trim((string) $values['name']) : null,
+                'reader_type' => $type,
+                'reader_manual' => array_key_exists('reader_manual', $values) ? (string) $values['reader_manual'] === '1' : null,
+                'reader_transport' => $values['reader_transport'] ?? null,
+                'is_active' => array_key_exists('is_active', $values) ? (string) $values['is_active'] === '1' : null,
+            ], fn ($value): bool => $value !== null && $value !== ''));
+
+            if (array_key_exists('reader_ip', $values)) {
+                $gate->reader_ip = filled($values['reader_ip']) ? (string) $values['reader_ip'] : null;
+            }
+            if (array_key_exists('reader_port', $values)) {
+                $gate->reader_port = filled($values['reader_port']) ? (int) $values['reader_port'] : null;
+            }
+
+            // The name shown in logs follows the gate name and reader type, unless it was renamed.
+            if (filled($values['reader_name'] ?? null)) {
+                $gate->reader_name = (string) $values['reader_name'];
+            } elseif ($defaultName) {
+                $gate->reader_name = $gate->name.' '.$suffix($type);
+            }
+            $gate->save();
+        }
+
+        if ($gates !== []) {
+            // A renamed or (de)activated gate: camera rows follow.
+            $this->calibrationService->ensureRequiredCameras();
+        }
+    }
+
+    /**
+     * Ensure the Python bridge has camera records and a runtime config file to read.
+     */
+    public function ensureCameraRuntimeConfigExists(): void
+    {
+        $this->calibrationService->ensureRequiredCameras();
+        $this->localStorageService->ensureBaseDirectories();
+        $this->exportCameraRuntimeConfig($this->all());
+    }
+
+    /**
+     * Phase 1: camera configuration of every active gate, keyed by gate code.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    public function cameraConfigurations(): array
+    {
+        return $this->calibrationService->cameraPayload(withSecrets: true);
+    }
+
+    /**
+     * Export dual-camera configuration and calibration data for Python.
+     *
+     * @param  array<string, string>|null  $settings
+     */
+    public function exportCameraRuntimeConfig(?array $settings = null, bool $syncLive = true): void
+    {
+        $settings ??= $this->all();
+        $cameraConfigurations = $this->cameraConfigurations();
+        $integrationBaseUrl = $this->integrationBaseUrl($settings);
+
+        $payload = [
+            'generated_at' => now()->toIso8601String(),
+            'system_settings' => [
+                'operating_mode' => $settings['operating_mode'] ?? 'manual',
+                'deployment_mode' => $settings['deployment_mode'] ?? 'offline_local',
+                'cctv_simulation_mode' => $settings['cctv_simulation_mode'] ?? 'enabled',
+                'rfid_simulation_mode' => $settings['rfid_simulation_mode'] ?? 'enabled',
+                'python_api_key' => $this->detectorApiKey(),
+                'performance' => $this->performanceSettings($settings),
+                'stream_host' => (string) config('monitoring.stream.host'),
+                'stream_port' => (int) config('monitoring.stream.port'),
+                'app_url' => $integrationBaseUrl,
+                'event_ingest_url' => $integrationBaseUrl.'/api/v1/integration/events',
+                'guest_observation_url' => $integrationBaseUrl.'/api/guest-observation',
+                'rfid_match_url' => $integrationBaseUrl.'/api/latest-scan',
+                'status_url' => $integrationBaseUrl.'/api/v1/integration/status',
+                'rfid_ingest_url' => $integrationBaseUrl.'/api/v1/integration/rfid-scans',
+                'crossing_url' => $integrationBaseUrl.'/api/v1/integration/crossings',
+                'visitor_plate_url' => $integrationBaseUrl.'/api/v1/integration/visitor-plates',
+            ],
+            // Phase 1: the detector runs one camera per gate, in this order.
+            'gates' => Gate::ordered()->map(fn (Gate $gate): array => [
+                'code' => $gate->code,
+                'name' => $gate->name,
+                'reader_name' => $gate->readerDisplayName(),
+            ])->values()->all(),
+            'storage' => $this->localStorageService->storageSummary(),
+            'cameras' => collect($cameraConfigurations)
+                ->map(fn (array $camera): array => $this->runtimeCameraPayload($camera))
+                ->all(),
+        ];
+
+        File::ensureDirectoryExists(dirname($this->cameraRuntimeConfigPath()));
+        File::put(
+            $this->cameraRuntimeConfigPath(),
+            json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+        );
+
+        // Live view work: a new camera address or login reaches go2rtc too
+        // (it rewrites its config and reloads only when something changed).
+        if ($syncLive && Cache::add('go2rtc-config-sync', true, 2)) {
+            app(\App\Services\Go2rtcService::class)->ensureRunning();
+        }
+    }
+
+    /**
+     * Get the runtime JSON config path used by the Python service.
+     */
+    public function cameraRuntimeConfigPath(): string
+    {
+        return CameraFiles::path('camera_runtime_config.json');
+    }
+
+    /**
+     * Save per-camera source connection settings.
+     *
+     * @param  array<string, mixed>  $cameraConfigurations
+     */
+    protected function saveCameraConfigurations(array $cameraConfigurations): void
+    {
+        $this->calibrationService->ensureRequiredCameras();
+
+        foreach (Gate::codes() as $role) {
+            if (! isset($cameraConfigurations[$role])) {
+                continue;
+            }
+
+            $cameraData = $cameraConfigurations[$role];
+
+            $camera = Camera::query()->forRole($role)->first();
+
+            if ($camera === null) {
+                continue;
+            }
+
+            $camera->fill([
+                'camera_name' => (string) ($cameraData['camera_name'] ?? $camera->camera_name),
+                'source_username' => (string) ($cameraData['source_username'] ?? ''),
+                'status' => 'active',
+            ]);
+
+            // Plug-and-detect: an assigned network camera keeps the address
+            // the device service found; the manual source is ignored.
+            $managed = DeviceAssignment::query()
+                ->where('station', $role)
+                ->where('role', DeviceAssignment::ROLE_CAMERA)
+                ->exists();
+
+            if (! $managed && array_key_exists('source_type', $cameraData)) {
+                // Camera source work: a manual source is only an rtsp:// or
+                // stream URL for a camera that cannot be found automatically.
+                $type = in_array($cameraData['source_type'], ['rtsp', 'url'], true) ? (string) $cameraData['source_type'] : Camera::SOURCE_NONE;
+                $camera->fill([
+                    'source_type' => $type,
+                    'source_value' => $type === Camera::SOURCE_NONE ? '' : (string) ($cameraData['source_value'] ?? ''),
+                    // Optional full-resolution stream for trigger snapshots (manual sources).
+                    'snapshot_source_value' => filled($cameraData['snapshot_source_value'] ?? null)
+                        ? (string) $cameraData['snapshot_source_value'] : null,
+                ]);
+            }
+
+            // The password is never shown again: blank keeps the saved one.
+            if (filled($cameraData['source_password'] ?? null)) {
+                $camera->source_password = (string) $cameraData['source_password'];
+            } elseif (! empty($cameraData['clear_password'])) {
+                $camera->source_password = null;
+            }
+
+            // Saved through the model so the encrypted cast applies.
+            $camera->save();
+        }
+    }
+
+    /**
+     * Resolve the URL Python should use when calling Laravel from this same PC.
+     *
+     * @param  array<string, string>  $settings
+     */
+    protected function integrationBaseUrl(array $settings): string
+    {
+        $explicitUrl = trim((string) config('monitoring.integration_url', ''));
+
+        if ($explicitUrl !== '') {
+            return rtrim($explicitUrl, '/');
+        }
+
+        // Plug-and-detect: derived from APP_URL only (no fixed address or
+        // port in the code). "localhost" becomes the IPv4 loopback so Python
+        // does not try IPv6 first.
+        $appUrl = rtrim((string) config('app.url'), '/');
+        $parts = parse_url($appUrl) ?: [];
+
+        if (($settings['deployment_mode'] ?? 'offline_local') === 'offline_local'
+            && strtolower((string) ($parts['host'] ?? '')) === 'localhost') {
+            $appUrl = (string) preg_replace('#//localhost#i', '//127.0.0.1', $appUrl, 1);
+        }
+
+        return $appUrl;
+    }
+
+    public function integrationUrl(): string
+    {
+        return $this->integrationBaseUrl($this->all());
+    }
+
+    /**
+     * Prepare one camera record for the Python runtime JSON file.
+     *
+     * @param  array<string, mixed>  $cameraConfiguration
+     * @return array<string, mixed>
+     */
+    /**
+     * @param  array<string, string>  $settings
+     * @return array<string, int|float|string>
+     */
+    public function performanceSettings(array $settings): array
+    {
+        // Live view work: tuning lives in config/monitoring.php (detection),
+        // not on a Settings page; only the debug view is switched in the UI.
+        return [
+            ...config('monitoring.detection'),
+            'debug_overlay' => (int) ($settings['detector_debug_overlay'] ?? 0),
+        ];
+    }
+
+    /** ROI work: the gate's minimum movement up / down (share of the zone's height, 0-1), or the default. */
+    public function passMinMove(string $gate): float
+    {
+        $percent = Gate::query()->where('code', $gate)->value('pass_min_move');
+
+        return $percent ? round($percent / 100, 3) : (float) config('monitoring.detection.pass_min_move', 0.15);
+    }
+
+    protected function runtimeCameraPayload(array $cameraConfiguration): array
+    {
+        // Camera source work: an assigned camera's URLs are built from its
+        // current address (found by MAC); a manual one is the typed URL.
+        $streams = app(CameraStreams::class)->forGate((string) $cameraConfiguration['camera_role']);
+        $sourceType = match (true) {
+            $streams['source'] === CameraStreams::SOURCE_WEBCAM => 'webcam',
+            $streams['source'] === CameraStreams::SOURCE_DEVICE && filled($streams['live']) => 'rtsp',
+            $streams['source'] === CameraStreams::SOURCE_MANUAL => (string) $cameraConfiguration['source_type'],
+            default => Camera::SOURCE_NONE,
+        };
+
+        return [
+            'camera_id' => $cameraConfiguration['id'],
+            'id' => $cameraConfiguration['id'],
+            'camera_role' => $cameraConfiguration['camera_role'],
+            'camera_name' => $cameraConfiguration['camera_name'],
+            'source_type' => $sourceType,
+            'source_value' => match ($sourceType) {
+                Camera::SOURCE_NONE => '',
+                'webcam' => (int) $streams['live'],
+                default => (string) $streams['live'],
+            },
+            'source_username' => (string) ($cameraConfiguration['source_username'] ?? ''),
+            'source_password' => (string) ($cameraConfiguration['source_password'] ?? ''),
+            'snapshot_source_value' => (string) ($streams['snapshot'] ?? ''),
+            // One decoder thread (lowest delay) unless the live source is a camera's
+            // full-resolution main stream, which needs FFmpeg's threading to keep up.
+            'decoder_threads' => $streams['source'] === CameraStreams::SOURCE_DEVICE && $streams['stream'] === 'main' ? 0 : 1,
+            'calibration_mask' => $cameraConfiguration['calibration_mask'],
+            // ROI work: a vehicle moving away from the camera is IN or OUT at
+            // this gate (null: not set, every pass is Direction unknown), and
+            // how far it must move up / down (share of the zone's height) for
+            // a sure IN / OUT.
+            'away_direction' => Gate::query()->where('code', (string) $cameraConfiguration['camera_role'])->first()?->awayDirection(),
+            'pass_min_move' => $this->passMinMove((string) $cameraConfiguration['camera_role']),
+            // Phase 3: how long the detector waits for a tag read after a
+            // crossing, and how far back a read still counts.
+            'rfid_window_seconds' => max(1, min(10, $this->getInt('rfid_lookahead_seconds', 2))),
+            'rfid_lookback_seconds' => max(1, min(15, $this->getInt('rfid_lookback_seconds', 10))),
+        ];
+    }
+}

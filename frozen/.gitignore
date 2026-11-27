@@ -1,0 +1,58 @@
+*.log
+.DS_Store
+.env
+.env.backup
+.env.production
+.phpactor.json
+.phpunit.result.cache
+/.fleet
+/.idea
+/.nova
+/.phpunit.cache
+/.vscode
+/.zed
+/auth.json
+/node_modules
+/public/build
+/public/hot
+/public/storage
+/storage/*.key
+/storage/pail
+/vendor
+Homestead.json
+Homestead.yaml
+Thumbs.db
+# Phase 6: old public camera output (now storage/app/camera)
+/public/camera
+
+# Windows install kit: data, caches and big binaries stay out of git.
+/storage/backups/*
+!/storage/backups/.gitignore
+__pycache__/
+*.pyc
+*.pt
+*.pth
+/tools/go2rtc/*.zip
+/school-vehicle-monitoring-detector/models/*
+!/school-vehicle-monitoring-detector/models/README.md
+/build/windows/dist/
+/build/windows/cache/
+*.sqlite-wal
+*.sqlite-shm
+# Local provisioning handover/installation metadata, never source artifacts.
+**/first-admin.txt
+**/install-result.txt
+**/install.json
+
+# Offline Mac candidates and build cache, never installation data in source.
+/build/macos/dist/
+/build/macos/cache/
+
+# D3 update-preparation sidecars/evidence; never source or an active updater.
+/build/updates/dist/
+
+# D4 client-only candidate bundles.
+/build/clients/dist/
+
+# D6 generated local delivery inventory, acceptance and release notes.
+/build/delivery/dist/

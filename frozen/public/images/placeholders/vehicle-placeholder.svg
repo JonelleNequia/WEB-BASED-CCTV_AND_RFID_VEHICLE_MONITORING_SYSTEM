@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" fill="none">
+  <rect width="640" height="360" rx="28" fill="#EEF4EF"/>
+  <rect x="44" y="58" width="552" height="244" rx="24" fill="#D8E6DB"/>
+  <path d="M176 218H464C478.912 218 491 230.088 491 245V254H149V245C149 230.088 161.088 218 176 218Z" fill="#136F63"/>
+  <path d="M224 144H410C427.673 144 442 158.327 442 176V206H192V176C192 158.327 206.327 144 224 144Z" fill="#F9FBF9"/>
+  <circle cx="208" cy="257" r="28" fill="#102F2F"/>
+  <circle cx="432" cy="257" r="28" fill="#102F2F"/>
+  <text x="320" y="96" fill="#35534A" font-family="Arial, sans-serif" font-size="24" font-weight="700" text-anchor="middle">No Vehicle Image</text>
+  <text x="320" y="124" fill="#4F6A61" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">Upload during manual event creation</text>
+</svg>

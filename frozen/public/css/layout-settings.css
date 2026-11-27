@@ -1,0 +1,157 @@
+/* Shared shell and Settings only. Page-specific layouts keep their own rules. */
+.app-body .sidebar { height: 100dvh; position: sticky; top: 0; }
+.app-body .sidebar-nav {
+    display: flex; flex-direction: column; flex: 1; min-height: 0;
+    overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable;
+}
+.app-body .sidebar-nav-sections { display: block; flex: 1 0 auto; overflow: visible; margin: 0; padding: 0; }
+.app-body .nav-section { align-content: start; }
+.app-body .sidebar-footer { position: static; flex-shrink: 0; gap: var(--space-3); }
+.app-body .sidebar-health { display: grid; gap: var(--space-2); padding: var(--space-3); }
+.app-body .sidebar-health-item { display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-2); font-size: .8rem; }
+.app-body .sidebar-health-state { font-size: .75rem; font-weight: 700; }
+.app-body .sidebar-account { gap: var(--space-1); overflow-wrap: anywhere; }
+.app-body .sidebar-account-links { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); padding-top: var(--space-2); font-size: .8rem; }
+.app-body .sidebar-account-links a { text-decoration: underline; text-underline-offset: 3px; }
+.app-body .sidebar-compact-account { display: none; }
+html.sidebar-collapsed .app-body .sidebar-account { display: none; }
+html.sidebar-collapsed .app-body .sidebar-compact-account { display: block; }
+.app-body .sidebar-compact-account > summary { display: flex; justify-content: center; cursor: pointer; padding: var(--space-2); border: 1px solid #ffffff60; border-radius: var(--radius-sm); }
+.app-body .sidebar-compact-account > summary svg { width: 22px; height: 22px; fill: currentColor; }
+.app-body .compact-account-panel { position: fixed; left: 72px; bottom: 64px; z-index: 100; display: grid; gap: var(--space-2); width: 250px; padding: var(--space-4); background: var(--purple-deep); box-shadow: var(--shadow-lg); border-radius: var(--radius-md); overflow-wrap: anywhere; }
+.app-body .compact-account-panel a { text-decoration: underline; }
+html.sidebar-collapsed .app-body .sidebar-health-item { display: flex; justify-content: center; }
+html.sidebar-collapsed .app-body .sidebar-health-state { display: none; }
+.app-body .page-header { flex-wrap: wrap; gap: var(--space-3); align-items: center; }
+.app-body .page-header-title { flex-wrap: wrap; gap: var(--space-3); min-width: 0; }
+.app-body .page-header-meta { font-size: .9rem; color: var(--text-muted); }
+.app-body .page-header-actions { flex-wrap: wrap; }
+.app-body .drawer-panel { min-height: 0; }
+.app-body .drawer-head, .app-body .drawer-foot { flex-shrink: 0; background: var(--card); }
+.app-body .drawer-body { min-height: 0; overscroll-behavior: contain; }
+.app-body .modal .drawer-panel { max-height: calc(100dvh - 32px); }
+.app-body .drawer-foot:empty { display: none; }
+
+.settings-page { --settings-gap: var(--space-5); font-size: .95rem; }
+.settings-page .settings-intro { margin: 0 0 var(--space-4); color: var(--text-muted); }
+.settings-page .panel-title { font-size: 1.12rem; line-height: 1.4; }
+.settings-page .panel-header { flex-wrap: wrap; gap: var(--space-3); }
+.settings-page .panel-header > div:first-child { flex: 1 1 220px; }
+.settings-page .field label, .settings-page .checkbox-row { font-size: .94rem; line-height: 1.5; }
+.settings-page .field-help { font-size: .86rem; line-height: 1.6; }
+.settings-page .button { font-size: .9rem; }
+.settings-page .field-error { display: block; font-size: .88rem; }
+.settings-page .form-grid, .settings-page .camera-grid { min-width: 0; }
+.settings-page .table-responsive, .settings-page .devices-list { max-width: 100%; overflow-x: auto; }
+.settings-page .advanced-nav { padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card); }
+.settings-page .advanced-nav-group { display: grid; gap: var(--space-1); padding: var(--space-2) 0; }
+.settings-page .advanced-nav-group h2 { margin: 0; padding: var(--space-2); color: var(--text-muted); font-size: .76rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.settings-page .advanced-nav-link { font-size: .9rem; padding: var(--space-2); }
+.settings-page .advanced-content { gap: var(--settings-gap); }
+.settings-page .advanced-content > .settings-diagnostics { margin: 0; }
+.settings-page .advanced-section[open] { grid-template-columns: minmax(0, 1fr); }
+.settings-page .advanced-section > * { min-width: 0; }
+.settings-page .devices-warnings li { flex-wrap: wrap; overflow-wrap: anywhere; }
+.settings-page .gate-setup-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: var(--settings-gap); align-items: stretch; }
+.settings-page .gate-setup-card { display: flex; flex-direction: column; padding: var(--space-5); gap: var(--space-2); min-width: 0; }
+.settings-page .gate-setup-head { flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.settings-page .gate-setup-head h2 { flex: 1 1 130px; min-width: 0; overflow-wrap: anywhere; font-size: 1.2rem; }
+.settings-page .gate-setup-kiosk { margin-left: 0; color: var(--purple-deep); font-size: .85rem; text-decoration: underline; text-underline-offset: 3px; }
+.settings-page .setup-part { padding: var(--space-4) 0; gap: var(--space-3); }
+.settings-page .setup-part-title { font-size: .82rem; color: #514064; }
+.settings-page .setup-device { align-items: start; }
+.settings-page .setup-device-text { min-width: 0; overflow-wrap: anywhere; }
+.settings-page .gate-management { margin-top: auto; border-top: 1px solid var(--border); padding-top: var(--space-3); }
+.settings-page .gate-management > summary { color: var(--purple-deep); font-weight: 650; cursor: pointer; padding: var(--space-2) 0; }
+.settings-page .gate-name-settings { padding-top: var(--space-3); }
+.settings-page .gate-name-settings .panel-title { font-size: 1rem; }
+.settings-page .general-gate { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+.settings-page .gate-removal-area { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid #f1d5d5; }
+.settings-page .gate-inactive-note { margin: 0; padding: var(--space-3); border-radius: var(--radius-sm); background: #f4f4f6; color: #55515d; font-size: .85rem; }
+.settings-page .gate-setup-add { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); background: #faf8fe; border-color: #c9bde6; scroll-margin-top: var(--space-5); }
+.settings-page .gate-setup-add input { flex: 1 1 220px; }
+.settings-page .gate-setup-add .field-error { flex-basis: 100%; }
+.settings-page .settings-help { margin: 0 0 var(--space-4); padding: var(--space-3) var(--space-4); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.settings-page .settings-help > summary, .settings-page .settings-diagnostics > summary { cursor: pointer; color: var(--purple-deep); font-weight: 650; }
+.settings-page .settings-help[open] > summary { margin-bottom: var(--space-3); }
+.settings-page .settings-diagnostics { margin: var(--space-5) 0; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card); }
+.settings-page .calibration-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
+.settings-page .camera-card-calibration {
+    display: grid; grid-template-columns: minmax(0, 1fr) 280px;
+    grid-template-areas: "heading heading" "tools controls" "preview controls" "feedback ." "overlay ." "problems ." "records records" "status status";
+    align-items: start; gap: var(--space-3) var(--space-5); min-width: 0;
+}
+.settings-page .camera-card-calibration > .camera-card-head { grid-area: heading; }
+.settings-page .calibration-controls-panel { display: contents; }
+.settings-page .camera-toolbar { grid-area: tools; margin: 0; gap: var(--space-2); }
+.settings-page .calibration-away { grid-area: controls; margin: 0; min-width: 0; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: #faf8fe; }
+.settings-page .calibration-away legend { font-size: .94rem; font-weight: 650; }
+.settings-page .calibration-away-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
+.settings-page .calibration-away-options { display: grid; gap: var(--space-3); }
+.settings-page .calibration-away-options label { display: flex; gap: var(--space-2); align-items: center; min-height: 40px; }
+.settings-page .calibration-away-diagram { width: 100%; max-width: 300px; height: auto; }
+.settings-page .calibration-save-actions { margin-top: var(--space-4); }
+.settings-page .calibration-save-actions .button { width: 100%; }
+.settings-page[data-settings-page="calibration"] { display: flex; flex-direction: column; }
+.settings-page .calibration-diagnostics { order: 5; }
+.settings-page .calibration-unsaved { grid-area: feedback; margin: 0; }
+.settings-page .calibration-detection-toggle { grid-area: overlay; margin: 0; }
+.settings-page .calibration-problems { grid-area: problems; margin: 0; }
+.settings-page .camera-stage-calibration { grid-area: preview; width: 100%; aspect-ratio: 16 / 9; min-width: 0; margin: 0; }
+.settings-page .calibration-crossings { grid-area: records; border-top: 1px solid var(--border); padding-top: var(--space-4); margin-top: var(--space-3); }
+.settings-page .calibration-detail-grid { grid-area: status; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); }
+.settings-page .calibration-context { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-4); }
+.settings-page .calibration-context h2 { margin: 0; font-size: 1.2rem; }
+.settings-page .calibration-context p { margin: var(--space-1) 0 0; }
+.settings-page .calibration-debug-toggle { margin-top: var(--space-4); }
+.settings-page .health-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: var(--space-3); }
+.settings-page .health-summary-item { display: grid; align-content: start; gap: var(--space-2); padding: var(--space-4); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.settings-page .health-summary-item p { margin: 0; }
+.settings-page .timing-group { margin: 0; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); min-width: 0; }
+.settings-page .timing-group legend { padding: 0 var(--space-2); font-weight: 700; color: #514064; }
+.settings-page .reset-panel { border-color: #efc6c6; margin-top: var(--space-5); }
+.settings-page .settings-preview-notice { padding: var(--space-4); border: 1px solid #d7c9ee; background: var(--purple-soft); border-radius: var(--radius-md); }
+
+#add-device-modal .drawer-foot > div { width: 100%; }
+#add-device-modal .add-device-actions { margin: 0; }
+#add-device-modal .add-device-option { align-items: start; }
+#add-device-modal .add-device-text { min-width: 0; overflow-wrap: anywhere; }
+#add-device-modal .add-device-address { font-family: Consolas, monospace; color: #55515d; font-size: .82rem; }
+#add-device-modal .add-device-selected { color: var(--purple-deep); font-weight: 700; font-size: .82rem; }
+#add-device-modal .add-device-error { padding: var(--space-3); }
+
+@media (max-width: 1150px) {
+    .settings-page .camera-card-calibration { grid-template-columns: minmax(0, 1fr); grid-template-areas: "heading" "tools" "preview" "feedback" "controls" "overlay" "problems" "records" "status"; }
+    .settings-page .calibration-away-body { grid-template-columns: minmax(0, 1fr) minmax(0, 240px); }
+}
+@media (max-width: 900px) {
+    .app-body .app-shell, html.sidebar-collapsed .app-body .app-shell { grid-template-columns: minmax(0, 1fr); }
+    .app-body .sidebar, html.sidebar-collapsed .app-body .sidebar { position: static; height: auto; padding: var(--space-4); overflow: visible; border-radius: 0; }
+    .app-body .brand-block, html.sidebar-collapsed .brand-block { flex-direction: row; }
+    .app-body .brand-block .brand-mark, .app-body .brand-name { display: inline-flex; }
+    .app-body .sidebar-toggle { display: none; }
+    .app-body .sidebar-nav { overflow: visible; }
+    .app-body .nav-section { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .app-body .nav-link { padding: var(--space-2); }
+    .app-body .nav-label, .app-body .sidebar-health-label, .app-body .sidebar-account,
+    html.sidebar-collapsed .app-body .nav-label, html.sidebar-collapsed .app-body .sidebar-health-label,
+    html.sidebar-collapsed .app-body .sidebar-account { position: static; width: auto; height: auto; clip: auto; overflow: visible; white-space: normal; }
+    .app-body .sidebar-account, html.sidebar-collapsed .app-body .sidebar-account { display: grid; }
+    .app-body .sidebar-compact-account, html.sidebar-collapsed .app-body .sidebar-compact-account { display: none; }
+    .app-body .sidebar-footer { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); align-items: start; }
+    .app-body .sidebar-health, html.sidebar-collapsed .app-body .sidebar-health { display: grid; padding: var(--space-3); }
+    .app-body .sidebar-health-item, html.sidebar-collapsed .app-body .sidebar-health-item { display: grid; grid-template-columns: auto 1fr auto; }
+    html.sidebar-collapsed .app-body .sidebar-health-state { display: inline; }
+    .app-body .content-shell { padding: var(--space-4); }
+    .settings-page .advanced-nav { position: static; }
+    .settings-page .advanced-nav-group { display: flex; flex-wrap: wrap; }
+    .settings-page .advanced-nav-group h2 { flex-basis: 100%; }
+}
+@media (max-width: 560px) {
+    .settings-page .gate-setup-card { padding: var(--space-4); }
+    .settings-page .calibration-away-body { grid-template-columns: minmax(0, 1fr); }
+    .settings-page .calibration-away-diagram { max-width: 220px; }
+    .settings-page .setup-device { grid-template-columns: minmax(0, 1fr) auto; }
+    .settings-page .setup-device > .button, .settings-page .setup-device > .row-menu { grid-column: auto; justify-self: start; }
+    .settings-page .camera-toolbar .button { padding-inline: var(--space-2); }
+}

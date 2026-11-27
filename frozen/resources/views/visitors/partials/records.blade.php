@@ -1,0 +1,120 @@
+{{--
+    Phase 5: rows of Unregistered Guest records (Guests page and plate profile).
+    UI Phase 4: snapshot, plate, gate, direction, time and one "⋯" menu
+    (dialogs in guests.partials.record-dialogs).
+--}}
+<thead>
+    <tr>
+        <th>Snapshot</th>
+        <th>Plate</th>
+        <th>Gate</th>
+        <th>Direction</th>
+        <th>Time</th>
+        <th><span class="sr-only">Actions</span></th>
+    </tr>
+</thead>
+<tbody>
+    @foreach ($records as $record)
+        <tr id="visitor-record-{{ $record->id }}">
+            <td>
+                @if ($record->snapshot_url)
+                    <button type="button" class="thumb-button" data-zoom="{{ $record->snapshot_url }}" data-zoom-label="Snapshot of {{ $record->plateLabel() }}">
+                        <img src="{{ $record->snapshot_url }}" alt="Snapshot of record {{ $record->id }}" class="thumb thumb-sm" loading="lazy">
+                    </button>
+                @else
+                    <span class="table-subtext">No snapshot</span>
+                @endif
+            </td>
+            <td>
+                <div class="plate-cell">
+                    @if ($record->identifier_label)
+                        <strong>{{ $record->plateLabel() }}</strong>
+                    @elseif (\App\Services\PlateEvidenceService::candidate($record))
+                        <x-badge tone="warning" :label="$record->plateLabel()" />
+                    @elseif ($record->plate_status === 'unreadable')
+                        <x-badge tone="warning" label="Plate unreadable" />
+                    @elseif ($record->plateProfile)
+                        <a href="{{ route('visitors.profiles.show', $record->plateProfile) }}"><strong>{{ $record->plateLabel() }}</strong></a>
+                    @else
+                        <strong>{{ $record->plateLabel() }}</strong>
+                    @endif
+                    @if ($record->plate_image_url)
+                        <button type="button" class="thumb-button" data-zoom="{{ $record->plate_image_url }}" data-zoom-label="Plate image">
+                            <img src="{{ $record->plate_image_url }}" alt="Plate image" class="thumb thumb-plate" loading="lazy">
+                        </button>
+                    @endif
+                </div>
+                <div class="table-subtext">
+                    <span data-vehicle-type title="{{ $record->vehicle_type_source_label }}">{{ $record->display_vehicle_type }}</span> ·
+                    @if ($record->identifier_label)
+                        Evidence only: {{ $record->identifier_text }} · confirmed by staff
+                    @else
+                    @switch($record->plate_status)
+                        @case('read') Camera{{ $record->plate_confidence !== null ? ' · '.number_format($record->plate_confidence * 100).'%' : '' }} @break
+                        @case('corrected') {{ $record->source === 'manual' ? 'Typed by' : 'Corrected by' }} {{ $record->corrector?->name ?? 'a guard' }}{{ $record->ocr_plate_number && $record->ocr_plate_number !== $record->plate_number ? ' · camera read '.$record->ocr_plate_number : '' }} @break
+                        @case('unreadable') {{ \App\Services\PlateEvidenceService::candidate($record) ? \App\Services\PlateEvidenceService::presentation($record)['source'] : 'No usable plate text' }} @break
+                        @default OCR running
+                    @endswitch
+                    @endif
+                    @if (in_array($record->match_confidence, ['high', 'medium', 'learned', 'low'], true))
+                        {{-- Gate direction work, Phase C: tied to a plate already seen, one character off. --}}
+                        · <span data-match="{{ $record->match_confidence }}" title="{{ $record->match_reason }}">{{ \App\Services\PlateMatchService::LABELS[$record->match_confidence] }}</span>
+                    @endif
+                    @if ($record->plateProfile && $record->plateProfile->visit_count > 1)
+                        · {{ $record->plateProfile->visit_count }} visits
+                    @endif
+                    @if ($record->source === 'manual')
+                        · Recorded by hand
+                    @endif
+                </div>
+                @if ($record->classificationCategory() === 'review')
+                    <div class="table-subtext">Review · {{ \App\Services\PlateEvidenceService::presentation($record)['reason'] ?: 'Check the plate.' }}</div>
+                @elseif ($record->isRegisteredAtOccurrence())
+                    <div class="table-subtext">Registered vehicle · plate identified</div>
+                @elseif ($record->vehicle)
+                    {{-- Phase 6: the plate is in the Registry (registered later, or its tag was not read). --}}
+                    <div class="table-subtext">Unregistered at occurrence · vehicle registered later</div>
+                @endif
+                @if ($record->tag_uid)
+                    {{-- RFID only with a vehicle: its tag was read but is not in the registry. --}}
+                    <div class="table-subtext">Unknown tag {{ $record->tag_uid }} · <a href="{{ route('registry.index', ['tab' => 'vehicles', 'register_tag' => $record->tag_uid]) }}">Register this tag</a></div>
+                @endif
+                @if ($record->status !== 'active')
+                    <x-badge tone="neutral" :label="ucfirst($record->status)" />
+                    <div class="table-subtext">{{ $record->status_note }}</div>
+                @endif
+            </td>
+            <td class="nowrap">{{ \App\Models\Gate::labelFor($record->gate) }}</td>
+            <td>
+                <x-badge :tone="$record->direction === 'UNKNOWN' ? 'warning' : 'info'" :label="$record->direction === 'UNKNOWN' ? 'Direction unknown' : $record->direction" />
+                @if ($record->direction === 'UNKNOWN' && $record->status === 'active')
+                    <x-set-direction :url="route('visitors.records.direction', $record)" />
+                @endif
+            </td>
+            <td><x-datetime :value="$record->seen_at" /></td>
+            <td class="row-actions">
+                <details class="menu row-menu">
+                    <summary class="button button-secondary button-sm" aria-label="Actions for record {{ $record->id }}">⋯</summary>
+                    <div class="menu-panel" role="menu">
+                        <button type="button" role="menuitem" data-visitor-action="plate"
+                                data-action-url="{{ route('visitors.records.plate', $record) }}"
+                                data-value="{{ $record->plate_number ?? $record->ocr_plate_number }}">Correct plate</button>
+                        <button type="button" role="menuitem" data-visitor-action="type"
+                                data-action-url="{{ route('visitors.records.type', $record) }}"
+                                data-value="{{ \App\Support\VehicleType::category($record->vehicle_type) }}">Correct type</button>
+                        @if ($record->plateProfile)
+                            <button type="button" role="menuitem" data-visitor-action="note"
+                                    data-action-url="{{ route('visitors.profiles.note', $record->plateProfile) }}"
+                                    data-value="{{ $record->plateProfile->note }}"
+                                    data-label="{{ $record->plateProfile->plate_number }}">Add note</button>
+                        @endif
+                        @if ($record->status === 'active')
+                            <button type="button" role="menuitem" class="menu-item-danger" data-visitor-action="dismiss"
+                                    data-action-url="{{ route('visitors.records.dismiss', $record) }}">Dismiss…</button>
+                        @endif
+                    </div>
+                </details>
+            </td>
+        </tr>
+    @endforeach
+</tbody>

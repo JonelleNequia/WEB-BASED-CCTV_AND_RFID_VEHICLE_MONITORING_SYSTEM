@@ -1,0 +1,263 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "signed",
+    "signatures"
+  ],
+  "properties": {
+    "signed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "product",
+        "version",
+        "channel",
+        "source",
+        "platform",
+        "compatibility",
+        "package",
+        "issued_at",
+        "expires_at"
+      ],
+      "properties": {
+        "schema": {
+          "const": "philcst.update.v1"
+        },
+        "product": {
+          "const": "philcst-vms"
+        },
+        "version": {
+          "type": "string",
+          "description": "Strict SemVer 2.0; runtime validator also enforces numeric prerelease rules",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "channel": {
+          "enum": [
+            "stable",
+            "prerelease",
+            "development"
+          ]
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "commit",
+            "sha256",
+            "build_identity"
+          ],
+          "properties": {
+            "commit": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{40}$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "build_identity": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "platform": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "os",
+            "architecture",
+            "minimum_os"
+          ],
+          "properties": {
+            "id": {
+              "enum": [
+                "windows-x64",
+                "macos-x86_64",
+                "macos-arm64"
+              ]
+            },
+            "os": {
+              "enum": [
+                "windows",
+                "macos"
+              ]
+            },
+            "architecture": {
+              "enum": [
+                "x64",
+                "x86_64",
+                "arm64"
+              ]
+            },
+            "minimum_os": {
+              "type": "string",
+              "pattern": "^\\d+\\.\\d+(\\.\\d+)?$"
+            }
+          }
+        },
+        "compatibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "supported_upgrade_origins",
+            "schema",
+            "runtime",
+            "installation_phase"
+          ],
+          "properties": {
+            "supported_upgrade_origins": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "minimum_inclusive",
+                  "maximum_exclusive"
+                ],
+                "properties": {
+                  "minimum_inclusive": {
+                    "type": "string",
+                    "description": "Strict SemVer 2.0; runtime validator also enforces numeric prerelease rules",
+                    "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+                  },
+                  "maximum_exclusive": {
+                    "type": "string",
+                    "description": "Strict SemVer 2.0; runtime validator also enforces numeric prerelease rules",
+                    "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+                  }
+                }
+              }
+            },
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "accepted",
+                "target"
+              ],
+              "properties": {
+                "accepted": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "target": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "runtime": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "accepted",
+                "target"
+              ],
+              "properties": {
+                "accepted": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "target": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "installation_phase": {
+              "const": "D5"
+            }
+          }
+        },
+        "package": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "filename",
+            "format",
+            "size",
+            "sha256",
+            "content_manifest_sha256"
+          ],
+          "properties": {
+            "filename": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "format": {
+              "enum": [
+                "zip",
+                "tar.gz"
+              ]
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "content_manifest_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        },
+        "issued_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ$"
+        },
+        "expires_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ$"
+        }
+      }
+    },
+    "signatures": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "algorithm",
+          "key_id",
+          "value"
+        ],
+        "properties": {
+          "algorithm": {
+            "const": "RSA-PKCS1-SHA256"
+          },
+          "key_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 16384,
+            "contentEncoding": "base64"
+          }
+        }
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:philcst:update-manifest:v1",
+  "title": "PHILCST platform update manifest envelope",
+  "description": "Structural schema only. contract.py also enforces signatures, SemVer/channel, platform pairings, compatibility, lifetime and safe paths."
+}

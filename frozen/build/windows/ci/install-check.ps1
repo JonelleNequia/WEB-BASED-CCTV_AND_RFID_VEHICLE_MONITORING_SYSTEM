@@ -1,0 +1,100 @@
+<#
+CI check of the real installer on a clean Windows runner (windows-kit.yml):
+install silently, check the result, sign in, install AGAIN over it (the
+path a technician takes when fixing something), check again, uninstall
+with the data, check nothing is left. Prints the install log on failure.
+    pwsh build/windows/ci/install-check.ps1 -Setup <PHILCST-VMS-Setup-*.exe>
+#>
+param([Parameter(Mandatory = $true)][string]$Setup, [string]$Dir = 'C:\PHILCST-D2-Acceptance', [switch]$ConfirmIsolatedRunner)
+$ErrorActionPreference = 'Stop'
+if (-not $ConfirmIsolatedRunner -or $env:OS -ne 'Windows_NT' -or $Dir -notmatch '^C:\\PHILCST-D2-') { throw 'Acceptance harness requires an explicitly confirmed isolated Windows runner/VM and C:\PHILCST-D2-* root. Never use a working installation.' }
+
+function Show-InstallLog {
+    $log = Get-ChildItem (Join-Path $Dir 'logs') -Filter 'install-*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+    if ($log) { Write-Host "----- $($log.Name)"; Get-Content $log.FullName | Write-Host }
+    foreach ($name in 'web.log', 'php-1.log') {
+        $file = Join-Path (Join-Path $Dir 'logs') $name
+        if (Test-Path $file) { Write-Host "----- $name"; Get-Content $file -Tail 30 | Write-Host }
+    }
+}
+
+function Install-Once([int]$Round) {
+    Write-Host "===== install, round $Round"
+    $process = Start-Process -FilePath $Setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$Dir", '/TASKS=', "/LOG=$env:RUNNER_TEMP\setup-$Round.log" -PassThru
+    # Never wait without a limit: a hang shows what was running and where the install stopped.
+    if (-not $process.WaitForExit(15 * 60 * 1000)) {
+        Write-Host "Setup still running after 15 minutes (round $Round)."
+        Show-InstallLog
+        Get-Service 'PHILCST-*' -ErrorAction SilentlyContinue | Format-Table Name, Status -AutoSize | Out-String | Write-Host
+        Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(powershell|php|php-cgi|python|caddy|go2rtc|nssm|schtasks|sc|unins|setup|.*\.tmp)' } |
+            Format-Table ProcessId, ParentProcessId, Name, CommandLine -AutoSize -Wrap | Out-String -Width 300 | Write-Host
+        $setupLog = "$env:RUNNER_TEMP\setup-$Round.log"
+        if (Test-Path $setupLog) { Write-Host '----- Inno Setup log'; Get-Content $setupLog -Tail 40 | Write-Host }
+        throw "Setup hung (round $Round)."
+    }
+    Write-Host "Setup exit code: $($process.ExitCode)"
+    $info = Get-Content (Join-Path $Dir 'config\install.json') -Raw | ConvertFrom-Json
+    Get-Content (Join-Path $Dir 'config\install-result.txt') | Where-Object { $_ -notmatch 'Password:' } | Write-Host
+    if ($info.status -ne 'ok') { Show-InstallLog; throw "Install round $Round failed: $($info.error)" }
+    $base = "http://127.0.0.1:$($info.web_port)"
+    $up = Invoke-WebRequest "$base/up" -UseBasicParsing
+    if ($up.StatusCode -ne 200) { throw "/up answered $($up.StatusCode)" }
+    Get-Service 'PHILCST-*' | Format-Table Name, Status -AutoSize | Out-String | Write-Host
+    return $info
+}
+
+$info = Install-Once 1
+# Explicit trust enrollment only inside the already-confirmed disposable runner.
+$publicRoot=Join-Path $Dir 'state\public-root.crt'
+. (Join-Path $Dir 'app\deploy\clients\client-common.ps1')
+$rootPem=[IO.File]::ReadAllText($publicRoot)
+$rootDer=[Convert]::FromBase64String(([regex]::Match($rootPem,'-----BEGIN CERTIFICATE-----([A-Za-z0-9+/=\s]+)-----END CERTIFICATE-----').Groups[1].Value -replace '\s',''))
+$rootCert=New-Object Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList @(,$rootDer)
+$rootHash=Get-RootFingerprint $rootCert
+& (Join-Path $Dir 'runtime\python\python.exe') -B (Join-Path $Dir 'app\deploy\network\server.py') trust-root --root $Dir --fingerprint $rootHash
+if ($LASTEXITCODE -ne 0) { throw 'Explicit fixture issuer trust enrollment failed.' }
+
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dir 'app\deploy\windows\readiness.ps1') -Root $Dir -VerifyContent -Inference -Json
+if ($LASTEXITCODE -ne 0) { throw 'Actual installed runtime/model readiness failed.' }
+$keyBefore = (Get-FileHash (Join-Path $Dir 'app\.env') -Algorithm SHA256).Hash
+
+# Consume the locally delivered setup credential; never print it or a password.
+$setupCode = (Select-String -Path (Join-Path $Dir 'config\setup\first-admin.txt') -Pattern 'Code: (.+)').Matches[0].Groups[1].Value.Trim()
+$password = 'Private test phrase ' + [guid]::NewGuid().ToString('N')
+$base = 'https://philcst.vms.internal'
+$setupPage = Invoke-WebRequest "$base/setup" -SessionVariable setupSession -UseBasicParsing
+$setupToken = [regex]::Match($setupPage.Content, 'name="_token" value="([^"]+)"').Groups[1].Value
+$null = Invoke-WebRequest "$base/setup" -Method Post -WebSession $setupSession -UseBasicParsing -Body @{ _token = $setupToken; code = $setupCode; password = $password; password_confirmation = $password }
+Remove-Item -LiteralPath (Join-Path $Dir 'config\setup\first-admin.txt')
+$login = Invoke-WebRequest "$base/login" -SessionVariable session -UseBasicParsing
+$token = [regex]::Match($login.Content, 'name="_token" value="([^"]+)"').Groups[1].Value
+$after = Invoke-WebRequest "$base/login" -Method Post -WebSession $session -UseBasicParsing -Body @{ _token = $token; email = $info.admin_email; password = $password }
+if ($after.Content -match 'name="password"') { throw 'Signing in with the first admin did not work.' }
+$proxy = Invoke-WebRequest "$base/live/proxy-auth" -WebSession $session -UseBasicParsing
+Write-Host "Signed in as $($info.admin_email); /live/proxy-auth answered $($proxy.StatusCode)."
+
+# The detector and device service run without a camera (no crash, a clear status).
+Start-Sleep -Seconds 45
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dir 'app\deploy\windows\status.ps1')
+foreach ($name in 'PHILCST-Detector', 'PHILCST-Devices', 'PHILCST-LiveView', 'PHILCST-Web', 'PHILCST-PHP1') {
+    if ((Get-Service $name).Status -ne 'Running') { Show-InstallLog; throw "$name is not running." }
+}
+
+Install-Once 2 | Out-Null
+if ((Get-FileHash (Join-Path $Dir 'app\.env') -Algorithm SHA256).Hash -ne $keyBefore) { throw 'Reinstall changed installation secrets/configuration.' }
+$again = Invoke-WebRequest "$base/login" -SessionVariable verifySession -UseBasicParsing
+$againToken = [regex]::Match($again.Content, 'name="_token" value="([^"]+)"').Groups[1].Value
+$verified = Invoke-WebRequest "$base/login" -Method Post -WebSession $verifySession -UseBasicParsing -Body @{_token=$againToken;email=$info.admin_email;password=$password}
+if ($verified.Content -match 'name="password"') { throw 'Reinstall did not retain the personal account.' }
+
+Write-Host '===== managed uninstall refusal (data retained)'
+$serviceNames=@(Get-Service 'PHILCST-*' | Select-Object -ExpandProperty Name | Sort-Object)
+$uninstaller = Get-ChildItem (Join-Path $Dir 'uninstall') -Filter 'unins*.exe' | Select-Object -First 1
+$process = Start-Process -FilePath $uninstaller.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -PassThru
+if (-not $process.WaitForExit(2 * 60 * 1000)) { throw 'Uninstall preflight did not finish; no forced process termination.' }
+if ($process.ExitCode -eq 0) { throw 'Managed uninstall unexpectedly succeeded; lifecycle removal is not certified.' }
+$afterServices=@(Get-Service 'PHILCST-*' | Select-Object -ExpandProperty Name | Sort-Object)
+if (Compare-Object $serviceNames $afterServices) { throw 'Uninstall refusal removed managed services.' }
+if ((Get-FileHash (Join-Path $Dir 'app\.env') -Algorithm SHA256).Hash -ne $keyBefore) { throw 'Uninstall refusal changed secrets.' }
+if (-not (Test-Path (Join-Path $Dir 'state\update-controller.json')) -or -not (Test-Path (Join-Path $Dir 'state\provision\fresh.json'))) { throw 'Protected controller/setup receipts were removed.' }
+Write-Host 'Hosted fixture smoke: fresh install/login/readiness/same-source verification passed; managed uninstall safely refused. Native clean-offline/reboot/uninstall acceptance NOT RUN/BLOCKED.'
